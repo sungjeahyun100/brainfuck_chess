@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
 use brainfuck_chess_engine::{
@@ -58,7 +59,12 @@ struct ErrorResponse {
 async fn main() {
     let store: GameStore = Arc::new(DashMap::new());
 
-    let app = Router::new()
+    // Static frontend directory — populated at Docker build time.
+    // Falls back gracefully if the directory doesn't exist (dev mode).
+    let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "/app/dist".into());
+    let index_fallback = format!("{}/index.html", static_dir);
+
+    let api = Router::new()
         .route("/health", get(health))
         .route("/games", post(create_game))
         .route("/games/:id", get(get_game))
@@ -68,9 +74,17 @@ async fn main() {
         .route("/games/:id/legal-drops", get(get_legal_drops))
         .with_state(store);
 
+    // SPA fallback: unknown paths → index.html so Vue Router handles them.
+    let spa = ServeDir::new(&static_dir)
+        .not_found_service(ServeFile::new(&index_fallback));
+
+    let app = Router::new()
+        .nest("/api", api)
+        .fallback_service(spa);
+
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".into());
     let addr = format!("0.0.0.0:{}", port);
-    println!("Server running on {}", addr);
+    println!("Server running on {} | static dir: {}", addr, static_dir);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

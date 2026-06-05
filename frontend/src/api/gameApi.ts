@@ -1,6 +1,6 @@
 import type { GameState, MoveAction, DropAction, TurnAction } from '../types/game'
 
-const BASE = '/games'
+const BASE = '/api/games'
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
