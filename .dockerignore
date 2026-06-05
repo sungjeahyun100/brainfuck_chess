@@ -1,0 +1,19 @@
+# Rust build artifacts (very large, never needed in build context)
+target/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+
+# Documentation source files (not needed for the server build)
+*.md
+
+# Git metadata
+.git/
+.gitignore
+
+# IDE / OS artifacts
+.vscode/
+.idea/
+*.swp
+.DS_Store
