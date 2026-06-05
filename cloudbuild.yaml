@@ -1,0 +1,47 @@
+steps:
+  # Step 1: Build the Docker image from the project root
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '$_IMAGE_NAME:$COMMIT_SHA'
+      - '-t'
+      - '$_IMAGE_NAME:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+
+  # Step 2: Push both tags to the registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_IMAGE_NAME:$COMMIT_SHA']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_IMAGE_NAME:latest']
+
+  # Step 3: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '$_SERVICE_NAME'
+      - '--image'
+      - '$_IMAGE_NAME:$COMMIT_SHA'
+      - '--region'
+      - '$_REGION'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+
+substitutions:
+  # Override these in the Cloud Build trigger settings
+  _IMAGE_NAME: 'gcr.io/$PROJECT_ID/brainfuck-chess-server'
+  _SERVICE_NAME: 'brainfuck-chess-server'
+  _REGION: 'asia-northeast3'
+
+images:
+  - '$_IMAGE_NAME:$COMMIT_SHA'
+  - '$_IMAGE_NAME:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
