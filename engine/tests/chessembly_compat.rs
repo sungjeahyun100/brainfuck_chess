@@ -79,6 +79,10 @@ take-move(0, -1);"
     assert!(moves.contains(&Square::new(3, 4)), "up");
     assert!(moves.contains(&Square::new(3, 2)), "down");
     assert_eq!(moves.len(), 4);
+    assert!(result.attack_squares.contains(&Square::new(4, 3)), "right attack");
+    assert!(result.attack_squares.contains(&Square::new(2, 3)), "left attack");
+    assert!(result.attack_squares.contains(&Square::new(3, 4)), "up attack");
+    assert!(result.attack_squares.contains(&Square::new(3, 2)), "down attack");
 }
 
 // ─── Rook slide ───────────────────────────────────────────────────────────────
@@ -195,10 +199,13 @@ fn test_white_pawn_movement_and_attack_separated() {
 
     // Forward move: (3,4) should be a movement square
     assert!(result.movement_squares.contains(&Square::new(3, 4)), "forward move");
-    // Diagonal attacks: (4,4) and (2,4) should be attack squares (but empty, so not activated by take)
-    // `take` only activates enemy squares — on empty board attack squares should be empty
-    assert!(result.attack_squares.is_empty() || !result.attack_squares.contains(&Square::new(3, 4)),
-        "forward should not be an attack square");
+    // Diagonal attacks should be recorded as threatened squares even when empty.
+    assert!(result.attack_squares.contains(&Square::new(4, 4)), "right diagonal threat");
+    assert!(result.attack_squares.contains(&Square::new(2, 4)), "left diagonal threat");
+    assert!(
+        !result.attack_squares.contains(&Square::new(3, 4)),
+        "forward should not be an attack square"
+    );
 
     // 2-step: from rank 3 (not rank 1), observe(0,1) is truthy but the 2-step chain starts
     // from (3,3): observe(0,1) checks (3,4) which is empty → true, then move(0,2) tries (3,5).
@@ -267,4 +274,37 @@ fn test_scope_block_y_move() {
     assert!(result.movement_squares.contains(&Square::new(3, 4)), "(3,4)");
     assert!(result.movement_squares.contains(&Square::new(4, 5)), "(4,5)");
     assert!(result.movement_squares.contains(&Square::new(2, 5)), "(2,5)");
+}
+
+#[test]
+fn test_catch_scans_and_marks_threatened_squares() {
+    let mut board = create_board(8);
+    let piece = make_piece("c1", "white", "cannon", 0, 0);
+    let enemy = make_piece("e1", "black", "rook", 3, 0);
+    board.squares.insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
+
+    let mut pieces = HashMap::new();
+    pieces.insert("c1".into(), piece.clone());
+    pieces.insert("e1".into(), enemy);
+
+    let def = PieceDefinition {
+        id: "cannon".into(),
+        name: "Cannon".into(),
+        score: 4,
+        chessembly_code: "catch(1, 0) repeat(1);".into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+    };
+
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+
+    assert!(result.attack_squares.contains(&Square::new(1, 0)), "empty scan square 1");
+    assert!(result.attack_squares.contains(&Square::new(2, 0)), "empty scan square 2");
+    assert!(result.attack_squares.contains(&Square::new(3, 0)), "enemy capture square");
+    assert!(
+        result.attack_squares.contains(&Square::new(4, 0)),
+        "catch chain continues scanning after contact"
+    );
 }

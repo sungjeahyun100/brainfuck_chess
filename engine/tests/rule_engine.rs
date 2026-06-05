@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 
-use brainfuck_chess_engine::endgame::{apply_drop_action, apply_move_action, has_living_king};
+use brainfuck_chess_engine::endgame::{apply_move_action, has_living_king};
+use brainfuck_chess_engine::legal_moves::generate_legal_move_actions;
 use brainfuck_chess_engine::pieces::default_pieces::*;
 use brainfuck_chess_engine::rules::*;
 use brainfuck_chess_engine::types::*;
@@ -50,6 +51,8 @@ fn make_game_state(board_size: i32) -> GameState {
         current_player: "white".into(),
         turn_number: 1,
         phase: GamePhase::Playing,
+        en_passant_target: None,
+        en_passant_available_to: None,
         turn_state: TurnState::new(),
         result: None,
     }
@@ -329,4 +332,76 @@ fn test_move_stack_reset_on_end_turn() {
     // Black's king should have received a stack
     let bk = final_state.pieces.get("k2").unwrap();
     assert_eq!(bk.move_stack, 1, "Black king should have move stack 1");
+}
+
+#[test]
+fn test_castling_kingside_generated_and_applied() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 4, 0);
+    add_piece(&mut state, "wr", "white", "rook", 7, 0);
+    add_piece(&mut state, "bk", "black", "king", 4, 7);
+
+    let legal = generate_legal_move_actions(&state);
+    let castle = legal
+        .iter()
+        .find(|m| m.piece_id == "wk" && m.to == Square::new(6, 0));
+    assert!(castle.is_some(), "Kingside castling move should be generated");
+
+    let action = MoveAction {
+        player_id: "white".into(),
+        piece_id: "wk".into(),
+        from: Square::new(4, 0),
+        to: Square::new(6, 0),
+        captured_piece_id: None,
+    };
+    let new_state = apply_move_action(state, action);
+
+    let king = new_state.pieces.get("wk").unwrap();
+    let rook = new_state.pieces.get("wr").unwrap();
+    assert_eq!(king.current_square, Some(Square::new(6, 0)));
+    assert_eq!(rook.current_square, Some(Square::new(5, 0)));
+}
+
+#[test]
+fn test_en_passant_generated_and_applied() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 4, 0);
+    add_piece(&mut state, "bk", "black", "king", 4, 7);
+    add_piece(&mut state, "wp", "white", "pawn-white", 4, 4);
+    add_piece(&mut state, "bp", "black", "pawn-black", 5, 6);
+
+    // Black double-step pawn: (5,6) -> (5,4), enabling white en passant at (5,5)
+    state.current_player = "black".into();
+    let black_double = MoveAction {
+        player_id: "black".into(),
+        piece_id: "bp".into(),
+        from: Square::new(5, 6),
+        to: Square::new(5, 4),
+        captured_piece_id: None,
+    };
+    let mut state = apply_move_action(state, black_double);
+    state.current_player = "white".into();
+
+    let legal = generate_legal_move_actions(&state);
+    let ep = legal
+        .iter()
+        .find(|m| m.piece_id == "wp" && m.to == Square::new(5, 5));
+    assert!(ep.is_some(), "En passant move should be generated");
+
+    let white_ep = MoveAction {
+        player_id: "white".into(),
+        piece_id: "wp".into(),
+        from: Square::new(4, 4),
+        to: Square::new(5, 5),
+        captured_piece_id: Some("bp".into()),
+    };
+    let new_state = apply_move_action(state, white_ep);
+
+    let white_pawn = new_state.pieces.get("wp").unwrap();
+    let black_pawn = new_state.pieces.get("bp").unwrap();
+
+    assert_eq!(white_pawn.current_square, Some(Square::new(5, 5)));
+    assert!(black_pawn.captured, "Black pawn should be captured by en passant");
+    assert_eq!(new_state.board.get_piece_at(&Square::new(5, 4)), None);
+    assert_eq!(new_state.en_passant_target, None);
 }

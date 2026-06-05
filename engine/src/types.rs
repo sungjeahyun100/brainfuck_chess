@@ -214,6 +214,10 @@ pub struct GameState {
     pub current_player: PlayerId,
     pub turn_number: u32,
     pub phase: GamePhase,
+    /// En passant target square (the passed-over square after a 2-step pawn move).
+    pub en_passant_target: Option<Square>,
+    /// Player allowed to capture via en passant on this turn.
+    pub en_passant_available_to: Option<PlayerId>,
     pub turn_state: TurnState,
     pub result: Option<GameResult>,
 }

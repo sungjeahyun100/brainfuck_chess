@@ -175,10 +175,10 @@ fn eval_expr(
             let occupant = ctx.board.get_piece_at(&target);
             match occupant {
                 None => {
-                    // Empty square: advance anchor but DON'T activate
-                    // (take only activates enemy squares)
+                    // Empty square: this is still a threatened square.
+                    // Keep pending take so `jump` can pair with it.
+                    activate_attack(target, state, result);
                     state.anchor = target;
-                    // Mark pending take so `jump` can pair with it
                     state.last_was_take = true;
                     state.pending_take_square = Some(target);
                     state.pending_take_is_attack = false;
@@ -208,6 +208,8 @@ fn eval_expr(
             let occupant = ctx.board.get_piece_at(&target);
             match occupant {
                 None => {
+                    // Empty target is still threatened by take-move.
+                    activate_attack(target, state, result);
                     activate_movement(target, state, result);
                     state.anchor = target;
                     (ExprResult::True, 1)
@@ -235,7 +237,8 @@ fn eval_expr(
             let occupant = ctx.board.get_piece_at(&target);
             match occupant {
                 None => {
-                    // Empty square: advance anchor only (no activation)
+                    // Empty square is threatened while scanning.
+                    activate_attack(target, state, result);
                     state.anchor = target;
                     (ExprResult::True, 1)
                 }
