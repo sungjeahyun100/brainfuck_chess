@@ -79,12 +79,17 @@ async fn main() {
         .not_found_service(ServeFile::new(&index_fallback));
 
     let app = Router::new()
+        .route_service("/", ServeFile::new(&index_fallback))
         .nest("/api", api)
         .fallback_service(spa);
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".into());
     let addr = format!("0.0.0.0:{}", port);
     println!("Server running on {} | static dir: {}", addr, static_dir);
+    println!(
+        "index.html exists: {}",
+        std::path::Path::new(&index_fallback).exists()
+    );
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
