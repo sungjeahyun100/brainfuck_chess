@@ -37,7 +37,7 @@ substitutions:
   # Override these in the Cloud Build trigger settings
   _IMAGE_NAME: 'gcr.io/$PROJECT_ID/brainfuck-chess-server'
   _SERVICE_NAME: 'brainfuck-chess-server'
-  _REGION: 'asia-northeast3'
+  _REGION: 'us-central1'
 
 images:
   - '$_IMAGE_NAME:$COMMIT_SHA'
