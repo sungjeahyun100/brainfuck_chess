@@ -1,6 +1,19 @@
-import type { GameState, MoveAction, DropAction, TurnAction } from '../types/game'
+import type { GameState, MoveAction, DropAction, TurnAction, Square } from '../types/game'
 
 const BASE = '/api/games'
+
+export interface DeckPlacementRequest {
+  piece_type: string
+  square: {
+    file: number
+    rank: number
+  }
+}
+
+export interface PlayerDeckRequest {
+  starting: DeckPlacementRequest[]
+  pocket: string[]
+}
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -15,10 +28,18 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  createGame(boardSize: number): Promise<{ id: string; state: GameState }> {
+  createGame(
+    boardSize: number,
+    whiteDeck: PlayerDeckRequest,
+    blackDeck: PlayerDeckRequest,
+  ): Promise<{ id: string; state: GameState }> {
     return request(`${BASE}`, {
       method: 'POST',
-      body: JSON.stringify({ board_size: boardSize }),
+      body: JSON.stringify({
+        board_size: boardSize,
+        white_deck: whiteDeck,
+        black_deck: blackDeck,
+      }),
     })
   },
 
@@ -39,6 +60,10 @@ export const api = {
 
   getLegalMoves(id: string): Promise<{ moves: MoveAction[] }> {
     return request(`${BASE}/${id}/legal-moves`)
+  },
+
+  getPieceAttacks(id: string, pieceId: string): Promise<{ squares: Square[] }> {
+    return request(`${BASE}/${id}/piece-attacks/${pieceId}`)
   },
 
   getLegalDrops(id: string): Promise<{ drops: DropAction[] }> {

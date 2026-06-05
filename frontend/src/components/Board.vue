@@ -120,9 +120,10 @@ function pieceSymbol(typeId: string): string {
 .board {
   display: grid;
   grid-template-columns: repeat(var(--size), 1fr);
+  grid-template-rows: repeat(var(--size), 1fr);
   border: 2px solid #555;
   width: min(80vw, 80vh);
-  height: min(80vw, 80vh);
+  aspect-ratio: 1;
 }
 
 .square {
@@ -132,6 +133,8 @@ function pieceSymbol(typeId: string): string {
   align-items: center;
   cursor: pointer;
   user-select: none;
+  min-width: 0;
+  min-height: 0;
 }
 
 .square.light { background: #f0d9b5; }

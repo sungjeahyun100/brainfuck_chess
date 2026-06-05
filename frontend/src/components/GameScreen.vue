@@ -112,6 +112,7 @@ const emit = defineEmits<{
 
 const selectedPieceId = ref<string | null>(null)
 const selectedPocketPieceId = ref<string | null>(null)
+const legalTargetSquares = ref<Square[]>([])
 const movableSquares = ref<Square[]>([])
 const attackSquares = ref<Square[]>([])
 const dropSquares = ref<Square[]>([])
@@ -137,6 +138,7 @@ function pieceSymbol(typeId: string): string {
 function clearSelection() {
   selectedPieceId.value = null
   selectedPocketPieceId.value = null
+  legalTargetSquares.value = []
   movableSquares.value = []
   attackSquares.value = []
   dropSquares.value = []
@@ -172,9 +174,8 @@ async function onSquareClick(sq: Square) {
 
   // ── Move mode: selected piece → move to target ──
   if (selectedPieceId.value) {
-    const isMovable = movableSquares.value.some(s => s.file === sq.file && s.rank === sq.rank)
-    const isAttack = attackSquares.value.some(s => s.file === sq.file && s.rank === sq.rank)
-    if (isMovable || isAttack) {
+    const isLegalTarget = legalTargetSquares.value.some(s => s.file === sq.file && s.rank === sq.rank)
+    if (isLegalTarget) {
       const fromPiece = props.state.pieces[selectedPieceId.value]
       if (fromPiece?.current_square) {
         try {
@@ -204,14 +205,19 @@ async function onSquareClick(sq: Square) {
     selectedPieceId.value = pieceId
 
     try {
-      const { moves } = await api.getLegalMoves(props.state.id)
+      const [{ moves }, { squares }] = await Promise.all([
+        api.getLegalMoves(props.state.id),
+        api.getPieceAttacks(props.state.id, selectedPieceId.value as string),
+      ])
+      legalTargetSquares.value = moves
+        .filter(m => m.piece_id === pieceId)
+        .map(m => m.to)
       movableSquares.value = moves
-        .filter(m => m.piece_id === pieceId && !props.state.board.squares[`${m.to.file}_${m.to.rank}`])
+        .filter(m => m.piece_id === pieceId && !m.captured_piece_id)
         .map(m => m.to)
-      attackSquares.value = moves
-        .filter(m => m.piece_id === pieceId && !!props.state.board.squares[`${m.to.file}_${m.to.rank}`])
-        .map(m => m.to)
+      attackSquares.value = squares
     } catch {
+      legalTargetSquares.value = []
       movableSquares.value = []
       attackSquares.value = []
     }

@@ -98,6 +98,8 @@ export interface GameState {
   current_player: PlayerId
   turn_number: number
   phase: GamePhase
+  en_passant_target?: Square | null
+  en_passant_available_to?: PlayerId | null
   turn_state: TurnState
   result?: GameResult
 }
