@@ -125,7 +125,8 @@ struct ErrorResponse {
 
 fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
-        "king" | "queen" | "rook" | "bishop" | "knight" => Some(raw_piece_type.into()),
+        "king" | "queen" | "rook" | "bishop" | "knight" | "amazon" | "tempest-rook"
+        | "bouncing-bishop" => Some(raw_piece_type.into()),
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
             "pawn-white".into()
         } else {

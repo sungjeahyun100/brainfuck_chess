@@ -314,6 +314,9 @@ const eraseTool = '__erase__'
 const pieceCatalog: PieceCatalogItem[] = [
   { id: 'king', name: 'King', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
   { id: 'queen', name: 'Queen', score: 9, category: 'major', canPocket: true },
+  { id: 'amazon', name: 'Amazon', score: 13, category: 'variant', canPocket: true },
+  { id: 'tempest-rook', name: 'Tempest Rook', score: 8, category: 'variant', canPocket: true, aliases: ['storm rook'] },
+  { id: 'bouncing-bishop', name: 'Bouncing Bishop', score: 7, category: 'variant', canPocket: true, aliases: ['bounce bishop'] },
   { id: 'rook', name: 'Rook', score: 5, category: 'major', canPocket: true },
   { id: 'bishop', name: 'Bishop', score: 3, category: 'minor', canPocket: true },
   { id: 'knight', name: 'Knight', score: 3, category: 'minor', canPocket: true },
@@ -327,6 +330,7 @@ const pocketCatalog = pieceCatalog.filter(
 const catalogCategoryLabels: Record<string, string> = {
   royal: 'Royal',
   major: 'Major',
+  variant: 'Variant',
   minor: 'Minor',
   pawn: 'Pawn',
 }
@@ -668,6 +672,9 @@ function displayPieceSymbol(pieceType: DeckPieceType, player: LobbyPlayer): stri
   const whiteSymbols: Partial<Record<DeckPieceType, string>> = {
     king: '♔',
     queen: '♕',
+    amazon: 'A',
+    'tempest-rook': 'T',
+    'bouncing-bishop': 'B',
     rook: '♖',
     bishop: '♗',
     knight: '♘',
@@ -677,6 +684,9 @@ function displayPieceSymbol(pieceType: DeckPieceType, player: LobbyPlayer): stri
   const blackSymbols: Partial<Record<DeckPieceType, string>> = {
     king: '♚',
     queen: '♛',
+    amazon: 'A',
+    'tempest-rook': 'T',
+    'bouncing-bishop': 'B',
     rook: '♜',
     bishop: '♝',
     knight: '♞',

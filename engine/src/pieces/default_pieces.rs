@@ -112,6 +112,123 @@ take-move(-1, 2);"
     }
 }
 
+/// Amazon: combines Queen sliding moves with Knight jumps.
+pub fn amazon_definition() -> PieceDefinition {
+    PieceDefinition {
+        id: "amazon".into(),
+        name: "Amazon".into(),
+        score: 13,
+        chessembly_code: "\
+take-move(1, 0) repeat(1);
+take-move(-1, 0) repeat(1);
+take-move(0, 1) repeat(1);
+take-move(0, -1) repeat(1);
+take-move(1, 1) repeat(1);
+take-move(1, -1) repeat(1);
+take-move(-1, 1) repeat(1);
+take-move(-1, -1) repeat(1);
+take-move(1, 2);
+take-move(2, 1);
+take-move(2, -1);
+take-move(1, -2);
+take-move(-1, -2);
+take-move(-2, -1);
+take-move(-2, 1);
+take-move(-1, 2);"
+            .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+    }
+}
+
+/// Tempest Rook: steps diagonally, then storms horizontally and vertically away
+/// from that diagonal landing square.
+pub fn tempest_rook_definition() -> PieceDefinition {
+    PieceDefinition {
+        id: "tempest-rook".into(),
+        name: "Tempest Rook".into(),
+        score: 8,
+        chessembly_code: "\
+{
+    take-move(1, 1)
+    { take-move(1, 0) repeat(1) }
+    { take-move(0, 1) repeat(1) }
+}
+{
+    take-move(-1, 1)
+    { take-move(-1, 0) repeat(1) }
+    { take-move(0, 1) repeat(1) }
+}
+{
+    take-move(-1, -1)
+    { take-move(-1, 0) repeat(1) }
+    { take-move(0, -1) repeat(1) }
+}
+{
+    take-move(1, -1)
+    { take-move(1, 0) repeat(1) }
+    { take-move(0, -1) repeat(1) }
+};"
+        .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+    }
+}
+
+/// Bouncing Bishop: slides diagonally and reflects off board edges.
+pub fn bouncing_bishop_definition() -> PieceDefinition {
+    PieceDefinition {
+        id: "bouncing-bishop".into(),
+        name: "Bouncing Bishop".into(),
+        score: 7,
+        chessembly_code: "\
+do
+take-move(1, 1)
+while
+edge(1, 1) {
+  take-move(-1, 1) repeat(1)
+} {
+  take-move(1, -1) repeat(1)
+};
+
+do
+    take-move(-1, 1)
+while
+edge(-1, 1) {
+  take-move(1, 1) repeat(1)
+} {
+  take-move(-1, -1) repeat(1)
+};
+
+do
+    take-move(1, -1)
+while
+edge(1, -1) {
+  take-move(1, 1) repeat(1)
+} {
+  take-move(-1, -1) repeat(1)
+};
+
+do
+    take-move(-1, -1)
+while
+edge(-1, -1) {
+  take-move(1, -1) repeat(1)
+} {
+  take-move(-1, 1) repeat(1)
+};"
+        .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+    }
+}
+
 /// White Pawn:
 /// - Moves forward (rank+1) with `move`
 /// - Attacks diagonally forward with `take`
@@ -162,6 +279,9 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         rook_definition(),
         bishop_definition(),
         knight_definition(),
+        amazon_definition(),
+        tempest_rook_definition(),
+        bouncing_bishop_definition(),
         pawn_white_definition(),
         pawn_black_definition(),
     ]

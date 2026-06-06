@@ -98,6 +98,9 @@ function onSquareClick(sq: SquareInfo) {
 const PIECE_SYMBOLS: Record<string, string> = {
   'king': '♔',
   'queen': '♕',
+  'amazon': 'A',
+  'tempest-rook': 'T',
+  'bouncing-bishop': 'B',
   'rook': '♖',
   'bishop': '♗',
   'knight': '♘',

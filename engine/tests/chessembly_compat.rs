@@ -184,6 +184,69 @@ take-move(-1, 2) repeat(1);"
     assert!(!result.movement_squares.contains(&Square::new(4, 8)));
 }
 
+// ─── Variant defaults ───────────────────────────────────────────────────────
+
+#[test]
+fn test_variant_piece_definitions_are_registered() {
+    let definitions = all_default_definitions();
+    let find = |id: &str| definitions.iter().find(|def| def.id == id).unwrap();
+
+    assert_eq!(find("amazon").score, 13);
+    assert_eq!(find("tempest-rook").score, 8);
+    assert_eq!(find("bouncing-bishop").score, 7);
+}
+
+#[test]
+fn test_amazon_combines_queen_and_knight() {
+    let board = create_board(8);
+    let def = amazon_definition();
+    let piece = make_piece("a1", "white", "amazon", 3, 3);
+    let mut pieces = HashMap::new();
+    pieces.insert("a1".into(), piece.clone());
+
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+
+    assert!(result.movement_squares.contains(&Square::new(3, 7)), "queen file slide");
+    assert!(result.movement_squares.contains(&Square::new(7, 7)), "queen diagonal slide");
+    assert!(result.movement_squares.contains(&Square::new(5, 4)), "knight jump");
+    assert!(result.movement_squares.contains(&Square::new(1, 2)), "knight jump");
+}
+
+#[test]
+fn test_tempest_rook_steps_diagonal_then_rays_outward() {
+    let board = create_board(8);
+    let def = tempest_rook_definition();
+    let piece = make_piece("tr1", "white", "tempest-rook", 3, 3);
+    let mut pieces = HashMap::new();
+    pieces.insert("tr1".into(), piece.clone());
+
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+
+    assert!(result.movement_squares.contains(&Square::new(4, 4)), "diagonal step");
+    assert!(result.movement_squares.contains(&Square::new(7, 4)), "east ray from diagonal");
+    assert!(result.movement_squares.contains(&Square::new(4, 7)), "north ray from diagonal");
+    assert!(result.movement_squares.contains(&Square::new(0, 2)), "west ray from diagonal");
+    assert!(result.movement_squares.contains(&Square::new(2, 0)), "south ray from diagonal");
+    assert!(!result.movement_squares.contains(&Square::new(3, 4)), "no direct rook move");
+}
+
+#[test]
+fn test_bouncing_bishop_reflects_from_edges() {
+    let board = create_board(8);
+    let def = bouncing_bishop_definition();
+    let piece = make_piece("bb1", "white", "bouncing-bishop", 3, 2);
+    let mut pieces = HashMap::new();
+    pieces.insert("bb1".into(), piece.clone());
+
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+
+    assert!(result.movement_squares.contains(&Square::new(7, 6)), "initial northeast diagonal");
+    assert!(result.movement_squares.contains(&Square::new(6, 7)), "reflection from right edge");
+    assert!(result.movement_squares.contains(&Square::new(7, 2)), "reflection from bottom edge");
+    assert!(result.movement_squares.contains(&Square::new(0, 5)), "initial northwest diagonal");
+    assert!(result.movement_squares.contains(&Square::new(2, 7)), "reflection from left edge");
+}
+
 // ─── Pawn ──────────────────────────────────────────────────────────────────
 
 #[test]
