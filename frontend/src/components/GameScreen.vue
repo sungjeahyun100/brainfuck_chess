@@ -286,7 +286,7 @@ async function onEndTurn() {
 .player-badge { padding: 4px 10px; border-radius: 6px; font-weight: bold; }
 .player-badge.player-white { background: #eee; color: #333; }
 .player-badge.player-black { background: #333; color: #eee; }
-.turn-badge, .mode-badge { padding: 4px 8px; background: #ddd; border-radius: 6px; }
+.turn-badge, .mode-badge { padding: 4px 8px; background: #ddd; color: #1f2933; border-radius: 6px; }
 .local-badge {
   padding: 4px 8px;
   background: #e8f5e9;
@@ -308,7 +308,7 @@ async function onEndTurn() {
   width: 44px; height: 44px; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   border: 2px solid #bbb; border-radius: 6px; cursor: pointer;
-  font-size: 22px; background: #f9f9f9;
+  font-size: 22px; background: #f9f9f9; color: #1f2933;
 }
 .pocket-piece.selected { border-color: #4a8fff; background: #e0eeff; }
 .score-info { font-size: 12px; color: #666; }
@@ -331,6 +331,7 @@ async function onEndTurn() {
 }
 .game-over-box {
   background: white; padding: 32px 48px; border-radius: 12px; text-align: center;
+  color: #1f2933;
 }
 .game-over-box button { margin-top: 16px; padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
 </style>
