@@ -7,10 +7,27 @@
         <p class="subtitle">보드 크기, 시작 배치, 포켓 기물을 한 화면에서 설정합니다.</p>
       </div>
 
+      <div class="mode-tabs">
+        <button
+          class="mode-tab"
+          :class="{ active: playMode === 'local' }"
+          @click="setPlayMode('local')"
+        >
+          로컬 게임
+        </button>
+        <button
+          class="mode-tab"
+          :class="{ active: playMode === 'multiplayer' }"
+          @click="setPlayMode('multiplayer')"
+        >
+          멀티플레이
+        </button>
+      </div>
+
       <div class="lobby-topbar card">
         <div class="board-select">
           <label for="board-size">보드 크기</label>
-          <select id="board-size" v-model.number="selectedSize">
+          <select id="board-size" v-model.number="selectedSize" :disabled="Boolean(currentRoom)">
             <option v-for="n in [8, 9, 10, 11, 12]" :key="n" :value="n">
               {{ n }} × {{ n }} (최대 {{ scoreLimit(n) }}점)
             </option>
@@ -22,10 +39,59 @@
           <strong>{{ scoreLimit(selectedSize) }}점</strong>
         </div>
 
-        <button class="btn-secondary" @click="resetDecks">추천 덱으로 초기화</button>
+        <button class="btn-secondary" @click="resetDecks()">추천 덱으로 초기화</button>
       </div>
 
-      <div class="player-tabs">
+      <div v-if="playMode === 'multiplayer'" class="card multiplayer-panel">
+        <div class="section-header">
+          <div>
+            <p class="section-kicker">Room</p>
+            <h2>멀티플레이 방</h2>
+          </div>
+          <p class="section-description">방장은 보드 크기를 정하고 한쪽 덱을 제출합니다. 참가자는 방 번호로 들어와 반대쪽 덱을 제출합니다.</p>
+        </div>
+
+        <div class="room-grid">
+          <div class="room-actions">
+            <div class="color-match">
+              <span class="limit-label">색상 매칭</span>
+              <label>
+                <input v-model="hostSideMode" type="radio" value="white" :disabled="Boolean(currentRoom)" />
+                White
+              </label>
+              <label>
+                <input v-model="hostSideMode" type="radio" value="black" :disabled="Boolean(currentRoom)" />
+                Black
+              </label>
+              <label>
+                <input v-model="hostSideMode" type="radio" value="random" :disabled="Boolean(currentRoom)" />
+                랜덤
+              </label>
+            </div>
+            <div class="room-code-row">
+              <input v-model.trim="roomCodeInput" class="room-code-input" maxlength="6" placeholder="입장할 방 번호" />
+            </div>
+            <div class="room-buttons">
+              <button class="btn-secondary" :disabled="!activeSummary.valid" @click="createMultiplayerRoom">방 만들기</button>
+              <button class="btn-secondary" :disabled="!canJoinRoom" @click="joinMultiplayerRoom">입장하고 시작</button>
+              <button class="btn-secondary" :disabled="!currentRoom" @click="refreshRoom">새로고침</button>
+            </div>
+          </div>
+
+          <div class="room-state">
+            <span class="limit-label">현재 방</span>
+            <strong>{{ currentRoom ? currentRoom.id : '없음' }}</strong>
+            <p v-if="currentRoom">
+              방장 {{ playerLabel(currentRoom.host_side) }} · 참가자 {{ playerLabel(currentRoom.guest_side) }} · {{ currentRoom.board_size }} × {{ currentRoom.board_size }}
+            </p>
+            <p v-else>내 덱을 구성한 뒤 방을 만들거나, 방 번호를 입력해 참가하세요. 랜덤 매칭은 방 생성 순간 색상을 배정합니다.</p>
+          </div>
+        </div>
+
+        <p v-if="multiplayerStatus" class="room-status">{{ multiplayerStatus }}</p>
+      </div>
+
+      <div v-if="playMode === 'local'" class="player-tabs">
         <button
           v-for="player in players"
           :key="player"
@@ -37,7 +103,7 @@
         </button>
       </div>
 
-      <div class="summary-grid">
+      <div v-if="playMode === 'local'" class="summary-grid">
         <div class="card summary-card" :class="{ invalid: !whiteSummary.valid }">
           <p class="summary-title">White</p>
           <strong>{{ whiteSummary.totalScore }} / {{ scoreLimit(selectedSize) }}점</strong>
@@ -52,43 +118,59 @@
           <p class="summary-status">{{ blackSummary.valid ? '시작 가능' : blackSummary.errors[0] }}</p>
         </div>
       </div>
+      <div v-else class="summary-grid">
+        <div class="card summary-card" :class="{ invalid: !activeSummary.valid }">
+          <p class="summary-title">내 덱 설정</p>
+          <strong>{{ activeSummary.totalScore }} / {{ scoreLimit(selectedSize) }}점</strong>
+          <span>시작 {{ activeDeck.starting.length }}개 / 포켓 {{ totalPocketCount(activeDeck) }}개</span>
+          <p class="summary-status">{{ activeSummary.valid ? '방 생성/입장 가능' : activeSummary.errors[0] }}</p>
+        </div>
+      </div>
 
       <div class="builder-grid">
-        <section class="card tool-panel">
+        <section class="card piece-list-panel">
           <div class="section-header">
             <div>
-              <p class="section-kicker">현재 편집</p>
-              <h2>{{ playerLabel(activePlayer) }} 기본 진영</h2>
+              <p class="section-kicker">기물 목록</p>
+              <h2>{{ deckEditorLabel }} Arsenal</h2>
             </div>
-            <p class="section-description">기물을 고른 뒤 기본 진영 칸을 클릭해 배치합니다.</p>
+            <p class="section-description">기물을 배치설정이나 포켓설정으로 드래그합니다.</p>
           </div>
 
-          <div class="piece-palette">
-            <button
-              v-for="piece in pieceCatalog"
-              :key="piece.id"
-              class="palette-piece"
-              :class="{ active: placementTool === piece.id }"
-              @click="placementTool = piece.id"
-            >
-              <span class="symbol">{{ displayPieceSymbol(piece.id, activePlayer) }}</span>
-              <span class="meta">
-                <strong>{{ piece.name }}</strong>
-                <small>{{ piece.score === 0 ? '점수 제외' : `${piece.score}점` }}</small>
-              </span>
-            </button>
+          <input
+            v-model.trim="pieceSearch"
+            class="piece-search"
+            type="search"
+            placeholder="기물 검색"
+          />
 
-            <button
-              class="palette-piece erase"
-              :class="{ active: placementTool === 'erase' }"
-              @click="placementTool = 'erase'"
-            >
-              <span class="symbol">✕</span>
-              <span class="meta">
-                <strong>지우개</strong>
-                <small>선택한 칸의 시작 기물 제거</small>
-              </span>
-            </button>
+          <div class="piece-catalog">
+            <div v-for="section in catalogSections" :key="section.id" class="catalog-section">
+              <div class="catalog-section-title">
+                <span>{{ section.label }}</span>
+                <small>{{ section.pieces.length }}</small>
+              </div>
+
+              <div class="piece-palette">
+                <button
+                  v-for="piece in section.pieces"
+                  :key="piece.id"
+                  class="palette-piece"
+                  :class="{ active: isPieceToolActive(piece.id) }"
+                  draggable="true"
+                  @click="selectPieceTool(piece.id)"
+                  @dragstart="onPieceDragStart($event, piece.id)"
+                  @dragend="onPieceDragEnd"
+                >
+                  <span class="symbol">{{ displayPieceSymbol(piece.id, activePlayer) }}</span>
+                  <span class="meta">
+                    <strong>{{ piece.name }}</strong>
+                    <small>{{ piece.score === 0 ? '점수 제외' : `${piece.score}점` }}</small>
+                  </span>
+                  <span class="piece-count">{{ pieceCount(activeDeck, piece.id) }}</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div class="active-counts">
@@ -102,10 +184,25 @@
         <section class="card board-panel">
           <div class="section-header">
             <div>
-              <p class="section-kicker">기본 진영 배치</p>
-              <h2>{{ playerLabel(activePlayer) }} Frontline</h2>
+              <p class="section-kicker">배치설정</p>
+              <h2>{{ deckEditorLabel }} Frontline</h2>
             </div>
-            <p class="section-description">King은 시작 기물에 정확히 한 개만 있어야 합니다.</p>
+            <p class="section-description">기물 목록에서 드롭하거나 선택한 기물로 칸을 클릭합니다.</p>
+          </div>
+
+          <div class="placement-controls">
+            <button
+              class="tool-button"
+              :class="{ active: placementTool === eraseTool }"
+              @click="selectEraseTool"
+            >
+              <span>✕</span>
+              <strong>지우개</strong>
+            </button>
+            <div class="selected-tool">
+              <span class="limit-label">선택 기물</span>
+              <strong>{{ selectedToolLabel }}</strong>
+            </div>
           </div>
 
           <div class="placement-board" :style="{ '--board-size': selectedSize }">
@@ -115,6 +212,8 @@
               class="placement-square"
               :class="squareClass(square.file, square.rank)"
               @click="onPlacementSquareClick(square.file, square.rank)"
+              @dragover.prevent="onPlacementDragOver"
+              @drop.prevent="onPlacementDrop($event, square.file, square.rank)"
             >
               <span class="square-label">{{ fileLabel(square.file) }}{{ square.rank + 1 }}</span>
               <span v-if="pieceAt(activePlayer, square.file, square.rank)" class="square-piece">
@@ -128,28 +227,30 @@
         <section class="card pocket-panel">
           <div class="section-header">
             <div>
-              <p class="section-kicker">포켓 기물</p>
-              <h2>{{ playerLabel(activePlayer) }} Pocket</h2>
+              <p class="section-kicker">포켓설정</p>
+              <h2>{{ deckEditorLabel }} Pocket</h2>
             </div>
-            <p class="section-description">포켓에는 King을 넣을 수 없습니다.</p>
+            <p class="section-description">기물 목록에서 드롭하면 포켓 수량이 1개 늘어납니다.</p>
           </div>
 
-          <div class="pocket-list">
-            <div v-for="piece in pocketCatalog" :key="piece.id" class="pocket-row">
-              <div class="pocket-piece-info">
-                <span class="symbol">{{ displayPieceSymbol(piece.id, activePlayer) }}</span>
-                <div class="meta meta-column">
-                  <strong>{{ piece.name }}</strong>
-                  <small>{{ piece.score }}점</small>
-                </div>
-              </div>
+          <div
+            class="pocket-drop-zone"
+            :class="{ ready: draggedPiece && canUseInPocket(draggedPiece) }"
+            @dragover.prevent="onPocketDragOver"
+            @drop.prevent="onPocketDrop($event)"
+          >
+            <span>{{ pocketDropMessage }}</span>
+          </div>
 
-              <div class="stepper">
-                <button @click="changePocketCount(piece.id, -1)">-</button>
-                <span>{{ activeDeck.pocket[piece.id] }}</span>
-                <button @click="changePocketCount(piece.id, 1)">+</button>
-              </div>
+          <div v-if="activePocketEntries.length > 0" class="pocket-summary">
+            <div v-for="entry in activePocketEntries" :key="entry.piece.id" class="pocket-chip">
+              <span class="symbol">{{ displayPieceSymbol(entry.piece.id, activePlayer) }}</span>
+              <strong>{{ entry.count }}</strong>
+              <button @click="changePocketCount(entry.piece.id, -1)">-</button>
             </div>
+          </div>
+          <div v-else class="pocket-empty">
+            포켓에 추가된 기물이 없습니다.
           </div>
 
           <div v-if="activeSummary.errors.length > 0" class="validation-list">
@@ -158,28 +259,38 @@
         </section>
       </div>
 
-      <button class="btn-start" :disabled="!lobbyReady" @click="startGame">게임 시작</button>
+      <button v-if="playMode === 'local'" class="btn-start" :disabled="!localLobbyReady" @click="startGame">게임 시작</button>
       <p v-if="lobbyError" class="error">{{ lobbyError }}</p>
     </div>
 
     <GameScreen
       v-else
       :state="gameState"
-      @state-update="gameState = $event"
-      @restart="gameState = null"
+      :local-player="localPlayer"
+      @state-update="onGameStateUpdate"
+      @restart="restartToLobby"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { GameState, Square } from './types/game'
-import { api, type PlayerDeckRequest } from './api/gameApi'
+import { api, type MultiplayerRoom, type PlayerDeckRequest } from './api/gameApi'
 import GameScreen from './components/GameScreen.vue'
 
 type LobbyPlayer = 'white' | 'black'
-type DeckPieceType = 'king' | 'queen' | 'rook' | 'bishop' | 'knight' | 'pawn'
-type PocketPieceType = Exclude<DeckPieceType, 'king'>
+type DeckPieceType = string
+
+interface PieceCatalogItem {
+  id: DeckPieceType
+  name: string
+  score: number
+  category: string
+  canPocket: boolean
+  uniqueStarting?: boolean
+  aliases?: string[]
+}
 
 interface LobbyPlacement {
   pieceType: DeckPieceType
@@ -188,7 +299,7 @@ interface LobbyPlacement {
 
 interface LobbyDeck {
   starting: LobbyPlacement[]
-  pocket: Record<PocketPieceType, number>
+  pocket: Record<DeckPieceType, number>
 }
 
 interface DeckSummary {
@@ -198,26 +309,46 @@ interface DeckSummary {
 }
 
 const players: LobbyPlayer[] = ['white', 'black']
+const eraseTool = '__erase__'
 
-const pieceCatalog: Array<{ id: DeckPieceType; name: string; score: number }> = [
-  { id: 'king', name: 'King', score: 0 },
-  { id: 'queen', name: 'Queen', score: 9 },
-  { id: 'rook', name: 'Rook', score: 5 },
-  { id: 'bishop', name: 'Bishop', score: 3 },
-  { id: 'knight', name: 'Knight', score: 3 },
-  { id: 'pawn', name: 'Pawn', score: 1 },
+const pieceCatalog: PieceCatalogItem[] = [
+  { id: 'king', name: 'King', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
+  { id: 'queen', name: 'Queen', score: 9, category: 'major', canPocket: true },
+  { id: 'rook', name: 'Rook', score: 5, category: 'major', canPocket: true },
+  { id: 'bishop', name: 'Bishop', score: 3, category: 'minor', canPocket: true },
+  { id: 'knight', name: 'Knight', score: 3, category: 'minor', canPocket: true },
+  { id: 'pawn', name: 'Pawn', score: 1, category: 'pawn', canPocket: true },
 ]
 
 const pocketCatalog = pieceCatalog.filter(
-  (piece): piece is { id: PocketPieceType; name: string; score: number } => piece.id !== 'king',
+  piece => piece.canPocket,
 )
+
+const catalogCategoryLabels: Record<string, string> = {
+  royal: 'Royal',
+  major: 'Major',
+  minor: 'Minor',
+  pawn: 'Pawn',
+}
 
 const gameState = ref<GameState | null>(null)
 const selectedSize = ref(8)
 const lobbyError = ref<string | null>(null)
+const multiplayerStatus = ref<string | null>(null)
 const activePlayer = ref<LobbyPlayer>('white')
-const placementTool = ref<DeckPieceType | 'erase'>('king')
+const placementTool = ref<DeckPieceType>(pieceCatalog[0].id)
+const pieceSearch = ref('')
+const draggedPiece = ref<DeckPieceType | null>(null)
 const lobbyDecks = ref<Record<LobbyPlayer, LobbyDeck>>(createLobbyDecks(selectedSize.value))
+const playMode = ref<'local' | 'multiplayer'>('local')
+const hostSideMode = ref<LobbyPlayer | 'random'>('random')
+const roomCodeInput = ref('')
+const currentRoom = ref<MultiplayerRoom | null>(null)
+const applyingRoomSize = ref(false)
+const localPlayer = ref<LobbyPlayer | null>(null)
+const roomPollTimer = ref<number | null>(null)
+const gamePollTimer = ref<number | null>(null)
+const unloadForfeitSent = ref(false)
 
 function scoreLimit(n: number): number {
   return n * n - 25
@@ -231,14 +362,8 @@ function fileLabel(file: number): string {
   return String.fromCharCode(97 + file)
 }
 
-function emptyPocket(): Record<PocketPieceType, number> {
-  return {
-    queen: 0,
-    rook: 0,
-    bishop: 0,
-    knight: 0,
-    pawn: 0,
-  }
+function emptyPocket(): Record<DeckPieceType, number> {
+  return Object.fromEntries(pocketCatalog.map(piece => [piece.id, 0]))
 }
 
 function createStandardStarting(player: LobbyPlayer, boardSize: number): LobbyPlacement[] {
@@ -273,28 +398,93 @@ function createLobbyDecks(boardSize: number): Record<LobbyPlayer, LobbyDeck> {
   }
 }
 
-function resetDecks() {
+function resetDecks(resetPlayer = true) {
   lobbyDecks.value = createLobbyDecks(selectedSize.value)
-  activePlayer.value = 'white'
-  placementTool.value = 'king'
+  if (resetPlayer) {
+    activePlayer.value = 'white'
+  }
+  placementTool.value = pieceCatalog[0].id
+  draggedPiece.value = null
   lobbyError.value = null
 }
 
 watch(selectedSize, () => {
-  resetDecks()
+  resetDecks(!applyingRoomSize.value)
+  if (!applyingRoomSize.value) {
+    currentRoom.value = null
+    multiplayerStatus.value = null
+  }
 })
 
 const whiteDeck = computed(() => lobbyDecks.value.white)
 const blackDeck = computed(() => lobbyDecks.value.black)
 const activeDeck = computed(() => lobbyDecks.value[activePlayer.value])
+const pieceById = computed(() => new Map(pieceCatalog.map(piece => [piece.id, piece])))
+const filteredPieceCatalog = computed(() => {
+  const query = pieceSearch.value.toLowerCase()
+  if (!query) return pieceCatalog
+
+  return pieceCatalog.filter(piece => {
+    const searchable = [piece.id, piece.name, piece.category, ...(piece.aliases ?? [])]
+      .join(' ')
+      .toLowerCase()
+    return searchable.includes(query)
+  })
+})
+const catalogSections = computed(() => {
+  const groups = new Map<string, PieceCatalogItem[]>()
+
+  for (const piece of filteredPieceCatalog.value) {
+    const existing = groups.get(piece.category) ?? []
+    existing.push(piece)
+    groups.set(piece.category, existing)
+  }
+
+  return Array.from(groups.entries()).map(([id, pieces]) => ({
+    id,
+    label: catalogCategoryLabels[id] ?? id,
+    pieces,
+  }))
+})
+const activePocketEntries = computed(() => pocketCatalog
+  .map(piece => ({
+    piece,
+    count: activeDeck.value.pocket[piece.id] ?? 0,
+  }))
+  .filter(entry => entry.count > 0))
+const selectedToolLabel = computed(() => {
+  if (placementTool.value === eraseTool) return '지우개'
+
+  return pieceById.value.get(placementTool.value)?.name ?? placementTool.value
+})
+const pocketDropMessage = computed(() => {
+  if (!draggedPiece.value) return '여기에 드롭해서 포켓에 추가'
+  if (!canUseInPocket(draggedPiece.value)) return `${pieceLabel(draggedPiece.value)}은 포켓에 넣을 수 없습니다.`
+
+  return `${pieceLabel(draggedPiece.value)} 포켓에 추가`
+})
+
+function pieceLabel(pieceType: DeckPieceType): string {
+  return pieceById.value.get(pieceType)?.name ?? pieceType
+}
+
+function pieceScore(pieceType: DeckPieceType): number {
+  return pieceById.value.get(pieceType)?.score ?? 0
+}
+
+function canUseInPocket(pieceType: DeckPieceType): boolean {
+  return pieceById.value.get(pieceType)?.canPocket === true
+}
+
+function isUniqueStartingPiece(pieceType: DeckPieceType): boolean {
+  return pieceById.value.get(pieceType)?.uniqueStarting === true
+}
 
 function deckSummary(deck: LobbyDeck): DeckSummary {
   const totalScore = deck.starting
-    .filter(piece => piece.pieceType !== 'king')
-    .reduce((sum, piece) => sum + pieceCatalog.find(entry => entry.id === piece.pieceType)!.score, 0)
+    .reduce((sum, piece) => sum + pieceScore(piece.pieceType), 0)
     + Object.entries(deck.pocket).reduce((sum, [pieceType, count]) => {
-      const score = pieceCatalog.find(entry => entry.id === pieceType)!.score
-      return sum + score * count
+      return sum + pieceScore(pieceType) * count
     }, 0)
 
   const kingCount = deck.starting.filter(piece => piece.pieceType === 'king').length
@@ -318,7 +508,13 @@ function deckSummary(deck: LobbyDeck): DeckSummary {
 const whiteSummary = computed(() => deckSummary(whiteDeck.value))
 const blackSummary = computed(() => deckSummary(blackDeck.value))
 const activeSummary = computed(() => deckSummary(activeDeck.value))
-const lobbyReady = computed(() => whiteSummary.value.valid && blackSummary.value.valid)
+const localLobbyReady = computed(() => whiteSummary.value.valid && blackSummary.value.valid)
+const deckEditorLabel = computed(() => playMode.value === 'multiplayer' ? '내 덱' : playerLabel(activePlayer.value))
+const canJoinRoom = computed(() => {
+  const isOwnRoom = Boolean(currentRoom.value && localPlayer.value === currentRoom.value.host_side)
+  const hasRoomTarget = !isOwnRoom && (Boolean(currentRoom.value && !currentRoom.value.game_id) || roomCodeInput.value.trim().length > 0)
+  return hasRoomTarget && activeSummary.value.valid
+})
 
 const activeBaseZoneSquares = computed(() => {
   const ranks = activePlayer.value === 'white'
@@ -346,20 +542,28 @@ function squareClass(file: number, rank: number): string[] {
   return [
     (file + rank) % 2 === 0 ? 'light' : 'dark',
     pieceAt(activePlayer.value, file, rank) ? 'occupied' : 'empty',
-  ]
+    draggedPiece.value ? 'drop-ready' : '',
+  ].filter(Boolean)
 }
 
-function onPlacementSquareClick(file: number, rank: number) {
+function selectPieceTool(pieceType: DeckPieceType) {
+  placementTool.value = pieceType
+}
+
+function selectEraseTool() {
+  placementTool.value = eraseTool
+}
+
+function isPieceToolActive(pieceType: DeckPieceType): boolean {
+  return placementTool.value === pieceType
+}
+
+function placePieceAt(pieceType: DeckPieceType, file: number, rank: number) {
   lobbyError.value = null
   const deck = lobbyDecks.value[activePlayer.value]
   const existing = pieceAt(activePlayer.value, file, rank)
 
-  if (placementTool.value === 'erase') {
-    deck.starting = deck.starting.filter(piece => piece.square.file !== file || piece.square.rank !== rank)
-    return
-  }
-
-  if (existing === placementTool.value) {
+  if (existing === pieceType) {
     deck.starting = deck.starting.filter(piece => piece.square.file !== file || piece.square.rank !== rank)
     return
   }
@@ -369,7 +573,7 @@ function onPlacementSquareClick(file: number, rank: number) {
       return false
     }
 
-    if (placementTool.value === 'king' && piece.pieceType === 'king') {
+    if (isUniqueStartingPiece(pieceType) && piece.pieceType === pieceType) {
       return false
     }
 
@@ -377,18 +581,91 @@ function onPlacementSquareClick(file: number, rank: number) {
   })
 
   deck.starting.push({
-    pieceType: placementTool.value,
+    pieceType,
     square: { file, rank },
   })
 }
 
-function changePocketCount(pieceType: PocketPieceType, delta: number) {
+function erasePieceAt(file: number, rank: number) {
   const deck = lobbyDecks.value[activePlayer.value]
+  deck.starting = deck.starting.filter(piece => piece.square.file !== file || piece.square.rank !== rank)
+}
+
+function onPlacementSquareClick(file: number, rank: number) {
+  if (placementTool.value === eraseTool) {
+    erasePieceAt(file, rank)
+    return
+  }
+
+  placePieceAt(placementTool.value, file, rank)
+}
+
+function getDraggedPiece(event: DragEvent): DeckPieceType | null {
+  const fromEvent = event.dataTransfer?.getData('application/x-brainfuck-chess-piece')
+    || event.dataTransfer?.getData('text/plain')
+    || null
+  const pieceType = draggedPiece.value ?? fromEvent
+
+  return pieceType && pieceById.value.has(pieceType) ? pieceType : null
+}
+
+function onPieceDragStart(event: DragEvent, pieceType: DeckPieceType) {
+  draggedPiece.value = pieceType
+  event.dataTransfer?.setData('application/x-brainfuck-chess-piece', pieceType)
+  event.dataTransfer?.setData('text/plain', pieceType)
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'copy'
+  }
+}
+
+function onPieceDragEnd() {
+  draggedPiece.value = null
+}
+
+function onPlacementDragOver(event: DragEvent) {
+  if (draggedPiece.value && event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onPlacementDrop(event: DragEvent, file: number, rank: number) {
+  const pieceType = getDraggedPiece(event)
+  draggedPiece.value = null
+  if (!pieceType) return
+
+  selectPieceTool(pieceType)
+  placePieceAt(pieceType, file, rank)
+}
+
+function onPocketDragOver(event: DragEvent) {
+  if (!draggedPiece.value || !event.dataTransfer) return
+
+  event.dataTransfer.dropEffect = canUseInPocket(draggedPiece.value) ? 'copy' : 'none'
+}
+
+function onPocketDrop(event: DragEvent) {
+  const pieceType = getDraggedPiece(event)
+  draggedPiece.value = null
+  if (!pieceType) return
+
+  if (!canUseInPocket(pieceType)) {
+    lobbyError.value = `${pieceLabel(pieceType)}은 포켓에 넣을 수 없습니다.`
+    return
+  }
+
+  changePocketCount(pieceType, 1)
+}
+
+function changePocketCount(pieceType: DeckPieceType, delta: number) {
+  if (!canUseInPocket(pieceType)) return
+
+  const deck = lobbyDecks.value[activePlayer.value]
+  deck.pocket[pieceType] ??= 0
   deck.pocket[pieceType] = Math.max(0, deck.pocket[pieceType] + delta)
 }
 
 function displayPieceSymbol(pieceType: DeckPieceType, player: LobbyPlayer): string {
-  const whiteSymbols: Record<DeckPieceType, string> = {
+  const whiteSymbols: Partial<Record<DeckPieceType, string>> = {
     king: '♔',
     queen: '♕',
     rook: '♖',
@@ -397,7 +674,7 @@ function displayPieceSymbol(pieceType: DeckPieceType, player: LobbyPlayer): stri
     pawn: '♙',
   }
 
-  const blackSymbols: Record<DeckPieceType, string> = {
+  const blackSymbols: Partial<Record<DeckPieceType, string>> = {
     king: '♚',
     queen: '♛',
     rook: '♜',
@@ -406,7 +683,8 @@ function displayPieceSymbol(pieceType: DeckPieceType, player: LobbyPlayer): stri
     pawn: '♟',
   }
 
-  return player === 'white' ? whiteSymbols[pieceType] : blackSymbols[pieceType]
+  const symbol = player === 'white' ? whiteSymbols[pieceType] : blackSymbols[pieceType]
+  return symbol ?? pieceLabel(pieceType).slice(0, 1).toUpperCase()
 }
 
 function serializeDeck(deck: LobbyDeck): PlayerDeckRequest {
@@ -415,12 +693,37 @@ function serializeDeck(deck: LobbyDeck): PlayerDeckRequest {
       piece_type: piece.pieceType,
       square: piece.square,
     })),
-    pocket: pocketCatalog.flatMap(piece => Array.from({ length: deck.pocket[piece.id] }, () => piece.id)),
+    pocket: pocketCatalog.flatMap(piece => Array.from({ length: deck.pocket[piece.id] ?? 0 }, () => piece.id)),
   }
 }
 
+function mirrorSquare(square: Square): Square {
+  return {
+    file: square.file,
+    rank: selectedSize.value - 1 - square.rank,
+  }
+}
+
+function serializeNeutralDeck(deck: LobbyDeck, fromSide: LobbyPlayer): PlayerDeckRequest {
+  if (fromSide === 'white') {
+    return serializeDeck(deck)
+  }
+
+  return {
+    starting: deck.starting.map(piece => ({
+      piece_type: piece.pieceType,
+      square: mirrorSquare(piece.square),
+    })),
+    pocket: pocketCatalog.flatMap(piece => Array.from({ length: deck.pocket[piece.id] ?? 0 }, () => piece.id)),
+  }
+}
+
+function randomSide(): LobbyPlayer {
+  return Math.random() < 0.5 ? 'white' : 'black'
+}
+
 async function startGame() {
-  if (!lobbyReady.value) {
+  if (!localLobbyReady.value) {
     lobbyError.value = '양쪽 덱 구성이 모두 유효해야 게임을 시작할 수 있습니다.'
     return
   }
@@ -432,7 +735,233 @@ async function startGame() {
       serializeDeck(whiteDeck.value),
       serializeDeck(blackDeck.value),
     )
+    localPlayer.value = null
+    unloadForfeitSent.value = false
+    stopGamePolling()
     gameState.value = state
+  } catch (e: unknown) {
+    lobbyError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+function setPlayMode(mode: 'local' | 'multiplayer') {
+  stopRoomPolling()
+  stopGamePolling()
+  playMode.value = mode
+  lobbyError.value = null
+  multiplayerStatus.value = null
+  currentRoom.value = null
+  hostSideMode.value = 'random'
+  localPlayer.value = null
+  unloadForfeitSent.value = false
+  if (mode === 'multiplayer') {
+    activePlayer.value = 'white'
+  }
+}
+
+function restartToLobby() {
+  stopRoomPolling()
+  stopGamePolling()
+  unloadForfeitSent.value = false
+  gameState.value = null
+  localPlayer.value = null
+}
+
+function onGameStateUpdate(state: GameState) {
+  gameState.value = state
+  if (state.phase === 'ended') {
+    unloadForfeitSent.value = false
+  }
+}
+
+function stopRoomPolling() {
+  if (roomPollTimer.value !== null) {
+    window.clearInterval(roomPollTimer.value)
+    roomPollTimer.value = null
+  }
+}
+
+function stopGamePolling() {
+  if (gamePollTimer.value !== null) {
+    window.clearInterval(gamePollTimer.value)
+    gamePollTimer.value = null
+  }
+}
+
+function startGamePolling(gameId: string) {
+  stopGamePolling()
+  if (!localPlayer.value) return
+
+  gamePollTimer.value = window.setInterval(async () => {
+    try {
+      gameState.value = await api.getGame(gameId)
+    } catch {
+      // Keep the last known state visible if a single sync request fails.
+    }
+  }, 900)
+}
+
+function shouldForfeitOnPageExit(): boolean {
+  return Boolean(
+    playMode.value === 'multiplayer'
+    && currentRoom.value
+    && localPlayer.value
+    && gameState.value
+    && gameState.value.phase === 'playing',
+  )
+}
+
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  if (!shouldForfeitOnPageExit()) return
+
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+function sendUnloadForfeit() {
+  if (!shouldForfeitOnPageExit() || unloadForfeitSent.value) return
+
+  unloadForfeitSent.value = true
+  api.sendForfeitBeacon(currentRoom.value!.id, localPlayer.value!)
+}
+
+function onPageHide() {
+  sendUnloadForfeit()
+}
+
+function startRoomPolling(roomId: string, player: LobbyPlayer) {
+  stopRoomPolling()
+  roomPollTimer.value = window.setInterval(async () => {
+    if (gameState.value) {
+      stopRoomPolling()
+      return
+    }
+
+    try {
+      const room = await api.getRoom(roomId)
+      currentRoom.value = room
+      if (!room.game_id) return
+
+      localPlayer.value = player
+      gameState.value = await api.getGame(room.game_id)
+      unloadForfeitSent.value = false
+      multiplayerStatus.value = '상대가 입장해 게임을 시작합니다.'
+      stopRoomPolling()
+      startGamePolling(room.game_id)
+    } catch {
+      // Keep waiting; transient network failures should not close the room.
+    }
+  }, 1200)
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', onBeforeUnload)
+  window.addEventListener('pagehide', onPageHide)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('pagehide', onPageHide)
+  stopRoomPolling()
+  stopGamePolling()
+})
+
+async function createMultiplayerRoom() {
+  if (!activeSummary.value.valid) {
+    lobbyError.value = '내 덱 구성이 유효해야 방을 만들 수 있습니다.'
+    return
+  }
+
+  lobbyError.value = null
+  multiplayerStatus.value = null
+  try {
+    const hostSide = hostSideMode.value === 'random' ? randomSide() : hostSideMode.value
+    const room = await api.createRoom(
+      selectedSize.value,
+      hostSide,
+      serializeNeutralDeck(activeDeck.value, 'white'),
+    )
+    currentRoom.value = room
+    localPlayer.value = hostSide
+    unloadForfeitSent.value = false
+    roomCodeInput.value = room.id
+    multiplayerStatus.value = `방 ${room.id} 생성 완료. 내 색상은 ${playerLabel(room.host_side)}입니다. 상대가 ${playerLabel(room.guest_side)} 덱으로 입장하면 게임이 시작됩니다.`
+    startRoomPolling(room.id, hostSide)
+  } catch (e: unknown) {
+    lobbyError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function applyRoomByCode(roomCode: string): Promise<MultiplayerRoom> {
+  const room = await api.getRoom(roomCode.toUpperCase())
+  applyingRoomSize.value = true
+  selectedSize.value = room.board_size
+  currentRoom.value = room
+  await nextTick()
+  activePlayer.value = 'white'
+  applyingRoomSize.value = false
+  return room
+}
+
+async function refreshRoom() {
+  if (!currentRoom.value) return
+
+  lobbyError.value = null
+  try {
+    const room = await api.getRoom(currentRoom.value.id)
+    currentRoom.value = room
+    if (room.game_id) {
+      localPlayer.value = localPlayer.value ?? room.guest_side
+      gameState.value = await api.getGame(room.game_id)
+      unloadForfeitSent.value = false
+      multiplayerStatus.value = '상대가 입장해 게임을 시작합니다.'
+      startGamePolling(room.game_id)
+      stopRoomPolling()
+    } else {
+      multiplayerStatus.value = '아직 상대 입장을 기다리는 중입니다.'
+    }
+  } catch (e: unknown) {
+    lobbyError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function joinMultiplayerRoom() {
+  if (!currentRoom.value) {
+    if (!roomCodeInput.value.trim()) {
+      lobbyError.value = '방 번호를 입력하세요.'
+      return
+    }
+
+    try {
+      await applyRoomByCode(roomCodeInput.value)
+    } catch (e: unknown) {
+      applyingRoomSize.value = false
+      const message = e instanceof Error ? e.message : String(e)
+      lobbyError.value = message
+      multiplayerStatus.value = `입장 실패: ${message}`
+      return
+    }
+  }
+  const room = currentRoom.value
+  if (!room) {
+    lobbyError.value = '방 정보를 불러오지 못했습니다.'
+    return
+  }
+  if (!activeSummary.value.valid) {
+    lobbyError.value = '내 덱 구성이 유효해야 입장할 수 있습니다.'
+    return
+  }
+
+  lobbyError.value = null
+  multiplayerStatus.value = null
+  try {
+    const { state } = await api.joinRoom(room.id, serializeNeutralDeck(activeDeck.value, 'white'))
+    localPlayer.value = room.guest_side
+    currentRoom.value = { ...room, game_id: state.id }
+    unloadForfeitSent.value = false
+    gameState.value = state
+    startGamePolling(state.id)
+    stopRoomPolling()
   } catch (e: unknown) {
     lobbyError.value = e instanceof Error ? e.message : String(e)
   }
@@ -495,11 +1024,31 @@ body {
   color: #f4dfb0;
 }
 
+.mode-tabs {
+  display: flex;
+  gap: 10px;
+}
+
+.mode-tab {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+  padding: 12px 18px;
+  font-weight: 700;
+}
+
+.mode-tab.active {
+  background: rgba(217, 164, 65, 0.2);
+  border-color: rgba(217, 164, 65, 0.52);
+  color: #f4dfb0;
+}
+
 .subtitle,
 .section-description,
 .summary-status,
-.meta small,
-.pocket-piece-info small {
+.meta small {
   color: var(--muted);
 }
 
@@ -534,6 +1083,10 @@ body {
   color: var(--text);
 }
 
+.board-select select:disabled {
+  opacity: 0.65;
+}
+
 .limit-panel {
   display: flex;
   flex-direction: column;
@@ -548,7 +1101,7 @@ body {
 .player-tab,
 .palette-piece,
 .placement-square,
-.stepper button {
+.tool-button {
   border: none;
   cursor: pointer;
 }
@@ -558,6 +1111,93 @@ body {
   border-radius: 12px;
   background: #243142;
   color: var(--text);
+}
+
+.btn-secondary:disabled,
+.player-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.multiplayer-panel {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.room-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(260px, 0.8fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.room-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.color-match {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.color-match label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+
+.color-match input {
+  accent-color: var(--accent);
+}
+
+.room-code-row,
+.room-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.room-code-input {
+  min-width: 160px;
+  flex: 1;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0d1520;
+  color: var(--text);
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.room-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.room-state strong {
+  color: #f4dfb0;
+  font-size: 1.6rem;
+  letter-spacing: 0.08em;
+}
+
+.room-state p,
+.room-status {
+  color: var(--muted);
 }
 
 .player-tabs {
@@ -606,7 +1246,7 @@ body {
   gap: 16px;
 }
 
-.tool-panel,
+.piece-list-panel,
 .board-panel,
 .pocket-panel {
   padding: 18px;
@@ -625,14 +1265,51 @@ body {
   font-size: 1.2rem;
 }
 
+.piece-search {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #0d1520;
+  color: var(--text);
+}
+
+.piece-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 540px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.catalog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.catalog-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.catalog-section-title small {
+  color: var(--accent);
+}
+
 .piece-palette,
-.pocket-list {
+.pocket-summary {
   display: grid;
   gap: 10px;
 }
 
-.palette-piece,
-.pocket-row {
+.palette-piece {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -641,6 +1318,19 @@ body {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
+}
+
+.palette-piece {
+  min-height: 68px;
+  text-align: left;
+}
+
+.palette-piece[draggable="true"] {
+  cursor: grab;
+}
+
+.palette-piece[draggable="true"]:active {
+  cursor: grabbing;
 }
 
 .palette-piece.active {
@@ -658,8 +1348,18 @@ body {
   line-height: 1;
 }
 
-.meta,
-.pocket-piece-info {
+.piece-count {
+  min-width: 28px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4dfb0;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.meta {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -686,6 +1386,41 @@ body {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.placement-controls {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.tool-button,
+.selected-tool {
+  min-height: 54px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.tool-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+}
+
+.tool-button.active {
+  background: rgba(255, 125, 125, 0.14);
+  outline: 1px solid rgba(255, 125, 125, 0.45);
+}
+
+.selected-tool {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 14px;
+}
+
 .placement-board {
   display: grid;
   grid-template-columns: repeat(var(--board-size), 1fr);
@@ -704,6 +1439,7 @@ body {
 .placement-square.light { background: #f1dfbf; color: #232a38; }
 .placement-square.dark { background: #b7844d; color: #fff8ef; }
 .placement-square.occupied { outline: 2px solid rgba(217, 164, 65, 0.48); }
+.placement-square.drop-ready { outline: 2px dashed rgba(244, 223, 176, 0.7); }
 
 .square-label {
   position: absolute;
@@ -722,18 +1458,58 @@ body {
   opacity: 0.35;
 }
 
-.stepper {
+.pocket-drop-zone {
+  min-height: 64px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  padding: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  text-align: center;
 }
 
-.stepper button {
-  width: 32px;
-  height: 32px;
+.pocket-drop-zone.ready {
+  border-color: rgba(217, 164, 65, 0.65);
+  background: rgba(217, 164, 65, 0.12);
+  color: #f4dfb0;
+}
+
+.pocket-summary {
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+}
+
+.pocket-chip,
+.pocket-empty {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.pocket-chip {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+}
+
+.pocket-chip button {
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: #243142;
   color: var(--text);
+  border: none;
+  cursor: pointer;
+}
+
+.pocket-empty {
+  padding: 14px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .validation-list {
@@ -765,7 +1541,8 @@ body {
 
 @media (max-width: 1100px) {
   .builder-grid,
-  .summary-grid {
+  .summary-grid,
+  .room-grid {
     grid-template-columns: 1fr;
   }
 

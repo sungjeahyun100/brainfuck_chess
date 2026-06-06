@@ -1,6 +1,8 @@
-import type { GameState, MoveAction, DropAction, TurnAction, Square } from '../types/game'
+import type { GameState, MoveAction, DropAction, TurnAction, Square, PlayerId } from '../types/game'
 
 const BASE = '/api/games'
+const ROOM_BASE = '/api/rooms'
+const CLIENT_ID_KEY = 'brainfuck_chess_tab_client_id'
 
 export interface DeckPlacementRequest {
   piece_type: string
@@ -15,6 +17,21 @@ export interface PlayerDeckRequest {
   pocket: string[]
 }
 
+export interface MultiplayerRoom {
+  id: string
+  board_size: number
+  host_side: 'white' | 'black'
+  guest_side: 'white' | 'black'
+  host_deck: PlayerDeckRequest
+  guest_deck?: PlayerDeckRequest | null
+  game_id?: string | null
+}
+
+interface ForfeitRoomRequest {
+  client_id: string
+  player_id: PlayerId
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
@@ -25,6 +42,15 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     throw new Error(err.error ?? res.statusText)
   }
   return res.json()
+}
+
+function getClientId(): string {
+  const existing = sessionStorage.getItem(CLIENT_ID_KEY)
+  if (existing) return existing
+
+  const next = crypto.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  sessionStorage.setItem(CLIENT_ID_KEY, next)
+  return next
 }
 
 export const api = {
@@ -68,5 +94,66 @@ export const api = {
 
   getLegalDrops(id: string): Promise<{ drops: DropAction[] }> {
     return request(`${BASE}/${id}/legal-drops`)
+  },
+
+  createRoom(
+    boardSize: number,
+    hostSide: 'white' | 'black',
+    deck: PlayerDeckRequest,
+  ): Promise<MultiplayerRoom> {
+    return request(`${ROOM_BASE}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        board_size: boardSize,
+        host_side: hostSide,
+        client_id: getClientId(),
+        deck,
+      }),
+    })
+  },
+
+  getRoom(id: string): Promise<MultiplayerRoom> {
+    return request(`${ROOM_BASE}/${encodeURIComponent(id)}`)
+  },
+
+  joinRoom(id: string, deck: PlayerDeckRequest): Promise<{ id: string; state: GameState }> {
+    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/join`, {
+      method: 'POST',
+      body: JSON.stringify({
+        client_id: getClientId(),
+        deck,
+      }),
+    })
+  },
+
+  forfeitRoom(id: string, playerId: PlayerId): Promise<GameState> {
+    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/forfeit`, {
+      method: 'POST',
+      body: JSON.stringify({
+        client_id: getClientId(),
+        player_id: playerId,
+      }),
+    })
+  },
+
+  sendForfeitBeacon(id: string, playerId: PlayerId): boolean {
+    const url = `${ROOM_BASE}/${encodeURIComponent(id)}/forfeit`
+    const body: ForfeitRoomRequest = {
+      client_id: getClientId(),
+      player_id: playerId,
+    }
+    const payload = JSON.stringify(body)
+
+    if (navigator.sendBeacon) {
+      return navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }))
+    }
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true,
+    }).catch(() => undefined)
+    return true
   },
 }

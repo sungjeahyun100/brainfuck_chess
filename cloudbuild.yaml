@@ -31,6 +31,10 @@ steps:
       - '$_REGION'
       - '--platform'
       - 'managed'
+      # Rooms are currently held in server memory. Keep Cloud Run on one
+      # instance so create/find/join requests see the same room store.
+      - '--max-instances'
+      - '1'
       - '--allow-unauthenticated'
 
 substitutions:

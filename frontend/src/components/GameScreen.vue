@@ -7,6 +7,9 @@
         <span class="player-badge" :class="`player-${state.current_player}`">
           {{ state.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
         </span>
+        <span v-if="localPlayer" class="local-badge" :class="{ waiting: !isMyTurn }">
+          {{ isMyTurn ? '내 턴' : '상대 턴' }}
+        </span>
         <span class="turn-badge">Turn {{ state.turn_number }}</span>
         <span class="mode-badge" v-if="state.turn_state.mode !== 'undecided'">
           {{ state.turn_state.mode === 'move' ? '🏃 Move' : '🎯 Drop' }}
@@ -84,7 +87,7 @@
     <div class="footer">
       <button
         class="btn btn-end-turn"
-        :disabled="state.turn_state.actions.length === 0 || state.phase === 'ended'"
+        :disabled="!isMyTurn || state.turn_state.actions.length === 0 || state.phase === 'ended'"
         @click="onEndTurn"
       >
         End Turn
@@ -100,11 +103,14 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { GameState, Square, MoveAction, DropAction } from '../types/game'
+import type { GameState, PlayerId, Square, MoveAction, DropAction } from '../types/game'
 import { api } from '../api/gameApi'
 import Board from './Board.vue'
 
-const props = defineProps<{ state: GameState }>()
+const props = defineProps<{
+  state: GameState
+  localPlayer?: PlayerId | null
+}>()
 const emit = defineEmits<{
   stateUpdate: [state: GameState]
   restart: []
@@ -126,6 +132,7 @@ const blackPocket = computed(() =>
 )
 const whiteDeck = computed(() => props.state.players['white']?.deck)
 const blackDeck = computed(() => props.state.players['black']?.deck)
+const isMyTurn = computed(() => !props.localPlayer || props.state.current_player === props.localPlayer)
 
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
@@ -146,6 +153,12 @@ function clearSelection() {
 
 async function onSquareClick(sq: Square) {
   error.value = null
+  if (!isMyTurn.value) {
+    error.value = '상대 턴입니다.'
+    clearSelection()
+    return
+  }
+
   const currentPlayer = props.state.current_player
   const sqId = `${sq.file}_${sq.rank}`
   const pieceId = props.state.board.squares[sqId] ?? null
@@ -228,6 +241,12 @@ async function onSquareClick(sq: Square) {
 
 async function onPocketClick(pieceId: string) {
   error.value = null
+  if (!isMyTurn.value) {
+    error.value = '상대 턴입니다.'
+    clearSelection()
+    return
+  }
+
   const piece = props.state.pieces[pieceId]
   if (!piece || piece.owner !== props.state.current_player) return
   if (props.state.turn_state.mode === 'move') return
@@ -244,6 +263,11 @@ async function onPocketClick(pieceId: string) {
 
 async function onEndTurn() {
   error.value = null
+  if (!isMyTurn.value) {
+    error.value = '상대 턴입니다.'
+    return
+  }
+
   try {
     const newState = await api.endTurn(props.state.id)
     clearSelection()
@@ -262,6 +286,17 @@ async function onEndTurn() {
 .player-badge.player-white { background: #eee; color: #333; }
 .player-badge.player-black { background: #333; color: #eee; }
 .turn-badge, .mode-badge { padding: 4px 8px; background: #ddd; border-radius: 6px; }
+.local-badge {
+  padding: 4px 8px;
+  background: #e8f5e9;
+  color: #256029;
+  border-radius: 6px;
+  font-weight: 700;
+}
+.local-badge.waiting {
+  background: #fff3cd;
+  color: #7a5a00;
+}
 
 .main-layout { display: flex; gap: 16px; align-items: flex-start; }
 
