@@ -27,8 +27,12 @@ export interface MultiplayerRoom {
   game_id?: string | null
 }
 
-interface ForfeitRoomRequest {
+interface ResignRoomRequest {
   client_id: string
+  player_id: PlayerId
+}
+
+interface ResignGameRequest {
   player_id: PlayerId
 }
 
@@ -84,6 +88,14 @@ export const api = {
     return request(`${BASE}/${id}/end-turn`, { method: 'POST' })
   },
 
+  resignGame(id: string, playerId: PlayerId): Promise<GameState> {
+    const body: ResignGameRequest = { player_id: playerId }
+    return request(`${BASE}/${id}/resign`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  },
+
   getLegalMoves(id: string): Promise<{ moves: MoveAction[] }> {
     return request(`${BASE}/${id}/legal-moves`)
   },
@@ -126,8 +138,8 @@ export const api = {
     })
   },
 
-  forfeitRoom(id: string, playerId: PlayerId): Promise<GameState> {
-    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/forfeit`, {
+  resignRoom(id: string, playerId: PlayerId): Promise<GameState> {
+    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/resign`, {
       method: 'POST',
       body: JSON.stringify({
         client_id: getClientId(),
@@ -136,9 +148,9 @@ export const api = {
     })
   },
 
-  sendForfeitBeacon(id: string, playerId: PlayerId): boolean {
-    const url = `${ROOM_BASE}/${encodeURIComponent(id)}/forfeit`
-    const body: ForfeitRoomRequest = {
+  sendResignBeacon(id: string, playerId: PlayerId): boolean {
+    const url = `${ROOM_BASE}/${encodeURIComponent(id)}/resign`
+    const body: ResignRoomRequest = {
       client_id: getClientId(),
       player_id: playerId,
     }

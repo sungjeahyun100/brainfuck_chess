@@ -75,8 +75,13 @@ struct JoinRoomRequest {
 }
 
 #[derive(Deserialize)]
-struct ForfeitRoomRequest {
+struct ResignRoomRequest {
     client_id: String,
+    player_id: PlayerId,
+}
+
+#[derive(Deserialize)]
+struct ResignGameRequest {
     player_id: PlayerId,
 }
 
@@ -382,13 +387,14 @@ async fn main() {
         .route("/games/:id", get(get_game))
         .route("/games/:id/actions", post(submit_action))
         .route("/games/:id/end-turn", post(end_game_turn))
+        .route("/games/:id/resign", post(resign_game))
         .route("/games/:id/legal-moves", get(get_legal_moves))
         .route("/games/:id/piece-attacks/:piece_id", get(get_piece_attacks))
         .route("/games/:id/legal-drops", get(get_legal_drops))
         .route("/rooms", post(create_room))
         .route("/rooms/:id", get(get_room))
         .route("/rooms/:id/join", post(join_room))
-        .route("/rooms/:id/forfeit", post(forfeit_room))
+        .route("/rooms/:id/resign", post(resign_room))
         .with_state(state);
 
     // SPA fallback: unknown paths → index.html so Vue Router handles them.
@@ -539,10 +545,10 @@ async fn join_room(
     Ok(Json(GameResponse { id: game_id, state }))
 }
 
-async fn forfeit_room(
+async fn resign_room(
     State(app): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<ForfeitRoomRequest>,
+    Json(req): Json<ResignRoomRequest>,
 ) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
     let room = app
         .rooms
@@ -582,6 +588,41 @@ async fn forfeit_room(
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
                 error: "방의 게임을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+
+    let state = entry.value_mut();
+    if state.phase != GamePhase::Ended {
+        state.phase = GamePhase::Ended;
+        state.result = Some(GameResult {
+            winner: Some(opponent_side(&req.player_id)),
+            reason: GameEndReason::Resignation,
+        });
+    }
+
+    Ok(Json(state.clone()))
+}
+
+async fn resign_game(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ResignGameRequest>,
+) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+    if req.player_id != "white" && req.player_id != "black" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "진영은 white 또는 black이어야 합니다.".into(),
+            }),
+        ));
+    }
+
+    let mut entry = app.games.get_mut(&id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "게임을 찾을 수 없습니다.".into(),
             }),
         )
     })?;

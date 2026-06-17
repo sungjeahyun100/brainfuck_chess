@@ -92,6 +92,13 @@
       >
         End Turn
       </button>
+      <button
+        class="btn btn-resign"
+        :disabled="state.phase === 'ended' || (Boolean(roomId) && !localPlayer)"
+        @click="onResign"
+      >
+        기권
+      </button>
       <div class="turn-log">
         <small>Actions this turn: {{ state.turn_state.actions.length }}</small>
       </div>
@@ -110,6 +117,7 @@ import Board from './Board.vue'
 const props = defineProps<{
   state: GameState
   localPlayer?: PlayerId | null
+  roomId?: string | null
 }>()
 const emit = defineEmits<{
   stateUpdate: [state: GameState]
@@ -277,6 +285,24 @@ async function onEndTurn() {
     error.value = e instanceof Error ? e.message : String(e)
   }
 }
+
+async function onResign() {
+  error.value = null
+  if (props.state.phase === 'ended') return
+
+  const resigningPlayer = props.localPlayer ?? props.state.current_player
+  if (!window.confirm('정말 기권하시겠습니까?')) return
+
+  try {
+    const newState = props.roomId
+      ? await api.resignRoom(props.roomId, resigningPlayer)
+      : await api.resignGame(props.state.id, resigningPlayer)
+    clearSelection()
+    emit('stateUpdate', newState)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+}
 </script>
 
 <style scoped>
@@ -318,6 +344,8 @@ async function onEndTurn() {
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-end-turn { background: #4caf50; color: white; }
 .btn-end-turn:hover:not(:disabled) { background: #388e3c; }
+.btn-resign { background: #c62828; color: white; }
+.btn-resign:hover:not(:disabled) { background: #a61f1f; }
 
 .error-banner {
   position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);

@@ -267,6 +267,7 @@
       v-else
       :state="gameState"
       :local-player="localPlayer"
+      :room-id="currentRoom?.id ?? null"
       @state-update="onGameStateUpdate"
       @restart="restartToLobby"
     />
@@ -352,7 +353,7 @@ const applyingRoomSize = ref(false)
 const localPlayer = ref<LobbyPlayer | null>(null)
 const roomPollTimer = ref<number | null>(null)
 const gamePollTimer = ref<number | null>(null)
-const unloadForfeitSent = ref(false)
+const unloadResignSent = ref(false)
 
 function scoreLimit(n: number): number {
   return n * n - 25
@@ -746,7 +747,7 @@ async function startGame() {
       serializeDeck(blackDeck.value),
     )
     localPlayer.value = null
-    unloadForfeitSent.value = false
+    unloadResignSent.value = false
     stopGamePolling()
     gameState.value = state
   } catch (e: unknown) {
@@ -763,7 +764,7 @@ function setPlayMode(mode: 'local' | 'multiplayer') {
   currentRoom.value = null
   hostSideMode.value = 'random'
   localPlayer.value = null
-  unloadForfeitSent.value = false
+  unloadResignSent.value = false
   if (mode === 'multiplayer') {
     activePlayer.value = 'white'
   }
@@ -772,7 +773,7 @@ function setPlayMode(mode: 'local' | 'multiplayer') {
 function restartToLobby() {
   stopRoomPolling()
   stopGamePolling()
-  unloadForfeitSent.value = false
+  unloadResignSent.value = false
   gameState.value = null
   localPlayer.value = null
 }
@@ -780,7 +781,7 @@ function restartToLobby() {
 function onGameStateUpdate(state: GameState) {
   gameState.value = state
   if (state.phase === 'ended') {
-    unloadForfeitSent.value = false
+    unloadResignSent.value = false
   }
 }
 
@@ -811,7 +812,7 @@ function startGamePolling(gameId: string) {
   }, 900)
 }
 
-function shouldForfeitOnPageExit(): boolean {
+function shouldResignOnPageExit(): boolean {
   return Boolean(
     playMode.value === 'multiplayer'
     && currentRoom.value
@@ -822,21 +823,21 @@ function shouldForfeitOnPageExit(): boolean {
 }
 
 function onBeforeUnload(event: BeforeUnloadEvent) {
-  if (!shouldForfeitOnPageExit()) return
+  if (!shouldResignOnPageExit()) return
 
   event.preventDefault()
   event.returnValue = ''
 }
 
-function sendUnloadForfeit() {
-  if (!shouldForfeitOnPageExit() || unloadForfeitSent.value) return
+function sendUnloadResign() {
+  if (!shouldResignOnPageExit() || unloadResignSent.value) return
 
-  unloadForfeitSent.value = true
-  api.sendForfeitBeacon(currentRoom.value!.id, localPlayer.value!)
+  unloadResignSent.value = true
+  api.sendResignBeacon(currentRoom.value!.id, localPlayer.value!)
 }
 
 function onPageHide() {
-  sendUnloadForfeit()
+  sendUnloadResign()
 }
 
 function startRoomPolling(roomId: string, player: LobbyPlayer) {
@@ -854,7 +855,7 @@ function startRoomPolling(roomId: string, player: LobbyPlayer) {
 
       localPlayer.value = player
       gameState.value = await api.getGame(room.game_id)
-      unloadForfeitSent.value = false
+      unloadResignSent.value = false
       multiplayerStatus.value = '상대가 입장해 게임을 시작합니다.'
       stopRoomPolling()
       startGamePolling(room.game_id)
@@ -893,7 +894,7 @@ async function createMultiplayerRoom() {
     )
     currentRoom.value = room
     localPlayer.value = hostSide
-    unloadForfeitSent.value = false
+    unloadResignSent.value = false
     roomCodeInput.value = room.id
     multiplayerStatus.value = `방 ${room.id} 생성 완료. 내 색상은 ${playerLabel(room.host_side)}입니다. 상대가 ${playerLabel(room.guest_side)} 덱으로 입장하면 게임이 시작됩니다.`
     startRoomPolling(room.id, hostSide)
@@ -923,7 +924,7 @@ async function refreshRoom() {
     if (room.game_id) {
       localPlayer.value = localPlayer.value ?? room.guest_side
       gameState.value = await api.getGame(room.game_id)
-      unloadForfeitSent.value = false
+      unloadResignSent.value = false
       multiplayerStatus.value = '상대가 입장해 게임을 시작합니다.'
       startGamePolling(room.game_id)
       stopRoomPolling()
@@ -968,7 +969,7 @@ async function joinMultiplayerRoom() {
     const { state } = await api.joinRoom(room.id, serializeNeutralDeck(activeDeck.value, 'white'))
     localPlayer.value = room.guest_side
     currentRoom.value = { ...room, game_id: state.id }
-    unloadForfeitSent.value = false
+    unloadResignSent.value = false
     gameState.value = state
     startGamePolling(state.id)
     stopRoomPolling()
