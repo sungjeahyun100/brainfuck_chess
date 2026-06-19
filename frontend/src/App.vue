@@ -1,5 +1,13 @@
 <template>
-  <div class="app">
+  <div class="app" :class="{ 'app-with-env-banner': showEnvBanner }">
+    <div
+      v-if="showEnvBanner"
+      class="env-banner"
+      :class="`env-banner-${appEnv}`"
+    >
+      {{ envBannerLabel }}
+    </div>
+
     <div v-if="!gameState" class="lobby">
       <div class="lobby-hero">
         <p class="eyebrow">Deck Builder Lobby</p>
@@ -278,6 +286,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { GameState, Square } from './types/game'
 import { api, type MultiplayerRoom, type PlayerDeckRequest } from './api/gameApi'
 import GameScreen from './components/GameScreen.vue'
+import { appEnv, envBannerLabel, showEnvBanner } from './config'
 
 type LobbyPlayer = 'white' | 'black'
 type DeckPieceType = string
@@ -1001,6 +1010,37 @@ body {
 }
 
 .app { min-height: 100vh; display: flex; flex-direction: column; }
+
+.app-with-env-banner {
+  padding-top: 28px;
+}
+
+.env-banner {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: #101723;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+}
+
+.env-banner-local {
+  background: #74d4ff;
+}
+
+.env-banner-test {
+  background: #ffd45f;
+}
 
 .lobby {
   width: min(1400px, 100%);

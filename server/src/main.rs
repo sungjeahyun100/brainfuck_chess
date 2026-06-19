@@ -1,4 +1,5 @@
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{
     extract::{Path, State},
@@ -396,6 +397,7 @@ async fn main() {
 
     let app = Router::new()
         .route_service("/", ServeFile::new(&index_fallback))
+        .route("/config.js", get(config_js))
         .nest("/api", api)
         .fallback_service(spa);
 
@@ -414,6 +416,28 @@ async fn main() {
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+fn app_env() -> &'static str {
+    match std::env::var("APP_ENV").as_deref() {
+        Ok("local") => "local",
+        Ok("test") => "test",
+        Ok("prod") => "prod",
+        _ => "prod",
+    }
+}
+
+async fn config_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        format!(
+            "window.APP_CONFIG = Object.freeze({{ appEnv: '{}' }});\n",
+            app_env()
+        ),
+    )
 }
 
 async fn create_game(
