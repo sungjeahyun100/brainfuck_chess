@@ -6,8 +6,8 @@ use std::sync::Arc;
 use brainfuck_chess_engine::attack_map::generate_attack_map;
 use brainfuck_chess_engine::endgame::{apply_move_action, has_living_king};
 use brainfuck_chess_engine::legal_moves::{
-    ensure_legal_action_cache, generate_legal_drop_actions, generate_legal_move_actions,
-    generate_piece_attack_squares,
+    generate_legal_drop_actions, generate_legal_move_actions, generate_piece_legal_drop_actions,
+    generate_piece_legal_move_actions,
 };
 use brainfuck_chess_engine::pieces::default_pieces::*;
 use brainfuck_chess_engine::rules::*;
@@ -70,8 +70,6 @@ fn make_game_state(board_size: i32) -> GameState {
         turn_state: TurnState::new(),
         result: None,
         chessembly_program_cache,
-        legal_action_cache_version: 0,
-        legal_action_cache: None,
     }
 }
 
@@ -96,7 +94,6 @@ fn add_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, file: 
         .deck
         .starting_pieces
         .push(id.into());
-    state.invalidate_legal_action_cache();
 }
 
 fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str) {
@@ -118,7 +115,6 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         .deck
         .pocket_pieces
         .push(id.into());
-    state.invalidate_legal_action_cache();
 }
 
 // ─── Board creation ───────────────────────────────────────────────────────────
@@ -379,6 +375,13 @@ fn test_castling_kingside_generated_and_applied() {
         castle.is_some(),
         "Kingside castling move should be generated"
     );
+    let piece_castle = generate_piece_legal_move_actions(&state, &"wk".to_string())
+        .into_iter()
+        .find(|m| m.to == Square::new(6, 0));
+    assert!(
+        piece_castle.is_some(),
+        "Kingside castling move should be generated for the selected king"
+    );
 
     let action = MoveAction {
         player_id: "white".into(),
@@ -420,6 +423,13 @@ fn test_en_passant_generated_and_applied() {
         .iter()
         .find(|m| m.piece_id == "wp" && m.to == Square::new(5, 5));
     assert!(ep.is_some(), "En passant move should be generated");
+    let piece_ep = generate_piece_legal_move_actions(&state, &"wp".to_string())
+        .into_iter()
+        .find(|m| m.to == Square::new(5, 5));
+    assert!(
+        piece_ep.is_some(),
+        "En passant move should be generated for the selected pawn"
+    );
 
     let white_ep = MoveAction {
         player_id: "white".into(),
@@ -510,80 +520,56 @@ fn test_chessembly_cache_clone_and_deserialize_rebuild() {
 }
 
 #[test]
-fn test_legal_action_cache_matches_direct_generators() {
+fn test_piece_legal_move_actions_match_filtered_full_generator() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 4, 0);
     add_piece(&mut state, "wr", "white", "rook", 0, 0);
+    add_piece(&mut state, "wp", "white", "pawn-white", 3, 1);
     add_piece(&mut state, "bk", "black", "king", 4, 7);
     add_piece(&mut state, "bp", "black", "pawn-black", 0, 5);
 
-    let mut direct_moves = generate_legal_move_actions(&state);
-    direct_moves.sort_by_key(|m| (m.piece_id.clone(), m.to.rank, m.to.file));
-    let direct_attacks = generate_piece_attack_squares(&state, &"wr".to_string());
+    let mut full_rook_moves = generate_legal_move_actions(&state)
+        .into_iter()
+        .filter(|m| m.piece_id == "wr")
+        .collect::<Vec<_>>();
+    let mut piece_rook_moves = generate_piece_legal_move_actions(&state, &"wr".to_string());
 
-    let cache = ensure_legal_action_cache(&mut state);
-    let mut cached_moves = cache.all_moves.clone();
-    cached_moves.sort_by_key(|m| (m.piece_id.clone(), m.to.rank, m.to.file));
+    full_rook_moves.sort_by_key(|m| (m.piece_id.clone(), m.to.rank, m.to.file));
+    piece_rook_moves.sort_by_key(|m| (m.piece_id.clone(), m.to.rank, m.to.file));
 
     assert_eq!(
-        cached_moves
+        piece_rook_moves
             .iter()
             .map(|m| (&m.piece_id, m.from, m.to, &m.captured_piece_id))
             .collect::<Vec<_>>(),
-        direct_moves
+        full_rook_moves
             .iter()
             .map(|m| (&m.piece_id, m.from, m.to, &m.captured_piece_id))
             .collect::<Vec<_>>()
     );
-    assert_eq!(
-        cache.moves_by_piece.get("wr").unwrap(),
-        &direct_moves
-            .into_iter()
-            .filter(|m| m.piece_id == "wr")
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(cache.attacks_by_piece.get("wr").unwrap(), &direct_attacks);
 }
 
 #[test]
-fn test_legal_action_cache_invalidates_after_move_and_excludes_moved_piece() {
+fn test_piece_legal_move_actions_exclude_moved_piece() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 4, 0);
     add_piece(&mut state, "wr", "white", "rook", 0, 0);
     add_piece(&mut state, "bk", "black", "king", 4, 7);
 
-    let initial_version = {
-        let cache = ensure_legal_action_cache(&mut state);
-        assert!(cache.moves_by_piece.contains_key("wr"));
-        cache.version
-    };
-    assert!(state.legal_action_cache.is_some());
-
-    let action = state
-        .legal_action_cache
-        .as_ref()
-        .unwrap()
-        .moves_by_piece
-        .get("wr")
-        .unwrap()
-        .iter()
+    let action = generate_piece_legal_move_actions(&state, &"wr".to_string())
+        .into_iter()
         .find(|m| m.to == Square::new(0, 1))
-        .unwrap()
-        .clone();
+        .unwrap();
 
-    let mut moved_state = apply_move_action(state, action);
-    assert!(moved_state.legal_action_cache.is_none());
-    assert!(moved_state.legal_action_cache_version > initial_version);
-
-    let cache = ensure_legal_action_cache(&mut moved_state);
+    let moved_state = apply_move_action(state, action);
     assert!(
-        !cache.moves_by_piece.contains_key("wr"),
+        generate_piece_legal_move_actions(&moved_state, &"wr".to_string()).is_empty(),
         "a piece that already moved this turn must not have more legal moves"
     );
 }
 
 #[test]
-fn test_legal_action_cache_matches_drop_mode_generators() {
+fn test_piece_legal_drop_actions_match_filtered_full_drop_generator() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 4, 0);
     add_piece(&mut state, "wr", "white", "rook", 0, 0);
@@ -591,44 +577,29 @@ fn test_legal_action_cache_matches_drop_mode_generators() {
     add_piece(&mut state, "bk", "black", "king", 4, 7);
 
     state.turn_state.mode = TurnMode::Drop;
-    state.invalidate_legal_action_cache();
 
     let direct_moves = generate_legal_move_actions(&state);
-    let mut direct_drops = generate_legal_drop_actions(&state);
-    direct_drops.sort_by_key(|d| (d.piece_id.clone(), d.to.rank, d.to.file));
-
-    let cache = ensure_legal_action_cache(&mut state);
-    let mut cached_drops = cache.drop_actions.clone();
-    cached_drops.sort_by_key(|d| (d.piece_id.clone(), d.to.rank, d.to.file));
-
-    assert!(direct_moves.is_empty());
-    assert!(cache.all_moves.is_empty());
-    assert_eq!(cached_drops, direct_drops);
-    let mut cached_piece_drops = cache.drops_by_piece.get("wn").unwrap().clone();
-    cached_piece_drops.sort_by_key(|d| (d.piece_id.clone(), d.to.rank, d.to.file));
-    let mut direct_piece_drops = direct_drops
+    let mut full_piece_drops = generate_legal_drop_actions(&state)
         .into_iter()
         .filter(|d| d.piece_id == "wn")
         .collect::<Vec<_>>();
-    direct_piece_drops.sort_by_key(|d| (d.piece_id.clone(), d.to.rank, d.to.file));
-    assert_eq!(cached_piece_drops, direct_piece_drops);
+    let mut piece_drops = generate_piece_legal_drop_actions(&state, &"wn".to_string());
+
+    full_piece_drops.sort_by_key(|d| (d.piece_id.clone(), d.to.rank, d.to.file));
+    piece_drops.sort_by_key(|d| (d.piece_id.clone(), d.to.rank, d.to.file));
+
+    assert!(direct_moves.is_empty());
+    assert_eq!(piece_drops, full_piece_drops);
 }
 
 #[test]
-fn test_legal_action_cache_is_not_serialized() {
+fn test_legal_action_cache_fields_are_not_serialized() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 4, 0);
     add_piece(&mut state, "wr", "white", "rook", 0, 0);
     add_piece(&mut state, "bk", "black", "king", 4, 7);
 
-    ensure_legal_action_cache(&mut state);
-    assert!(state.legal_action_cache.is_some());
-
     let json = serde_json::to_string(&state).unwrap();
     assert!(!json.contains("legal_action_cache"));
     assert!(!json.contains("legal_action_cache_version"));
-
-    let deserialized: GameState = serde_json::from_str(&json).unwrap();
-    assert!(deserialized.legal_action_cache.is_none());
-    assert_eq!(deserialized.legal_action_cache_version, 0);
 }

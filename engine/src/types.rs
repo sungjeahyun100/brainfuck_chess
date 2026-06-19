@@ -258,19 +258,6 @@ pub struct DropAction {
     pub to: Square,
 }
 
-// ─── Legal Action Cache ────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Default)]
-pub struct LegalActionCache {
-    pub version: u64,
-    pub player_id: PlayerId,
-    pub all_moves: Vec<MoveAction>,
-    pub moves_by_piece: HashMap<PieceId, Vec<MoveAction>>,
-    pub attacks_by_piece: HashMap<PieceId, Vec<Square>>,
-    pub drop_actions: Vec<DropAction>,
-    pub drops_by_piece: HashMap<PieceId, Vec<DropAction>>,
-}
-
 // ─── GameResult ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -320,18 +307,9 @@ pub struct GameState {
     pub result: Option<GameResult>,
     #[serde(skip, default)]
     pub chessembly_program_cache: ChessemblyProgramCache,
-    #[serde(skip, default)]
-    pub legal_action_cache_version: u64,
-    #[serde(skip, default)]
-    pub legal_action_cache: Option<LegalActionCache>,
 }
 
 impl GameState {
-    pub fn invalidate_legal_action_cache(&mut self) {
-        self.legal_action_cache_version = self.legal_action_cache_version.saturating_add(1);
-        self.legal_action_cache = None;
-    }
-
     pub fn rebuild_chessembly_cache(&self) {
         self.chessembly_program_cache
             .rebuild(&self.piece_definitions);
