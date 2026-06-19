@@ -140,6 +140,7 @@ pub fn end_turn(game_state: GameState) -> GameState {
         }
     }
 
+    new_state.invalidate_legal_action_cache();
     new_state
 }
 
@@ -151,4 +152,5 @@ pub fn grant_move_stacks(game_state: &mut GameState) {
             piece.move_stack = 1;
         }
     }
+    game_state.invalidate_legal_action_cache();
 }

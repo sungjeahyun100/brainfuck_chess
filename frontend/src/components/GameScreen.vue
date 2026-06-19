@@ -222,22 +222,15 @@ async function onSquareClick(sq: Square) {
   }
 
   // ── Select own piece ──
-  if (piece && piece.owner === currentPlayer && piece.move_stack > 0) {
+  if (pieceId && piece && piece.owner === currentPlayer && piece.move_stack > 0) {
     clearSelection()
     selectedPieceId.value = pieceId
 
     try {
-      const [{ moves }, { squares }] = await Promise.all([
-        api.getLegalMoves(props.state.id),
-        api.getPieceAttacks(props.state.id, selectedPieceId.value as string),
-      ])
-      legalTargetSquares.value = moves
-        .filter(m => m.piece_id === pieceId)
-        .map(m => m.to)
-      movableSquares.value = moves
-        .filter(m => m.piece_id === pieceId && !m.captured_piece_id)
-        .map(m => m.to)
-      attackSquares.value = squares
+      const { moves, attacks } = await api.getPieceOptions(props.state.id, pieceId)
+      legalTargetSquares.value = moves.map(m => m.to)
+      movableSquares.value = moves.filter(m => !m.captured_piece_id).map(m => m.to)
+      attackSquares.value = attacks
     } catch {
       legalTargetSquares.value = []
       movableSquares.value = []

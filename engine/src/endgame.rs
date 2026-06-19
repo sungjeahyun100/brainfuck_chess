@@ -119,6 +119,7 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         });
     }
 
+    game_state.invalidate_legal_action_cache();
     game_state
 }
 
@@ -154,6 +155,7 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
         game_state.en_passant_available_to = None;
     }
 
+    game_state.invalidate_legal_action_cache();
     game_state
 }
 

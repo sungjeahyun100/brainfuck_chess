@@ -14,11 +14,8 @@ use uuid::Uuid;
 
 use brainfuck_chess_engine::{
     endgame::{apply_drop_action, apply_move_action},
-    legal_moves::{
-        generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
-    },
+    legal_moves::ensure_legal_action_cache,
     pieces::default_pieces::all_default_definitions,
-    placement::validate_drop_action,
     rules::{
         calculate_deck_score, calculate_score_limit, can_end_turn, create_board, end_turn,
         get_base_zone_squares, grant_move_stacks, validate_deck,
@@ -122,6 +119,12 @@ struct LegalDropsResponse {
 #[derive(Serialize)]
 struct PieceAttacksResponse {
     squares: Vec<Square>,
+}
+
+#[derive(Serialize)]
+struct PieceOptionsResponse {
+    moves: Vec<MoveAction>,
+    attacks: Vec<Square>,
 }
 
 #[derive(Serialize)]
@@ -308,9 +311,12 @@ fn build_game_state(
         turn_state: TurnState::new(),
         result: None,
         chessembly_program_cache,
+        legal_action_cache_version: 0,
+        legal_action_cache: None,
     };
 
     grant_move_stacks(&mut state);
+    ensure_legal_action_cache(&mut state);
     Ok(state)
 }
 
@@ -393,6 +399,10 @@ async fn main() {
         .route("/games/:id/resign", post(resign_game))
         .route("/games/:id/legal-moves", get(get_legal_moves))
         .route("/games/:id/piece-attacks/:piece_id", get(get_piece_attacks))
+        .route(
+            "/games/:id/pieces/:piece_id/options",
+            get(get_piece_options),
+        )
         .route("/games/:id/legal-drops", get(get_legal_drops))
         .route("/rooms", post(create_room))
         .route("/rooms/:id", get(get_room))
@@ -625,6 +635,7 @@ async fn resign_room(
             winner: Some(opponent_side(&req.player_id)),
             reason: GameEndReason::Resignation,
         });
+        state.invalidate_legal_action_cache();
     }
 
     Ok(Json(state.clone()))
@@ -660,6 +671,7 @@ async fn resign_game(
             winner: Some(opponent_side(&req.player_id)),
             reason: GameEndReason::Resignation,
         });
+        state.invalidate_legal_action_cache();
     }
 
     Ok(Json(state.clone()))
@@ -749,11 +761,19 @@ async fn submit_action(
                     }),
                 ));
             }
-            // Validate it's a legal move
-            let legal_moves = generate_legal_move_actions(state);
-            let is_legal = legal_moves
-                .iter()
-                .any(|m| m.piece_id == action.piece_id && m.to == action.to);
+            // Validate against the cached legal actions for this state.
+            let is_legal = {
+                let cache = ensure_legal_action_cache(state);
+                cache
+                    .moves_by_piece
+                    .get(&action.piece_id)
+                    .map(|moves| {
+                        moves
+                            .iter()
+                            .any(|m| m.from == action.from && m.to == action.to)
+                    })
+                    .unwrap_or(false)
+            };
             if !is_legal {
                 return Err((
                     StatusCode::BAD_REQUEST,
@@ -764,6 +784,7 @@ async fn submit_action(
             }
 
             state.turn_state.mode = TurnMode::Move;
+            state.invalidate_legal_action_cache();
             let new_state = apply_move_action(state.clone(), action);
             *state = new_state;
         }
@@ -784,10 +805,29 @@ async fn submit_action(
                     }),
                 ));
             }
-            validate_drop_action(state, &action)
-                .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
+            let is_legal = {
+                let cache = ensure_legal_action_cache(state);
+                cache
+                    .drops_by_piece
+                    .get(&action.piece_id)
+                    .map(|drops| {
+                        drops
+                            .iter()
+                            .any(|d| d.player_id == action.player_id && d.to == action.to)
+                    })
+                    .unwrap_or(false)
+            };
+            if !is_legal {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: "착수 가능한 칸이 아닙니다.".into(),
+                    }),
+                ));
+            }
 
             state.turn_state.mode = TurnMode::Drop;
+            state.invalidate_legal_action_cache();
             let new_state = apply_drop_action(state.clone(), action);
             *state = new_state;
         }
@@ -822,6 +862,7 @@ async fn end_game_turn(
 
     let new_state = end_turn(state.clone());
     *state = new_state;
+    ensure_legal_action_cache(state);
     Ok(Json(state.clone()))
 }
 
@@ -829,9 +870,11 @@ async fn get_legal_moves(
     State(app): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<LegalMovesResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app.games.get(&id) {
-        Some(state) => {
-            let moves = generate_legal_move_actions(&state);
+    match app.games.get_mut(&id) {
+        Some(mut state) => {
+            let moves = ensure_legal_action_cache(state.value_mut())
+                .all_moves
+                .clone();
             Ok(Json(LegalMovesResponse { moves }))
         }
         None => Err((
@@ -847,9 +890,11 @@ async fn get_legal_drops(
     State(app): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<LegalDropsResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app.games.get(&id) {
-        Some(state) => {
-            let drops = generate_legal_drop_actions(&state);
+    match app.games.get_mut(&id) {
+        Some(mut state) => {
+            let drops = ensure_legal_action_cache(state.value_mut())
+                .drop_actions
+                .clone();
             Ok(Json(LegalDropsResponse { drops }))
         }
         None => Err((
@@ -865,10 +910,42 @@ async fn get_piece_attacks(
     State(app): State<AppState>,
     Path((id, piece_id)): Path<(String, String)>,
 ) -> Result<Json<PieceAttacksResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match app.games.get(&id) {
-        Some(state) => {
-            let squares = generate_piece_attack_squares(&state, &piece_id);
+    match app.games.get_mut(&id) {
+        Some(mut state) => {
+            let squares = ensure_legal_action_cache(state.value_mut())
+                .attacks_by_piece
+                .get(&piece_id)
+                .cloned()
+                .unwrap_or_default();
             Ok(Json(PieceAttacksResponse { squares }))
+        }
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "게임을 찾을 수 없습니다.".into(),
+            }),
+        )),
+    }
+}
+
+async fn get_piece_options(
+    State(app): State<AppState>,
+    Path((id, piece_id)): Path<(String, String)>,
+) -> Result<Json<PieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match app.games.get_mut(&id) {
+        Some(mut state) => {
+            let cache = ensure_legal_action_cache(state.value_mut());
+            let moves = cache
+                .moves_by_piece
+                .get(&piece_id)
+                .cloned()
+                .unwrap_or_default();
+            let attacks = cache
+                .attacks_by_piece
+                .get(&piece_id)
+                .cloned()
+                .unwrap_or_default();
+            Ok(Json(PieceOptionsResponse { moves, attacks }))
         }
         None => Err((
             StatusCode::NOT_FOUND,

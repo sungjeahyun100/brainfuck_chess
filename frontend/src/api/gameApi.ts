@@ -36,6 +36,11 @@ interface ResignGameRequest {
   player_id: PlayerId
 }
 
+export interface PieceOptionsResponse {
+  moves: MoveAction[]
+  attacks: Square[]
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
@@ -102,6 +107,10 @@ export const api = {
 
   getPieceAttacks(id: string, pieceId: string): Promise<{ squares: Square[] }> {
     return request(`${BASE}/${id}/piece-attacks/${pieceId}`)
+  },
+
+  getPieceOptions(id: string, pieceId: string): Promise<PieceOptionsResponse> {
+    return request(`${BASE}/${id}/pieces/${pieceId}/options`)
   },
 
   getLegalDrops(id: string): Promise<{ drops: DropAction[] }> {

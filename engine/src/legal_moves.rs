@@ -38,6 +38,68 @@ fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
     }
 }
 
+fn build_legal_action_cache(game_state: &GameState) -> LegalActionCache {
+    let all_moves = generate_legal_move_actions(game_state);
+    let drop_actions = generate_legal_drop_actions(game_state);
+
+    let mut moves_by_piece: HashMap<PieceId, Vec<MoveAction>> = HashMap::new();
+    for action in &all_moves {
+        moves_by_piece
+            .entry(action.piece_id.clone())
+            .or_default()
+            .push(action.clone());
+    }
+
+    let mut drops_by_piece: HashMap<PieceId, Vec<DropAction>> = HashMap::new();
+    for action in &drop_actions {
+        drops_by_piece
+            .entry(action.piece_id.clone())
+            .or_default()
+            .push(action.clone());
+    }
+
+    let mut attacks_by_piece: HashMap<PieceId, Vec<Square>> = HashMap::new();
+    for (piece_id, piece) in &game_state.pieces {
+        if piece.owner == game_state.current_player && piece.is_on_board() {
+            attacks_by_piece.insert(
+                piece_id.clone(),
+                generate_piece_attack_squares(game_state, piece_id),
+            );
+        }
+    }
+
+    LegalActionCache {
+        version: game_state.legal_action_cache_version,
+        player_id: game_state.current_player.clone(),
+        all_moves,
+        moves_by_piece,
+        attacks_by_piece,
+        drop_actions,
+        drops_by_piece,
+    }
+}
+
+/// Ensure the current player's legal actions are computed and indexed for reuse.
+pub fn ensure_legal_action_cache(game_state: &mut GameState) -> &LegalActionCache {
+    let cache_is_valid = game_state
+        .legal_action_cache
+        .as_ref()
+        .map(|cache| {
+            cache.version == game_state.legal_action_cache_version
+                && cache.player_id == game_state.current_player
+        })
+        .unwrap_or(false);
+
+    if !cache_is_valid {
+        game_state.legal_action_cache = Some(build_legal_action_cache(game_state));
+    }
+
+    game_state
+        .legal_action_cache
+        .as_ref()
+        .expect("legal action cache should exist after ensure")
+}
+
 /// Generate attack/threat squares for a specific piece.
 ///
 /// This is intentionally separate from legal moves so UI can visualize
