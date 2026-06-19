@@ -1,5 +1,9 @@
-use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use crate::chessembly::ast::Program;
+use crate::chessembly::parser::parse;
 
 // ─── Primitive ID types ─────────────────────────────────────────────────────
 
@@ -63,6 +67,87 @@ pub struct PieceDefinition {
     pub extensions: Option<Vec<String>>,
     /// If true, capturing this piece ends the game immediately
     pub is_king: bool,
+}
+
+// ─── Chessembly Program Cache ───────────────────────────────────────────────
+
+#[derive(Debug, Default)]
+pub struct ChessemblyProgramCache {
+    pub programs: RwLock<HashMap<PieceTypeId, Arc<Program>>>,
+}
+
+impl Clone for ChessemblyProgramCache {
+    fn clone(&self) -> Self {
+        Self {
+            programs: RwLock::new(self.read_programs().clone()),
+        }
+    }
+}
+
+impl ChessemblyProgramCache {
+    pub fn from_definitions(definitions: &HashMap<PieceTypeId, PieceDefinition>) -> Self {
+        let cache = Self::default();
+        cache.rebuild(definitions);
+        cache
+    }
+
+    pub fn rebuild(&self, definitions: &HashMap<PieceTypeId, PieceDefinition>) {
+        let programs = definitions
+            .iter()
+            .map(|(type_id, definition)| {
+                (
+                    type_id.clone(),
+                    Arc::new(parse(&definition.chessembly_code)),
+                )
+            })
+            .collect();
+        *self.write_programs() = programs;
+    }
+
+    pub fn is_complete_for(&self, definitions: &HashMap<PieceTypeId, PieceDefinition>) -> bool {
+        let programs = self.read_programs();
+        programs.len() == definitions.len()
+            && definitions
+                .keys()
+                .all(|type_id| programs.contains_key(type_id))
+    }
+
+    pub fn get(&self, type_id: &PieceTypeId) -> Option<Arc<Program>> {
+        self.read_programs().get(type_id).cloned()
+    }
+
+    pub fn get_or_parse(
+        &self,
+        type_id: &PieceTypeId,
+        definition: &PieceDefinition,
+    ) -> Arc<Program> {
+        if let Some(program) = self.get(type_id) {
+            return program;
+        }
+
+        let program = Arc::new(parse(&definition.chessembly_code));
+        let mut programs = self.write_programs();
+        programs
+            .entry(type_id.clone())
+            .or_insert_with(|| program.clone())
+            .clone()
+    }
+
+    pub fn len(&self) -> usize {
+        self.read_programs().len()
+    }
+
+    fn read_programs(&self) -> RwLockReadGuard<'_, HashMap<PieceTypeId, Arc<Program>>> {
+        self.programs
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn write_programs(&self) -> RwLockWriteGuard<'_, HashMap<PieceTypeId, Arc<Program>>> {
+        self.programs
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,6 +305,40 @@ pub struct GameState {
     pub en_passant_available_to: Option<PlayerId>,
     pub turn_state: TurnState,
     pub result: Option<GameResult>,
+    #[serde(skip, default)]
+    pub chessembly_program_cache: ChessemblyProgramCache,
+}
+
+impl GameState {
+    pub fn rebuild_chessembly_cache(&self) {
+        self.chessembly_program_cache
+            .rebuild(&self.piece_definitions);
+    }
+
+    pub fn ensure_chessembly_cache(&self) {
+        if !self
+            .chessembly_program_cache
+            .is_complete_for(&self.piece_definitions)
+        {
+            self.rebuild_chessembly_cache();
+        }
+    }
+
+    pub fn chessembly_program(&self, type_id: &PieceTypeId) -> Option<Arc<Program>> {
+        if let Some(program) = self.chessembly_program_cache.get(type_id) {
+            return Some(program);
+        }
+
+        let definition = self.piece_definitions.get(type_id)?;
+        Some(
+            self.chessembly_program_cache
+                .get_or_parse(type_id, definition),
+        )
+    }
+
+    pub fn cached_chessembly_program_count(&self) -> usize {
+        self.chessembly_program_cache.len()
+    }
 }
 
 // ─── Validation ─────────────────────────────────────────────────────────────
@@ -232,11 +351,17 @@ pub struct ValidationResult {
 
 impl ValidationResult {
     pub fn ok() -> Self {
-        Self { valid: true, errors: Vec::new() }
+        Self {
+            valid: true,
+            errors: Vec::new(),
+        }
     }
 
     pub fn fail(errors: Vec<String>) -> Self {
-        Self { valid: false, errors }
+        Self {
+            valid: false,
+            errors,
+        }
     }
 }
 

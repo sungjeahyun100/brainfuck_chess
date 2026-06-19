@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::chessembly::interpreter::{run, ExecutionContext};
-use crate::chessembly::parser::parse;
 use crate::types::*;
 
 /// Compute the full attack map for a player: the union of attackSquares from
@@ -12,6 +11,8 @@ pub fn generate_attack_map(
     // Pre-computed attack maps for other players (used by `danger()` expression)
     existing_attack_maps: &HashMap<PlayerId, HashSet<String>>,
 ) -> AttackMap {
+    game_state.ensure_chessembly_cache();
+
     let mut attacked_squares: HashSet<SquareId> = HashSet::new();
     let mut source_map: HashMap<SquareId, Vec<PieceId>> = HashMap::new();
 
@@ -26,7 +27,9 @@ pub fn generate_attack_map(
             None => continue,
         };
 
-        let program = parse(&definition.chessembly_code);
+        let Some(program) = game_state.chessembly_program(&piece.type_id) else {
+            continue;
+        };
         let ctx = ExecutionContext {
             board: &game_state.board,
             piece,
@@ -38,15 +41,12 @@ pub fn generate_attack_map(
             attack_maps: existing_attack_maps,
         };
 
-        let chessembly_result = run(&program, &ctx);
+        let chessembly_result = run(program.as_ref(), &ctx);
 
         for sq in &chessembly_result.attack_squares {
             let sq_id = sq.to_id();
             attacked_squares.insert(sq_id.clone());
-            source_map
-                .entry(sq_id)
-                .or_default()
-                .push(piece_id.clone());
+            source_map.entry(sq_id).or_default().push(piece_id.clone());
         }
     }
 

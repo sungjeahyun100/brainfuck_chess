@@ -1,7 +1,9 @@
 //! Brainfuck Chess rule engine integration tests.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use brainfuck_chess_engine::attack_map::generate_attack_map;
 use brainfuck_chess_engine::endgame::{apply_move_action, has_living_king};
 use brainfuck_chess_engine::legal_moves::generate_legal_move_actions;
 use brainfuck_chess_engine::pieces::default_pieces::*;
@@ -16,6 +18,7 @@ fn make_game_state(board_size: i32) -> GameState {
         .into_iter()
         .map(|d| (d.id.clone(), d))
         .collect();
+    let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&defs);
 
     let white_deck = Deck {
         player_id: "white".into(),
@@ -35,11 +38,19 @@ fn make_game_state(board_size: i32) -> GameState {
     let mut players = HashMap::new();
     players.insert(
         "white".into(),
-        Player { id: "white".into(), deck: white_deck, captured_pieces: Vec::new() },
+        Player {
+            id: "white".into(),
+            deck: white_deck,
+            captured_pieces: Vec::new(),
+        },
     );
     players.insert(
         "black".into(),
-        Player { id: "black".into(), deck: black_deck, captured_pieces: Vec::new() },
+        Player {
+            id: "black".into(),
+            deck: black_deck,
+            captured_pieces: Vec::new(),
+        },
     );
 
     GameState {
@@ -55,17 +66,11 @@ fn make_game_state(board_size: i32) -> GameState {
         en_passant_available_to: None,
         turn_state: TurnState::new(),
         result: None,
+        chessembly_program_cache,
     }
 }
 
-fn add_piece(
-    state: &mut GameState,
-    id: &str,
-    owner: &str,
-    type_id: &str,
-    file: i32,
-    rank: i32,
-) {
+fn add_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, file: i32, rank: i32) {
     let sq = Square::new(file, rank);
     let piece = Piece {
         id: id.into(),
@@ -79,7 +84,13 @@ fn add_piece(
     };
     state.board.squares.insert(sq.to_id(), Some(id.into()));
     state.pieces.insert(id.into(), piece.clone());
-    state.players.get_mut(owner).unwrap().deck.starting_pieces.push(id.into());
+    state
+        .players
+        .get_mut(owner)
+        .unwrap()
+        .deck
+        .starting_pieces
+        .push(id.into());
 }
 
 fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str) {
@@ -94,7 +105,13 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         has_moved: false,
     };
     state.pieces.insert(id.into(), piece);
-    state.players.get_mut(owner).unwrap().deck.pocket_pieces.push(id.into());
+    state
+        .players
+        .get_mut(owner)
+        .unwrap()
+        .deck
+        .pocket_pieces
+        .push(id.into());
 }
 
 // ─── Board creation ───────────────────────────────────────────────────────────
@@ -323,8 +340,14 @@ fn test_move_stack_reset_on_end_turn() {
 
     let mut new_state = apply_move_action(state, action);
     // Move state board to reflect move
-    new_state.board.squares.insert(Square::new(4, 0).to_id(), None);
-    new_state.board.squares.insert(Square::new(4, 1).to_id(), Some("k1".into()));
+    new_state
+        .board
+        .squares
+        .insert(Square::new(4, 0).to_id(), None);
+    new_state
+        .board
+        .squares
+        .insert(Square::new(4, 1).to_id(), Some("k1".into()));
 
     let final_state = end_turn(new_state);
     // After end_turn, black's pieces get stacks; white's "k1" shouldn't have been reset
@@ -345,7 +368,10 @@ fn test_castling_kingside_generated_and_applied() {
     let castle = legal
         .iter()
         .find(|m| m.piece_id == "wk" && m.to == Square::new(6, 0));
-    assert!(castle.is_some(), "Kingside castling move should be generated");
+    assert!(
+        castle.is_some(),
+        "Kingside castling move should be generated"
+    );
 
     let action = MoveAction {
         player_id: "white".into(),
@@ -401,7 +427,77 @@ fn test_en_passant_generated_and_applied() {
     let black_pawn = new_state.pieces.get("bp").unwrap();
 
     assert_eq!(white_pawn.current_square, Some(Square::new(5, 5)));
-    assert!(black_pawn.captured, "Black pawn should be captured by en passant");
+    assert!(
+        black_pawn.captured,
+        "Black pawn should be captured by en passant"
+    );
     assert_eq!(new_state.board.get_piece_at(&Square::new(5, 4)), None);
     assert_eq!(new_state.en_passant_target, None);
+}
+
+#[test]
+fn test_chessembly_cache_preserves_legal_moves_and_attack_map() {
+    let mut cached_state = make_game_state(8);
+    add_piece(&mut cached_state, "wk", "white", "king", 4, 0);
+    add_piece(&mut cached_state, "wr", "white", "rook", 0, 0);
+    add_piece(&mut cached_state, "bk", "black", "king", 4, 7);
+    add_piece(&mut cached_state, "bp", "black", "pawn-black", 0, 5);
+
+    let rebuilt_state = cached_state.clone();
+    rebuilt_state.rebuild_chessembly_cache();
+
+    let mut cached_moves = generate_legal_move_actions(&cached_state);
+    let mut rebuilt_moves = generate_legal_move_actions(&rebuilt_state);
+    cached_moves.sort_by_key(|m| (m.piece_id.clone(), m.to.rank, m.to.file));
+    rebuilt_moves.sort_by_key(|m| (m.piece_id.clone(), m.to.rank, m.to.file));
+    assert_eq!(
+        cached_moves.len(),
+        rebuilt_moves.len(),
+        "legal move count should not depend on cache rebuild"
+    );
+    assert_eq!(
+        cached_moves
+            .iter()
+            .map(|m| (&m.piece_id, m.from, m.to, &m.captured_piece_id))
+            .collect::<Vec<_>>(),
+        rebuilt_moves
+            .iter()
+            .map(|m| (&m.piece_id, m.from, m.to, &m.captured_piece_id))
+            .collect::<Vec<_>>()
+    );
+
+    let empty_maps = HashMap::new();
+    let cached_attack_map = generate_attack_map(&cached_state, &"white".into(), &empty_maps);
+    let rebuilt_attack_map = generate_attack_map(&rebuilt_state, &"white".into(), &empty_maps);
+    assert_eq!(
+        cached_attack_map.attacked_squares,
+        rebuilt_attack_map.attacked_squares
+    );
+    assert_eq!(cached_attack_map.source_map, rebuilt_attack_map.source_map);
+}
+
+#[test]
+fn test_chessembly_cache_clone_and_deserialize_rebuild() {
+    let state = make_game_state(8);
+    assert_eq!(
+        state.cached_chessembly_program_count(),
+        state.piece_definitions.len()
+    );
+
+    let cloned = state.clone();
+    let state_rook = state.chessembly_program(&"rook".to_string()).unwrap();
+    let cloned_rook = cloned.chessembly_program(&"rook".to_string()).unwrap();
+    assert!(Arc::ptr_eq(&state_rook, &cloned_rook));
+
+    let json = serde_json::to_string(&state).unwrap();
+    assert!(!json.contains("chessembly_program_cache"));
+    assert!(json.contains("chessembly_code"));
+
+    let deserialized: GameState = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.cached_chessembly_program_count(), 0);
+    deserialized.ensure_chessembly_cache();
+    assert_eq!(
+        deserialized.cached_chessembly_program_count(),
+        deserialized.piece_definitions.len()
+    );
 }

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::attack_map::generate_attack_map;
 use crate::chessembly::interpreter::{run, ExecutionContext};
-use crate::chessembly::parser::parse;
 use crate::placement::get_placement_squares;
 use crate::types::*;
 
@@ -45,6 +44,8 @@ fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
 /// attacked squares (including empty threatened squares) without making
 /// those squares executable move targets.
 pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId) -> Vec<Square> {
+    game_state.ensure_chessembly_cache();
+
     let Some(piece) = game_state.pieces.get(piece_id) else {
         return Vec::new();
     };
@@ -56,7 +57,9 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
         return Vec::new();
     };
 
-    let program = parse(&definition.chessembly_code);
+    let Some(program) = game_state.chessembly_program(&piece.type_id) else {
+        return Vec::new();
+    };
     let empty_maps = HashMap::new();
     let empty_global_state = HashMap::new();
     let ctx = ExecutionContext {
@@ -70,7 +73,7 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
         attack_maps: &empty_maps,
     };
 
-    let result = run(&program, &ctx);
+    let result = run(program.as_ref(), &ctx);
     result
         .attack_squares
         .into_iter()
@@ -80,6 +83,8 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
 
 /// Generate all legal move actions for the current player in the given state.
 pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
+    game_state.ensure_chessembly_cache();
+
     let player_id = &game_state.current_player;
     let opponent_id = if player_id == "white" {
         "black".to_string()
@@ -112,7 +117,9 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
             None => continue,
         };
 
-        let program = parse(&definition.chessembly_code);
+        let Some(program) = game_state.chessembly_program(&piece.type_id) else {
+            continue;
+        };
         let ctx = ExecutionContext {
             board: &game_state.board,
             piece,
@@ -124,7 +131,7 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
             attack_maps: &empty_maps,
         };
 
-        let result = run(&program, &ctx);
+        let result = run(program.as_ref(), &ctx);
         let from = piece.current_square.unwrap();
         let pawn_dir = pawn_forward_dir(&piece.type_id);
         let pawn_start = pawn_start_rank(&piece.type_id, game_state.board.size);
@@ -155,13 +162,16 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
                 }
             }
 
-            push_action_if_unique(&mut actions, MoveAction {
-                player_id: player_id.clone(),
-                piece_id: piece_id.clone(),
-                from,
-                to,
-                captured_piece_id,
-            });
+            push_action_if_unique(
+                &mut actions,
+                MoveAction {
+                    player_id: player_id.clone(),
+                    piece_id: piece_id.clone(),
+                    from,
+                    to,
+                    captured_piece_id,
+                },
+            );
         }
 
         // Attack-only squares are legal only when an enemy occupies the square.
@@ -182,13 +192,16 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
                 continue;
             }
 
-            push_action_if_unique(&mut actions, MoveAction {
-                player_id: player_id.clone(),
-                piece_id: piece_id.clone(),
-                from,
-                to,
-                captured_piece_id: Some(captured_piece_id),
-            });
+            push_action_if_unique(
+                &mut actions,
+                MoveAction {
+                    player_id: player_id.clone(),
+                    piece_id: piece_id.clone(),
+                    from,
+                    to,
+                    captured_piece_id: Some(captured_piece_id),
+                },
+            );
         }
 
         // En passant: pawn can capture onto target square even when destination is empty.
@@ -202,14 +215,19 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
                         let adjacent = Square::new(target.file, from.rank);
                         if let Some(captured_id) = game_state.board.get_piece_at(&adjacent) {
                             if let Some(captured_piece) = game_state.pieces.get(captured_id) {
-                                if captured_piece.owner != *player_id && is_pawn_type(&captured_piece.type_id) {
-                                    push_action_if_unique(&mut actions, MoveAction {
-                                        player_id: player_id.clone(),
-                                        piece_id: piece_id.clone(),
-                                        from,
-                                        to: target,
-                                        captured_piece_id: Some(captured_id.clone()),
-                                    });
+                                if captured_piece.owner != *player_id
+                                    && is_pawn_type(&captured_piece.type_id)
+                                {
+                                    push_action_if_unique(
+                                        &mut actions,
+                                        MoveAction {
+                                            player_id: player_id.clone(),
+                                            piece_id: piece_id.clone(),
+                                            from,
+                                            to: target,
+                                            captured_piece_id: Some(captured_id.clone()),
+                                        },
+                                    );
                                 }
                             }
                         }
@@ -225,7 +243,11 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
             }
 
             for rook in game_state.pieces.values() {
-                if rook.owner != *player_id || rook.has_moved || !rook.is_on_board() || !is_rook_piece(rook) {
+                if rook.owner != *player_id
+                    || rook.has_moved
+                    || !rook.is_on_board()
+                    || !is_rook_piece(rook)
+                {
                     continue;
                 }
 
@@ -243,7 +265,9 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
                 let king_mid = Square::new(from.file + dir, from.rank);
                 let king_to = Square::new(from.file + 2 * dir, from.rank);
 
-                if !game_state.board.is_in_bounds(&king_mid) || !game_state.board.is_in_bounds(&king_to) {
+                if !game_state.board.is_in_bounds(&king_mid)
+                    || !game_state.board.is_in_bounds(&king_to)
+                {
                     continue;
                 }
                 if !game_state.board.is_empty(&king_mid) || !game_state.board.is_empty(&king_to) {
@@ -264,19 +288,24 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
                     continue;
                 }
 
-                if enemy_attack_map.attacked_squares.contains(&king_mid.to_id())
+                if enemy_attack_map
+                    .attacked_squares
+                    .contains(&king_mid.to_id())
                     || enemy_attack_map.attacked_squares.contains(&king_to.to_id())
                 {
                     continue;
                 }
 
-                push_action_if_unique(&mut actions, MoveAction {
-                    player_id: player_id.clone(),
-                    piece_id: piece_id.clone(),
-                    from,
-                    to: king_to,
-                    captured_piece_id: None,
-                });
+                push_action_if_unique(
+                    &mut actions,
+                    MoveAction {
+                        player_id: player_id.clone(),
+                        piece_id: piece_id.clone(),
+                        from,
+                        to: king_to,
+                        captured_piece_id: None,
+                    },
+                );
             }
         }
     }
