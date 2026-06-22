@@ -1,9 +1,8 @@
-/// Abstract Syntax Tree for Chessembly DSL.
-///
-/// One `Program` is a sequence of `Chain`s separated by `;`.
-/// Each `Chain` is a sequence of `Expr`s executed in order.
-/// The anchor (reference position) resets to the piece's square at the start
-/// of every new chain.
+//! Abstract Syntax Tree for Chessembly DSL.
+//!
+//! One `Program` is a sequence of `Chain`s separated by `;`.
+//! Each `Chain` is a sequence of `Expr`s executed in order. The anchor resets
+//! to the piece's square at the start of every new chain.
 
 // ─── Top level ──────────────────────────────────────────────────────────────
 

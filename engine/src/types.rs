@@ -1,5 +1,7 @@
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::chessembly::ast::Program;
@@ -8,9 +10,111 @@ use crate::chessembly::parser::parse;
 // ─── Primitive ID types ─────────────────────────────────────────────────────
 
 pub type PlayerId = String;
-pub type SquareId = String;
-pub type PieceId = String;
 pub type PieceTypeId = String;
+
+/// Stable external piece id with allocation-free clones inside the engine.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PieceId(Arc<str>);
+
+impl PieceId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for PieceId {
+    fn from(value: &str) -> Self {
+        Self(Arc::from(value))
+    }
+}
+
+impl From<String> for PieceId {
+    fn from(value: String) -> Self {
+        Self(Arc::from(value))
+    }
+}
+
+impl Borrow<str> for PieceId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for PieceId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl PartialEq<str> for PieceId {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for PieceId {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<String> for PieceId {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other
+    }
+}
+
+/// Compact, allocation-free square key used by engine maps and sets.
+///
+/// Its serde representation remains `"file_rank"` so existing board and API
+/// JSON stays compatible while the engine no longer allocates square strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SquareId {
+    pub file: i32,
+    pub rank: i32,
+}
+
+impl SquareId {
+    pub const fn new(file: i32, rank: i32) -> Self {
+        Self { file, rank }
+    }
+
+    pub const fn to_square(self) -> Square {
+        Square::new(self.file, self.rank)
+    }
+}
+
+impl fmt::Display for SquareId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}_{}", self.file, self.rank)
+    }
+}
+
+impl Serialize for SquareId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for SquareId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        let (file, rank) = value
+            .split_once('_')
+            .ok_or_else(|| de::Error::custom("square id must be `file_rank`"))?;
+        Ok(Self::new(
+            file.parse().map_err(de::Error::custom)?,
+            rank.parse().map_err(de::Error::custom)?,
+        ))
+    }
+}
 
 // ─── Square ─────────────────────────────────────────────────────────────────
 
@@ -21,12 +125,12 @@ pub struct Square {
 }
 
 impl Square {
-    pub fn new(file: i32, rank: i32) -> Self {
+    pub const fn new(file: i32, rank: i32) -> Self {
         Self { file, rank }
     }
 
-    pub fn to_id(&self) -> SquareId {
-        format!("{}_{}", self.file, self.rank)
+    pub const fn to_id(&self) -> SquareId {
+        SquareId::new(self.file, self.rank)
     }
 }
 
@@ -69,6 +173,22 @@ pub struct PieceDefinition {
     pub is_king: bool,
 }
 
+/// Move generation dispatch seam. Native implementations can be enabled per
+/// definition without changing callers; custom pieces remain Chessembly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MovegenBackend {
+    Native,
+    Chessembly,
+}
+
+impl PieceDefinition {
+    pub fn movegen_backend(&self) -> MovegenBackend {
+        // The first optimization pass keeps behavior identical. Native
+        // backends can be introduced piece-by-piece with parity tests.
+        MovegenBackend::Chessembly
+    }
+}
+
 // ─── Chessembly Program Cache ───────────────────────────────────────────────
 
 #[derive(Debug, Default)]
@@ -92,6 +212,7 @@ impl ChessemblyProgramCache {
     }
 
     pub fn rebuild(&self, definitions: &HashMap<PieceTypeId, PieceDefinition>) {
+        crate::profiling::record_cache_rebuild(1);
         let programs = definitions
             .iter()
             .map(|(type_id, definition)| {
@@ -135,6 +256,10 @@ impl ChessemblyProgramCache {
 
     pub fn len(&self) -> usize {
         self.read_programs().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.read_programs().is_empty()
     }
 
     fn read_programs(&self) -> RwLockReadGuard<'_, HashMap<PieceTypeId, Arc<Program>>> {
@@ -233,6 +358,12 @@ impl TurnState {
     }
 }
 
+impl Default for TurnState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ─── Actions ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,6 +387,16 @@ pub struct DropAction {
     pub player_id: PlayerId,
     pub piece_id: PieceId,
     pub to: Square,
+}
+
+/// Search-oriented drop candidate. Identical pocket pieces are represented by
+/// their type and count instead of one action per concrete piece id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DropCandidateByType {
+    pub player_id: PlayerId,
+    pub piece_type_id: PieceTypeId,
+    pub count: u16,
+    pub to: SquareId,
 }
 
 // ─── GameResult ─────────────────────────────────────────────────────────────
@@ -326,6 +467,7 @@ impl GameState {
 
     pub fn chessembly_program(&self, type_id: &PieceTypeId) -> Option<Arc<Program>> {
         if let Some(program) = self.chessembly_program_cache.get(type_id) {
+            crate::profiling::record_cache_hit(1);
             return Some(program);
         }
 

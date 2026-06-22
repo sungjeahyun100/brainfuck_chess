@@ -187,23 +187,23 @@ fn parse_expr(tokens: &[Token], pos: usize) -> Option<(Expr, usize)> {
         // ── Function calls ───────────────────────────────────────────────────
         Token::Call(name) => {
             match name.as_str() {
-                "move" => parse_xy(tokens, pos + 1, |x, y| Expr::Move(x, y)),
-                "take" => parse_xy(tokens, pos + 1, |x, y| Expr::Take(x, y)),
-                "take-move" => parse_xy(tokens, pos + 1, |x, y| Expr::TakeMove(x, y)),
-                "catch" => parse_xy(tokens, pos + 1, |x, y| Expr::Catch(x, y)),
-                "jump" => parse_xy(tokens, pos + 1, |x, y| Expr::Jump(x, y)),
-                "shift" => parse_xy(tokens, pos + 1, |x, y| Expr::Shift(x, y)),
-                "anchor" => parse_xy(tokens, pos + 1, |x, y| Expr::Anchor(x, y)),
+                "move" => parse_xy(tokens, pos + 1, Expr::Move),
+                "take" => parse_xy(tokens, pos + 1, Expr::Take),
+                "take-move" => parse_xy(tokens, pos + 1, Expr::TakeMove),
+                "catch" => parse_xy(tokens, pos + 1, Expr::Catch),
+                "jump" => parse_xy(tokens, pos + 1, Expr::Jump),
+                "shift" => parse_xy(tokens, pos + 1, Expr::Shift),
+                "anchor" => parse_xy(tokens, pos + 1, Expr::Anchor),
                 "absolute-x" => parse_int_arg(tokens, pos + 1, Expr::AbsoluteX),
                 "absolute-y" => parse_int_arg(tokens, pos + 1, Expr::AbsoluteY),
-                "observe" => parse_xy(tokens, pos + 1, |x, y| Expr::Observe(x, y)),
-                "peek" => parse_xy(tokens, pos + 1, |x, y| Expr::Peek(x, y)),
-                "enemy" => parse_xy(tokens, pos + 1, |x, y| Expr::Enemy(x, y)),
-                "friendly" => parse_xy(tokens, pos + 1, |x, y| Expr::Friendly(x, y)),
-                "bound" => parse_xy(tokens, pos + 1, |x, y| Expr::Bound(x, y)),
-                "edge" => parse_xy(tokens, pos + 1, |x, y| Expr::Edge(x, y)),
-                "corner" => parse_xy(tokens, pos + 1, |x, y| Expr::Corner(x, y)),
-                "danger" => parse_xy(tokens, pos + 1, |x, y| Expr::Danger(x, y)),
+                "observe" => parse_xy(tokens, pos + 1, Expr::Observe),
+                "peek" => parse_xy(tokens, pos + 1, Expr::Peek),
+                "enemy" => parse_xy(tokens, pos + 1, Expr::Enemy),
+                "friendly" => parse_xy(tokens, pos + 1, Expr::Friendly),
+                "bound" => parse_xy(tokens, pos + 1, Expr::Bound),
+                "edge" => parse_xy(tokens, pos + 1, Expr::Edge),
+                "corner" => parse_xy(tokens, pos + 1, Expr::Corner),
+                "danger" => parse_xy(tokens, pos + 1, Expr::Danger),
                 "repeat" => parse_usize_arg(tokens, pos + 1, Expr::Repeat),
                 "jmp" => parse_usize_arg(tokens, pos + 1, Expr::Jmp),
                 "jne" => parse_usize_arg(tokens, pos + 1, Expr::Jne),
@@ -407,9 +407,6 @@ mod tests {
         let prog = parse("do take-move(1, 1) while");
         // No semicolon: whole thing is one chain
         assert_eq!(prog.len(), 1);
-        assert_eq!(
-            prog[0],
-            vec![Expr::Do, Expr::TakeMove(1, 1), Expr::While]
-        );
+        assert_eq!(prog[0], vec![Expr::Do, Expr::TakeMove(1, 1), Expr::While]);
     }
 }

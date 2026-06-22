@@ -14,7 +14,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::types::{Board, ChessemblyResult, Piece, PieceDefinition, PlayerId, Square};
+use crate::types::{
+    Board, ChessemblyResult, Piece, PieceDefinition, PieceId, PlayerId, Square, SquareId,
+};
 
 use super::ast::{Expr, Program};
 
@@ -27,18 +29,19 @@ pub struct ExecutionContext<'a> {
     /// All piece definitions keyed by type_id.
     pub all_definitions: &'a HashMap<String, PieceDefinition>,
     /// All pieces keyed by piece_id.
-    pub all_pieces: &'a HashMap<String, Piece>,
+    pub all_pieces: &'a HashMap<PieceId, Piece>,
     pub player: PlayerId,
     /// Global game state variables (e.g. castling rights stored as integers).
     pub global_state: &'a HashMap<String, i32>,
     /// Attack maps: player_id → set of attacked square ids.
     /// Used by `danger()` expression. May be empty if not yet computed.
-    pub attack_maps: &'a HashMap<PlayerId, HashSet<String>>,
+    pub attack_maps: &'a HashMap<PlayerId, HashSet<SquareId>>,
 }
 
 // ─── Interpreter ─────────────────────────────────────────────────────────────
 
 pub fn run(program: &Program, ctx: &ExecutionContext) -> ChessemblyResult {
+    crate::profiling::record_chessembly_run(1);
     let piece_pos = ctx.piece.current_square.unwrap_or(Square::new(0, 0));
     let mut result = ChessemblyResult::default();
 
@@ -155,7 +158,6 @@ fn eval_expr(
 
     match expr {
         // ── Movement expressions ─────────────────────────────────────────────
-
         Expr::Move(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) || !ctx.board.is_empty(&target) {
@@ -307,7 +309,6 @@ fn eval_expr(
         }
 
         // ── Position expressions ─────────────────────────────────────────────
-
         Expr::Anchor(dx, dy) => {
             let new_anchor = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&new_anchor) {
@@ -334,11 +335,14 @@ fn eval_expr(
         }
 
         // ── Conditional expressions ───────────────────────────────────────────
-
         Expr::Observe(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             let empty = ctx.board.is_in_bounds(&target) && ctx.board.is_empty(&target);
-            if empty { (ExprResult::True, 1) } else { (ExprResult::False, 1) }
+            if empty {
+                (ExprResult::True, 1)
+            } else {
+                (ExprResult::False, 1)
+            }
         }
 
         Expr::Peek(dx, dy) => {
@@ -387,9 +391,15 @@ fn eval_expr(
                 .get_piece_at(&target)
                 .and_then(|pid| ctx.all_pieces.get(pid))
                 .and_then(|p| ctx.all_definitions.get(&p.type_id))
-                .map(|def| &def.id == piece_name || def.name.to_lowercase() == *piece_name.to_lowercase())
+                .map(|def| {
+                    &def.id == piece_name || def.name.to_lowercase() == *piece_name.to_lowercase()
+                })
                 .unwrap_or(false);
-            if found { (ExprResult::True, 1) } else { (ExprResult::False, 1) }
+            if found {
+                (ExprResult::True, 1)
+            } else {
+                (ExprResult::False, 1)
+            }
         }
 
         Expr::Danger(dx, dy) => {
@@ -400,7 +410,11 @@ fn eval_expr(
                 .get(&opponent)
                 .map(|map| map.contains(&target.to_id()))
                 .unwrap_or(false);
-            if is_attacked { (ExprResult::True, 1) } else { (ExprResult::False, 1) }
+            if is_attacked {
+                (ExprResult::True, 1)
+            } else {
+                (ExprResult::False, 1)
+            }
         }
 
         Expr::Check => {
@@ -423,27 +437,42 @@ fn eval_expr(
                 || target.file >= ctx.board.size
                 || target.rank < 0
                 || target.rank >= ctx.board.size;
-            if on_edge { (ExprResult::True, 1) } else { (ExprResult::False, 1) }
+            if on_edge {
+                (ExprResult::True, 1)
+            } else {
+                (ExprResult::False, 1)
+            }
         }
 
         Expr::Corner(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             let in_corner = (target.file < 0 || target.file >= ctx.board.size)
                 && (target.rank < 0 || target.rank >= ctx.board.size);
-            if in_corner { (ExprResult::True, 1) } else { (ExprResult::False, 1) }
+            if in_corner {
+                (ExprResult::True, 1)
+            } else {
+                (ExprResult::False, 1)
+            }
         }
 
         // ── State expressions ────────────────────────────────────────────────
-
         Expr::Piece(name) => {
             let matches = ctx.piece_definition.id == *name
                 || ctx.piece_definition.name.to_lowercase() == name.to_lowercase();
-            if matches { (ExprResult::True, 1) } else { (ExprResult::False, 1) }
+            if matches {
+                (ExprResult::True, 1)
+            } else {
+                (ExprResult::False, 1)
+            }
         }
 
         Expr::IfState(key, n) => {
             let current = ctx.global_state.get(key).copied().unwrap_or(0);
-            if current == *n { (ExprResult::True, 1) } else { (ExprResult::False, 1) }
+            if current == *n {
+                (ExprResult::True, 1)
+            } else {
+                (ExprResult::False, 1)
+            }
         }
 
         Expr::Transition(name) => {
@@ -457,7 +486,6 @@ fn eval_expr(
         }
 
         // ── Control flow ─────────────────────────────────────────────────────
-
         Expr::Repeat(n) => {
             // `repeat(n)`: if last value is true, jump back n expressions in the chain
             if !state.last_value {
@@ -528,11 +556,7 @@ fn eval_expr(
 
         Expr::Label(_) => {
             // Just a marker; passes through last value
-            if state.last_value {
-                (ExprResult::True, 1)
-            } else {
-                (ExprResult::True, 1) // label is exceptional: always true
-            }
+            (ExprResult::True, 1) // label is exceptional: always true
         }
 
         Expr::Jmp(n) => {
@@ -559,9 +583,8 @@ fn eval_expr(
         }
 
         Expr::Not => {
-            let new_val = !state.last_value;
-            state.last_value = new_val;
-            if new_val { (ExprResult::True, 1) } else { (ExprResult::True, 1) }
+            state.last_value = !state.last_value;
+            (ExprResult::True, 1)
             // `not` is exceptional: never terminates chain
         }
 
@@ -576,11 +599,10 @@ fn eval_expr(
         }
 
         // ── Bit registers ────────────────────────────────────────────────────
-
         Expr::Read(n) => {
             let v = state.bits.get(*n).copied().unwrap_or(false);
             state.last_value = v;
-            (if v { ExprResult::True } else { ExprResult::True }, 1) // exceptional
+            (ExprResult::True, 1) // exceptional
         }
 
         Expr::ReadAnd(n) => {
@@ -612,7 +634,6 @@ fn eval_expr(
         }
 
         // ── Block ─────────────────────────────────────────────────────────────
-
         Expr::Block(inner) => {
             let saved_anchor = state.anchor;
             // Run inner expressions; ignore false termination (isolated)
@@ -623,9 +644,7 @@ fn eval_expr(
             (ExprResult::True, 1) // block is not a chain terminator itself
         }
 
-        Expr::End => {
-            (ExprResult::False, 1)
-        }
+        Expr::End => (ExprResult::False, 1),
     }
 }
 
@@ -656,9 +675,9 @@ fn flush_pending_take(state: &mut ChainState, result: &mut ChessemblyResult) {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn is_enemy_piece(
-    piece_id: &str,
+    piece_id: &PieceId,
     current_player: &PlayerId,
-    all_pieces: &HashMap<String, Piece>,
+    all_pieces: &HashMap<PieceId, Piece>,
 ) -> bool {
     all_pieces
         .get(piece_id)
@@ -676,12 +695,7 @@ fn opponent_id(player: &PlayerId) -> PlayerId {
 
 fn find_matching_do(chain: &[Expr], while_idx: usize) -> Option<usize> {
     // Scan backwards from `while_idx` for the nearest `do`
-    for j in (0..while_idx).rev() {
-        if chain[j] == Expr::Do {
-            return Some(j);
-        }
-    }
-    None
+    (0..while_idx).rev().find(|&j| chain[j] == Expr::Do)
 }
 
 fn find_label(chain: &[Expr], n: usize) -> Option<usize> {

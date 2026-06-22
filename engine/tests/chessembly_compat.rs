@@ -26,7 +26,13 @@ fn make_piece(id: &str, owner: &str, type_id: &str, file: i32, rank: i32) -> Pie
     }
 }
 
-fn run_code(code: &str, piece: &Piece, board: &Board, all_pieces: &HashMap<String, Piece>, def: &PieceDefinition) -> ChessemblyResult {
+fn run_code(
+    code: &str,
+    piece: &Piece,
+    board: &Board,
+    all_pieces: &HashMap<PieceId, Piece>,
+    def: &PieceDefinition,
+) -> ChessemblyResult {
     let program = parse(code);
     let ctx = ExecutionContext {
         board,
@@ -79,10 +85,22 @@ take-move(0, -1);"
     assert!(moves.contains(&Square::new(3, 4)), "up");
     assert!(moves.contains(&Square::new(3, 2)), "down");
     assert_eq!(moves.len(), 4);
-    assert!(result.attack_squares.contains(&Square::new(4, 3)), "right attack");
-    assert!(result.attack_squares.contains(&Square::new(2, 3)), "left attack");
-    assert!(result.attack_squares.contains(&Square::new(3, 4)), "up attack");
-    assert!(result.attack_squares.contains(&Square::new(3, 2)), "down attack");
+    assert!(
+        result.attack_squares.contains(&Square::new(4, 3)),
+        "right attack"
+    );
+    assert!(
+        result.attack_squares.contains(&Square::new(2, 3)),
+        "left attack"
+    );
+    assert!(
+        result.attack_squares.contains(&Square::new(3, 4)),
+        "up attack"
+    );
+    assert!(
+        result.attack_squares.contains(&Square::new(3, 2)),
+        "down attack"
+    );
 }
 
 // ─── Rook slide ───────────────────────────────────────────────────────────────
@@ -108,7 +126,9 @@ fn test_rook_blocked_by_friendly() {
     let blocker = make_piece("p1", "white", "pawn-white", 3, 0);
 
     // Place blocker on board
-    board.squares.insert(blocker.current_square.unwrap().to_id(), Some("p1".into()));
+    board
+        .squares
+        .insert(blocker.current_square.unwrap().to_id(), Some("p1".into()));
 
     let mut pieces = HashMap::new();
     pieces.insert("r1".into(), piece.clone());
@@ -130,7 +150,9 @@ fn test_rook_can_capture_enemy() {
     let piece = make_piece("r1", "white", "rook", 0, 0);
     let enemy = make_piece("e1", "black", "rook", 3, 0);
 
-    board.squares.insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
+    board
+        .squares
+        .insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
 
     let mut pieces = HashMap::new();
     pieces.insert("r1".into(), piece.clone());
@@ -206,10 +228,22 @@ fn test_amazon_combines_queen_and_knight() {
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
 
-    assert!(result.movement_squares.contains(&Square::new(3, 7)), "queen file slide");
-    assert!(result.movement_squares.contains(&Square::new(7, 7)), "queen diagonal slide");
-    assert!(result.movement_squares.contains(&Square::new(5, 4)), "knight jump");
-    assert!(result.movement_squares.contains(&Square::new(1, 2)), "knight jump");
+    assert!(
+        result.movement_squares.contains(&Square::new(3, 7)),
+        "queen file slide"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(7, 7)),
+        "queen diagonal slide"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(5, 4)),
+        "knight jump"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(1, 2)),
+        "knight jump"
+    );
 }
 
 #[test]
@@ -222,12 +256,30 @@ fn test_tempest_rook_steps_diagonal_then_rays_outward() {
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
 
-    assert!(result.movement_squares.contains(&Square::new(4, 4)), "diagonal step");
-    assert!(result.movement_squares.contains(&Square::new(7, 4)), "east ray from diagonal");
-    assert!(result.movement_squares.contains(&Square::new(4, 7)), "north ray from diagonal");
-    assert!(result.movement_squares.contains(&Square::new(0, 2)), "west ray from diagonal");
-    assert!(result.movement_squares.contains(&Square::new(2, 0)), "south ray from diagonal");
-    assert!(!result.movement_squares.contains(&Square::new(3, 4)), "no direct rook move");
+    assert!(
+        result.movement_squares.contains(&Square::new(4, 4)),
+        "diagonal step"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(7, 4)),
+        "east ray from diagonal"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(4, 7)),
+        "north ray from diagonal"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(0, 2)),
+        "west ray from diagonal"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(2, 0)),
+        "south ray from diagonal"
+    );
+    assert!(
+        !result.movement_squares.contains(&Square::new(3, 4)),
+        "no direct rook move"
+    );
 }
 
 #[test]
@@ -240,11 +292,26 @@ fn test_bouncing_bishop_reflects_from_edges() {
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
 
-    assert!(result.movement_squares.contains(&Square::new(7, 6)), "initial northeast diagonal");
-    assert!(result.movement_squares.contains(&Square::new(6, 7)), "reflection from right edge");
-    assert!(result.movement_squares.contains(&Square::new(7, 2)), "reflection from bottom edge");
-    assert!(result.movement_squares.contains(&Square::new(0, 5)), "initial northwest diagonal");
-    assert!(result.movement_squares.contains(&Square::new(2, 7)), "reflection from left edge");
+    assert!(
+        result.movement_squares.contains(&Square::new(7, 6)),
+        "initial northeast diagonal"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(6, 7)),
+        "reflection from right edge"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(7, 2)),
+        "reflection from bottom edge"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(0, 5)),
+        "initial northwest diagonal"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(2, 7)),
+        "reflection from left edge"
+    );
 }
 
 // ─── Pawn ──────────────────────────────────────────────────────────────────
@@ -261,10 +328,19 @@ fn test_white_pawn_movement_and_attack_separated() {
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
 
     // Forward move: (3,4) should be a movement square
-    assert!(result.movement_squares.contains(&Square::new(3, 4)), "forward move");
+    assert!(
+        result.movement_squares.contains(&Square::new(3, 4)),
+        "forward move"
+    );
     // Diagonal attacks should be recorded as threatened squares even when empty.
-    assert!(result.attack_squares.contains(&Square::new(4, 4)), "right diagonal threat");
-    assert!(result.attack_squares.contains(&Square::new(2, 4)), "left diagonal threat");
+    assert!(
+        result.attack_squares.contains(&Square::new(4, 4)),
+        "right diagonal threat"
+    );
+    assert!(
+        result.attack_squares.contains(&Square::new(2, 4)),
+        "left diagonal threat"
+    );
     assert!(
         !result.attack_squares.contains(&Square::new(3, 4)),
         "forward should not be an attack square"
@@ -283,7 +359,9 @@ fn test_white_pawn_attack_captures_enemy() {
     let piece = make_piece("pw1", "white", "pawn-white", 3, 3);
     let enemy = make_piece("e1", "black", "pawn-black", 4, 4);
 
-    board.squares.insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
+    board
+        .squares
+        .insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
 
     let mut pieces = HashMap::new();
     pieces.insert("pw1".into(), piece.clone());
@@ -292,7 +370,10 @@ fn test_white_pawn_attack_captures_enemy() {
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
 
     // (4,4) has an enemy → should be an attack square
-    assert!(result.attack_squares.contains(&Square::new(4, 4)), "diagonal capture");
+    assert!(
+        result.attack_squares.contains(&Square::new(4, 4)),
+        "diagonal capture"
+    );
 }
 
 // ─── King ─────────────────────────────────────────────────────────────────────
@@ -306,7 +387,11 @@ fn test_king_moves() {
     pieces.insert("k1".into(), piece.clone());
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-    assert_eq!(result.movement_squares.len(), 8, "King from center has 8 moves");
+    assert_eq!(
+        result.movement_squares.len(),
+        8,
+        "King from center has 8 moves"
+    );
 }
 
 // ─── Scope block ─────────────────────────────────────────────────────────────
@@ -334,9 +419,18 @@ fn test_scope_block_y_move() {
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
     // From (3,3): move(0,1) → (3,4); block saves (3,4), move(1,1) → (4,5), restores (3,4);
     // then move(-1,1) from (3,4) → (2,5)
-    assert!(result.movement_squares.contains(&Square::new(3, 4)), "(3,4)");
-    assert!(result.movement_squares.contains(&Square::new(4, 5)), "(4,5)");
-    assert!(result.movement_squares.contains(&Square::new(2, 5)), "(2,5)");
+    assert!(
+        result.movement_squares.contains(&Square::new(3, 4)),
+        "(3,4)"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(4, 5)),
+        "(4,5)"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(2, 5)),
+        "(2,5)"
+    );
 }
 
 #[test]
@@ -344,7 +438,9 @@ fn test_catch_scans_and_marks_threatened_squares() {
     let mut board = create_board(8);
     let piece = make_piece("c1", "white", "cannon", 0, 0);
     let enemy = make_piece("e1", "black", "rook", 3, 0);
-    board.squares.insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
+    board
+        .squares
+        .insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
 
     let mut pieces = HashMap::new();
     pieces.insert("c1".into(), piece.clone());
@@ -363,9 +459,18 @@ fn test_catch_scans_and_marks_threatened_squares() {
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
 
-    assert!(result.attack_squares.contains(&Square::new(1, 0)), "empty scan square 1");
-    assert!(result.attack_squares.contains(&Square::new(2, 0)), "empty scan square 2");
-    assert!(result.attack_squares.contains(&Square::new(3, 0)), "enemy capture square");
+    assert!(
+        result.attack_squares.contains(&Square::new(1, 0)),
+        "empty scan square 1"
+    );
+    assert!(
+        result.attack_squares.contains(&Square::new(2, 0)),
+        "empty scan square 2"
+    );
+    assert!(
+        result.attack_squares.contains(&Square::new(3, 0)),
+        "enemy capture square"
+    );
     assert!(
         result.attack_squares.contains(&Square::new(4, 0)),
         "catch chain continues scanning after contact"

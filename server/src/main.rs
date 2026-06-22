@@ -148,10 +148,14 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     }
 }
 
-fn make_piece_id(player_id: &str, piece_type: &str, counters: &mut HashMap<String, u32>) -> String {
+fn make_piece_id(
+    player_id: &str,
+    piece_type: &str,
+    counters: &mut HashMap<String, u32>,
+) -> PieceId {
     let next = counters.entry(piece_type.into()).or_insert(0);
     *next += 1;
-    format!("{}_{}_{}", player_id, piece_type.replace('-', "_"), next)
+    format!("{}_{}_{}", player_id, piece_type.replace('-', "_"), next).into()
 }
 
 fn build_player_deck(
@@ -881,6 +885,7 @@ async fn get_piece_attacks(
     State(app): State<AppState>,
     Path((id, piece_id)): Path<(String, String)>,
 ) -> Result<Json<PieceAttacksResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let piece_id = PieceId::from(piece_id);
     match app.games.get(&id) {
         Some(state) => Ok(Json(PieceAttacksResponse {
             squares: generate_piece_attack_squares(&state, &piece_id),
@@ -898,6 +903,7 @@ async fn get_piece_options(
     State(app): State<AppState>,
     Path((id, piece_id)): Path<(String, String)>,
 ) -> Result<Json<PieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let piece_id = PieceId::from(piece_id);
     match app.games.get(&id) {
         Some(state) => {
             let moves = generate_piece_legal_move_actions(&state, &piece_id);

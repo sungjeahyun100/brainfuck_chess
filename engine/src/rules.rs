@@ -61,7 +61,10 @@ pub fn validate_deck(
     if king_count == 0 {
         errors.push("덱에 King이 없습니다. 기본 진영에 King 1개를 포함해야 합니다.".into());
     } else if king_count > 1 {
-        errors.push(format!("King이 {}개입니다. King은 1개만 허용됩니다.", king_count));
+        errors.push(format!(
+            "King이 {}개입니다. King은 1개만 허용됩니다.",
+            king_count
+        ));
     }
 
     // No king in pocket

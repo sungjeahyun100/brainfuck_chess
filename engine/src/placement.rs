@@ -3,11 +3,15 @@ use std::collections::{HashMap, HashSet};
 use crate::attack_map::generate_attack_map;
 use crate::rules::get_base_zone_squares;
 use crate::types::*;
+#[cfg(feature = "profiling")]
+use std::time::Instant;
 
 /// Compute the set of squares where a player can drop a pocket piece.
 ///
 /// placementSquares = baseZoneSquares ∪ playerAttackMap   (minus occupied squares)
 pub fn get_placement_squares(game_state: &GameState, player_id: &PlayerId) -> Vec<Square> {
+    #[cfg(feature = "profiling")]
+    let started = Instant::now();
     let attack_map = generate_attack_map(game_state, player_id, &HashMap::new());
 
     let base_zone = get_base_zone_squares(player_id, game_state.board.size);
@@ -23,34 +27,28 @@ pub fn get_placement_squares(game_state: &GameState, player_id: &PlayerId) -> Ve
 
     // Add attack map squares
     for sq_id in &attack_map.attacked_squares {
-        candidates.insert(sq_id.clone());
+        candidates.insert(*sq_id);
     }
 
     // Filter: must be empty and in bounds
-    candidates
+    let squares = candidates
         .into_iter()
         .filter_map(|sq_id| {
-            let parts: Vec<&str> = sq_id.split('_').collect();
-            if parts.len() != 2 {
-                return None;
-            }
-            let file: i32 = parts[0].parse().ok()?;
-            let rank: i32 = parts[1].parse().ok()?;
-            let sq = Square::new(file, rank);
+            let sq = sq_id.to_square();
             if game_state.board.is_in_bounds(&sq) && game_state.board.is_empty(&sq) {
                 Some(sq)
             } else {
                 None
             }
         })
-        .collect()
+        .collect();
+    #[cfg(feature = "profiling")]
+    crate::profiling::record_placement(started.elapsed());
+    squares
 }
 
 /// Validate a drop action.
-pub fn validate_drop_action(
-    game_state: &GameState,
-    action: &DropAction,
-) -> Result<(), String> {
+pub fn validate_drop_action(game_state: &GameState, action: &DropAction) -> Result<(), String> {
     // Must be drop turn mode
     if game_state.turn_state.mode == crate::types::TurnMode::Move {
         return Err("이동 턴에는 착수할 수 없습니다.".into());

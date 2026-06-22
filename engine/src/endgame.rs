@@ -33,7 +33,10 @@ fn en_passant_target_for_action(game_state: &GameState, action: &MoveAction) -> 
     if action.from.file != action.to.file || (action.to.rank - action.from.rank).abs() != 2 {
         return None;
     }
-    Some(Square::new(action.from.file, (action.from.rank + action.to.rank) / 2))
+    Some(Square::new(
+        action.from.file,
+        (action.from.rank + action.to.rank) / 2,
+    ))
 }
 
 /// Returns true if the piece definition marks this piece as royal (King).
@@ -57,11 +60,6 @@ pub fn has_living_king(game_state: &GameState, player_id: &PlayerId) -> bool {
 /// Apply a MoveAction to the game state.
 /// If the captured piece is a King, the game ends immediately.
 pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameState {
-    let moved_piece_type = game_state
-        .pieces
-        .get(&action.piece_id)
-        .map(|p| p.type_id.clone());
-
     // Detect what is on the destination square before moving
     let target_piece_id = game_state.board.get_piece_at(&action.to).cloned();
     let target_is_king = target_piece_id.as_ref().and_then(|id| {
@@ -81,21 +79,17 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         piece.has_moved = true;
     }
 
-    // En passant availability lasts only until the eligible player's next action.
-    game_state.en_passant_target = en_passant_target_for_action(&game_state, &action);
-    game_state.en_passant_available_to = game_state.en_passant_target.map(|_| {
-        if action.player_id == "white" {
+    // A new pawn double-step replaces the previous right. Otherwise, only an
+    // action by the player who could claim en passant consumes that right;
+    // extra moves by the double-stepping player happen before the response.
+    if let Some(target) = en_passant_target_for_action(&game_state, &action) {
+        game_state.en_passant_target = Some(target);
+        game_state.en_passant_available_to = Some(if action.player_id == "white" {
             "black".to_string()
         } else {
             "white".to_string()
-        }
-    });
-
-    // Defensive clear if the moved piece wasn't actually a pawn 2-step.
-    if moved_piece_type.as_deref().map(is_pawn_type) != Some(true)
-        || action.from.file != action.to.file
-        || (action.to.rank - action.from.rank).abs() != 2
-    {
+        });
+    } else if game_state.en_passant_available_to.as_ref() == Some(&action.player_id) {
         game_state.en_passant_target = None;
         game_state.en_passant_available_to = None;
     }
@@ -126,7 +120,10 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
 pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameState {
     // Remove from pocket list
     if let Some(player) = game_state.players.get_mut(&action.player_id) {
-        player.deck.pocket_pieces.retain(|id| id != &action.piece_id);
+        player
+            .deck
+            .pocket_pieces
+            .retain(|id| id != &action.piece_id);
     }
 
     // Update piece state
@@ -142,10 +139,7 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
         .insert(action.to.to_id(), Some(action.piece_id.clone()));
 
     // Record action
-    game_state
-        .turn_state
-        .actions
-        .push(TurnAction::Drop(action));
+    game_state.turn_state.actions.push(TurnAction::Drop(action));
 
     // If the player who could claim en passant used this turn for a drop,
     // the en passant right expires.
@@ -172,10 +166,7 @@ fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameSt
         && action.to.rank == action.from.rank;
 
     // Remove piece from source square
-    game_state
-        .board
-        .squares
-        .insert(action.from.to_id(), None);
+    game_state.board.squares.insert(action.from.to_id(), None);
 
     // Capture target piece if present (including en passant capture square).
     let mut capture_square = action.to;
@@ -205,7 +196,7 @@ fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameSt
         let dir = (action.to.file - action.from.file).signum();
         let mut rook_file = action.from.file + dir;
         let rank = action.from.rank;
-        let mut rook_piece_id: Option<String> = None;
+        let mut rook_piece_id: Option<PieceId> = None;
         let mut rook_from: Option<Square> = None;
 
         while rook_file >= 0 && rook_file < game_state.board.size {

@@ -1,10 +1,11 @@
-pub mod types;
-pub mod rules;
-pub mod endgame;
 pub mod attack_map;
-pub mod placement;
+pub mod chessembly;
+pub mod endgame;
 pub mod legal_moves;
 pub mod pieces;
-pub mod chessembly;
+pub mod placement;
+pub mod profiling;
+pub mod rules;
+pub mod types;
 
 pub use types::*;

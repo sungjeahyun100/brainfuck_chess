@@ -9,8 +9,9 @@ pub fn generate_attack_map(
     game_state: &GameState,
     player_id: &PlayerId,
     // Pre-computed attack maps for other players (used by `danger()` expression)
-    existing_attack_maps: &HashMap<PlayerId, HashSet<String>>,
+    existing_attack_maps: &HashMap<PlayerId, HashSet<SquareId>>,
 ) -> AttackMap {
+    crate::profiling::record_attack_map(1);
     game_state.ensure_chessembly_cache();
 
     let mut attacked_squares: HashSet<SquareId> = HashSet::new();
@@ -45,7 +46,7 @@ pub fn generate_attack_map(
 
         for sq in &chessembly_result.attack_squares {
             let sq_id = sq.to_id();
-            attacked_squares.insert(sq_id.clone());
+            attacked_squares.insert(sq_id);
             source_map.entry(sq_id).or_default().push(piece_id.clone());
         }
     }

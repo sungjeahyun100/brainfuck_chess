@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+#[cfg(feature = "profiling")]
+use std::time::Instant;
 
 use crate::attack_map::generate_attack_map;
 use crate::chessembly::interpreter::{run, ExecutionContext};
@@ -143,10 +145,11 @@ pub fn generate_piece_legal_move_actions(
 
         if let (Some(dir), Some(start_rank)) = (pawn_dir, pawn_start) {
             // Restrict pawn 2-step to starting rank and only before first move.
-            if to.file == from.file && to.rank - from.rank == 2 * dir {
-                if from.rank != start_rank || piece.has_moved {
-                    continue;
-                }
+            if to.file == from.file
+                && to.rank - from.rank == 2 * dir
+                && (from.rank != start_rank || piece.has_moved)
+            {
+                continue;
             }
         }
 
@@ -327,6 +330,8 @@ pub fn generate_piece_legal_move_actions(
 
 /// Generate all legal move actions for the current player in the given state.
 pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
+    #[cfg(feature = "profiling")]
+    let started = Instant::now();
     let player_id = &game_state.current_player;
 
     if game_state.turn_state.mode == TurnMode::Drop {
@@ -346,10 +351,13 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
         .collect::<Vec<_>>();
     piece_ids.sort();
 
-    piece_ids
+    let actions = piece_ids
         .into_iter()
         .flat_map(|piece_id| generate_piece_legal_move_actions(game_state, &piece_id))
-        .collect()
+        .collect::<Vec<_>>();
+    #[cfg(feature = "profiling")]
+    crate::profiling::record_legal_moves(started.elapsed(), actions.len());
+    actions
 }
 
 /// Generate legal drop actions for one pocket piece owned by the current player.
@@ -434,5 +442,66 @@ pub fn generate_legal_drop_actions(game_state: &GameState) -> Vec<DropAction> {
         actions.extend(generate_piece_legal_drop_actions(game_state, piece_id));
     }
 
+    crate::profiling::record_drops(actions.len());
     actions
+}
+
+/// Generate search-oriented drop candidates grouped by piece type.
+///
+/// This intentionally does not select a concrete `piece_id`; that conversion
+/// belongs at the boundary where a selected candidate becomes a `DropAction`.
+pub fn generate_drop_candidates_by_type(
+    game_state: &GameState,
+    player_id: &PlayerId,
+) -> Vec<DropCandidateByType> {
+    if &game_state.current_player != player_id || game_state.turn_state.mode == TurnMode::Move {
+        return Vec::new();
+    }
+    if game_state
+        .turn_state
+        .actions
+        .iter()
+        .any(|action| matches!(action, TurnAction::Drop(_)))
+    {
+        return Vec::new();
+    }
+
+    let Some(player) = game_state.players.get(player_id) else {
+        return Vec::new();
+    };
+
+    let mut counts: HashMap<PieceTypeId, u16> = HashMap::new();
+    for piece_id in &player.deck.pocket_pieces {
+        let Some(piece) = game_state.pieces.get(piece_id) else {
+            continue;
+        };
+        if piece.owner != *player_id || !piece.in_pocket || piece.captured {
+            continue;
+        }
+        let Some(definition) = game_state.piece_definitions.get(&piece.type_id) else {
+            continue;
+        };
+        if definition.is_king {
+            continue;
+        }
+        let count = counts.entry(piece.type_id.clone()).or_default();
+        *count = count.saturating_add(1);
+    }
+
+    let mut type_counts: Vec<_> = counts.into_iter().collect();
+    type_counts.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut squares = get_placement_squares(game_state, player_id);
+    squares.sort_by_key(|square| (square.rank, square.file));
+
+    type_counts
+        .into_iter()
+        .flat_map(|(piece_type_id, count)| {
+            squares.iter().map(move |square| DropCandidateByType {
+                player_id: player_id.clone(),
+                piece_type_id: piece_type_id.clone(),
+                count,
+                to: square.to_id(),
+            })
+        })
+        .collect()
 }
