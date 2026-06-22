@@ -25,11 +25,47 @@
         </button>
         <button
           class="mode-tab"
+          :class="{ active: playMode === 'bot' }"
+          @click="setPlayMode('bot')"
+        >
+          봇 대전
+        </button>
+        <button
+          class="mode-tab"
           :class="{ active: playMode === 'multiplayer' }"
           @click="setPlayMode('multiplayer')"
         >
           멀티플레이
         </button>
+      </div>
+
+      <div v-if="playMode === 'bot'" class="card bot-panel">
+        <div class="section-header">
+          <div>
+            <p class="section-kicker">Bot Match</p>
+            <h2>봇 대전 설정</h2>
+          </div>
+          <p class="section-description">사람 진영과 봇 난이도를 선택합니다. 봇은 자기 차례의 모든 행동과 턴 종료를 자동으로 처리합니다.</p>
+        </div>
+        <div class="bot-options">
+          <div class="color-match">
+            <span class="limit-label">내 진영</span>
+            <label><input v-model="botHumanSide" type="radio" value="white" /> White</label>
+            <label><input v-model="botHumanSide" type="radio" value="black" /> Black</label>
+          </div>
+          <label class="difficulty-select">
+            <span class="limit-label">난이도</span>
+            <select v-model="botDifficulty">
+              <option value="easy">Easy · 빠름 / 약간의 랜덤성</option>
+              <option value="normal">Normal · 균형</option>
+              <option value="hard">Hard · 더 깊은 탐색</option>
+            </select>
+          </label>
+          <div class="bot-opponent">
+            <span class="limit-label">봇 진영</span>
+            <strong>{{ playerLabel(botPlayer) }}</strong>
+          </div>
+        </div>
       </div>
 
       <div class="lobby-topbar card">
@@ -99,7 +135,7 @@
         <p v-if="multiplayerStatus" class="room-status">{{ multiplayerStatus }}</p>
       </div>
 
-      <div v-if="playMode === 'local'" class="player-tabs">
+      <div v-if="playMode !== 'multiplayer'" class="player-tabs">
         <button
           v-for="player in players"
           :key="player"
@@ -108,19 +144,20 @@
           @click="activePlayer = player"
         >
           {{ playerLabel(player) }} Deck
+          <span v-if="playMode === 'bot'">· {{ player === botHumanSide ? '나' : '봇' }}</span>
         </button>
       </div>
 
-      <div v-if="playMode === 'local'" class="summary-grid">
+      <div v-if="playMode !== 'multiplayer'" class="summary-grid">
         <div class="card summary-card" :class="{ invalid: !whiteSummary.valid }">
-          <p class="summary-title">White</p>
+          <p class="summary-title">White<span v-if="playMode === 'bot'"> · {{ botHumanSide === 'white' ? '나' : '봇' }}</span></p>
           <strong>{{ whiteSummary.totalScore }} / {{ scoreLimit(selectedSize) }}점</strong>
           <span>시작 {{ whiteDeck.starting.length }}개 / 포켓 {{ totalPocketCount(whiteDeck) }}개</span>
           <p class="summary-status">{{ whiteSummary.valid ? '시작 가능' : whiteSummary.errors[0] }}</p>
         </div>
 
         <div class="card summary-card" :class="{ invalid: !blackSummary.valid }">
-          <p class="summary-title">Black</p>
+          <p class="summary-title">Black<span v-if="playMode === 'bot'"> · {{ botHumanSide === 'black' ? '나' : '봇' }}</span></p>
           <strong>{{ blackSummary.totalScore }} / {{ scoreLimit(selectedSize) }}점</strong>
           <span>시작 {{ blackDeck.starting.length }}개 / 포켓 {{ totalPocketCount(blackDeck) }}개</span>
           <p class="summary-status">{{ blackSummary.valid ? '시작 가능' : blackSummary.errors[0] }}</p>
@@ -267,7 +304,9 @@
         </section>
       </div>
 
-      <button v-if="playMode === 'local'" class="btn-start" :disabled="!localLobbyReady" @click="startGame">게임 시작</button>
+      <button v-if="playMode !== 'multiplayer'" class="btn-start" :disabled="!localLobbyReady" @click="startGame">
+        {{ playMode === 'bot' ? '봇 대전 시작' : '게임 시작' }}
+      </button>
       <p v-if="lobbyError" class="error">{{ lobbyError }}</p>
     </div>
 
@@ -276,6 +315,8 @@
       :state="gameState"
       :local-player="localPlayer"
       :room-id="currentRoom?.id ?? null"
+      :bot-player="playMode === 'bot' ? botPlayer : null"
+      :bot-difficulty="botDifficulty"
       @state-update="onGameStateUpdate"
       @restart="restartToLobby"
     />
@@ -284,7 +325,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { GameState, Square } from './types/game'
+import type { BotDifficulty, GameState, Square } from './types/game'
 import { api, type MultiplayerRoom, type PlayerDeckRequest } from './api/gameApi'
 import GameScreen from './components/GameScreen.vue'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
@@ -354,7 +395,9 @@ const placementTool = ref<DeckPieceType>(pieceCatalog[0].id)
 const pieceSearch = ref('')
 const draggedPiece = ref<DeckPieceType | null>(null)
 const lobbyDecks = ref<Record<LobbyPlayer, LobbyDeck>>(createLobbyDecks(selectedSize.value))
-const playMode = ref<'local' | 'multiplayer'>('local')
+const playMode = ref<'local' | 'bot' | 'multiplayer'>('local')
+const botHumanSide = ref<LobbyPlayer>('white')
+const botDifficulty = ref<BotDifficulty>('normal')
 const hostSideMode = ref<LobbyPlayer | 'random'>('random')
 const roomCodeInput = ref('')
 const currentRoom = ref<MultiplayerRoom | null>(null)
@@ -523,6 +566,7 @@ const whiteSummary = computed(() => deckSummary(whiteDeck.value))
 const blackSummary = computed(() => deckSummary(blackDeck.value))
 const activeSummary = computed(() => deckSummary(activeDeck.value))
 const localLobbyReady = computed(() => whiteSummary.value.valid && blackSummary.value.valid)
+const botPlayer = computed<LobbyPlayer>(() => botHumanSide.value === 'white' ? 'black' : 'white')
 const deckEditorLabel = computed(() => playMode.value === 'multiplayer' ? '내 덱' : playerLabel(activePlayer.value))
 const canJoinRoom = computed(() => {
   const isOwnRoom = Boolean(currentRoom.value && localPlayer.value === currentRoom.value.host_side)
@@ -755,7 +799,7 @@ async function startGame() {
       serializeDeck(whiteDeck.value),
       serializeDeck(blackDeck.value),
     )
-    localPlayer.value = null
+    localPlayer.value = playMode.value === 'bot' ? botHumanSide.value : null
     unloadResignSent.value = false
     stopGamePolling()
     gameState.value = state
@@ -764,7 +808,7 @@ async function startGame() {
   }
 }
 
-function setPlayMode(mode: 'local' | 'multiplayer') {
+function setPlayMode(mode: 'local' | 'bot' | 'multiplayer') {
   stopRoomPolling()
   stopGamePolling()
   playMode.value = mode
@@ -1175,6 +1219,43 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.bot-panel {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bot-options {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) minmax(150px, 0.5fr);
+  gap: 14px;
+}
+
+.difficulty-select,
+.bot-opponent {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.difficulty-select select {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #0d1520;
+  color: var(--text);
+}
+
+.bot-opponent strong {
+  color: #f4dfb0;
+  font-size: 1.25rem;
 }
 
 .room-grid {
@@ -1593,7 +1674,8 @@ body {
 @media (max-width: 1100px) {
   .builder-grid,
   .summary-grid,
-  .room-grid {
+  .room-grid,
+  .bot-options {
     grid-template-columns: 1fr;
   }
 

@@ -1,4 +1,13 @@
-import type { GameState, MoveAction, DropAction, TurnAction, Square, PlayerId } from '../types/game'
+import type {
+  BotDifficulty,
+  BotTurnResponse,
+  DropAction,
+  GameState,
+  MoveAction,
+  PlayerId,
+  Square,
+  TurnAction,
+} from '../types/game'
 
 const BASE = '/api/games'
 const ROOM_BASE = '/api/rooms'
@@ -91,6 +100,16 @@ export const api = {
 
   endTurn(id: string): Promise<GameState> {
     return request(`${BASE}/${id}/end-turn`, { method: 'POST' })
+  },
+
+  botTurn(id: string, botPlayerId: PlayerId, difficulty: BotDifficulty): Promise<BotTurnResponse> {
+    return request(`${BASE}/${id}/bot-turn`, {
+      method: 'POST',
+      body: JSON.stringify({
+        bot_player_id: botPlayerId,
+        difficulty,
+      }),
+    })
   },
 
   resignGame(id: string, playerId: PlayerId): Promise<GameState> {

@@ -80,6 +80,27 @@ export interface DropAction {
 
 export type TurnAction = MoveAction | DropAction
 
+export type BotDifficulty = 'easy' | 'normal' | 'hard'
+
+export interface EndTurnAiAction {
+  type: 'end_turn'
+}
+
+export type AiAction = MoveAction | DropAction | EndTurnAiAction
+
+export interface BotTurnStats {
+  searched_nodes: number
+  depth_reached: number
+  elapsed_ms: number
+}
+
+export interface BotTurnResponse {
+  ok: boolean
+  game_state: GameState
+  actions: AiAction[]
+  stats: BotTurnStats
+}
+
 export type GamePhase = 'setup' | 'playing' | 'ended'
 
 export type GameEndReason = 'king_capture' | 'resignation' | 'timeout' | 'draw'

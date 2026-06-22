@@ -8,13 +8,25 @@
           {{ state.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
         </span>
         <span v-if="localPlayer" class="local-badge" :class="{ waiting: !isMyTurn }">
-          {{ isMyTurn ? '내 턴' : '상대 턴' }}
+          {{ isBotTurn ? '봇 턴' : isMyTurn ? '내 턴' : '상대 턴' }}
         </span>
+        <span v-if="botPlayer" class="bot-badge">🤖 {{ botDifficultyLabel }}</span>
         <span class="turn-badge">Turn {{ state.turn_number }}</span>
         <span class="mode-badge" v-if="state.turn_state.mode !== 'undecided'">
           {{ state.turn_state.mode === 'move' ? '🏃 Move' : '🎯 Drop' }}
         </span>
       </div>
+    </div>
+
+    <div v-if="botPlayer" class="bot-status" :class="{ thinking: botThinking, failed: Boolean(botError) }" aria-live="polite">
+      <div>
+        <strong>{{ botThinking ? '봇이 수를 계산하고 있습니다…' : botError ? '봇 턴 실행 실패' : '봇 대전' }}</strong>
+        <small v-if="lastBotStats">
+          최근 탐색 {{ lastBotStats.searched_nodes.toLocaleString() }}노드 · 깊이 {{ lastBotStats.depth_reached }} · {{ lastBotStats.elapsed_ms }}ms
+        </small>
+        <small v-else>{{ playerName(botPlayer) }} 봇 · {{ botDifficultyLabel }}</small>
+      </div>
+      <button v-if="botError && isBotTurn && !botThinking" @click="runBotTurn">다시 시도</button>
     </div>
 
     <!-- Game over overlay -->
@@ -30,7 +42,7 @@
       </div>
     </div>
 
-    <div class="main-layout">
+    <div class="main-layout" :class="{ locked: botThinking || isBotTurn }">
       <!-- Left: Pocket (White) -->
       <div class="pocket">
         <h4>⬜ White Pocket</h4>
@@ -87,14 +99,14 @@
     <div class="footer">
       <button
         class="btn btn-end-turn"
-        :disabled="!isMyTurn || state.turn_state.actions.length === 0 || state.phase === 'ended'"
+        :disabled="!isMyTurn || botThinking || state.turn_state.actions.length === 0 || state.phase === 'ended'"
         @click="onEndTurn"
       >
         End Turn
       </button>
       <button
         class="btn btn-resign"
-        :disabled="state.phase === 'ended' || (Boolean(roomId) && !localPlayer)"
+        :disabled="botThinking || state.phase === 'ended' || (Boolean(roomId) && !localPlayer)"
         @click="onResign"
       >
         기권
@@ -104,13 +116,21 @@
       </div>
     </div>
 
-    <div v-if="error" class="error-banner">{{ error }}</div>
+    <div v-if="error || botError" class="error-banner">{{ error || botError }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import type { GameState, PlayerId, Square, MoveAction, DropAction } from '../types/game'
+import { ref, computed, watch } from 'vue'
+import type {
+  BotDifficulty,
+  BotTurnStats,
+  DropAction,
+  GameState,
+  MoveAction,
+  PlayerId,
+  Square,
+} from '../types/game'
 import { api } from '../api/gameApi'
 import Board from './Board.vue'
 
@@ -118,6 +138,8 @@ const props = defineProps<{
   state: GameState
   localPlayer?: PlayerId | null
   roomId?: string | null
+  botPlayer?: PlayerId | null
+  botDifficulty?: BotDifficulty
 }>()
 const emit = defineEmits<{
   stateUpdate: [state: GameState]
@@ -131,6 +153,9 @@ const movableSquares = ref<Square[]>([])
 const attackSquares = ref<Square[]>([])
 const dropSquares = ref<Square[]>([])
 const error = ref<string | null>(null)
+const botError = ref<string | null>(null)
+const botThinking = ref(false)
+const lastBotStats = ref<BotTurnStats | null>(null)
 
 const whitePocket = computed(() =>
   props.state.players['white']?.deck.pocket_pieces ?? []
@@ -141,6 +166,59 @@ const blackPocket = computed(() =>
 const whiteDeck = computed(() => props.state.players['white']?.deck)
 const blackDeck = computed(() => props.state.players['black']?.deck)
 const isMyTurn = computed(() => !props.localPlayer || props.state.current_player === props.localPlayer)
+const isBotTurn = computed(() => Boolean(
+  props.botPlayer
+  && props.state.current_player === props.botPlayer
+  && props.state.phase === 'playing',
+))
+const botDifficultyLabel = computed(() => {
+  const labels: Record<BotDifficulty, string> = {
+    easy: 'Easy',
+    normal: 'Normal',
+    hard: 'Hard',
+  }
+  return labels[props.botDifficulty ?? 'normal']
+})
+
+function playerName(player: PlayerId): string {
+  return player === 'white' ? 'White' : 'Black'
+}
+
+async function runBotTurn() {
+  if (!props.botPlayer || !isBotTurn.value || botThinking.value) return
+
+  botThinking.value = true
+  botError.value = null
+  clearSelection()
+  try {
+    const response = await api.botTurn(
+      props.state.id,
+      props.botPlayer,
+      props.botDifficulty ?? 'normal',
+    )
+    lastBotStats.value = response.stats
+    emit('stateUpdate', response.game_state)
+  } catch (e: unknown) {
+    botError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    botThinking.value = false
+  }
+}
+
+watch(
+  () => [
+    props.state.id,
+    props.state.current_player,
+    props.state.turn_number,
+    props.state.phase,
+    props.botPlayer,
+    props.botDifficulty,
+  ],
+  () => {
+    if (isBotTurn.value) void runBotTurn()
+  },
+  { immediate: true },
+)
 
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
@@ -317,8 +395,46 @@ async function onResign() {
   background: #fff3cd;
   color: #7a5a00;
 }
+.bot-badge {
+  padding: 4px 8px;
+  background: #342a18;
+  color: #f4dfb0;
+  border: 1px solid rgba(217, 164, 65, 0.38);
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+.bot-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid rgba(217, 164, 65, 0.28);
+  border-radius: 10px;
+  background: rgba(217, 164, 65, 0.08);
+  color: #f4dfb0;
+}
+.bot-status > div { display: flex; flex-direction: column; gap: 3px; }
+.bot-status small { color: #a8b1c2; }
+.bot-status.thinking { animation: bot-pulse 1.3s ease-in-out infinite alternate; }
+.bot-status.failed { border-color: rgba(255, 125, 125, 0.55); }
+.bot-status button {
+  padding: 7px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #d9a441;
+  color: #221a0d;
+  cursor: pointer;
+  font-weight: 700;
+}
+@keyframes bot-pulse {
+  from { background: rgba(217, 164, 65, 0.06); }
+  to { background: rgba(217, 164, 65, 0.16); }
+}
 
 .main-layout { display: flex; gap: 16px; align-items: flex-start; }
+.main-layout.locked { pointer-events: none; opacity: 0.78; }
 
 .pocket { min-width: 120px; display: flex; flex-direction: column; gap: 8px; }
 .pocket h4 { margin: 0; font-size: 14px; }
