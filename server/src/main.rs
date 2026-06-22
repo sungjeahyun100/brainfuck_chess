@@ -13,6 +13,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
 use brainfuck_chess_engine::{
+    ai::{play_bot_turn_detailed, AiAction, BotDifficulty},
     endgame::{apply_drop_action, apply_move_action},
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
@@ -107,6 +108,28 @@ struct GameResponse {
 #[derive(Deserialize)]
 struct SubmitActionRequest {
     action: TurnAction,
+}
+
+#[derive(Deserialize)]
+struct BotTurnRequest {
+    bot_player_id: PlayerId,
+    #[serde(default)]
+    difficulty: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BotTurnStats {
+    searched_nodes: u64,
+    depth_reached: u8,
+    elapsed_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct BotTurnResponse {
+    ok: bool,
+    game_state: GameState,
+    actions: Vec<AiAction>,
+    stats: BotTurnStats,
 }
 
 #[derive(Serialize)]
@@ -399,6 +422,7 @@ async fn main() {
         .route("/games", post(create_game))
         .route("/games/:id", get(get_game))
         .route("/games/:id/actions", post(submit_action))
+        .route("/games/:id/bot-turn", post(run_bot_turn))
         .route("/games/:id/end-turn", post(end_game_turn))
         .route("/games/:id/resign", post(resign_game))
         .route("/games/:id/legal-moves", get(get_legal_moves))
@@ -818,6 +842,74 @@ async fn submit_action(
     Ok(Json(state.clone()))
 }
 
+async fn run_bot_turn(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<BotTurnRequest>,
+) -> Result<Json<BotTurnResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if req.bot_player_id != "white" && req.bot_player_id != "black" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "bot_player_id는 white 또는 black이어야 합니다.".into(),
+            }),
+        ));
+    }
+    let difficulty = match req.difficulty.as_deref().unwrap_or("normal") {
+        "easy" => BotDifficulty::Easy,
+        "normal" => BotDifficulty::Normal,
+        "hard" => BotDifficulty::Hard,
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "difficulty는 easy, normal, hard 중 하나여야 합니다.".into(),
+                }),
+            ));
+        }
+    };
+
+    let mut entry = app.games.get_mut(&id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "게임을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+    if entry.phase == GamePhase::Ended || entry.result.is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "게임이 이미 종료되었습니다.".into(),
+            }),
+        ));
+    }
+    if entry.current_player != req.bot_player_id {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "현재 턴 플레이어와 bot_player_id가 일치하지 않습니다.".into(),
+            }),
+        ));
+    }
+
+    let result = play_bot_turn_detailed(entry.clone(), &req.bot_player_id, difficulty)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    *entry = result.state.clone();
+
+    Ok(Json(BotTurnResponse {
+        ok: true,
+        game_state: result.state,
+        actions: result.actions,
+        stats: BotTurnStats {
+            searched_nodes: result.searched_nodes,
+            depth_reached: result.depth_reached,
+            elapsed_ms: result.elapsed_ms,
+        },
+    }))
+}
+
 async fn end_game_turn(
     State(app): State<AppState>,
     Path(id): Path<String>,
@@ -967,5 +1059,84 @@ mod tests {
 
         assert!(!response.moves.is_empty());
         assert!(response.moves.iter().all(|m| m.piece_id == piece_id));
+    }
+
+    #[tokio::test]
+    async fn bot_turn_api_runs_and_persists_a_complete_turn() {
+        let (app, game_id) = test_app_with_game();
+
+        let response = match run_bot_turn(
+            State(app.clone()),
+            Path(game_id.clone()),
+            Json(BotTurnRequest {
+                bot_player_id: "white".into(),
+                difficulty: Some("easy".into()),
+            }),
+        )
+        .await
+        {
+            Ok(Json(response)) => response,
+            Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+        };
+
+        assert!(response.ok);
+        assert!(!response.actions.is_empty());
+        assert!(
+            response.game_state.phase == GamePhase::Ended
+                || response.game_state.current_player == "black"
+        );
+        let stored = app.games.get(&game_id).unwrap();
+        assert_eq!(stored.current_player, response.game_state.current_player);
+        assert_eq!(stored.turn_number, response.game_state.turn_number);
+    }
+
+    #[tokio::test]
+    async fn bot_turn_api_rejects_an_ended_game_without_mutating_it() {
+        let (app, game_id) = test_app_with_game();
+        {
+            let mut state = app.games.get_mut(&game_id).unwrap();
+            state.phase = GamePhase::Ended;
+            state.result = Some(GameResult {
+                winner: Some("black".into()),
+                reason: GameEndReason::KingCapture,
+            });
+        }
+
+        let error = run_bot_turn(
+            State(app.clone()),
+            Path(game_id.clone()),
+            Json(BotTurnRequest {
+                bot_player_id: "white".into(),
+                difficulty: Some("normal".into()),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        let stored = app.games.get(&game_id).unwrap();
+        assert_eq!(stored.phase, GamePhase::Ended);
+        assert_eq!(
+            stored.result.as_ref().unwrap().winner.as_deref(),
+            Some("black")
+        );
+    }
+
+    #[tokio::test]
+    async fn bot_turn_api_rejects_an_unknown_difficulty() {
+        let (app, game_id) = test_app_with_game();
+        let error = run_bot_turn(
+            State(app),
+            Path(game_id),
+            Json(BotTurnRequest {
+                bot_player_id: "white".into(),
+                difficulty: Some("impossible".into()),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert!(error.1.error.contains("difficulty"));
     }
 }
