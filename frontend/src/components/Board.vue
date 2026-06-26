@@ -18,7 +18,14 @@
       >
         <span v-if="legalMarker(sq)" class="legal-move-dot" :class="legalMarker(sq)" />
         <span v-if="sq.piece" class="piece" :class="`owner-${sq.piece.owner}`">
-          {{ pieceSymbol(sq.piece.type_id) }}
+          <img
+            v-if="pieceAsset(sq.piece.type_id, sq.piece.owner)"
+            class="piece-image"
+            :src="pieceAsset(sq.piece.type_id, sq.piece.owner)"
+            :alt="pieceAlt(sq.piece)"
+            draggable="false"
+          />
+          <span v-else>{{ pieceSymbol(sq.piece.type_id) }}</span>
         </span>
         <span v-if="sq.moveStack !== undefined && sq.moveStack > 0" class="stack-badge">
           {{ sq.moveStack }}
@@ -30,7 +37,8 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import type { Board, Piece, Square } from '../types/game'
+import type { Board, Piece, PlayerId, Square } from '../types/game'
+import { pieceAsset } from '../pieceAssets'
 
 interface SquareInfo {
   id: string
@@ -48,6 +56,7 @@ const props = defineProps<{
   movableSquares: Square[]
   attackSquares: Square[]
   dropSquares: Square[]
+  orientation?: PlayerId
 }>()
 
 const emit = defineEmits<{
@@ -62,9 +71,16 @@ function squareId(file: number, rank: number) {
 
 const allSquares = computed((): SquareInfo[] => {
   const squares: SquareInfo[] = []
-  // Render from rank n-1 down to 0 (top = high rank) for proper chess orientation
-  for (let rank = props.board.size - 1; rank >= 0; rank--) {
-    for (let file = 0; file < props.board.size; file++) {
+  const isBlackOrientation = props.orientation === 'black'
+  const ranks = isBlackOrientation
+    ? Array.from({ length: props.board.size }, (_, index) => index)
+    : Array.from({ length: props.board.size }, (_, index) => props.board.size - 1 - index)
+  const files = isBlackOrientation
+    ? Array.from({ length: props.board.size }, (_, index) => props.board.size - 1 - index)
+    : Array.from({ length: props.board.size }, (_, index) => index)
+
+  for (const rank of ranks) {
+    for (const file of files) {
       const id = squareId(file, rank)
       const pieceId = props.board.squares[id] ?? null
       const piece = pieceId ? props.pieces[pieceId] : undefined
@@ -240,6 +256,10 @@ const PIECE_SYMBOLS: Record<string, string> = {
 function pieceSymbol(typeId: string): string {
   return PIECE_SYMBOLS[typeId] ?? '?'
 }
+
+function pieceAlt(piece: Piece): string {
+  return `${piece.owner} ${piece.type_id}`
+}
 </script>
 
 <style scoped>
@@ -316,6 +336,18 @@ function pieceSymbol(typeId: string): string {
   position: relative;
   z-index: 2;
   transition: opacity 80ms ease, transform 80ms ease;
+  display: flex;
+  width: 82%;
+  height: 82%;
+  align-items: center;
+  justify-content: center;
+}
+
+.piece-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .square.dragging .piece {

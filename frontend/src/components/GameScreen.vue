@@ -58,7 +58,14 @@
             @dragstart="onPocketDragStart($event, pid)"
             @dragend="onPocketDragEnd"
           >
-            {{ pieceSymbol(viewState.pieces[pid]?.type_id) }}
+            <img
+              v-if="pieceImage(pid)"
+              class="pocket-piece-image"
+              :src="pieceImage(pid)"
+              :alt="pieceAlt(pid)"
+              draggable="false"
+            />
+            <span v-else>{{ pieceSymbol(viewState.pieces[pid]?.type_id) }}</span>
             <small>{{ viewState.piece_definitions[viewState.pieces[pid]?.type_id]?.score }}pt</small>
           </div>
         </div>
@@ -75,6 +82,7 @@
         :movable-squares="visibleMovableSquares"
         :attack-squares="visibleAttackSquares"
         :drop-squares="visibleDropSquares"
+        :orientation="boardOrientation"
         @square-click="onSquareClick"
         @piece-drag-start="onBoardPieceDragStart"
         @square-drop="onSquareDrop"
@@ -94,7 +102,14 @@
             @dragstart="onPocketDragStart($event, pid)"
             @dragend="onPocketDragEnd"
           >
-            {{ pieceSymbol(viewState.pieces[pid]?.type_id) }}
+            <img
+              v-if="pieceImage(pid)"
+              class="pocket-piece-image"
+              :src="pieceImage(pid)"
+              :alt="pieceAlt(pid)"
+              draggable="false"
+            />
+            <span v-else>{{ pieceSymbol(viewState.pieces[pid]?.type_id) }}</span>
             <small>{{ viewState.piece_definitions[viewState.pieces[pid]?.type_id]?.score }}pt</small>
           </div>
         </div>
@@ -142,6 +157,7 @@ import type {
   Square,
 } from '../types/game'
 import { api } from '../api/gameApi'
+import { pieceAsset } from '../pieceAssets'
 import Board from './Board.vue'
 
 const props = defineProps<{
@@ -218,6 +234,7 @@ const visibleAttackSquares = computed(() => (
 const visibleDropSquares = computed(() => (
   botReplaying.value ? botPreviewDropSquares.value : dropSquares.value
 ))
+const boardOrientation = computed(() => props.localPlayer ?? viewState.value.current_player)
 const botDifficultyLabel = computed(() => {
   const labels: Record<BotDifficulty, string> = {
     easy: 'Easy',
@@ -502,6 +519,16 @@ const PIECE_SYMBOLS: Record<string, string> = {
 }
 function pieceSymbol(typeId: string): string {
   return PIECE_SYMBOLS[typeId] ?? '?'
+}
+
+function pieceImage(pieceId: string): string | undefined {
+  const piece = viewState.value.pieces[pieceId]
+  return piece ? pieceAsset(piece.type_id, piece.owner) : undefined
+}
+
+function pieceAlt(pieceId: string): string {
+  const piece = viewState.value.pieces[pieceId]
+  return piece ? `${piece.owner} ${piece.type_id}` : pieceId
 }
 
 function clearSelection() {
@@ -908,6 +935,12 @@ async function onResign() {
 .pocket-piece[draggable="true"] { cursor: grab; }
 .pocket-piece[draggable="true"]:active { cursor: grabbing; }
 .pocket-piece.selected { border-color: #4a8fff; background: #e0eeff; }
+.pocket-piece-image {
+  display: block;
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
 .score-info { font-size: 12px; color: #666; }
 
 .footer { display: flex; align-items: center; gap: 16px; }

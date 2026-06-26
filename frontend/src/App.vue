@@ -219,7 +219,16 @@
                   @dragstart="onPieceDragStart($event, piece.id)"
                   @dragend="onPieceDragEnd"
                 >
-                  <span class="symbol">{{ displayPieceSymbol(piece.id, activePlayer) }}</span>
+                  <span class="symbol">
+                    <img
+                      v-if="displayPieceAsset(piece.id, activePlayer)"
+                      class="piece-icon"
+                      :src="displayPieceAsset(piece.id, activePlayer)"
+                      :alt="`${playerLabel(activePlayer)} ${piece.name}`"
+                      draggable="false"
+                    />
+                    <span v-else>{{ displayPieceSymbol(piece.id, activePlayer) }}</span>
+                  </span>
                   <span class="meta">
                     <strong>{{ piece.name }}</strong>
                     <small>{{ piece.score === 0 ? '점수 제외' : `${piece.score}점` }}</small>
@@ -278,7 +287,14 @@
             >
               <span class="square-label">{{ fileLabel(square.file) }}{{ square.rank + 1 }}</span>
               <span v-if="pieceAt(activePlayer, square.file, square.rank)" class="square-piece">
-                {{ displayPieceSymbol(pieceAt(activePlayer, square.file, square.rank)!, activePlayer) }}
+                <img
+                  v-if="displayPieceAsset(pieceAt(activePlayer, square.file, square.rank)!, activePlayer)"
+                  class="piece-icon"
+                  :src="displayPieceAsset(pieceAt(activePlayer, square.file, square.rank)!, activePlayer)"
+                  :alt="`${playerLabel(activePlayer)} ${pieceLabel(pieceAt(activePlayer, square.file, square.rank)!)}`"
+                  draggable="false"
+                />
+                <span v-else>{{ displayPieceSymbol(pieceAt(activePlayer, square.file, square.rank)!, activePlayer) }}</span>
               </span>
               <span v-else class="square-empty">+</span>
             </button>
@@ -305,7 +321,16 @@
 
           <div v-if="activePocketEntries.length > 0" class="pocket-summary">
             <div v-for="entry in activePocketEntries" :key="entry.piece.id" class="pocket-chip">
-              <span class="symbol">{{ displayPieceSymbol(entry.piece.id, activePlayer) }}</span>
+              <span class="symbol">
+                <img
+                  v-if="displayPieceAsset(entry.piece.id, activePlayer)"
+                  class="piece-icon"
+                  :src="displayPieceAsset(entry.piece.id, activePlayer)"
+                  :alt="`${playerLabel(activePlayer)} ${entry.piece.name}`"
+                  draggable="false"
+                />
+                <span v-else>{{ displayPieceSymbol(entry.piece.id, activePlayer) }}</span>
+              </span>
               <strong>{{ entry.count }}</strong>
               <button @click="changePocketCount(entry.piece.id, -1)">-</button>
             </div>
@@ -345,6 +370,7 @@ import type { BotDifficulty, GameState, Square } from './types/game'
 import { api, type MultiplayerRoom, type PlayerDeckRequest } from './api/gameApi'
 import GameScreen from './components/GameScreen.vue'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
+import { pieceAsset } from './pieceAssets'
 
 type LobbyPlayer = 'white' | 'black'
 type DeckPieceType = string
@@ -788,6 +814,10 @@ function displayPieceSymbol(pieceType: DeckPieceType, player: LobbyPlayer): stri
 
   const symbol = player === 'white' ? whiteSymbols[pieceType] : blackSymbols[pieceType]
   return symbol ?? pieceLabel(pieceType).slice(0, 1).toUpperCase()
+}
+
+function displayPieceAsset(pieceType: DeckPieceType, player: LobbyPlayer): string | undefined {
+  return pieceAsset(pieceType, player)
 }
 
 function serializeDeck(deck: LobbyDeck): PlayerDeckRequest {
@@ -1575,8 +1605,21 @@ body {
 }
 
 .symbol {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
   font-size: 26px;
   line-height: 1;
+  flex: 0 0 34px;
+}
+
+.piece-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .piece-count {
@@ -1681,6 +1724,11 @@ body {
 }
 
 .square-piece {
+  display: inline-flex;
+  width: min(70%, 46px);
+  height: min(70%, 46px);
+  align-items: center;
+  justify-content: center;
   font-size: clamp(24px, 2.5vw, 38px);
 }
 

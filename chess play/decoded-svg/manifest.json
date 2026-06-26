@@ -1,0 +1,4976 @@
+{
+  "generatedFrom": "project.json",
+  "uniqueSvgFiles": 242,
+  "copiedSvgFiles": 242,
+  "missingSvgFiles": 0,
+  "entries": [
+    {
+      "sourceFile": "6dbb9b8951c06ba7e7dcc7d4b7fefe2d.svg",
+      "assetId": "6dbb9b8951c06ba7e7dcc7d4b7fefe2d",
+      "dataFormat": "svg",
+      "chosenName": "16",
+      "chosenSprite": "camel",
+      "outputFile": "001__camel__16__6dbb9b8951c06ba7e7dcc7d4b7fefe2d.svg",
+      "references": [
+        {
+          "sprite": "camel",
+          "costumeIndex": 3,
+          "costumeName": "16",
+          "rotationCenterX": 12.249999999999943,
+          "rotationCenterY": 16
+        }
+      ]
+    },
+    {
+      "sourceFile": "7093a905d63ba731d9ddfe8910941c72.svg",
+      "assetId": "7093a905d63ba731d9ddfe8910941c72",
+      "dataFormat": "svg",
+      "chosenName": "3",
+      "chosenSprite": "camel",
+      "outputFile": "002__camel__3__7093a905d63ba731d9ddfe8910941c72.svg",
+      "references": [
+        {
+          "sprite": "camel",
+          "costumeIndex": 5,
+          "costumeName": "3",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 17.40759342442513
+        }
+      ]
+    },
+    {
+      "sourceFile": "37bed103caa198dc0394ea6bc59243ca.svg",
+      "assetId": "37bed103caa198dc0394ea6bc59243ca",
+      "dataFormat": "svg",
+      "chosenName": "camel knight",
+      "chosenSprite": "camel",
+      "outputFile": "003__camel__camel_knight__37bed103caa198dc0394ea6bc59243ca.svg",
+      "references": [
+        {
+          "sprite": "camel",
+          "costumeIndex": 4,
+          "costumeName": "camel knight",
+          "rotationCenterX": 16.76448173839529,
+          "rotationCenterY": 16.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "cc0dfd0f00d3edb1f0b72833bf7afdb4.svg",
+      "assetId": "cc0dfd0f00d3edb1f0b72833bf7afdb4",
+      "dataFormat": "svg",
+      "chosenName": "pb2",
+      "chosenSprite": "camel",
+      "outputFile": "004__camel__pb2__cc0dfd0f00d3edb1f0b72833bf7afdb4.svg",
+      "references": [
+        {
+          "sprite": "camel",
+          "costumeIndex": 2,
+          "costumeName": "pb2",
+          "rotationCenterX": 12.25,
+          "rotationCenterY": 16
+        }
+      ]
+    },
+    {
+      "sourceFile": "3339a2953a3bf62bb80e54ff575dbced.svg",
+      "assetId": "3339a2953a3bf62bb80e54ff575dbced",
+      "dataFormat": "svg",
+      "chosenName": "모양 1",
+      "chosenSprite": "camel",
+      "outputFile": "005__camel__1__3339a2953a3bf62bb80e54ff575dbced.svg",
+      "references": [
+        {
+          "sprite": "camel",
+          "costumeIndex": 1,
+          "costumeName": "모양 1",
+          "rotationCenterX": 0,
+          "rotationCenterY": 0
+        },
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 1,
+          "costumeName": "모양 1",
+          "rotationCenterX": 0,
+          "rotationCenterY": 0
+        }
+      ]
+    },
+    {
+      "sourceFile": "5bee3be8dd79cd04f9d88947d9d3a43e.svg",
+      "assetId": "5bee3be8dd79cd04f9d88947d9d3a43e",
+      "dataFormat": "svg",
+      "chosenName": "4",
+      "chosenSprite": "chess",
+      "outputFile": "006__chess__4__5bee3be8dd79cd04f9d88947d9d3a43e.svg",
+      "references": [
+        {
+          "sprite": "chess",
+          "costumeIndex": 11,
+          "costumeName": "4",
+          "rotationCenterX": 0,
+          "rotationCenterY": 36
+        }
+      ]
+    },
+    {
+      "sourceFile": "7aef60caa494bfeb14c926a7e10b900b.svg",
+      "assetId": "7aef60caa494bfeb14c926a7e10b900b",
+      "dataFormat": "svg",
+      "chosenName": "b",
+      "chosenSprite": "chess",
+      "outputFile": "007__chess__b__7aef60caa494bfeb14c926a7e10b900b.svg",
+      "references": [
+        {
+          "sprite": "chess",
+          "costumeIndex": 4,
+          "costumeName": "b",
+          "rotationCenterX": 64.4736950846409,
+          "rotationCenterY": 85.35462540466509
+        }
+      ]
+    },
+    {
+      "sourceFile": "eed90c5d7700774184b0fd02b5a42364.svg",
+      "assetId": "eed90c5d7700774184b0fd02b5a42364",
+      "dataFormat": "svg",
+      "chosenName": "k",
+      "chosenSprite": "chess",
+      "outputFile": "008__chess__k__eed90c5d7700774184b0fd02b5a42364.svg",
+      "references": [
+        {
+          "sprite": "chess",
+          "costumeIndex": 5,
+          "costumeName": "k",
+          "rotationCenterX": 47.589491262622374,
+          "rotationCenterY": 49.82001167683754
+        }
+      ]
+    },
+    {
+      "sourceFile": "e6872fa8d89685d1e40fb470084b3a13.svg",
+      "assetId": "e6872fa8d89685d1e40fb470084b3a13",
+      "dataFormat": "svg",
+      "chosenName": "move",
+      "chosenSprite": "chess",
+      "outputFile": "009__chess__move__e6872fa8d89685d1e40fb470084b3a13.svg",
+      "references": [
+        {
+          "sprite": "chess",
+          "costumeIndex": 9,
+          "costumeName": "move",
+          "rotationCenterX": 29.570954561664138,
+          "rotationCenterY": 29.570954561664195
+        }
+      ]
+    },
+    {
+      "sourceFile": "4c029336f5f4754bf0984f1a807437cb.svg",
+      "assetId": "4c029336f5f4754bf0984f1a807437cb",
+      "dataFormat": "svg",
+      "chosenName": "n",
+      "chosenSprite": "chess",
+      "outputFile": "010__chess__n__4c029336f5f4754bf0984f1a807437cb.svg",
+      "references": [
+        {
+          "sprite": "chess",
+          "costumeIndex": 3,
+          "costumeName": "n",
+          "rotationCenterX": 45.04118587788719,
+          "rotationCenterY": 68.44987992601935
+        }
+      ]
+    },
+    {
+      "sourceFile": "2bb0c86e8609abd16809e1216daa6c9f.svg",
+      "assetId": "2bb0c86e8609abd16809e1216daa6c9f",
+      "dataFormat": "svg",
+      "chosenName": "p",
+      "chosenSprite": "chess",
+      "outputFile": "011__chess__p__2bb0c86e8609abd16809e1216daa6c9f.svg",
+      "references": [
+        {
+          "sprite": "chess",
+          "costumeIndex": 1,
+          "costumeName": "p",
+          "rotationCenterX": 44.933959651643534,
+          "rotationCenterY": 61.856598018817195
+        }
+      ]
+    },
+    {
+      "sourceFile": "bee52124ca510c30561835eb2a7de7b8.svg",
+      "assetId": "bee52124ca510c30561835eb2a7de7b8",
+      "dataFormat": "svg",
+      "chosenName": "q",
+      "chosenSprite": "chess",
+      "outputFile": "012__chess__q__bee52124ca510c30561835eb2a7de7b8.svg",
+      "references": [
+        {
+          "sprite": "chess",
+          "costumeIndex": 6,
+          "costumeName": "q",
+          "rotationCenterX": 60.57208141509133,
+          "rotationCenterY": 77.7338202211328
+        }
+      ]
+    },
+    {
+      "sourceFile": "0fa79865e3b0366249fc849670818516.svg",
+      "assetId": "0fa79865e3b0366249fc849670818516",
+      "dataFormat": "svg",
+      "chosenName": "r",
+      "chosenSprite": "chess",
+      "outputFile": "013__chess__r__0fa79865e3b0366249fc849670818516.svg",
+      "references": [
+        {
+          "sprite": "chess",
+          "costumeIndex": 2,
+          "costumeName": "r",
+          "rotationCenterX": 60.557386587030436,
+          "rotationCenterY": 69.13142879778925
+        }
+      ]
+    },
+    {
+      "sourceFile": "5e9fae3dd69ce4fd326fc81898bd0724.svg",
+      "assetId": "5e9fae3dd69ce4fd326fc81898bd0724",
+      "dataFormat": "svg",
+      "chosenName": "take",
+      "chosenSprite": "chess",
+      "outputFile": "014__chess__take__5e9fae3dd69ce4fd326fc81898bd0724.svg",
+      "references": [
+        {
+          "sprite": "chess",
+          "costumeIndex": 8,
+          "costumeName": "take",
+          "rotationCenterX": 35.71136604754818,
+          "rotationCenterY": 35.711366047548324
+        }
+      ]
+    },
+    {
+      "sourceFile": "3dadc7942e9ff2cfda0f47265d8bf039.svg",
+      "assetId": "3dadc7942e9ff2cfda0f47265d8bf039",
+      "dataFormat": "svg",
+      "chosenName": "1",
+      "chosenSprite": "chess pieces",
+      "outputFile": "015__chess_pieces__1__3dadc7942e9ff2cfda0f47265d8bf039.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 20,
+          "costumeName": "1",
+          "rotationCenterX": 15.151911068713162,
+          "rotationCenterY": 17.88659830087761
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 20,
+          "costumeName": "1",
+          "rotationCenterX": 15.151911068713162,
+          "rotationCenterY": 17.88659830087761
+        }
+      ]
+    },
+    {
+      "sourceFile": "5fc9db7e38b6880fac56d1264ffae1e9.svg",
+      "assetId": "5fc9db7e38b6880fac56d1264ffae1e9",
+      "dataFormat": "svg",
+      "chosenName": "2",
+      "chosenSprite": "chess pieces",
+      "outputFile": "016__chess_pieces__2__5fc9db7e38b6880fac56d1264ffae1e9.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 19,
+          "costumeName": "2",
+          "rotationCenterX": 16.349391047934574,
+          "rotationCenterY": 17.6392980585249
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 19,
+          "costumeName": "2",
+          "rotationCenterX": 16.349391047934574,
+          "rotationCenterY": 17.6392980585249
+        }
+      ]
+    },
+    {
+      "sourceFile": "a6415a7c43d6f4e2b2129c07973be993.svg",
+      "assetId": "a6415a7c43d6f4e2b2129c07973be993",
+      "dataFormat": "svg",
+      "chosenName": "3",
+      "chosenSprite": "chess pieces",
+      "outputFile": "017__chess_pieces__3__a6415a7c43d6f4e2b2129c07973be993.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 11,
+          "costumeName": "3",
+          "rotationCenterX": 17.885270308812693,
+          "rotationCenterY": 16.802715000000006
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 11,
+          "costumeName": "3",
+          "rotationCenterX": 17.885270308812693,
+          "rotationCenterY": 16.802715000000006
+        }
+      ]
+    },
+    {
+      "sourceFile": "dd85e46336c565ea492abbc5712db2ea.svg",
+      "assetId": "dd85e46336c565ea492abbc5712db2ea",
+      "dataFormat": "svg",
+      "chosenName": "4",
+      "chosenSprite": "chess pieces",
+      "outputFile": "018__chess_pieces__4__dd85e46336c565ea492abbc5712db2ea.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 10,
+          "costumeName": "4",
+          "rotationCenterX": 16.764486099071462,
+          "rotationCenterY": 16.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "19dd5316e0b72ef4654862c8b03155b9.svg",
+      "assetId": "19dd5316e0b72ef4654862c8b03155b9",
+      "dataFormat": "svg",
+      "chosenName": "5",
+      "chosenSprite": "chess pieces",
+      "outputFile": "019__chess_pieces__5__19dd5316e0b72ef4654862c8b03155b9.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 12,
+          "costumeName": "5",
+          "rotationCenterX": 14.592809217318234,
+          "rotationCenterY": 20.89558462883116
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 12,
+          "costumeName": "5",
+          "rotationCenterX": 14.592809217318234,
+          "rotationCenterY": 20.89558462883116
+        }
+      ]
+    },
+    {
+      "sourceFile": "09f7317c120017d308855d88557a269c.svg",
+      "assetId": "09f7317c120017d308855d88557a269c",
+      "dataFormat": "svg",
+      "chosenName": "9",
+      "chosenSprite": "chess pieces",
+      "outputFile": "020__chess_pieces__9__09f7317c120017d308855d88557a269c.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 17,
+          "costumeName": "9",
+          "rotationCenterX": 17.34668688231696,
+          "rotationCenterY": 17.05034462090049
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 9,
+          "costumeName": "9",
+          "rotationCenterX": 17.34668688231696,
+          "rotationCenterY": 17.05034462090049
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 17,
+          "costumeName": "9",
+          "rotationCenterX": 17.34668688231696,
+          "rotationCenterY": 17.05034462090049
+        }
+      ]
+    },
+    {
+      "sourceFile": "0fccdbd9b1cfbb4f3b0b403dde65c229.svg",
+      "assetId": "0fccdbd9b1cfbb4f3b0b403dde65c229",
+      "dataFormat": "svg",
+      "chosenName": "body",
+      "chosenSprite": "chess pieces",
+      "outputFile": "021__chess_pieces__body__0fccdbd9b1cfbb4f3b0b403dde65c229.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 40,
+          "costumeName": "body",
+          "rotationCenterX": 20.193039999999996,
+          "rotationCenterY": 13.776060000000001
+        }
+      ]
+    },
+    {
+      "sourceFile": "0d67c58a650f254a5162c870fda117ea.svg",
+      "assetId": "0d67c58a650f254a5162c870fda117ea",
+      "dataFormat": "svg",
+      "chosenName": "body curve",
+      "chosenSprite": "chess pieces",
+      "outputFile": "022__chess_pieces__body_curve__0d67c58a650f254a5162c870fda117ea.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 39,
+          "costumeName": "body curve",
+          "rotationCenterX": 14.835297576052739,
+          "rotationCenterY": 20.043360000000007
+        }
+      ]
+    },
+    {
+      "sourceFile": "9286d33d76ab41fb891e9f01ac1b17e6.svg",
+      "assetId": "9286d33d76ab41fb891e9f01ac1b17e6",
+      "dataFormat": "svg",
+      "chosenName": "body curve2",
+      "chosenSprite": "chess pieces",
+      "outputFile": "023__chess_pieces__body_curve2__9286d33d76ab41fb891e9f01ac1b17e6.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 43,
+          "costumeName": "body curve2",
+          "rotationCenterX": 13.759739999999994,
+          "rotationCenterY": 20.043360000000007
+        }
+      ]
+    },
+    {
+      "sourceFile": "548b0b02290c876e9c430891bbeefb9f.svg",
+      "assetId": "548b0b02290c876e9c430891bbeefb9f",
+      "dataFormat": "svg",
+      "chosenName": "body2",
+      "chosenSprite": "chess pieces",
+      "outputFile": "024__chess_pieces__body2__548b0b02290c876e9c430891bbeefb9f.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 44,
+          "costumeName": "body2",
+          "rotationCenterX": 20.193039999999996,
+          "rotationCenterY": 13.776060000000001
+        }
+      ]
+    },
+    {
+      "sourceFile": "7589c4224b2f79e5e43efd6c9292129f.svg",
+      "assetId": "7589c4224b2f79e5e43efd6c9292129f",
+      "dataFormat": "svg",
+      "chosenName": "bouncing bishop black",
+      "chosenSprite": "chess pieces",
+      "outputFile": "025__chess_pieces__bouncing_bishop_black__7589c4224b2f79e5e43efd6c9292129f.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 26,
+          "costumeName": "bouncing bishop black",
+          "rotationCenterX": 17.218297500000006,
+          "rotationCenterY": 18.198389396808125
+        },
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 12,
+          "costumeName": "bouncing bishop2",
+          "rotationCenterX": 17.218297500000006,
+          "rotationCenterY": 18.198389396808125
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 26,
+          "costumeName": "bouncing bishop black",
+          "rotationCenterX": 17.218297500000006,
+          "rotationCenterY": 18.198389396808125
+        }
+      ]
+    },
+    {
+      "sourceFile": "6e5a70c7a3774bbad6fbd984ddd6d21e.svg",
+      "assetId": "6e5a70c7a3774bbad6fbd984ddd6d21e",
+      "dataFormat": "svg",
+      "chosenName": "bw",
+      "chosenSprite": "chess pieces",
+      "outputFile": "026__chess_pieces__bw__6e5a70c7a3774bbad6fbd984ddd6d21e.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 9,
+          "costumeName": "bw",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 17.40759342442513
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 3,
+          "costumeName": "3",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 17.40759342442513
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 9,
+          "costumeName": "bw",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 17.40759342442513
+        }
+      ]
+    },
+    {
+      "sourceFile": "4eb026339bc341e70ab9ea7edec150c2.svg",
+      "assetId": "4eb026339bc341e70ab9ea7edec150c2",
+      "dataFormat": "svg",
+      "chosenName": "camelaon",
+      "chosenSprite": "chess pieces",
+      "outputFile": "027__chess_pieces__camelaon__4eb026339bc341e70ab9ea7edec150c2.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 23,
+          "costumeName": "camelaon",
+          "rotationCenterX": 18.28090499999999,
+          "rotationCenterY": 18.628375000000005
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 23,
+          "costumeName": "camelaon",
+          "rotationCenterX": 18.28090499999999,
+          "rotationCenterY": 18.628375000000005
+        }
+      ]
+    },
+    {
+      "sourceFile": "02f1d589aa129ec988c451d266c2cec2.svg",
+      "assetId": "02f1d589aa129ec988c451d266c2cec2",
+      "dataFormat": "svg",
+      "chosenName": "Chess_Alt45 (1)",
+      "chosenSprite": "chess pieces",
+      "outputFile": "028__chess_pieces__Chess_Alt45_1__02f1d589aa129ec988c451d266c2cec2.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 13,
+          "costumeName": "Chess_Alt45 (1)",
+          "rotationCenterX": 14.279050000000012,
+          "rotationCenterY": 20.393685000000005
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 13,
+          "costumeName": "Chess_Alt45 (1)",
+          "rotationCenterX": 14.279050000000012,
+          "rotationCenterY": 20.393685000000005
+        }
+      ]
+    },
+    {
+      "sourceFile": "97da37fc4c5d3727fcad2777b3cdc624.svg",
+      "assetId": "97da37fc4c5d3727fcad2777b3cdc624",
+      "dataFormat": "svg",
+      "chosenName": "Chess_tlt45",
+      "chosenSprite": "chess pieces",
+      "outputFile": "029__chess_pieces__Chess_tlt45__97da37fc4c5d3727fcad2777b3cdc624.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 22,
+          "costumeName": "Chess_tlt45",
+          "rotationCenterX": 21.617134783536812,
+          "rotationCenterY": 19.215540000000004
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 22,
+          "costumeName": "Chess_tlt45",
+          "rotationCenterX": 21.617134783536812,
+          "rotationCenterY": 19.215540000000004
+        }
+      ]
+    },
+    {
+      "sourceFile": "fc42a90c3544debdbfc63b81d05d504d.svg",
+      "assetId": "fc42a90c3544debdbfc63b81d05d504d",
+      "dataFormat": "svg",
+      "chosenName": "costume1 (1)",
+      "chosenSprite": "chess pieces",
+      "outputFile": "030__chess_pieces__costume1_1__fc42a90c3544debdbfc63b81d05d504d.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 48,
+          "costumeName": "costume1 (1)",
+          "rotationCenterX": 17.448031624351444,
+          "rotationCenterY": 17.563786219354256
+        }
+      ]
+    },
+    {
+      "sourceFile": "79e3dd6896608e56bbc567e96fa1b85c.svg",
+      "assetId": "79e3dd6896608e56bbc567e96fa1b85c",
+      "dataFormat": "svg",
+      "chosenName": "cut head",
+      "chosenSprite": "chess pieces",
+      "outputFile": "031__chess_pieces__cut_head__79e3dd6896608e56bbc567e96fa1b85c.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 38,
+          "costumeName": "cut head",
+          "rotationCenterX": 19.83622449880187,
+          "rotationCenterY": 18.582604733403315
+        },
+        {
+          "sprite": "스프라이트 1",
+          "costumeIndex": 3,
+          "costumeName": "cut head",
+          "rotationCenterX": 19.83622449880187,
+          "rotationCenterY": 18.582604733403315
+        }
+      ]
+    },
+    {
+      "sourceFile": "6605e34eee15876f94831cdd66233121.svg",
+      "assetId": "6605e34eee15876f94831cdd66233121",
+      "dataFormat": "svg",
+      "chosenName": "DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR9iQbZg",
+      "chosenSprite": "chess pieces",
+      "outputFile": "032__chess_pieces__DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR__6605e34eee15876f94831cdd66233121.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 21,
+          "costumeName": "DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR9iQbZg",
+          "rotationCenterX": 18.455587118403145,
+          "rotationCenterY": 10.95845037955064
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 21,
+          "costumeName": "DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR9iQbZg",
+          "rotationCenterX": 18.455587118403145,
+          "rotationCenterY": 10.95845037955064
+        }
+      ]
+    },
+    {
+      "sourceFile": "9f48a29e1cc9a80704f0ae7d17235100.svg",
+      "assetId": "9f48a29e1cc9a80704f0ae7d17235100",
+      "dataFormat": "svg",
+      "chosenName": "dozer",
+      "chosenSprite": "chess pieces",
+      "outputFile": "033__chess_pieces__dozer__9f48a29e1cc9a80704f0ae7d17235100.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 30,
+          "costumeName": "dozer",
+          "rotationCenterX": 15.693554369615782,
+          "rotationCenterY": 18.677692851616143
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 30,
+          "costumeName": "dozer",
+          "rotationCenterX": 15.693554369615782,
+          "rotationCenterY": 18.677692851616143
+        }
+      ]
+    },
+    {
+      "sourceFile": "8983f8cf528f350f25717c7fbc73b75b.svg",
+      "assetId": "8983f8cf528f350f25717c7fbc73b75b",
+      "dataFormat": "svg",
+      "chosenName": "garl",
+      "chosenSprite": "chess pieces",
+      "outputFile": "034__chess_pieces__garl__8983f8cf528f350f25717c7fbc73b75b.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 28,
+          "costumeName": "garl",
+          "rotationCenterX": 15.38090177800865,
+          "rotationCenterY": 16.543536971676673
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 28,
+          "costumeName": "garl",
+          "rotationCenterX": 15.38090177800865,
+          "rotationCenterY": 16.543536971676673
+        }
+      ]
+    },
+    {
+      "sourceFile": "cf96e937dcea3d206ff8510fe036723e.svg",
+      "assetId": "cf96e937dcea3d206ff8510fe036723e",
+      "dataFormat": "svg",
+      "chosenName": "god",
+      "chosenSprite": "chess pieces",
+      "outputFile": "035__chess_pieces__god__cf96e937dcea3d206ff8510fe036723e.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 27,
+          "costumeName": "god",
+          "rotationCenterX": 17.85002500221512,
+          "rotationCenterY": 15.943739999999991
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 27,
+          "costumeName": "god",
+          "rotationCenterX": 17.85002500221512,
+          "rotationCenterY": 15.943739999999991
+        }
+      ]
+    },
+    {
+      "sourceFile": "952c9b4ed27aa4d041fe77eab0f2bcec.svg",
+      "assetId": "952c9b4ed27aa4d041fe77eab0f2bcec",
+      "dataFormat": "svg",
+      "chosenName": "head",
+      "chosenSprite": "chess pieces",
+      "outputFile": "036__chess_pieces__head__952c9b4ed27aa4d041fe77eab0f2bcec.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 37,
+          "costumeName": "head",
+          "rotationCenterX": 20.019955467541337,
+          "rotationCenterY": 18.582604733403315
+        }
+      ]
+    },
+    {
+      "sourceFile": "9f49c817ca906404e0d6463889869c30.svg",
+      "assetId": "9f49c817ca906404e0d6463889869c30",
+      "dataFormat": "svg",
+      "chosenName": "head2",
+      "chosenSprite": "chess pieces",
+      "outputFile": "037__chess_pieces__head2__9f49c817ca906404e0d6463889869c30.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 42,
+          "costumeName": "head2",
+          "rotationCenterX": 20.019955467541337,
+          "rotationCenterY": 18.582604733403315
+        }
+      ]
+    },
+    {
+      "sourceFile": "9a7780a3ce46dbc0e07154d38a1dd5c3.svg",
+      "assetId": "9a7780a3ce46dbc0e07154d38a1dd5c3",
+      "dataFormat": "svg",
+      "chosenName": "kw2",
+      "chosenSprite": "chess pieces",
+      "outputFile": "038__chess_pieces__kw2__9a7780a3ce46dbc0e07154d38a1dd5c3.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 14,
+          "costumeName": "kw2",
+          "rotationCenterX": 16.59645863294989,
+          "rotationCenterY": 14.978495620316494
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 14,
+          "costumeName": "kw2",
+          "rotationCenterX": 16.59645863294989,
+          "rotationCenterY": 14.978495620316494
+        }
+      ]
+    },
+    {
+      "sourceFile": "de3146e867b1c8993fec81a1838d86f7.svg",
+      "assetId": "de3146e867b1c8993fec81a1838d86f7",
+      "dataFormat": "svg",
+      "chosenName": "log1",
+      "chosenSprite": "chess pieces",
+      "outputFile": "039__chess_pieces__log1__de3146e867b1c8993fec81a1838d86f7.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 49,
+          "costumeName": "log1",
+          "rotationCenterX": 15.065290343559639,
+          "rotationCenterY": 18.737650000000002
+        }
+      ]
+    },
+    {
+      "sourceFile": "3418a52be3c10c70c8d5c99c29267259.svg",
+      "assetId": "3418a52be3c10c70c8d5c99c29267259",
+      "dataFormat": "svg",
+      "chosenName": "log2",
+      "chosenSprite": "chess pieces",
+      "outputFile": "040__chess_pieces__log2__3418a52be3c10c70c8d5c99c29267259.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 50,
+          "costumeName": "log2",
+          "rotationCenterX": 19.19457170473845,
+          "rotationCenterY": 17.387414894473096
+        }
+      ]
+    },
+    {
+      "sourceFile": "5bd440d8534f51481e5a52d9b4dd0928.svg",
+      "assetId": "5bd440d8534f51481e5a52d9b4dd0928",
+      "dataFormat": "svg",
+      "chosenName": "pw",
+      "chosenSprite": "chess pieces",
+      "outputFile": "041__chess_pieces__pw__5bd440d8534f51481e5a52d9b4dd0928.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 16,
+          "costumeName": "pw",
+          "rotationCenterX": 12.249999999999943,
+          "rotationCenterY": 16
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 6,
+          "costumeName": "6",
+          "rotationCenterX": 12.249999999999943,
+          "rotationCenterY": 16
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 16,
+          "costumeName": "pw",
+          "rotationCenterX": 12.249999999999943,
+          "rotationCenterY": 16
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 8,
+          "costumeName": "6",
+          "rotationCenterX": 12.249999999999943,
+          "rotationCenterY": 16
+        }
+      ]
+    },
+    {
+      "sourceFile": "c848bb6aa6b012d41eebe3fceb7c1064.svg",
+      "assetId": "c848bb6aa6b012d41eebe3fceb7c1064",
+      "dataFormat": "svg",
+      "chosenName": "rw",
+      "chosenSprite": "chess pieces",
+      "outputFile": "042__chess_pieces__rw__c848bb6aa6b012d41eebe3fceb7c1064.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 15,
+          "costumeName": "rw",
+          "rotationCenterX": 14.249999999999943,
+          "rotationCenterY": 15.75
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 5,
+          "costumeName": "5",
+          "rotationCenterX": 14.249999999999943,
+          "rotationCenterY": 15.75
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 15,
+          "costumeName": "rw",
+          "rotationCenterX": 14.249999999999943,
+          "rotationCenterY": 15.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "a4417ee93d8e6cdfbe420618d01f7dd8.svg",
+      "assetId": "a4417ee93d8e6cdfbe420618d01f7dd8",
+      "dataFormat": "svg",
+      "chosenName": "tail",
+      "chosenSprite": "chess pieces",
+      "outputFile": "043__chess_pieces__tail__a4417ee93d8e6cdfbe420618d01f7dd8.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 41,
+          "costumeName": "tail",
+          "rotationCenterX": 16.185667841227854,
+          "rotationCenterY": 13.767240000000015
+        }
+      ]
+    },
+    {
+      "sourceFile": "f1ceabb75aa4d50049c2dc2a7a648bf0.svg",
+      "assetId": "f1ceabb75aa4d50049c2dc2a7a648bf0",
+      "dataFormat": "svg",
+      "chosenName": "tail2",
+      "chosenSprite": "chess pieces",
+      "outputFile": "044__chess_pieces__tail2__f1ceabb75aa4d50049c2dc2a7a648bf0.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 45,
+          "costumeName": "tail2",
+          "rotationCenterX": 16.18566659635229,
+          "rotationCenterY": 13.767240000000015
+        }
+      ]
+    },
+    {
+      "sourceFile": "5adf2ccd11338d900a25786084499336.svg",
+      "assetId": "5adf2ccd11338d900a25786084499336",
+      "dataFormat": "svg",
+      "chosenName": "toilet",
+      "chosenSprite": "chess pieces",
+      "outputFile": "045__chess_pieces__toilet__5adf2ccd11338d900a25786084499336.svg",
+      "references": [
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 29,
+          "costumeName": "toilet",
+          "rotationCenterX": 18.414405195272934,
+          "rotationCenterY": 19.42983550766968
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 29,
+          "costumeName": "toilet",
+          "rotationCenterX": 18.414405195272934,
+          "rotationCenterY": 19.42983550766968
+        }
+      ]
+    },
+    {
+      "sourceFile": "6a8e7e7263598756c329555da591696f.svg",
+      "assetId": "6a8e7e7263598756c329555da591696f",
+      "dataFormat": "svg",
+      "chosenName": "bishop black",
+      "chosenSprite": "kind of chess piece black",
+      "outputFile": "046__kind_of_chess_piece_black__bishop_black__6a8e7e7263598756c329555da591696f.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 7,
+          "costumeName": "bishop black",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 17.25
+        },
+        {
+          "sprite": "스프라이트 1",
+          "costumeIndex": 4,
+          "costumeName": "bishop black",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 17.25
+        }
+      ]
+    },
+    {
+      "sourceFile": "b0bc1cf242460c121de42011cb589664.svg",
+      "assetId": "b0bc1cf242460c121de42011cb589664",
+      "dataFormat": "svg",
+      "chosenName": "camelaon black",
+      "chosenSprite": "kind of chess piece black",
+      "outputFile": "047__kind_of_chess_piece_black__camelaon_black__b0bc1cf242460c121de42011cb589664.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 9,
+          "costumeName": "camelaon black",
+          "rotationCenterX": 18.280903218017244,
+          "rotationCenterY": 18.628375674153403
+        }
+      ]
+    },
+    {
+      "sourceFile": "978fa0f5fa0da8e3eddfe0bc9dc4ff99.svg",
+      "assetId": "978fa0f5fa0da8e3eddfe0bc9dc4ff99",
+      "dataFormat": "svg",
+      "chosenName": "carl2",
+      "chosenSprite": "kind of chess piece black",
+      "outputFile": "048__kind_of_chess_piece_black__carl2__978fa0f5fa0da8e3eddfe0bc9dc4ff99.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 11,
+          "costumeName": "carl2",
+          "rotationCenterX": 18.64733000000001,
+          "rotationCenterY": 17.88659843114337
+        }
+      ]
+    },
+    {
+      "sourceFile": "4efc7fd71952b2559a40cdbc5c710e2b.svg",
+      "assetId": "4efc7fd71952b2559a40cdbc5c710e2b",
+      "dataFormat": "svg",
+      "chosenName": "dozer black",
+      "chosenSprite": "kind of chess piece black",
+      "outputFile": "049__kind_of_chess_piece_black__dozer_black__4efc7fd71952b2559a40cdbc5c710e2b.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 2,
+          "costumeName": "dozer black",
+          "rotationCenterX": 16.455389999999966,
+          "rotationCenterY": 17.37222269272712
+        }
+      ]
+    },
+    {
+      "sourceFile": "a5c74b3946ec5f5f358a782f66468f43.svg",
+      "assetId": "a5c74b3946ec5f5f358a782f66468f43",
+      "dataFormat": "svg",
+      "chosenName": "knight black",
+      "chosenSprite": "kind of chess piece black",
+      "outputFile": "050__kind_of_chess_piece_black__knight_black__a5c74b3946ec5f5f358a782f66468f43.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 6,
+          "costumeName": "knight black",
+          "rotationCenterX": 16.764480590820312,
+          "rotationCenterY": 16.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "605760d08d5759b14cd6c63678ba089d.svg",
+      "assetId": "605760d08d5759b14cd6c63678ba089d",
+      "dataFormat": "svg",
+      "chosenName": "pb",
+      "chosenSprite": "kind of chess piece black",
+      "outputFile": "051__kind_of_chess_piece_black__pb__605760d08d5759b14cd6c63678ba089d.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 5,
+          "costumeName": "pb",
+          "rotationCenterX": 12.25,
+          "rotationCenterY": 16
+        }
+      ]
+    },
+    {
+      "sourceFile": "919211fb6cd55a4b7562292a4b8c6f0c.svg",
+      "assetId": "919211fb6cd55a4b7562292a4b8c6f0c",
+      "dataFormat": "svg",
+      "chosenName": "tem blck",
+      "chosenSprite": "kind of chess piece black",
+      "outputFile": "052__kind_of_chess_piece_black__tem_blck__919211fb6cd55a4b7562292a4b8c6f0c.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 3,
+          "costumeName": "tem blck",
+          "rotationCenterX": 16.027780000000007,
+          "rotationCenterY": 16.485504999999762
+        }
+      ]
+    },
+    {
+      "sourceFile": "8b8061c20da757feb2ac3e572b67b6d4.svg",
+      "assetId": "8b8061c20da757feb2ac3e572b67b6d4",
+      "dataFormat": "svg",
+      "chosenName": "10",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "053__kind_of_chess_piece_white4__10__8b8061c20da757feb2ac3e572b67b6d4.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 69,
+          "costumeName": "10",
+          "rotationCenterX": 16.455389999999994,
+          "rotationCenterY": 17.372222242957974
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 18,
+          "costumeName": "10",
+          "rotationCenterX": 16.455389999999994,
+          "rotationCenterY": 17.372222242957974
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 10,
+          "costumeName": "10",
+          "rotationCenterX": 16.455389999999994,
+          "rotationCenterY": 17.372222242957974
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 18,
+          "costumeName": "10",
+          "rotationCenterX": 16.455389999999994,
+          "rotationCenterY": 17.372222242957974
+        }
+      ]
+    },
+    {
+      "sourceFile": "90abd2fa0ad96374a61b181d4f6f4723.svg",
+      "assetId": "90abd2fa0ad96374a61b181d4f6f4723",
+      "dataFormat": "svg",
+      "chosenName": "1000_F_543599994_PaeUjGedr7ZbLqapPXTMQexXdNVKO0qJ",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "054__kind_of_chess_piece_white4__1000_F_543599994_PaeUjGedr7ZbLqapPXTMQexXdNVKO0qJ__90abd2fa0ad96374a61b181d4f6f4723.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 129,
+          "costumeName": "1000_F_543599994_PaeUjGedr7ZbLqapPXTMQexXdNVKO0qJ",
+          "rotationCenterX": 19.92157499999999,
+          "rotationCenterY": 17.399759999999986
+        }
+      ]
+    },
+    {
+      "sourceFile": "1b5670df575ff8648546b6c3e3a54375.svg",
+      "assetId": "1b5670df575ff8648546b6c3e3a54375",
+      "dataFormat": "svg",
+      "chosenName": "1085005",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "055__kind_of_chess_piece_white4__1085005__1b5670df575ff8648546b6c3e3a54375.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 135,
+          "costumeName": "1085005",
+          "rotationCenterX": 120.19680539056037,
+          "rotationCenterY": 76.92289297242718
+        }
+      ]
+    },
+    {
+      "sourceFile": "6c166965363cb437350ce1c4a4a63052.svg",
+      "assetId": "6c166965363cb437350ce1c4a4a63052",
+      "dataFormat": "svg",
+      "chosenName": "11",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "056__kind_of_chess_piece_white4__11__6c166965363cb437350ce1c4a4a63052.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 18,
+          "costumeName": "11",
+          "rotationCenterX": 16.341859999999997,
+          "rotationCenterY": 17.090059999999994
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 11,
+          "costumeName": "11",
+          "rotationCenterX": 16.341859999999997,
+          "rotationCenterY": 17.090059999999994
+        }
+      ]
+    },
+    {
+      "sourceFile": "f4f0a8488a6312704a7c6f097d8b76c2.svg",
+      "assetId": "f4f0a8488a6312704a7c6f097d8b76c2",
+      "dataFormat": "svg",
+      "chosenName": "1165858",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "057__kind_of_chess_piece_white4__1165858__f4f0a8488a6312704a7c6f097d8b76c2.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 119,
+          "costumeName": "1165858",
+          "rotationCenterX": 17.93352099509673,
+          "rotationCenterY": 16.60248656346343
+        }
+      ]
+    },
+    {
+      "sourceFile": "16b1a01970a9065a39b771f6667999ea.svg",
+      "assetId": "16b1a01970a9065a39b771f6667999ea",
+      "dataFormat": "svg",
+      "chosenName": "1197365",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "058__kind_of_chess_piece_white4__1197365__16b1a01970a9065a39b771f6667999ea.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 116,
+          "costumeName": "1197365",
+          "rotationCenterX": 18.633406768523457,
+          "rotationCenterY": 18.376164735876728
+        }
+      ]
+    },
+    {
+      "sourceFile": "5b1aadbf48176e9e3b810b3d4d4d452f.svg",
+      "assetId": "5b1aadbf48176e9e3b810b3d4d4d452f",
+      "dataFormat": "svg",
+      "chosenName": "12",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "059__kind_of_chess_piece_white4__12__5b1aadbf48176e9e3b810b3d4d4d452f.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 140,
+          "costumeName": "12",
+          "rotationCenterX": 12.986130000000003,
+          "rotationCenterY": 17.752595000000014
+        }
+      ]
+    },
+    {
+      "sourceFile": "5dfe8a63c39623d69df1fce85fddb57b.svg",
+      "assetId": "5dfe8a63c39623d69df1fce85fddb57b",
+      "dataFormat": "svg",
+      "chosenName": "1292604",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "060__kind_of_chess_piece_white4__1292604__5dfe8a63c39623d69df1fce85fddb57b.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 110,
+          "costumeName": "1292604",
+          "rotationCenterX": 18.595358983528456,
+          "rotationCenterY": 19.15279846633021
+        }
+      ]
+    },
+    {
+      "sourceFile": "b0b1031c4eed0e6c6eadc3bea1b6fa56.svg",
+      "assetId": "b0b1031c4eed0e6c6eadc3bea1b6fa56",
+      "dataFormat": "svg",
+      "chosenName": "1294345",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "061__kind_of_chess_piece_white4__1294345__b0b1031c4eed0e6c6eadc3bea1b6fa56.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 120,
+          "costumeName": "1294345",
+          "rotationCenterX": 14.907056643728737,
+          "rotationCenterY": 18.060318871506098
+        }
+      ]
+    },
+    {
+      "sourceFile": "e5daee175a0ae30fe1c708041ab7c006.svg",
+      "assetId": "e5daee175a0ae30fe1c708041ab7c006",
+      "dataFormat": "svg",
+      "chosenName": "1299374",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "062__kind_of_chess_piece_white4__1299374__e5daee175a0ae30fe1c708041ab7c006.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 121,
+          "costumeName": "1299374",
+          "rotationCenterX": 18.26650053427545,
+          "rotationCenterY": 18.64747371467061
+        }
+      ]
+    },
+    {
+      "sourceFile": "7464bd9bde9351350d9753b602e7dadc.svg",
+      "assetId": "7464bd9bde9351350d9753b602e7dadc",
+      "dataFormat": "svg",
+      "chosenName": "13",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "063__kind_of_chess_piece_white4__13__7464bd9bde9351350d9753b602e7dadc.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 142,
+          "costumeName": "13",
+          "rotationCenterX": 12.986130000000003,
+          "rotationCenterY": 17.752595000000014
+        }
+      ]
+    },
+    {
+      "sourceFile": "903ee0ddf5fd85c40d16f330a0dafb56.svg",
+      "assetId": "903ee0ddf5fd85c40d16f330a0dafb56",
+      "dataFormat": "svg",
+      "chosenName": "1321399",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "064__kind_of_chess_piece_white4__1321399__903ee0ddf5fd85c40d16f330a0dafb56.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 109,
+          "costumeName": "1321399",
+          "rotationCenterX": 147.86055191927466,
+          "rotationCenterY": 151.63864500000003
+        }
+      ]
+    },
+    {
+      "sourceFile": "692317bc8fe35f72e3eb99151e89f39b.svg",
+      "assetId": "692317bc8fe35f72e3eb99151e89f39b",
+      "dataFormat": "svg",
+      "chosenName": "14",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "065__kind_of_chess_piece_white4__14__692317bc8fe35f72e3eb99151e89f39b.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 137,
+          "costumeName": "14",
+          "rotationCenterX": 12.98612,
+          "rotationCenterY": 17.75258500000004
+        }
+      ]
+    },
+    {
+      "sourceFile": "9882c1102635a0d66cb43350232edf47.svg",
+      "assetId": "9882c1102635a0d66cb43350232edf47",
+      "dataFormat": "svg",
+      "chosenName": "147570",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "066__kind_of_chess_piece_white4__147570__9882c1102635a0d66cb43350232edf47.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 94,
+          "costumeName": "147570",
+          "rotationCenterX": 15.559558839795045,
+          "rotationCenterY": 18.42631
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 38,
+          "costumeName": "147570",
+          "rotationCenterX": 15.559558839795045,
+          "rotationCenterY": 18.42631
+        }
+      ]
+    },
+    {
+      "sourceFile": "42ef326da36d945047583b7765dc5d03.svg",
+      "assetId": "42ef326da36d945047583b7765dc5d03",
+      "dataFormat": "svg",
+      "chosenName": "15",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "067__kind_of_chess_piece_white4__15__42ef326da36d945047583b7765dc5d03.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 139,
+          "costumeName": "15",
+          "rotationCenterX": 12.982505000000003,
+          "rotationCenterY": 17.752579999999995
+        }
+      ]
+    },
+    {
+      "sourceFile": "5fe081f1c8baba9eee98caf66027800c.svg",
+      "assetId": "5fe081f1c8baba9eee98caf66027800c",
+      "dataFormat": "svg",
+      "chosenName": "153108",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "068__kind_of_chess_piece_white4__153108__5fe081f1c8baba9eee98caf66027800c.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 146,
+          "costumeName": "153108",
+          "rotationCenterX": 17.154130805831045,
+          "rotationCenterY": 19.38446711161569
+        }
+      ]
+    },
+    {
+      "sourceFile": "3dc9bd0391bf141eaa0b913f4a51e075.svg",
+      "assetId": "3dc9bd0391bf141eaa0b913f4a51e075",
+      "dataFormat": "svg",
+      "chosenName": "16",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "069__kind_of_chess_piece_white4__16__3dc9bd0391bf141eaa0b913f4a51e075.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 141,
+          "costumeName": "16",
+          "rotationCenterX": 12.98612,
+          "rotationCenterY": 17.75258500000004
+        }
+      ]
+    },
+    {
+      "sourceFile": "96f9fc94f7aa56263fd44ab644020253.svg",
+      "assetId": "96f9fc94f7aa56263fd44ab644020253",
+      "dataFormat": "svg",
+      "chosenName": "17",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "070__kind_of_chess_piece_white4__17__96f9fc94f7aa56263fd44ab644020253.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 143,
+          "costumeName": "17",
+          "rotationCenterX": 12.98612,
+          "rotationCenterY": 17.75258500000004
+        }
+      ]
+    },
+    {
+      "sourceFile": "13f54c0ba9e9282765d36a2901bc4073.svg",
+      "assetId": "13f54c0ba9e9282765d36a2901bc4073",
+      "dataFormat": "svg",
+      "chosenName": "1710299 (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "071__kind_of_chess_piece_white4__1710299_1__13f54c0ba9e9282765d36a2901bc4073.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 122,
+          "costumeName": "1710299 (1)",
+          "rotationCenterX": 19.319985947753565,
+          "rotationCenterY": 19.413548710600736
+        }
+      ]
+    },
+    {
+      "sourceFile": "8b476fa5eb1494fd759b2742ee786918.svg",
+      "assetId": "8b476fa5eb1494fd759b2742ee786918",
+      "dataFormat": "svg",
+      "chosenName": "1710299 (1) (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "072__kind_of_chess_piece_white4__1710299_1_1__8b476fa5eb1494fd759b2742ee786918.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 111,
+          "costumeName": "1710299 (1) (1)",
+          "rotationCenterX": 19.28655028925519,
+          "rotationCenterY": 19.3220888449207
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 43,
+          "costumeName": "1710299 (1) (1)",
+          "rotationCenterX": 19.28655028925519,
+          "rotationCenterY": 19.3220888449207
+        }
+      ]
+    },
+    {
+      "sourceFile": "20f146ada4575e62b01008b57e469742.svg",
+      "assetId": "20f146ada4575e62b01008b57e469742",
+      "dataFormat": "svg",
+      "chosenName": "1731337",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "073__kind_of_chess_piece_white4__1731337__20f146ada4575e62b01008b57e469742.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 118,
+          "costumeName": "1731337",
+          "rotationCenterX": 19.70019673980761,
+          "rotationCenterY": 18.356684716556828
+        }
+      ]
+    },
+    {
+      "sourceFile": "af7aae001c76988abdda5c12e165c417.svg",
+      "assetId": "af7aae001c76988abdda5c12e165c417",
+      "dataFormat": "svg",
+      "chosenName": "1792874 (1) (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "074__kind_of_chess_piece_white4__1792874_1_1__af7aae001c76988abdda5c12e165c417.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 123,
+          "costumeName": "1792874 (1) (1)",
+          "rotationCenterX": 17.00042528386936,
+          "rotationCenterY": 17.07035146162181
+        }
+      ]
+    },
+    {
+      "sourceFile": "ff3182815e3741ea0039be1853496510.svg",
+      "assetId": "ff3182815e3741ea0039be1853496510",
+      "dataFormat": "svg",
+      "chosenName": "1798092",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "075__kind_of_chess_piece_white4__1798092__ff3182815e3741ea0039be1853496510.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 134,
+          "costumeName": "1798092",
+          "rotationCenterX": 18.2574741446401,
+          "rotationCenterY": 18.233247765509248
+        }
+      ]
+    },
+    {
+      "sourceFile": "39e0eaba5f400b07dfc2564d0d32b6fc.svg",
+      "assetId": "39e0eaba5f400b07dfc2564d0d32b6fc",
+      "dataFormat": "svg",
+      "chosenName": "18",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "076__kind_of_chess_piece_white4__18__39e0eaba5f400b07dfc2564d0d32b6fc.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 136,
+          "costumeName": "18",
+          "rotationCenterX": 12.98612,
+          "rotationCenterY": 17.752575000000007
+        }
+      ]
+    },
+    {
+      "sourceFile": "79a21643a6af93205d31501660d87255.svg",
+      "assetId": "79a21643a6af93205d31501660d87255",
+      "dataFormat": "svg",
+      "chosenName": "1865345",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "077__kind_of_chess_piece_white4__1865345__79a21643a6af93205d31501660d87255.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 151,
+          "costumeName": "1865345",
+          "rotationCenterX": 18.21738613362328,
+          "rotationCenterY": 18.188994938199926
+        }
+      ]
+    },
+    {
+      "sourceFile": "420cbd6b7b2309b4f329d0da47e37986.svg",
+      "assetId": "420cbd6b7b2309b4f329d0da47e37986",
+      "dataFormat": "svg",
+      "chosenName": "1873373",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "078__kind_of_chess_piece_white4__1873373__420cbd6b7b2309b4f329d0da47e37986.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 99,
+          "costumeName": "1873373",
+          "rotationCenterX": 18.347518461429587,
+          "rotationCenterY": 18.3511098175035
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 42,
+          "costumeName": "1873373",
+          "rotationCenterX": 18.347518461429587,
+          "rotationCenterY": 18.3511098175035
+        }
+      ]
+    },
+    {
+      "sourceFile": "5b85c2bede56fa9b7695a7dff08b2f30.svg",
+      "assetId": "5b85c2bede56fa9b7695a7dff08b2f30",
+      "dataFormat": "svg",
+      "chosenName": "1877810",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "079__kind_of_chess_piece_white4__1877810__5b85c2bede56fa9b7695a7dff08b2f30.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 132,
+          "costumeName": "1877810",
+          "rotationCenterX": 16.94981025059988,
+          "rotationCenterY": 18.84158079166852
+        }
+      ]
+    },
+    {
+      "sourceFile": "e55c0570fa5b98e3a9572e3e6198f9b3.svg",
+      "assetId": "e55c0570fa5b98e3a9572e3e6198f9b3",
+      "dataFormat": "svg",
+      "chosenName": "19",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "080__kind_of_chess_piece_white4__19__e55c0570fa5b98e3a9572e3e6198f9b3.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 133,
+          "costumeName": "19",
+          "rotationCenterX": 16.949780250599844,
+          "rotationCenterY": 18.841580791668406
+        }
+      ]
+    },
+    {
+      "sourceFile": "8584e6bdad458b075c7742bdf3acd5f1.svg",
+      "assetId": "8584e6bdad458b075c7742bdf3acd5f1",
+      "dataFormat": "svg",
+      "chosenName": "2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "081__kind_of_chess_piece_white4__2__8584e6bdad458b075c7742bdf3acd5f1.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 58,
+          "costumeName": "2",
+          "rotationCenterX": 14.886306977416496,
+          "rotationCenterY": 20.898917723161503
+        }
+      ]
+    },
+    {
+      "sourceFile": "f212db5fbbe99210a5f409a4928ac1df.svg",
+      "assetId": "f212db5fbbe99210a5f409a4928ac1df",
+      "dataFormat": "svg",
+      "chosenName": "20",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "082__kind_of_chess_piece_white4__20__f212db5fbbe99210a5f409a4928ac1df.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 148,
+          "costumeName": "20",
+          "rotationCenterX": 17.15413366541145,
+          "rotationCenterY": 19.38446711161569
+        }
+      ]
+    },
+    {
+      "sourceFile": "096e73c11d4219e9d75b09c2c499360c.svg",
+      "assetId": "096e73c11d4219e9d75b09c2c499360c",
+      "dataFormat": "svg",
+      "chosenName": "2099119",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "083__kind_of_chess_piece_white4__2099119__096e73c11d4219e9d75b09c2c499360c.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 105,
+          "costumeName": "2099119",
+          "rotationCenterX": 16.008623045993488,
+          "rotationCenterY": 17.582428013376585
+        }
+      ]
+    },
+    {
+      "sourceFile": "5a3f5cbbbe49a034be318cfcd3a0d1c1.svg",
+      "assetId": "5a3f5cbbbe49a034be318cfcd3a0d1c1",
+      "dataFormat": "svg",
+      "chosenName": "21",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "084__kind_of_chess_piece_white4__21__5a3f5cbbbe49a034be318cfcd3a0d1c1.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 147,
+          "costumeName": "21",
+          "rotationCenterX": 19.384395519033887,
+          "rotationCenterY": 17.154205257993226
+        }
+      ]
+    },
+    {
+      "sourceFile": "341718a2cb926e72f63f74dbd27edc47.svg",
+      "assetId": "341718a2cb926e72f63f74dbd27edc47",
+      "dataFormat": "svg",
+      "chosenName": "22",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "085__kind_of_chess_piece_white4__22__341718a2cb926e72f63f74dbd27edc47.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 4,
+          "costumeName": "22",
+          "rotationCenterX": 14.25,
+          "rotationCenterY": 15.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "074c2db7d5fb9de1e60f6b3bf2949c2d.svg",
+      "assetId": "074c2db7d5fb9de1e60f6b3bf2949c2d",
+      "dataFormat": "svg",
+      "chosenName": "23123",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "086__kind_of_chess_piece_white4__23123__074c2db7d5fb9de1e60f6b3bf2949c2d.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 96,
+          "costumeName": "23123",
+          "rotationCenterX": 18.83452500400935,
+          "rotationCenterY": 18.876404351188768
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 40,
+          "costumeName": "23123",
+          "rotationCenterX": 18.83452500400935,
+          "rotationCenterY": 18.876404351188768
+        }
+      ]
+    },
+    {
+      "sourceFile": "c3f6cdf72341ecb920a7d8cef5c3d7eb.svg",
+      "assetId": "c3f6cdf72341ecb920a7d8cef5c3d7eb",
+      "dataFormat": "svg",
+      "chosenName": "2474728 (2) (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "087__kind_of_chess_piece_white4__2474728_2_1__c3f6cdf72341ecb920a7d8cef5c3d7eb.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 98,
+          "costumeName": "2474728 (2) (1)",
+          "rotationCenterX": 43.23462852848024,
+          "rotationCenterY": 17.426680000000005
+        }
+      ]
+    },
+    {
+      "sourceFile": "12af60ace8d0de187f097177ac2f16f9.svg",
+      "assetId": "12af60ace8d0de187f097177ac2f16f9",
+      "dataFormat": "svg",
+      "chosenName": "2474728 (2) (1) (1) (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "088__kind_of_chess_piece_white4__2474728_2_1_1_1__12af60ace8d0de187f097177ac2f16f9.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 130,
+          "costumeName": "2474728 (2) (1) (1) (1)",
+          "rotationCenterX": 15.214189422895743,
+          "rotationCenterY": 17.73842122374589
+        }
+      ]
+    },
+    {
+      "sourceFile": "6a99db7607b773ba49db6c604b2ad9ae.svg",
+      "assetId": "6a99db7607b773ba49db6c604b2ad9ae",
+      "dataFormat": "svg",
+      "chosenName": "2474728 (2) (1) (1) (1)2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "089__kind_of_chess_piece_white4__2474728_2_1_1_1_2__6a99db7607b773ba49db6c604b2ad9ae.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 131,
+          "costumeName": "2474728 (2) (1) (1) (1)2",
+          "rotationCenterX": 15.214189422895743,
+          "rotationCenterY": 17.73842122374589
+        }
+      ]
+    },
+    {
+      "sourceFile": "c3bdc9d28c5d800d8fa2abd897c7f1d1.svg",
+      "assetId": "c3bdc9d28c5d800d8fa2abd897c7f1d1",
+      "dataFormat": "svg",
+      "chosenName": "25777",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "090__kind_of_chess_piece_white4__25777__c3bdc9d28c5d800d8fa2abd897c7f1d1.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 150,
+          "costumeName": "25777",
+          "rotationCenterX": 17.60589797825409,
+          "rotationCenterY": 17.623749324144512
+        }
+      ]
+    },
+    {
+      "sourceFile": "6c61c5312e8d0bb92e12c4b2984de1c1.svg",
+      "assetId": "6c61c5312e8d0bb92e12c4b2984de1c1",
+      "dataFormat": "svg",
+      "chosenName": "30106",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "091__kind_of_chess_piece_white4__30106__6c61c5312e8d0bb92e12c4b2984de1c1.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 107,
+          "costumeName": "30106",
+          "rotationCenterX": 15.752816885789827,
+          "rotationCenterY": 14.941894443126444
+        }
+      ]
+    },
+    {
+      "sourceFile": "f232bb2dc781a7ba32491ebe35071703.svg",
+      "assetId": "f232bb2dc781a7ba32491ebe35071703",
+      "dataFormat": "svg",
+      "chosenName": "30274",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "092__kind_of_chess_piece_white4__30274__f232bb2dc781a7ba32491ebe35071703.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 106,
+          "costumeName": "30274",
+          "rotationCenterX": 17.343680000000006,
+          "rotationCenterY": 16.16390552487087
+        }
+      ]
+    },
+    {
+      "sourceFile": "ccfd8b348db8b4537459170add49bfb1.svg",
+      "assetId": "ccfd8b348db8b4537459170add49bfb1",
+      "dataFormat": "svg",
+      "chosenName": "304185",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "093__kind_of_chess_piece_white4__304185__ccfd8b348db8b4537459170add49bfb1.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 49,
+          "costumeName": "304185",
+          "rotationCenterX": 6.474170362472677,
+          "rotationCenterY": 23.269373201428095
+        }
+      ]
+    },
+    {
+      "sourceFile": "c6d5d9ed80a198f97fc51956ca1bbd32.svg",
+      "assetId": "c6d5d9ed80a198f97fc51956ca1bbd32",
+      "dataFormat": "svg",
+      "chosenName": "310931",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "094__kind_of_chess_piece_white4__310931__c6d5d9ed80a198f97fc51956ca1bbd32.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 93,
+          "costumeName": "310931",
+          "rotationCenterX": 18.009395000000012,
+          "rotationCenterY": 17.670685893216103
+        }
+      ]
+    },
+    {
+      "sourceFile": "735db4a8fa9da28f2d34816ba666e64d.svg",
+      "assetId": "735db4a8fa9da28f2d34816ba666e64d",
+      "dataFormat": "svg",
+      "chosenName": "31RE-E2q7eL",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "095__kind_of_chess_piece_white4__31RE-E2q7eL__735db4a8fa9da28f2d34816ba666e64d.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 115,
+          "costumeName": "31RE-E2q7eL",
+          "rotationCenterX": 17.085738831095796,
+          "rotationCenterY": 16.521907748554298
+        }
+      ]
+    },
+    {
+      "sourceFile": "2081144747fa528aa5a34f15a29c41b6.svg",
+      "assetId": "2081144747fa528aa5a34f15a29c41b6",
+      "dataFormat": "svg",
+      "chosenName": "36388",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "096__kind_of_chess_piece_white4__36388__2081144747fa528aa5a34f15a29c41b6.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 108,
+          "costumeName": "36388",
+          "rotationCenterX": 55.98416399486217,
+          "rotationCenterY": 53.15129034279889
+        }
+      ]
+    },
+    {
+      "sourceFile": "68df40b465ee65f65a2396f35fe0bc21.svg",
+      "assetId": "68df40b465ee65f65a2396f35fe0bc21",
+      "dataFormat": "svg",
+      "chosenName": "36389",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "097__kind_of_chess_piece_white4__36389__68df40b465ee65f65a2396f35fe0bc21.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 102,
+          "costumeName": "36389",
+          "rotationCenterX": 229.98526602544698,
+          "rotationCenterY": 180
+        }
+      ]
+    },
+    {
+      "sourceFile": "c018beb81d8ed065afe63188e4f29955.svg",
+      "assetId": "c018beb81d8ed065afe63188e4f29955",
+      "dataFormat": "svg",
+      "chosenName": "36390",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "098__kind_of_chess_piece_white4__36390__c018beb81d8ed065afe63188e4f29955.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 103,
+          "costumeName": "36390",
+          "rotationCenterX": 213.3271383415257,
+          "rotationCenterY": 203.5892884681744
+        }
+      ]
+    },
+    {
+      "sourceFile": "0b9b6ca306e677b44f4b0355f7bd9bf3.svg",
+      "assetId": "0b9b6ca306e677b44f4b0355f7bd9bf3",
+      "dataFormat": "svg",
+      "chosenName": "36391",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "099__kind_of_chess_piece_white4__36391__0b9b6ca306e677b44f4b0355f7bd9bf3.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 101,
+          "costumeName": "36391",
+          "rotationCenterX": 86.56970441912935,
+          "rotationCenterY": 88.88306284753817
+        }
+      ]
+    },
+    {
+      "sourceFile": "41314e1a70797c4c5a902753a95cb67d.svg",
+      "assetId": "41314e1a70797c4c5a902753a95cb67d",
+      "dataFormat": "svg",
+      "chosenName": "36392",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "100__kind_of_chess_piece_white4__36392__41314e1a70797c4c5a902753a95cb67d.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 100,
+          "costumeName": "36392",
+          "rotationCenterX": 64.6564490689901,
+          "rotationCenterY": 82.74420297782129
+        }
+      ]
+    },
+    {
+      "sourceFile": "b896c58b9673b191222977d6ebc2cca8.svg",
+      "assetId": "b896c58b9673b191222977d6ebc2cca8",
+      "dataFormat": "svg",
+      "chosenName": "36393",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "101__kind_of_chess_piece_white4__36393__b896c58b9673b191222977d6ebc2cca8.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 104,
+          "costumeName": "36393",
+          "rotationCenterX": 240,
+          "rotationCenterY": 200.4148149207682
+        }
+      ]
+    },
+    {
+      "sourceFile": "c27583611443af136a1499cbe2b9787e.svg",
+      "assetId": "c27583611443af136a1499cbe2b9787e",
+      "dataFormat": "svg",
+      "chosenName": "4",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "102__kind_of_chess_piece_white4__4__c27583611443af136a1499cbe2b9787e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 64,
+          "costumeName": "4",
+          "rotationCenterX": 17.60656062268228,
+          "rotationCenterY": 16.802695
+        }
+      ]
+    },
+    {
+      "sourceFile": "711e37d2135e7d033583f5048e1d4c0f.svg",
+      "assetId": "711e37d2135e7d033583f5048e1d4c0f",
+      "dataFormat": "svg",
+      "chosenName": "40168",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "103__kind_of_chess_piece_white4__40168__711e37d2135e7d033583f5048e1d4c0f.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 117,
+          "costumeName": "40168",
+          "rotationCenterX": 15.76913183052497,
+          "rotationCenterY": 17.166334322588455
+        }
+      ]
+    },
+    {
+      "sourceFile": "b6ccbd2626ea9e970dbcc4c8fba8ab61.svg",
+      "assetId": "b6ccbd2626ea9e970dbcc4c8fba8ab61",
+      "dataFormat": "svg",
+      "chosenName": "47621 (1) (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "104__kind_of_chess_piece_white4__47621_1_1__b6ccbd2626ea9e970dbcc4c8fba8ab61.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 112,
+          "costumeName": "47621 (1) (1)",
+          "rotationCenterX": 18.613847202215226,
+          "rotationCenterY": 19.390022777142775
+        }
+      ]
+    },
+    {
+      "sourceFile": "6ae646fc4945f703613187a212bbecec.svg",
+      "assetId": "6ae646fc4945f703613187a212bbecec",
+      "dataFormat": "svg",
+      "chosenName": "5",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "105__kind_of_chess_piece_white4__5__6ae646fc4945f703613187a212bbecec.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 6,
+          "costumeName": "5",
+          "rotationCenterX": 14.25,
+          "rotationCenterY": 15.75
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 5,
+          "costumeName": "5",
+          "rotationCenterX": 14.249999999999943,
+          "rotationCenterY": 15.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "3adaf57471191b2494e2c3f51804cd0f.svg",
+      "assetId": "3adaf57471191b2494e2c3f51804cd0f",
+      "dataFormat": "svg",
+      "chosenName": "6",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "106__kind_of_chess_piece_white4__6__3adaf57471191b2494e2c3f51804cd0f.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 5,
+          "costumeName": "6",
+          "rotationCenterX": 12.25,
+          "rotationCenterY": 16
+        }
+      ]
+    },
+    {
+      "sourceFile": "b68e6d6a2e5923f2e8e192a6235d1a57.svg",
+      "assetId": "b68e6d6a2e5923f2e8e192a6235d1a57",
+      "dataFormat": "svg",
+      "chosenName": "7",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "107__kind_of_chess_piece_white4__7__b68e6d6a2e5923f2e8e192a6235d1a57.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 15,
+          "costumeName": "7",
+          "rotationCenterX": 14.741449999999986,
+          "rotationCenterY": 18.342978207114072
+        }
+      ]
+    },
+    {
+      "sourceFile": "fdc7f086b0d4c84c2db568a4631da541.svg",
+      "assetId": "fdc7f086b0d4c84c2db568a4631da541",
+      "dataFormat": "svg",
+      "chosenName": "8",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "108__kind_of_chess_piece_white4__8__fdc7f086b0d4c84c2db568a4631da541.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 63,
+          "costumeName": "8",
+          "rotationCenterX": 18.330999722870388,
+          "rotationCenterY": 17.086585000000014
+        }
+      ]
+    },
+    {
+      "sourceFile": "dedab0a98e4c1a313fec5eb4888de3f7.svg",
+      "assetId": "dedab0a98e4c1a313fec5eb4888de3f7",
+      "dataFormat": "svg",
+      "chosenName": "8 (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "109__kind_of_chess_piece_white4__8_1__dedab0a98e4c1a313fec5eb4888de3f7.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 44,
+          "costumeName": "8 (1)",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 17.25
+        }
+      ]
+    },
+    {
+      "sourceFile": "f1b53ced872739af851cf6e9bc81c945.svg",
+      "assetId": "f1b53ced872739af851cf6e9bc81c945",
+      "dataFormat": "svg",
+      "chosenName": "9",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "110__kind_of_chess_piece_white4__9__f1b53ced872739af851cf6e9bc81c945.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 138,
+          "costumeName": "9",
+          "rotationCenterX": 12.982515000000006,
+          "rotationCenterY": 17.752579999999995
+        }
+      ]
+    },
+    {
+      "sourceFile": "d79c65280bd04fb8269dae5804e9f4cf.svg",
+      "assetId": "d79c65280bd04fb8269dae5804e9f4cf",
+      "dataFormat": "svg",
+      "chosenName": "aanca-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "111__kind_of_chess_piece_white4__aanca-b__d79c65280bd04fb8269dae5804e9f4cf.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 88,
+          "costumeName": "aanca-b",
+          "rotationCenterX": 15.941706549999992,
+          "rotationCenterY": 16.482571699999994
+        }
+      ]
+    },
+    {
+      "sourceFile": "d83d5854021ae5d897309e6953729162.svg",
+      "assetId": "d83d5854021ae5d897309e6953729162",
+      "dataFormat": "svg",
+      "chosenName": "aanca-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "112__kind_of_chess_piece_white4__aanca-w__d83d5854021ae5d897309e6953729162.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 87,
+          "costumeName": "aanca-w",
+          "rotationCenterX": 16.191706549999964,
+          "rotationCenterY": 16.732571699999994
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 32,
+          "costumeName": "aanca-w",
+          "rotationCenterX": 16.191706549999964,
+          "rotationCenterY": 16.732571699999994
+        }
+      ]
+    },
+    {
+      "sourceFile": "ede4313e74ad5092d33224a5afa274fa.svg",
+      "assetId": "ede4313e74ad5092d33224a5afa274fa",
+      "dataFormat": "svg",
+      "chosenName": "amazon",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "113__kind_of_chess_piece_white4__amazon__ede4313e74ad5092d33224a5afa274fa.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 55,
+          "costumeName": "amazon",
+          "rotationCenterX": 14.279050000000012,
+          "rotationCenterY": 20.393675
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 26,
+          "costumeName": "amazon",
+          "rotationCenterX": 14.279050000000012,
+          "rotationCenterY": 20.393675
+        }
+      ]
+    },
+    {
+      "sourceFile": "1e44fb259ec351deff3c2a17a0e29828.svg",
+      "assetId": "1e44fb259ec351deff3c2a17a0e29828",
+      "dataFormat": "svg",
+      "chosenName": "archbishop-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "114__kind_of_chess_piece_white4__archbishop-b__1e44fb259ec351deff3c2a17a0e29828.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 34,
+          "costumeName": "archbishop-b",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 17.491950000000003
+        }
+      ]
+    },
+    {
+      "sourceFile": "ad9b5f634238e83241c9091c4a2fe7ce.svg",
+      "assetId": "ad9b5f634238e83241c9091c4a2fe7ce",
+      "dataFormat": "svg",
+      "chosenName": "archbishop-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "115__kind_of_chess_piece_white4__archbishop-w__ad9b5f634238e83241c9091c4a2fe7ce.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 33,
+          "costumeName": "archbishop-w",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 17.491939746392973
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 23,
+          "costumeName": "Chess_alt45",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 17.491939746392973
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 19,
+          "costumeName": "archbishop-w",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 17.491939746392973
+        }
+      ]
+    },
+    {
+      "sourceFile": "378111fa7e766a10440b76ca7155c570.svg",
+      "assetId": "378111fa7e766a10440b76ca7155c570",
+      "dataFormat": "svg",
+      "chosenName": "Ball-e",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "116__kind_of_chess_piece_white4__Ball-e__378111fa7e766a10440b76ca7155c570.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 149,
+          "costumeName": "Ball-e",
+          "rotationCenterX": 16.966665000000006,
+          "rotationCenterY": 16.966665000000006
+        }
+      ]
+    },
+    {
+      "sourceFile": "0ef2f0cf7b5c590a8553b9ef41990e5e.svg",
+      "assetId": "0ef2f0cf7b5c590a8553b9ef41990e5e",
+      "dataFormat": "svg",
+      "chosenName": "bard",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "117__kind_of_chess_piece_white4__bard__0ef2f0cf7b5c590a8553b9ef41990e5e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 38,
+          "costumeName": "bard",
+          "rotationCenterX": 16.59645931647495,
+          "rotationCenterY": 14.978502810158261
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 22,
+          "costumeName": "bard",
+          "rotationCenterX": 16.59645931647495,
+          "rotationCenterY": 14.978502810158261
+        }
+      ]
+    },
+    {
+      "sourceFile": "8feab435b11811caf040abb0bb8f6db1.svg",
+      "assetId": "8feab435b11811caf040abb0bb8f6db1",
+      "dataFormat": "svg",
+      "chosenName": "bb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "118__kind_of_chess_piece_white4__bb__8feab435b11811caf040abb0bb8f6db1.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 76,
+          "costumeName": "bb",
+          "rotationCenterX": 17.249999999999915,
+          "rotationCenterY": 17.40759342442513
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 3,
+          "costumeName": "bb",
+          "rotationCenterX": 17.249999999999915,
+          "rotationCenterY": 17.40759342442513
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 3,
+          "costumeName": "bb",
+          "rotationCenterX": 17.249999999999915,
+          "rotationCenterY": 17.40759342442513
+        }
+      ]
+    },
+    {
+      "sourceFile": "d9168a9a276ef7f4efc0af76f7d7d17d.svg",
+      "assetId": "d9168a9a276ef7f4efc0af76f7d7d17d",
+      "dataFormat": "svg",
+      "chosenName": "bishop white",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "119__kind_of_chess_piece_white4__bishop_white__d9168a9a276ef7f4efc0af76f7d7d17d.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 7,
+          "costumeName": "bishop white",
+          "rotationCenterX": 17.250004299396892,
+          "rotationCenterY": 17.407589504471474
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 6,
+          "costumeName": "bishop white",
+          "rotationCenterX": 17.250004299396892,
+          "rotationCenterY": 17.407589504471474
+        }
+      ]
+    },
+    {
+      "sourceFile": "bdafad8219bb91c8153d4ac03153fde5.svg",
+      "assetId": "bdafad8219bb91c8153d4ac03153fde5",
+      "dataFormat": "svg",
+      "chosenName": "bishop white3",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "120__kind_of_chess_piece_white4__bishop_white3__bdafad8219bb91c8153d4ac03153fde5.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 155,
+          "costumeName": "bishop white3",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 20.226395294032244
+        }
+      ]
+    },
+    {
+      "sourceFile": "a40c3c679a707fb14da694a629b9f5cf.svg",
+      "assetId": "a40c3c679a707fb14da694a629b9f5cf",
+      "dataFormat": "svg",
+      "chosenName": "bishop white4",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "121__kind_of_chess_piece_white4__bishop_white4__a40c3c679a707fb14da694a629b9f5cf.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 3,
+          "costumeName": "bishop white4",
+          "rotationCenterX": 17.250004299396892,
+          "rotationCenterY": 17.407589504471474
+        }
+      ]
+    },
+    {
+      "sourceFile": "eb5191e704f2d22a4370f22c2ee5c9fb.svg",
+      "assetId": "eb5191e704f2d22a4370f22c2ee5c9fb",
+      "dataFormat": "svg",
+      "chosenName": "black-hole-emoji-1024x1024-btoxw50k (1) (1) (1) (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "122__kind_of_chess_piece_white4__black-hole-emoji-1024x1024-btoxw50k_1_1_1_1__eb5191e704f2d22a4370f22c2ee5c9fb.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 125,
+          "costumeName": "black-hole-emoji-1024x1024-btoxw50k (1) (1) (1) (1)",
+          "rotationCenterX": 17.9546130247237,
+          "rotationCenterY": 17.93280500000006
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 44,
+          "costumeName": "black-hole-emoji-1024x1024-btoxw50k (1) (1) (1) (1)",
+          "rotationCenterX": 17.9546130247237,
+          "rotationCenterY": 17.93280500000006
+        }
+      ]
+    },
+    {
+      "sourceFile": "b374aafa9e9f79abb968dff120c797be.svg",
+      "assetId": "b374aafa9e9f79abb968dff120c797be",
+      "dataFormat": "svg",
+      "chosenName": "black-hole-emoji-1024x1024-btoxw50k (1) (1) (1) (1)2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "123__kind_of_chess_piece_white4__black-hole-emoji-1024x1024-btoxw50k_1_1_1_1_2__b374aafa9e9f79abb968dff120c797be.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 126,
+          "costumeName": "black-hole-emoji-1024x1024-btoxw50k (1) (1) (1) (1)2",
+          "rotationCenterX": 17.9546190329649,
+          "rotationCenterY": 17.932805000000087
+        }
+      ]
+    },
+    {
+      "sourceFile": "53cd45e066d0a2730ab84d3c95fc9667.svg",
+      "assetId": "53cd45e066d0a2730ab84d3c95fc9667",
+      "dataFormat": "svg",
+      "chosenName": "boat-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "124__kind_of_chess_piece_white4__boat-b__53cd45e066d0a2730ab84d3c95fc9667.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 30,
+          "costumeName": "boat-b",
+          "rotationCenterX": 17.308225767022634,
+          "rotationCenterY": 16.973055102411337
+        }
+      ]
+    },
+    {
+      "sourceFile": "9e095a0a2c92e9ac01c881d851b367b0.svg",
+      "assetId": "9e095a0a2c92e9ac01c881d851b367b0",
+      "dataFormat": "svg",
+      "chosenName": "boat-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "125__kind_of_chess_piece_white4__boat-w__9e095a0a2c92e9ac01c881d851b367b0.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 29,
+          "costumeName": "boat-w",
+          "rotationCenterX": 17.30822554613465,
+          "rotationCenterY": 16.973053066342786
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 17,
+          "costumeName": "boat-w",
+          "rotationCenterX": 17.30822554613465,
+          "rotationCenterY": 16.973053066342786
+        }
+      ]
+    },
+    {
+      "sourceFile": "9f5dc67f7b91bbcce8a91a0700eb2bf5.svg",
+      "assetId": "9f5dc67f7b91bbcce8a91a0700eb2bf5",
+      "dataFormat": "svg",
+      "chosenName": "bouncing bishop",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "126__kind_of_chess_piece_white4__bouncing_bishop__9f5dc67f7b91bbcce8a91a0700eb2bf5.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 48,
+          "costumeName": "bouncing bishop",
+          "rotationCenterX": 17.218297500000006,
+          "rotationCenterY": 18.198389396808096
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 25,
+          "costumeName": "bouncing bishop white",
+          "rotationCenterX": 17.218297500000006,
+          "rotationCenterY": 18.198389396808096
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 25,
+          "costumeName": "bouncing bishop white",
+          "rotationCenterX": 17.218297500000006,
+          "rotationCenterY": 18.198389396808096
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 24,
+          "costumeName": "bouncing bishop",
+          "rotationCenterX": 17.218297500000006,
+          "rotationCenterY": 18.198389396808096
+        }
+      ]
+    },
+    {
+      "sourceFile": "d1629e40f0ca5a2acdba4f5bf73a351d.svg",
+      "assetId": "d1629e40f0ca5a2acdba4f5bf73a351d",
+      "dataFormat": "svg",
+      "chosenName": "buffalob",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "127__kind_of_chess_piece_white4__buffalob__d1629e40f0ca5a2acdba4f5bf73a351d.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 166,
+          "costumeName": "buffalob",
+          "rotationCenterX": 15.28662601448147,
+          "rotationCenterY": 16.75086859645927
+        }
+      ]
+    },
+    {
+      "sourceFile": "668ab9f21ab12e2076d57df65323801c.svg",
+      "assetId": "668ab9f21ab12e2076d57df65323801c",
+      "dataFormat": "svg",
+      "chosenName": "buffalow",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "128__kind_of_chess_piece_white4__buffalow__668ab9f21ab12e2076d57df65323801c.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 167,
+          "costumeName": "buffalow",
+          "rotationCenterX": 15.286622004827137,
+          "rotationCenterY": 16.750868434945517
+        }
+      ]
+    },
+    {
+      "sourceFile": "a1647d6e6f0e093557287250cfe38fa9.svg",
+      "assetId": "a1647d6e6f0e093557287250cfe38fa9",
+      "dataFormat": "svg",
+      "chosenName": "bw2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "129__kind_of_chess_piece_white4__bw2__a1647d6e6f0e093557287250cfe38fa9.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 61,
+          "costumeName": "bw2",
+          "rotationCenterX": 17.249990000000054,
+          "rotationCenterY": 17.40758500000001
+        }
+      ]
+    },
+    {
+      "sourceFile": "3ab011b6f63f49bb00656c5e172372d6.svg",
+      "assetId": "3ab011b6f63f49bb00656c5e172372d6",
+      "dataFormat": "svg",
+      "chosenName": "bw2 (3)2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "130__kind_of_chess_piece_white4__bw2_3_2__3ab011b6f63f49bb00656c5e172372d6.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 57,
+          "costumeName": "bw2 (3)2",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 17.868781701714312
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 27,
+          "costumeName": "bw2 (3)2",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 17.868781701714312
+        }
+      ]
+    },
+    {
+      "sourceFile": "11da786a630e1d3c67f9e4a9cf59350b.svg",
+      "assetId": "11da786a630e1d3c67f9e4a9cf59350b",
+      "dataFormat": "svg",
+      "chosenName": "bw3",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "131__kind_of_chess_piece_white4__bw3__11da786a630e1d3c67f9e4a9cf59350b.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 60,
+          "costumeName": "bw3",
+          "rotationCenterX": 17.249989999999997,
+          "rotationCenterY": 17.40758500000001
+        }
+      ]
+    },
+    {
+      "sourceFile": "f725b04a444dafb91980d92adb220b6b.svg",
+      "assetId": "f725b04a444dafb91980d92adb220b6b",
+      "dataFormat": "svg",
+      "chosenName": "bw3 (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "132__kind_of_chess_piece_white4__bw3_1__f725b04a444dafb91980d92adb220b6b.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 62,
+          "costumeName": "bw3 (1)",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 18.135617030012043
+        }
+      ]
+    },
+    {
+      "sourceFile": "f2a7b240590b2ca43f76904e412f5f80.svg",
+      "assetId": "f2a7b240590b2ca43f76904e412f5f80",
+      "dataFormat": "svg",
+      "chosenName": "bw3 (1)2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "133__kind_of_chess_piece_white4__bw3_1_2__f2a7b240590b2ca43f76904e412f5f80.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 154,
+          "costumeName": "bw3 (1)2",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 18.135617030012043
+        }
+      ]
+    },
+    {
+      "sourceFile": "ac20d2f7df6ab1e627a6607890460ae0.svg",
+      "assetId": "ac20d2f7df6ab1e627a6607890460ae0",
+      "dataFormat": "svg",
+      "chosenName": "camelaon",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "134__kind_of_chess_piece_white4__camelaon__ac20d2f7df6ab1e627a6607890460ae0.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 40,
+          "costumeName": "camelaon",
+          "rotationCenterX": 18.280903218017244,
+          "rotationCenterY": 18.628375674153176
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 23,
+          "costumeName": "camelaon",
+          "rotationCenterX": 18.280903218017244,
+          "rotationCenterY": 18.628375674153176
+        }
+      ]
+    },
+    {
+      "sourceFile": "eb38d3cc0c45e05d560df6af84f09f80.svg",
+      "assetId": "eb38d3cc0c45e05d560df6af84f09f80",
+      "dataFormat": "svg",
+      "chosenName": "cantaur-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "135__kind_of_chess_piece_white4__cantaur-b__eb38d3cc0c45e05d560df6af84f09f80.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 22,
+          "costumeName": "cantaur-b",
+          "rotationCenterX": 14.349287565243117,
+          "rotationCenterY": 18.62380999999999
+        }
+      ]
+    },
+    {
+      "sourceFile": "65f9b5dac9b2087a014a744c3ee01dcd.svg",
+      "assetId": "65f9b5dac9b2087a014a744c3ee01dcd",
+      "dataFormat": "svg",
+      "chosenName": "cantaur-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "136__kind_of_chess_piece_white4__cantaur-w__65f9b5dac9b2087a014a744c3ee01dcd.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 21,
+          "costumeName": "cantaur-w",
+          "rotationCenterX": 14.349287681796966,
+          "rotationCenterY": 18.623809988079103
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 13,
+          "costumeName": "cantaur-w",
+          "rotationCenterX": 14.349287681796966,
+          "rotationCenterY": 18.623809988079103
+        }
+      ]
+    },
+    {
+      "sourceFile": "263148bc455885ab8a8edeb9554f61a0.svg",
+      "assetId": "263148bc455885ab8a8edeb9554f61a0",
+      "dataFormat": "svg",
+      "chosenName": "catlew",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "137__kind_of_chess_piece_white4__catlew__263148bc455885ab8a8edeb9554f61a0.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 165,
+          "costumeName": "catlew",
+          "rotationCenterX": 16.962771253079694,
+          "rotationCenterY": 14.611140249803867
+        }
+      ]
+    },
+    {
+      "sourceFile": "4f6a9f3d1aae45a02e59117c64232fc0.svg",
+      "assetId": "4f6a9f3d1aae45a02e59117c64232fc0",
+      "dataFormat": "svg",
+      "chosenName": "chancellor-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "138__kind_of_chess_piece_white4__chancellor-b__4f6a9f3d1aae45a02e59117c64232fc0.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 32,
+          "costumeName": "chancellor-b",
+          "rotationCenterX": 13.70129833319993,
+          "rotationCenterY": 17.99526519999992
+        }
+      ]
+    },
+    {
+      "sourceFile": "59fed24e8f8b7957f3fdfe9ebdb98777.svg",
+      "assetId": "59fed24e8f8b7957f3fdfe9ebdb98777",
+      "dataFormat": "svg",
+      "chosenName": "chancellor-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "139__kind_of_chess_piece_white4__chancellor-w__59fed24e8f8b7957f3fdfe9ebdb98777.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 31,
+          "costumeName": "chancellor-w",
+          "rotationCenterX": 13.701302605202983,
+          "rotationCenterY": 17.995255200000003
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 22,
+          "costumeName": "Chess_clt45 (1)",
+          "rotationCenterX": 13.701302605202983,
+          "rotationCenterY": 17.995255200000003
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 18,
+          "costumeName": "chancellor-w",
+          "rotationCenterX": 13.701302605202983,
+          "rotationCenterY": 17.995255200000003
+        }
+      ]
+    },
+    {
+      "sourceFile": "5a00f48232dea62972b2b8a410aff777.svg",
+      "assetId": "5a00f48232dea62972b2b8a410aff777",
+      "dataFormat": "svg",
+      "chosenName": "Chess_edt45",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "140__kind_of_chess_piece_white4__Chess_edt45__5a00f48232dea62972b2b8a410aff777.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 83,
+          "costumeName": "Chess_edt45",
+          "rotationCenterX": 19.477257880981455,
+          "rotationCenterY": 7.643120023084123
+        }
+      ]
+    },
+    {
+      "sourceFile": "134e39702ea6984ef244ec65d79ae1a8.svg",
+      "assetId": "134e39702ea6984ef244ec65d79ae1a8",
+      "dataFormat": "svg",
+      "chosenName": "Chess_elt2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "141__kind_of_chess_piece_white4__Chess_elt2__134e39702ea6984ef244ec65d79ae1a8.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 28,
+          "costumeName": "Chess_elt2",
+          "rotationCenterX": 21.14426717882091,
+          "rotationCenterY": 10.87702420222297
+        }
+      ]
+    },
+    {
+      "sourceFile": "a9d64d7dcffdbdfc60ca6c508546cfcf.svg",
+      "assetId": "a9d64d7dcffdbdfc60ca6c508546cfcf",
+      "dataFormat": "svg",
+      "chosenName": "Chess_elt45",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "142__kind_of_chess_piece_white4__Chess_elt45__a9d64d7dcffdbdfc60ca6c508546cfcf.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 27,
+          "costumeName": "Chess_elt45",
+          "rotationCenterX": 21.14426717882091,
+          "rotationCenterY": 10.877022278019808
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 18,
+          "costumeName": "Chess_elt45",
+          "rotationCenterX": 21.14426717882091,
+          "rotationCenterY": 10.877022278019808
+        }
+      ]
+    },
+    {
+      "sourceFile": "7c2734dff490832be52e04741ad7f6f4.svg",
+      "assetId": "7c2734dff490832be52e04741ad7f6f4",
+      "dataFormat": "svg",
+      "chosenName": "Chess_elt45 (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "143__kind_of_chess_piece_white4__Chess_elt45_1__7c2734dff490832be52e04741ad7f6f4.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 82,
+          "costumeName": "Chess_elt45 (1)",
+          "rotationCenterX": 19.47726,
+          "rotationCenterY": 7.643130685131837
+        }
+      ]
+    },
+    {
+      "sourceFile": "44b467bbfd44e2369fb7818fba1bac36.svg",
+      "assetId": "44b467bbfd44e2369fb7818fba1bac36",
+      "dataFormat": "svg",
+      "chosenName": "Chess_Mlt45",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "144__kind_of_chess_piece_white4__Chess_Mlt45__44b467bbfd44e2369fb7818fba1bac36.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 23,
+          "costumeName": "Chess_Mlt45",
+          "rotationCenterX": 18.736597959174418,
+          "rotationCenterY": 21.65416949264278
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 14,
+          "costumeName": "Chess_Mlt45",
+          "rotationCenterX": 18.736597959174418,
+          "rotationCenterY": 21.65416949264278
+        }
+      ]
+    },
+    {
+      "sourceFile": "527c1483b3032ae3be71ad48ae24e11f.svg",
+      "assetId": "527c1483b3032ae3be71ad48ae24e11f",
+      "dataFormat": "svg",
+      "chosenName": "Chess_xlt2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "145__kind_of_chess_piece_white4__Chess_xlt2__527c1483b3032ae3be71ad48ae24e11f.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 53,
+          "costumeName": "Chess_xlt2",
+          "rotationCenterX": 14.384902802768124,
+          "rotationCenterY": 20.899906490486728
+        }
+      ]
+    },
+    {
+      "sourceFile": "c40c696f7f0473074e6ac1f95b356b19.svg",
+      "assetId": "c40c696f7f0473074e6ac1f95b356b19",
+      "dataFormat": "svg",
+      "chosenName": "Chess_xlt45",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "146__kind_of_chess_piece_white4__Chess_xlt45__c40c696f7f0473074e6ac1f95b356b19.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 37,
+          "costumeName": "Chess_xlt45",
+          "rotationCenterX": 18.796313129870214,
+          "rotationCenterY": 16.275000000000006
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 27,
+          "costumeName": "Chess_xlt45",
+          "rotationCenterX": 18.796313129870214,
+          "rotationCenterY": 16.275000000000006
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 21,
+          "costumeName": "Chess_xlt45",
+          "rotationCenterX": 18.796313129870214,
+          "rotationCenterY": 16.275000000000006
+        }
+      ]
+    },
+    {
+      "sourceFile": "78e293d0db6786108971b245865bf98c.svg",
+      "assetId": "78e293d0db6786108971b245865bf98c",
+      "dataFormat": "svg",
+      "chosenName": "costume1 (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "147__kind_of_chess_piece_white4__costume1_1__78e293d0db6786108971b245865bf98c.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 91,
+          "costumeName": "costume1 (1)",
+          "rotationCenterX": 18.319158151803634,
+          "rotationCenterY": 18.440043689672592
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 36,
+          "costumeName": "costume1 (1)",
+          "rotationCenterX": 18.319158151803634,
+          "rotationCenterY": 18.440043689672592
+        }
+      ]
+    },
+    {
+      "sourceFile": "b82c54cca14e4f7fec10b9adc4b4908e.svg",
+      "assetId": "b82c54cca14e4f7fec10b9adc4b4908e",
+      "dataFormat": "svg",
+      "chosenName": "DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR9iQbZg",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "148__kind_of_chess_piece_white4__DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR__b82c54cca14e4f7fec10b9adc4b4908e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 89,
+          "costumeName": "DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR9iQbZg",
+          "rotationCenterX": 18.618415000000027,
+          "rotationCenterY": 11.830593871063684
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 37,
+          "costumeName": "DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR9iQbZg",
+          "rotationCenterX": 18.618415000000027,
+          "rotationCenterY": 11.830593871063684
+        }
+      ]
+    },
+    {
+      "sourceFile": "8f2859e7dfdefd3d0331bb133a86e038.svg",
+      "assetId": "8f2859e7dfdefd3d0331bb133a86e038",
+      "dataFormat": "svg",
+      "chosenName": "DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR9iQbZg2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "149__kind_of_chess_piece_white4__DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR__8f2859e7dfdefd3d0331bb133a86e038.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 90,
+          "costumeName": "DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR9iQbZg2",
+          "rotationCenterX": 19.17494776843182,
+          "rotationCenterY": 22.18184808193189
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 34,
+          "costumeName": "DCx_U2xhaGga2BHX6T4I8st1a1XszSVJv8X829uwDynl4cANjovliBTCGfaGA1z0NEWKz-bZokKbr4AR9iQbZg2",
+          "rotationCenterX": 19.17494776843182,
+          "rotationCenterY": 22.18184808193189
+        }
+      ]
+    },
+    {
+      "sourceFile": "08ea069fcfa36550384703fda8dccdde.svg",
+      "assetId": "08ea069fcfa36550384703fda8dccdde",
+      "dataFormat": "svg",
+      "chosenName": "donkeyb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "150__kind_of_chess_piece_white4__donkeyb__08ea069fcfa36550384703fda8dccdde.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 163,
+          "costumeName": "donkeyb",
+          "rotationCenterX": 16.996079452026507,
+          "rotationCenterY": 18.242694772927848
+        }
+      ]
+    },
+    {
+      "sourceFile": "1bc5a39992a16fd1ee3874461594e155.svg",
+      "assetId": "1bc5a39992a16fd1ee3874461594e155",
+      "dataFormat": "svg",
+      "chosenName": "donkeyb2 (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "151__kind_of_chess_piece_white4__donkeyb2_1__1bc5a39992a16fd1ee3874461594e155.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 164,
+          "costumeName": "donkeyb2 (1)",
+          "rotationCenterX": 16.996078904053007,
+          "rotationCenterY": 18.242694545855713
+        }
+      ]
+    },
+    {
+      "sourceFile": "f31686c6b3e651ee433b7b3d2bc95cc9.svg",
+      "assetId": "f31686c6b3e651ee433b7b3d2bc95cc9",
+      "dataFormat": "svg",
+      "chosenName": "dozer",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "152__kind_of_chess_piece_white4__dozer__f31686c6b3e651ee433b7b3d2bc95cc9.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 16,
+          "costumeName": "dozer",
+          "rotationCenterX": 16.455389999999994,
+          "rotationCenterY": 17.372224974176447
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 31,
+          "costumeName": "dozer white",
+          "rotationCenterX": 16.455389999999994,
+          "rotationCenterY": 17.372224974176447
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 31,
+          "costumeName": "dozer white",
+          "rotationCenterX": 16.455389999999994,
+          "rotationCenterY": 17.372224974176447
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 10,
+          "costumeName": "dozer",
+          "rotationCenterX": 16.455389999999994,
+          "rotationCenterY": 17.372224974176447
+        }
+      ]
+    },
+    {
+      "sourceFile": "86bc1c9704e5ebbd7ad267d75be1ed48.svg",
+      "assetId": "86bc1c9704e5ebbd7ad267d75be1ed48",
+      "dataFormat": "svg",
+      "chosenName": "dozer2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "153__kind_of_chess_piece_white4__dozer2__86bc1c9704e5ebbd7ad267d75be1ed48.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 17,
+          "costumeName": "dozer2",
+          "rotationCenterX": 16.455389999999966,
+          "rotationCenterY": 17.372225726214367
+        }
+      ]
+    },
+    {
+      "sourceFile": "58f4abe6e42784ceacc97444ac3a6ce6.svg",
+      "assetId": "58f4abe6e42784ceacc97444ac3a6ce6",
+      "dataFormat": "svg",
+      "chosenName": "dragonhorse-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "154__kind_of_chess_piece_white4__dragonhorse-b__58f4abe6e42784ceacc97444ac3a6ce6.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 20,
+          "costumeName": "dragonhorse-b",
+          "rotationCenterX": 16.451638736507107,
+          "rotationCenterY": 16.672324500000002
+        }
+      ]
+    },
+    {
+      "sourceFile": "e3301b0483474a2da96188c64f0de4e9.svg",
+      "assetId": "e3301b0483474a2da96188c64f0de4e9",
+      "dataFormat": "svg",
+      "chosenName": "dragonhorse-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "155__kind_of_chess_piece_white4__dragonhorse-w__e3301b0483474a2da96188c64f0de4e9.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 19,
+          "costumeName": "dragonhorse-w",
+          "rotationCenterX": 16.451638736507107,
+          "rotationCenterY": 16.672324500000002
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 12,
+          "costumeName": "dragonhorse-w",
+          "rotationCenterX": 16.451638736507107,
+          "rotationCenterY": 16.672324500000002
+        }
+      ]
+    },
+    {
+      "sourceFile": "e65d3df85ab677755f17d2208d15464b.svg",
+      "assetId": "e65d3df85ab677755f17d2208d15464b",
+      "dataFormat": "svg",
+      "chosenName": "elephantb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "156__kind_of_chess_piece_white4__elephantb__e65d3df85ab677755f17d2208d15464b.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 168,
+          "costumeName": "elephantb",
+          "rotationCenterX": 16.825591505394385,
+          "rotationCenterY": 15.687601998181819
+        }
+      ]
+    },
+    {
+      "sourceFile": "fade12e7a0a962c095d56891e6d9aa63.svg",
+      "assetId": "fade12e7a0a962c095d56891e6d9aa63",
+      "dataFormat": "svg",
+      "chosenName": "elephantw",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "157__kind_of_chess_piece_white4__elephantw__fade12e7a0a962c095d56891e6d9aa63.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 169,
+          "costumeName": "elephantw",
+          "rotationCenterX": 16.825583252697243,
+          "rotationCenterY": 15.687607253918685
+        }
+      ]
+    },
+    {
+      "sourceFile": "7c8f6cdf335883926fa9dff7a9cb6e15.svg",
+      "assetId": "7c8f6cdf335883926fa9dff7a9cb6e15",
+      "dataFormat": "svg",
+      "chosenName": "free-icon-triquetra-112313",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "158__kind_of_chess_piece_white4__free-icon-triquetra-112313__7c8f6cdf335883926fa9dff7a9cb6e15.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 113,
+          "costumeName": "free-icon-triquetra-112313",
+          "rotationCenterX": 17.083221400907178,
+          "rotationCenterY": 16.63139811589599
+        }
+      ]
+    },
+    {
+      "sourceFile": "4310f4544f9ba6e9685153a5fd5fe211.svg",
+      "assetId": "4310f4544f9ba6e9685153a5fd5fe211",
+      "dataFormat": "svg",
+      "chosenName": "garl2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "159__kind_of_chess_piece_white4__garl2__4310f4544f9ba6e9685153a5fd5fe211.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 43,
+          "costumeName": "garl2",
+          "rotationCenterX": 15.380899999999997,
+          "rotationCenterY": 16.54352499999999
+        }
+      ]
+    },
+    {
+      "sourceFile": "d926c1919fd74051101dad9b9a573899.svg",
+      "assetId": "d926c1919fd74051101dad9b9a573899",
+      "dataFormat": "svg",
+      "chosenName": "generated_019e8bf8-b005-7fad-af41-fa9d2d2f287a2 (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "160__kind_of_chess_piece_white4__generated_019e8bf8-b005-7fad-af41-fa9d2d2f287a2_1__d926c1919fd74051101dad9b9a573899.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 156,
+          "costumeName": "generated_019e8bf8-b005-7fad-af41-fa9d2d2f287a2 (1)",
+          "rotationCenterX": 16.154270206312646,
+          "rotationCenterY": 18.370480574879565
+        }
+      ]
+    },
+    {
+      "sourceFile": "e39a02359e693f626021803fe78911b9.svg",
+      "assetId": "e39a02359e693f626021803fe78911b9",
+      "dataFormat": "svg",
+      "chosenName": "giraffe-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "161__kind_of_chess_piece_white4__giraffe-b__e39a02359e693f626021803fe78911b9.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 14,
+          "costumeName": "giraffe-b",
+          "rotationCenterX": 17.81677428513632,
+          "rotationCenterY": 20.200149999999994
+        }
+      ]
+    },
+    {
+      "sourceFile": "e76e4ac8134b76b20cc472766f77d9b3.svg",
+      "assetId": "e76e4ac8134b76b20cc472766f77d9b3",
+      "dataFormat": "svg",
+      "chosenName": "giraffe-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "162__kind_of_chess_piece_white4__giraffe-w__e76e4ac8134b76b20cc472766f77d9b3.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 13,
+          "costumeName": "giraffe-w",
+          "rotationCenterX": 17.816764642568103,
+          "rotationCenterY": 20.200150000000008
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 17,
+          "costumeName": "Chess_Glt45",
+          "rotationCenterX": 17.816764642568103,
+          "rotationCenterY": 20.200150000000008
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 9,
+          "costumeName": "giraffe-w",
+          "rotationCenterX": 17.816764642568103,
+          "rotationCenterY": 20.200150000000008
+        }
+      ]
+    },
+    {
+      "sourceFile": "fd12196c2fb962cc528da666221fcadc.svg",
+      "assetId": "fd12196c2fb962cc528da666221fcadc",
+      "dataFormat": "svg",
+      "chosenName": "goatb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "163__kind_of_chess_piece_white4__goatb__fd12196c2fb962cc528da666221fcadc.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 170,
+          "costumeName": "goatb",
+          "rotationCenterX": 17.115797476582912,
+          "rotationCenterY": 13.687172660168386
+        }
+      ]
+    },
+    {
+      "sourceFile": "b20fceb9cfc3dced326234e08409ec12.svg",
+      "assetId": "b20fceb9cfc3dced326234e08409ec12",
+      "dataFormat": "svg",
+      "chosenName": "goatw",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "164__kind_of_chess_piece_white4__goatw__b20fceb9cfc3dced326234e08409ec12.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 171,
+          "costumeName": "goatw",
+          "rotationCenterX": 17.115793738291472,
+          "rotationCenterY": 13.687173830084191
+        }
+      ]
+    },
+    {
+      "sourceFile": "d21c2b47df5331eaf5d8b83960a5c8f5.svg",
+      "assetId": "d21c2b47df5331eaf5d8b83960a5c8f5",
+      "dataFormat": "svg",
+      "chosenName": "god",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "165__kind_of_chess_piece_white4__god__d21c2b47df5331eaf5d8b83960a5c8f5.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 46,
+          "costumeName": "god",
+          "rotationCenterX": 19.219765212319913,
+          "rotationCenterY": 17.180722145873403
+        }
+      ]
+    },
+    {
+      "sourceFile": "383af07ea3c809d0a560b3b4d80e2651.svg",
+      "assetId": "383af07ea3c809d0a560b3b4d80e2651",
+      "dataFormat": "svg",
+      "chosenName": "grasshopper-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "166__kind_of_chess_piece_white4__grasshopper-b__383af07ea3c809d0a560b3b4d80e2651.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 36,
+          "costumeName": "grasshopper-b",
+          "rotationCenterX": 21.617137872071794,
+          "rotationCenterY": 19.215539278957408
+        }
+      ]
+    },
+    {
+      "sourceFile": "25bf5c0c86a33816bf04783269be9d7c.svg",
+      "assetId": "25bf5c0c86a33816bf04783269be9d7c",
+      "dataFormat": "svg",
+      "chosenName": "grasshopper-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "167__kind_of_chess_piece_white4__grasshopper-w__25bf5c0c86a33816bf04783269be9d7c.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 35,
+          "costumeName": "grasshopper-w",
+          "rotationCenterX": 21.61712830499812,
+          "rotationCenterY": 19.215539278957408
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 24,
+          "costumeName": "Chess_tlt45",
+          "rotationCenterX": 21.61712830499812,
+          "rotationCenterY": 19.215539278957408
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 20,
+          "costumeName": "grasshopper-w",
+          "rotationCenterX": 21.61712830499812,
+          "rotationCenterY": 19.215539278957408
+        }
+      ]
+    },
+    {
+      "sourceFile": "b1e33af07339c0502067a0df02594291.svg",
+      "assetId": "b1e33af07339c0502067a0df02594291",
+      "dataFormat": "svg",
+      "chosenName": "istockphoto-1835374268-612x612",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "168__kind_of_chess_piece_white4__istockphoto-1835374268-612x612__b1e33af07339c0502067a0df02594291.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 114,
+          "costumeName": "istockphoto-1835374268-612x612",
+          "rotationCenterX": 18.824472392615377,
+          "rotationCenterY": 18.77062034841714
+        }
+      ]
+    },
+    {
+      "sourceFile": "8080aea839f3e070328acf6f0ae8a490.svg",
+      "assetId": "8080aea839f3e070328acf6f0ae8a490",
+      "dataFormat": "svg",
+      "chosenName": "kb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "169__kind_of_chess_piece_white4__kb__8080aea839f3e070328acf6f0ae8a490.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 65,
+          "costumeName": "kb",
+          "rotationCenterX": 17.362245559692383,
+          "rotationCenterY": 17.5625
+        },
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 4,
+          "costumeName": "kb",
+          "rotationCenterX": 17.362245559692383,
+          "rotationCenterY": 17.5625
+        }
+      ]
+    },
+    {
+      "sourceFile": "7cdf5d2f17fd6179ed00f2a91bb6d09a.svg",
+      "assetId": "7cdf5d2f17fd6179ed00f2a91bb6d09a",
+      "dataFormat": "svg",
+      "chosenName": "kb2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "170__kind_of_chess_piece_white4__kb2__7cdf5d2f17fd6179ed00f2a91bb6d09a.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 75,
+          "costumeName": "kb2",
+          "rotationCenterX": 16.764481606807976,
+          "rotationCenterY": 17
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 4,
+          "costumeName": "kb2",
+          "rotationCenterX": 16.764481606807976,
+          "rotationCenterY": 17
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 4,
+          "costumeName": "kb2",
+          "rotationCenterX": 16.764481606807976,
+          "rotationCenterY": 17
+        }
+      ]
+    },
+    {
+      "sourceFile": "72d490628569af887fd4a4f3c35f87c9.svg",
+      "assetId": "72d490628569af887fd4a4f3c35f87c9",
+      "dataFormat": "svg",
+      "chosenName": "kb3",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "171__kind_of_chess_piece_white4__kb3__72d490628569af887fd4a4f3c35f87c9.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 77,
+          "costumeName": "kb3",
+          "rotationCenterX": 17.362244897959187,
+          "rotationCenterY": 17.5625
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 2,
+          "costumeName": "kb",
+          "rotationCenterX": 17.362244897959187,
+          "rotationCenterY": 17.5625
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 2,
+          "costumeName": "kb",
+          "rotationCenterX": 17.362244897959187,
+          "rotationCenterY": 17.5625
+        }
+      ]
+    },
+    {
+      "sourceFile": "fc7d95d15f8e00296729a3df924e289f.svg",
+      "assetId": "fc7d95d15f8e00296729a3df924e289f",
+      "dataFormat": "svg",
+      "chosenName": "king",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "172__kind_of_chess_piece_white4__king__fc7d95d15f8e00296729a3df924e289f.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 10,
+          "costumeName": "king",
+          "rotationCenterX": 17.36224489795913,
+          "rotationCenterY": 17.5625
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 8,
+          "costumeName": "kw",
+          "rotationCenterX": 17.36224489795913,
+          "rotationCenterY": 17.5625
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 46,
+          "costumeName": "kw3",
+          "rotationCenterX": 17.36224489795913,
+          "rotationCenterY": 17.5625
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 2,
+          "costumeName": "2",
+          "rotationCenterX": 17.36224489795913,
+          "rotationCenterY": 17.5625
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 8,
+          "costumeName": "kw",
+          "rotationCenterX": 17.36224489795913,
+          "rotationCenterY": 17.5625
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 3,
+          "costumeName": "king",
+          "rotationCenterX": 17.36224489795913,
+          "rotationCenterY": 17.5625
+        }
+      ]
+    },
+    {
+      "sourceFile": "d0ece8952d2c2bf70ff893123862957e.svg",
+      "assetId": "d0ece8952d2c2bf70ff893123862957e",
+      "dataFormat": "svg",
+      "chosenName": "knight",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "173__kind_of_chess_piece_white4__knight__d0ece8952d2c2bf70ff893123862957e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 1,
+          "costumeName": "knight",
+          "rotationCenterX": 16.764482246131763,
+          "rotationCenterY": 16.75
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 7,
+          "costumeName": "knight",
+          "rotationCenterX": 16.764482246131763,
+          "rotationCenterY": 16.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "f83e56e40bdfeb26b1d7cb27e4756af8.svg",
+      "assetId": "f83e56e40bdfeb26b1d7cb27e4756af8",
+      "dataFormat": "svg",
+      "chosenName": "knight2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "174__kind_of_chess_piece_white4__knight2__f83e56e40bdfeb26b1d7cb27e4756af8.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 8,
+          "costumeName": "knight2",
+          "rotationCenterX": 17.923043043912486,
+          "rotationCenterY": 18.353342933451785
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 36,
+          "costumeName": "knight2",
+          "rotationCenterX": 17.923043043912486,
+          "rotationCenterY": 18.353342933451785
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 36,
+          "costumeName": "knight2",
+          "rotationCenterX": 17.923043043912486,
+          "rotationCenterY": 18.353342933451785
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 1,
+          "costumeName": "knight2",
+          "rotationCenterX": 17.923043043912486,
+          "rotationCenterY": 18.353342933451785
+        }
+      ]
+    },
+    {
+      "sourceFile": "7e10a5a41e45ee60a3463c3e590a3178.svg",
+      "assetId": "7e10a5a41e45ee60a3463c3e590a3178",
+      "dataFormat": "svg",
+      "chosenName": "knight3",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "175__kind_of_chess_piece_white4__knight3__7e10a5a41e45ee60a3463c3e590a3178.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 9,
+          "costumeName": "knight3",
+          "rotationCenterX": 17.923045568473498,
+          "rotationCenterY": 18.3533336936664
+        }
+      ]
+    },
+    {
+      "sourceFile": "e285c5b1152bb3554f103f72f3d79a5b.svg",
+      "assetId": "e285c5b1152bb3554f103f72f3d79a5b",
+      "dataFormat": "svg",
+      "chosenName": "knight4",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "176__kind_of_chess_piece_white4__knight4__e285c5b1152bb3554f103f72f3d79a5b.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 2,
+          "costumeName": "knight4",
+          "rotationCenterX": 16.764486738395277,
+          "rotationCenterY": 16.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "f81630c20f357641870e18925a88e716.svg",
+      "assetId": "f81630c20f357641870e18925a88e716",
+      "dataFormat": "svg",
+      "chosenName": "lion-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "177__kind_of_chess_piece_white4__lion-b__f81630c20f357641870e18925a88e716.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 86,
+          "costumeName": "lion-b",
+          "rotationCenterX": 18.25004615475197,
+          "rotationCenterY": 18.795235665934342
+        }
+      ]
+    },
+    {
+      "sourceFile": "b50aa616862611d8fe5f7a0663f271b7.svg",
+      "assetId": "b50aa616862611d8fe5f7a0663f271b7",
+      "dataFormat": "svg",
+      "chosenName": "lion-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "178__kind_of_chess_piece_white4__lion-w__b50aa616862611d8fe5f7a0663f271b7.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 85,
+          "costumeName": "lion-w",
+          "rotationCenterX": 18.250046154752084,
+          "rotationCenterY": 18.795235665934342
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 33,
+          "costumeName": "lion-w",
+          "rotationCenterX": 18.250046154752084,
+          "rotationCenterY": 18.795235665934342
+        }
+      ]
+    },
+    {
+      "sourceFile": "7f83516fa705caffc5d1220d1965002e.svg",
+      "assetId": "7f83516fa705caffc5d1220d1965002e",
+      "dataFormat": "svg",
+      "chosenName": "mann-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "179__kind_of_chess_piece_white4__mann-b__7f83516fa705caffc5d1220d1965002e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 80,
+          "costumeName": "mann-b",
+          "rotationCenterX": 18.736595918348797,
+          "rotationCenterY": 21.65416898528558
+        }
+      ]
+    },
+    {
+      "sourceFile": "822b21b5d1ec73eb99506ef286b1f476.svg",
+      "assetId": "822b21b5d1ec73eb99506ef286b1f476",
+      "dataFormat": "svg",
+      "chosenName": "mann-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "180__kind_of_chess_piece_white4__mann-w__822b21b5d1ec73eb99506ef286b1f476.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 79,
+          "costumeName": "mann-w",
+          "rotationCenterX": 18.736597959174418,
+          "rotationCenterY": 21.65416949264278
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 14,
+          "costumeName": "Chess_Mlt45",
+          "rotationCenterX": 18.736597959174418,
+          "rotationCenterY": 21.65416949264278
+        }
+      ]
+    },
+    {
+      "sourceFile": "55e21e8a8e8dce73b2c4859b5eee5fc0.svg",
+      "assetId": "55e21e8a8e8dce73b2c4859b5eee5fc0",
+      "dataFormat": "svg",
+      "chosenName": "pb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "181__kind_of_chess_piece_white4__pb__55e21e8a8e8dce73b2c4859b5eee5fc0.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 73,
+          "costumeName": "pb",
+          "rotationCenterX": 12.249999999999972,
+          "rotationCenterY": 16
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 6,
+          "costumeName": "pb",
+          "rotationCenterX": 12.249999999999972,
+          "rotationCenterY": 16
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 6,
+          "costumeName": "pb",
+          "rotationCenterX": 12.249999999999972,
+          "rotationCenterY": 16
+        }
+      ]
+    },
+    {
+      "sourceFile": "e2433e381c20cdd79748ef13c1d9cee8.svg",
+      "assetId": "e2433e381c20cdd79748ef13c1d9cee8",
+      "dataFormat": "svg",
+      "chosenName": "png-transparent-computer-icons-crown-crown-svg-free-black-crown-image-file-formats-king-black (1) (2)3",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "182__kind_of_chess_piece_white4__png-transparent-computer-icons-crown-crown-svg-free-black-crown-image-file-forma__e2433e381c20cdd79748ef13c1d9cee8.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 72,
+          "costumeName": "png-transparent-computer-icons-crown-crown-svg-free-black-crown-image-file-formats-king-black (1) (2)3",
+          "rotationCenterX": 20.59705867254749,
+          "rotationCenterY": 19.316117144673882
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 34,
+          "costumeName": "png-transparent-computer-icons-crown-crown-svg-free-black-crown-image-file-formats-king-black (1) (2)",
+          "rotationCenterX": 20.59705867254749,
+          "rotationCenterY": 19.316117144673882
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 34,
+          "costumeName": "png-transparent-computer-icons-crown-crown-svg-free-black-crown-image-file-formats-king-black (1) (2)",
+          "rotationCenterX": 20.59705867254749,
+          "rotationCenterY": 19.316117144673882
+        }
+      ]
+    },
+    {
+      "sourceFile": "fdcbed0f6b1bc4fbc8933979f06cf3fa.svg",
+      "assetId": "fdcbed0f6b1bc4fbc8933979f06cf3fa",
+      "dataFormat": "svg",
+      "chosenName": "priest",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "183__kind_of_chess_piece_white4__priest__fdcbed0f6b1bc4fbc8933979f06cf3fa.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 67,
+          "costumeName": "priest",
+          "rotationCenterX": 16.670812826656913,
+          "rotationCenterY": 18.311436187426864
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 30,
+          "costumeName": "priest",
+          "rotationCenterX": 16.670812826656913,
+          "rotationCenterY": 18.311436187426864
+        }
+      ]
+    },
+    {
+      "sourceFile": "f9f50ae5b380bc5d77d6daf1c01b7540.svg",
+      "assetId": "f9f50ae5b380bc5d77d6daf1c01b7540",
+      "dataFormat": "svg",
+      "chosenName": "priest2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "184__kind_of_chess_piece_white4__priest2__f9f50ae5b380bc5d77d6daf1c01b7540.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 68,
+          "costumeName": "priest2",
+          "rotationCenterX": 16.670818749607577,
+          "rotationCenterY": 18.311434876034383
+        }
+      ]
+    },
+    {
+      "sourceFile": "2531fa53d0ee43f357ceef8e255ca58e.svg",
+      "assetId": "2531fa53d0ee43f357ceef8e255ca58e",
+      "dataFormat": "svg",
+      "chosenName": "qb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "185__kind_of_chess_piece_white4__qb__2531fa53d0ee43f357ceef8e255ca58e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 66,
+          "costumeName": "qb",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.971614837646484
+        },
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 10,
+          "costumeName": "qb",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.971614837646484
+        }
+      ]
+    },
+    {
+      "sourceFile": "3a673554a255620b6102580c827276b6.svg",
+      "assetId": "3a673554a255620b6102580c827276b6",
+      "dataFormat": "svg",
+      "chosenName": "qb2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "186__kind_of_chess_piece_white4__qb2__3a673554a255620b6102580c827276b6.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 78,
+          "costumeName": "qb2",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.9716153239344
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 1,
+          "costumeName": "qb",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.9716153239344
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 1,
+          "costumeName": "qb",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.9716153239344
+        }
+      ]
+    },
+    {
+      "sourceFile": "3b7433e5642f779da9778202a8c05d91.svg",
+      "assetId": "3b7433e5642f779da9778202a8c05d91",
+      "dataFormat": "svg",
+      "chosenName": "qw",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "187__kind_of_chess_piece_white4__qw__3b7433e5642f779da9778202a8c05d91.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 81,
+          "costumeName": "qw",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.375
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 7,
+          "costumeName": "qw",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.375
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 1,
+          "costumeName": "1",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.375
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 7,
+          "costumeName": "qw",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.375
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 4,
+          "costumeName": "qw",
+          "rotationCenterX": 19.25,
+          "rotationCenterY": 17.375
+        }
+      ]
+    },
+    {
+      "sourceFile": "00dc245c7f1c43ed6b240f50458f2858.svg",
+      "assetId": "00dc245c7f1c43ed6b240f50458f2858",
+      "dataFormat": "svg",
+      "chosenName": "rb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "188__kind_of_chess_piece_white4__rb__00dc245c7f1c43ed6b240f50458f2858.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 74,
+          "costumeName": "rb",
+          "rotationCenterX": 14.249999999999972,
+          "rotationCenterY": 15.75
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 5,
+          "costumeName": "rb",
+          "rotationCenterX": 14.249999999999972,
+          "rotationCenterY": 15.75
+        },
+        {
+          "sprite": "kind of chess piece black",
+          "costumeIndex": 8,
+          "costumeName": "rook black",
+          "rotationCenterX": 14.249999999999972,
+          "rotationCenterY": 15.75
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 5,
+          "costumeName": "rb",
+          "rotationCenterX": 14.249999999999972,
+          "rotationCenterY": 15.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "ca486499eb69bb7c57decdb96d37cdea.svg",
+      "assetId": "ca486499eb69bb7c57decdb96d37cdea",
+      "dataFormat": "svg",
+      "chosenName": "skull",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "189__kind_of_chess_piece_white4__skull__ca486499eb69bb7c57decdb96d37cdea.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 95,
+          "costumeName": "skull",
+          "rotationCenterX": 13.852221962094234,
+          "rotationCenterY": 18.433206870237115
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 39,
+          "costumeName": "skull",
+          "rotationCenterX": 13.852221962094234,
+          "rotationCenterY": 18.433206870237115
+        }
+      ]
+    },
+    {
+      "sourceFile": "a9812f9162b503dfeebd40c516f196cd.svg",
+      "assetId": "a9812f9162b503dfeebd40c516f196cd",
+      "dataFormat": "svg",
+      "chosenName": "Snowflake_0",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "190__kind_of_chess_piece_white4__Snowflake_0__a9812f9162b503dfeebd40c516f196cd.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 144,
+          "costumeName": "Snowflake_0",
+          "rotationCenterX": 169.27989208398867,
+          "rotationCenterY": 192.08021565982034
+        }
+      ]
+    },
+    {
+      "sourceFile": "4b084c389a8d8fa33e829fc809fa3f35.svg",
+      "assetId": "4b084c389a8d8fa33e829fc809fa3f35",
+      "dataFormat": "svg",
+      "chosenName": "Snowflake_0 (1) (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "191__kind_of_chess_piece_white4__Snowflake_0_1_1__4b084c389a8d8fa33e829fc809fa3f35.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 145,
+          "costumeName": "Snowflake_0 (1) (1)",
+          "rotationCenterX": 16.940822009436403,
+          "rotationCenterY": 18.750085880025523
+        }
+      ]
+    },
+    {
+      "sourceFile": "11520fcdb4140f9aa0407823fc4cd8cc.svg",
+      "assetId": "11520fcdb4140f9aa0407823fc4cd8cc",
+      "dataFormat": "svg",
+      "chosenName": "tem white",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "192__kind_of_chess_piece_white4__tem_white__11520fcdb4140f9aa0407823fc4cd8cc.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 59,
+          "costumeName": "tem white",
+          "rotationCenterX": 16.027780000000007,
+          "rotationCenterY": 16.48550499999996
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 35,
+          "costumeName": "tem white",
+          "rotationCenterX": 16.027780000000007,
+          "rotationCenterY": 16.48550499999996
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 12,
+          "costumeName": "12",
+          "rotationCenterX": 16.027780000000007,
+          "rotationCenterY": 16.48550499999996
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 35,
+          "costumeName": "tem white",
+          "rotationCenterX": 16.027780000000007,
+          "rotationCenterY": 16.48550499999996
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 28,
+          "costumeName": "tem white",
+          "rotationCenterX": 16.027780000000007,
+          "rotationCenterY": 16.48550499999996
+        }
+      ]
+    },
+    {
+      "sourceFile": "feed7719efab39e1424fa64b3bb98fd6.svg",
+      "assetId": "feed7719efab39e1424fa64b3bb98fd6",
+      "dataFormat": "svg",
+      "chosenName": "tempest-queen-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "193__kind_of_chess_piece_white4__tempest-queen-b__feed7719efab39e1424fa64b3bb98fd6.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 51,
+          "costumeName": "tempest-queen-b",
+          "rotationCenterX": 18.50537696165111,
+          "rotationCenterY": 17.245022102617156
+        }
+      ]
+    },
+    {
+      "sourceFile": "ff4ecbc87efdda218797cb5e713d055e.svg",
+      "assetId": "ff4ecbc87efdda218797cb5e713d055e",
+      "dataFormat": "svg",
+      "chosenName": "tempest-queen-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "194__kind_of_chess_piece_white4__tempest-queen-w__ff4ecbc87efdda218797cb5e713d055e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 50,
+          "costumeName": "tempest-queen-w",
+          "rotationCenterX": 18.50537696165091,
+          "rotationCenterY": 17.245022102617412
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 25,
+          "costumeName": "tempest-queen-w",
+          "rotationCenterX": 18.50537696165091,
+          "rotationCenterY": 17.245022102617412
+        }
+      ]
+    },
+    {
+      "sourceFile": "4d02008104d22eb9f9110f4de7864256.svg",
+      "assetId": "4d02008104d22eb9f9110f4de7864256",
+      "dataFormat": "svg",
+      "chosenName": "temple",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "195__kind_of_chess_piece_white4__temple__4d02008104d22eb9f9110f4de7864256.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 42,
+          "costumeName": "temple",
+          "rotationCenterX": 15.489977366925046,
+          "rotationCenterY": 18.059062614715117
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 24,
+          "costumeName": "temple",
+          "rotationCenterX": 15.489977366925046,
+          "rotationCenterY": 18.059062614715117
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 24,
+          "costumeName": "temple",
+          "rotationCenterX": 15.489977366925046,
+          "rotationCenterY": 18.059062614715117
+        }
+      ]
+    },
+    {
+      "sourceFile": "83b1393dff99ad2f8f458a5297e0915c.svg",
+      "assetId": "83b1393dff99ad2f8f458a5297e0915c",
+      "dataFormat": "svg",
+      "chosenName": "toilet",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "196__kind_of_chess_piece_white4__toilet__83b1393dff99ad2f8f458a5297e0915c.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 45,
+          "costumeName": "toilet",
+          "rotationCenterX": 18.4144,
+          "rotationCenterY": 19.42985999999999
+        }
+      ]
+    },
+    {
+      "sourceFile": "3f30a522a656bbe8148f3f3da87019f3.svg",
+      "assetId": "3f30a522a656bbe8148f3f3da87019f3",
+      "dataFormat": "svg",
+      "chosenName": "triskelion",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "197__kind_of_chess_piece_white4__triskelion__3f30a522a656bbe8148f3f3da87019f3.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 127,
+          "costumeName": "triskelion",
+          "rotationCenterX": 18.815857695709383,
+          "rotationCenterY": 17.39775558994063
+        }
+      ]
+    },
+    {
+      "sourceFile": "c20a9c8d8998292039cbb59a0820a728.svg",
+      "assetId": "c20a9c8d8998292039cbb59a0820a728",
+      "dataFormat": "svg",
+      "chosenName": "triskelion2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "198__kind_of_chess_piece_white4__triskelion2__c20a9c8d8998292039cbb59a0820a728.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 128,
+          "costumeName": "triskelion2",
+          "rotationCenterX": 18.751508311552158,
+          "rotationCenterY": 17.39775066968167
+        }
+      ]
+    },
+    {
+      "sourceFile": "d6800acf5eab45c6db3d0bb1e44f4e48.svg",
+      "assetId": "d6800acf5eab45c6db3d0bb1e44f4e48",
+      "dataFormat": "svg",
+      "chosenName": "unicorn-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "199__kind_of_chess_piece_white4__unicorn-b__d6800acf5eab45c6db3d0bb1e44f4e48.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 26,
+          "costumeName": "unicorn-b",
+          "rotationCenterX": 18.605947012191677,
+          "rotationCenterY": 16.663318165213184
+        }
+      ]
+    },
+    {
+      "sourceFile": "93abb65b09760e6c383be5383872fd34.svg",
+      "assetId": "93abb65b09760e6c383be5383872fd34",
+      "dataFormat": "svg",
+      "chosenName": "unicorn-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "200__kind_of_chess_piece_white4__unicorn-w__93abb65b09760e6c383be5383872fd34.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 25,
+          "costumeName": "unicorn-w",
+          "rotationCenterX": 18.60594325195396,
+          "rotationCenterY": 16.663318165213184
+        },
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 16,
+          "costumeName": "Chess_Ult45",
+          "rotationCenterX": 18.60594325195396,
+          "rotationCenterY": 16.663318165213184
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 16,
+          "costumeName": "unicorn-w",
+          "rotationCenterX": 18.60594325195396,
+          "rotationCenterY": 16.663318165213184
+        }
+      ]
+    },
+    {
+      "sourceFile": "1f78c295e6b3878e6c5667ca5f754548.svg",
+      "assetId": "1f78c295e6b3878e6c5667ca5f754548",
+      "dataFormat": "svg",
+      "chosenName": "wasp-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "201__kind_of_chess_piece_white4__wasp-b__1f78c295e6b3878e6c5667ca5f754548.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 12,
+          "costumeName": "wasp-b",
+          "rotationCenterX": 17.346665646950953,
+          "rotationCenterY": 17.05034386270144
+        }
+      ]
+    },
+    {
+      "sourceFile": "6e3f1b1e3322905953ad2ab5f7232154.svg",
+      "assetId": "6e3f1b1e3322905953ad2ab5f7232154",
+      "dataFormat": "svg",
+      "chosenName": "wasp-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "202__kind_of_chess_piece_white4__wasp-w__6e3f1b1e3322905953ad2ab5f7232154.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 11,
+          "costumeName": "wasp-w",
+          "rotationCenterX": 17.346681882316943,
+          "rotationCenterY": 17.050349620900448
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 2,
+          "costumeName": "wasp-w",
+          "rotationCenterX": 17.346681882316943,
+          "rotationCenterY": 17.050349620900448
+        }
+      ]
+    },
+    {
+      "sourceFile": "f8200bd25fa17c2019a82be366613695.svg",
+      "assetId": "f8200bd25fa17c2019a82be366613695",
+      "dataFormat": "svg",
+      "chosenName": "wbishopb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "203__kind_of_chess_piece_white4__wbishopb__f8200bd25fa17c2019a82be366613695.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 157,
+          "costumeName": "wbishopb",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 17.59756500000003
+        }
+      ]
+    },
+    {
+      "sourceFile": "5fd2f471b0bd2d0b03d7bad7a2f5c367.svg",
+      "assetId": "5fd2f471b0bd2d0b03d7bad7a2f5c367",
+      "dataFormat": "svg",
+      "chosenName": "wbishopw",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "204__kind_of_chess_piece_white4__wbishopw__5fd2f471b0bd2d0b03d7bad7a2f5c367.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 158,
+          "costumeName": "wbishopw",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 17.597555
+        }
+      ]
+    },
+    {
+      "sourceFile": "782aa693fc4b70b750eda577d34a1ce8.svg",
+      "assetId": "782aa693fc4b70b750eda577d34a1ce8",
+      "dataFormat": "svg",
+      "chosenName": "windmill2",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "205__kind_of_chess_piece_white4__windmill2__782aa693fc4b70b750eda577d34a1ce8.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 71,
+          "costumeName": "windmill2",
+          "rotationCenterX": 15.97063109960007,
+          "rotationCenterY": 16.098304228943363
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 33,
+          "costumeName": "windmill2",
+          "rotationCenterX": 15.97063109960007,
+          "rotationCenterY": 16.098304228943363
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 33,
+          "costumeName": "windmill2",
+          "rotationCenterX": 15.97063109960007,
+          "rotationCenterY": 16.098304228943363
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 31,
+          "costumeName": "windmill2",
+          "rotationCenterX": 15.97063109960007,
+          "rotationCenterY": 16.098304228943363
+        }
+      ]
+    },
+    {
+      "sourceFile": "bf5b681d641bbbc991b8befa7ba6c880.svg",
+      "assetId": "bf5b681d641bbbc991b8befa7ba6c880",
+      "dataFormat": "svg",
+      "chosenName": "windmill3",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "206__kind_of_chess_piece_white4__windmill3__bf5b681d641bbbc991b8befa7ba6c880.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 70,
+          "costumeName": "windmill3",
+          "rotationCenterX": 18.591064999999986,
+          "rotationCenterY": 18.59106
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 32,
+          "costumeName": "windmill3",
+          "rotationCenterX": 18.591064999999986,
+          "rotationCenterY": 18.59106
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 32,
+          "costumeName": "windmill3",
+          "rotationCenterX": 18.591064999999986,
+          "rotationCenterY": 18.59106
+        }
+      ]
+    },
+    {
+      "sourceFile": "d1491dc6e687e61130722e10f12ededd.svg",
+      "assetId": "d1491dc6e687e61130722e10f12ededd",
+      "dataFormat": "svg",
+      "chosenName": "windmill4",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "207__kind_of_chess_piece_white4__windmill4__d1491dc6e687e61130722e10f12ededd.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 152,
+          "costumeName": "windmill4",
+          "rotationCenterX": 16.076560000000057,
+          "rotationCenterY": 16.07340000000002
+        }
+      ]
+    },
+    {
+      "sourceFile": "c23cbde31020ef064c81d92615ca624e.svg",
+      "assetId": "c23cbde31020ef064c81d92615ca624e",
+      "dataFormat": "svg",
+      "chosenName": "windmill5",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "208__kind_of_chess_piece_white4__windmill5__c23cbde31020ef064c81d92615ca624e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 153,
+          "costumeName": "windmill5",
+          "rotationCenterX": 18.59105715805856,
+          "rotationCenterY": 18.591074835728108
+        }
+      ]
+    },
+    {
+      "sourceFile": "58e341947334f0def1360ce6f271381b.svg",
+      "assetId": "58e341947334f0def1360ce6f271381b",
+      "dataFormat": "svg",
+      "chosenName": "wkingb (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "209__kind_of_chess_piece_white4__wkingb_1__58e341947334f0def1360ce6f271381b.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 161,
+          "costumeName": "wkingb (1)",
+          "rotationCenterX": 17.797645000000017,
+          "rotationCenterY": 16.752490000000016
+        }
+      ]
+    },
+    {
+      "sourceFile": "230ce838bcdccd9023a64c940957dfde.svg",
+      "assetId": "230ce838bcdccd9023a64c940957dfde",
+      "dataFormat": "svg",
+      "chosenName": "wkingw (1)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "210__kind_of_chess_piece_white4__wkingw_1__230ce838bcdccd9023a64c940957dfde.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 162,
+          "costumeName": "wkingw (1)",
+          "rotationCenterX": 17.797664999999995,
+          "rotationCenterY": 16.752489999999995
+        }
+      ]
+    },
+    {
+      "sourceFile": "444c467092b75c0c4bbab40f05fae8fb.svg",
+      "assetId": "444c467092b75c0c4bbab40f05fae8fb",
+      "dataFormat": "svg",
+      "chosenName": "wqueenb",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "211__kind_of_chess_piece_white4__wqueenb__444c467092b75c0c4bbab40f05fae8fb.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 160,
+          "costumeName": "wqueenb",
+          "rotationCenterX": 16.75,
+          "rotationCenterY": 16.97429113736976
+        }
+      ]
+    },
+    {
+      "sourceFile": "01fd388c3c1db71c285d5bbe3512394a.svg",
+      "assetId": "01fd388c3c1db71c285d5bbe3512394a",
+      "dataFormat": "svg",
+      "chosenName": "wqueenw",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "212__kind_of_chess_piece_white4__wqueenw__01fd388c3c1db71c285d5bbe3512394a.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 159,
+          "costumeName": "wqueenw",
+          "rotationCenterX": 16.75,
+          "rotationCenterY": 16.974291137369804
+        }
+      ]
+    },
+    {
+      "sourceFile": "d5e9ef2ad33b10a3cbfe51e343661072.svg",
+      "assetId": "d5e9ef2ad33b10a3cbfe51e343661072",
+      "dataFormat": "svg",
+      "chosenName": "zebra-b",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "213__kind_of_chess_piece_white4__zebra-b__d5e9ef2ad33b10a3cbfe51e343661072.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 84,
+          "costumeName": "zebra-b",
+          "rotationCenterX": 18.96243785864263,
+          "rotationCenterY": 18.971424999999996
+        }
+      ]
+    },
+    {
+      "sourceFile": "d882600737f2911e80fd088e4d4dae71.svg",
+      "assetId": "d882600737f2911e80fd088e4d4dae71",
+      "dataFormat": "svg",
+      "chosenName": "zebra-w",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "214__kind_of_chess_piece_white4__zebra-w__d882600737f2911e80fd088e4d4dae71.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 24,
+          "costumeName": "zebra-w",
+          "rotationCenterX": 18.97179231642417,
+          "rotationCenterY": 18.94798499999999
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 15,
+          "costumeName": "zebra-w",
+          "rotationCenterX": 18.97179231642417,
+          "rotationCenterY": 18.94798499999999
+        }
+      ]
+    },
+    {
+      "sourceFile": "bfdeafed1a71ab89fdb5b82d4a9c4fb0.svg",
+      "assetId": "bfdeafed1a71ab89fdb5b82d4a9c4fb0",
+      "dataFormat": "svg",
+      "chosenName": "모양 1",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "215__kind_of_chess_piece_white4__1__bfdeafed1a71ab89fdb5b82d4a9c4fb0.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 92,
+          "costumeName": "모양 1",
+          "rotationCenterX": 14.08204820135012,
+          "rotationCenterY": 17.97964879728727
+        },
+        {
+          "sprite": "chess pieces",
+          "costumeIndex": 47,
+          "costumeName": "모양 1",
+          "rotationCenterX": 14.08204820135012,
+          "rotationCenterY": 17.97964879728727
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 35,
+          "costumeName": "모양 2",
+          "rotationCenterX": 14.08204820135012,
+          "rotationCenterY": 17.97964879728727
+        }
+      ]
+    },
+    {
+      "sourceFile": "2cd965e981fbae9f1d35830fe30a2e9c.svg",
+      "assetId": "2cd965e981fbae9f1d35830fe30a2e9c",
+      "dataFormat": "svg",
+      "chosenName": "모양 1 (12)",
+      "chosenSprite": "kind of chess piece white4",
+      "outputFile": "216__kind_of_chess_piece_white4__1_12__2cd965e981fbae9f1d35830fe30a2e9c.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece white4",
+          "costumeIndex": 124,
+          "costumeName": "모양 1 (12)",
+          "rotationCenterX": 18.537896580647782,
+          "rotationCenterY": 15.694748522044677
+        },
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 45,
+          "costumeName": "모양 1 (12)",
+          "rotationCenterX": 18.537896580647782,
+          "rotationCenterY": 15.694748522044677
+        }
+      ]
+    },
+    {
+      "sourceFile": "e5802473e4a8837ae124ea9df0c2f72e.svg",
+      "assetId": "e5802473e4a8837ae124ea9df0c2f72e",
+      "dataFormat": "svg",
+      "chosenName": "11",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "217__kind_of_chess_piece2__11__e5802473e4a8837ae124ea9df0c2f72e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 11,
+          "costumeName": "11",
+          "rotationCenterX": 16.341859999999997,
+          "rotationCenterY": 17.09005906575831
+        }
+      ]
+    },
+    {
+      "sourceFile": "e67655bc8e7ab083c5af86cb644f1dc6.svg",
+      "assetId": "e67655bc8e7ab083c5af86cb644f1dc6",
+      "dataFormat": "svg",
+      "chosenName": "4",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "218__kind_of_chess_piece2__4__e67655bc8e7ab083c5af86cb644f1dc6.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 4,
+          "costumeName": "4",
+          "rotationCenterX": 16.76448385293969,
+          "rotationCenterY": 16.75
+        },
+        {
+          "sprite": "2",
+          "costumeIndex": 10,
+          "costumeName": "4",
+          "rotationCenterX": 16.76448385293969,
+          "rotationCenterY": 16.75
+        }
+      ]
+    },
+    {
+      "sourceFile": "47453e4247f82ec9c09d976d5efd3834.svg",
+      "assetId": "47453e4247f82ec9c09d976d5efd3834",
+      "dataFormat": "svg",
+      "chosenName": "7",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "219__kind_of_chess_piece2__7__47453e4247f82ec9c09d976d5efd3834.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 7,
+          "costumeName": "7",
+          "rotationCenterX": 14.741449999999986,
+          "rotationCenterY": 18.342986546360407
+        }
+      ]
+    },
+    {
+      "sourceFile": "5f5e2b0bc9800d4fae6149ddbdd8e582.svg",
+      "assetId": "5f5e2b0bc9800d4fae6149ddbdd8e582",
+      "dataFormat": "svg",
+      "chosenName": "8",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "220__kind_of_chess_piece2__8__5f5e2b0bc9800d4fae6149ddbdd8e582.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 8,
+          "costumeName": "8",
+          "rotationCenterX": 17.25,
+          "rotationCenterY": 17.25
+        }
+      ]
+    },
+    {
+      "sourceFile": "0af754af370ad235e072141c5b5d3f32.svg",
+      "assetId": "0af754af370ad235e072141c5b5d3f32",
+      "dataFormat": "svg",
+      "chosenName": "Chess_Alt45 (1)",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "221__kind_of_chess_piece2__Chess_Alt45_1__0af754af370ad235e072141c5b5d3f32.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 21,
+          "costumeName": "Chess_Alt45 (1)",
+          "rotationCenterX": 14.27905407,
+          "rotationCenterY": 21.76867593000003
+        }
+      ]
+    },
+    {
+      "sourceFile": "ec024a84edf062ec634d61b932fa8678.svg",
+      "assetId": "ec024a84edf062ec634d61b932fa8678",
+      "dataFormat": "svg",
+      "chosenName": "Chess_Clt45",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "222__kind_of_chess_piece2__Chess_Clt45__ec024a84edf062ec634d61b932fa8678.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 13,
+          "costumeName": "Chess_Clt45",
+          "rotationCenterX": 17.392687545932517,
+          "rotationCenterY": 22.62380999999999
+        }
+      ]
+    },
+    {
+      "sourceFile": "00fc73f29e19f68e4825727b0f27db76.svg",
+      "assetId": "00fc73f29e19f68e4825727b0f27db76",
+      "dataFormat": "svg",
+      "chosenName": "Chess_Dlt45",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "223__kind_of_chess_piece2__Chess_Dlt45__00fc73f29e19f68e4825727b0f27db76.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 20,
+          "costumeName": "Chess_Dlt45",
+          "rotationCenterX": 16.451646490375367,
+          "rotationCenterY": 16.672324500000002
+        }
+      ]
+    },
+    {
+      "sourceFile": "7b84ec1a7546de4460924f037aa5c40a.svg",
+      "assetId": "7b84ec1a7546de4460924f037aa5c40a",
+      "dataFormat": "svg",
+      "chosenName": "Chess_slt45",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "224__kind_of_chess_piece2__Chess_slt45__7b84ec1a7546de4460924f037aa5c40a.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 19,
+          "costumeName": "Chess_slt45",
+          "rotationCenterX": 20.778869935586926,
+          "rotationCenterY": 12.901147500000008
+        }
+      ]
+    },
+    {
+      "sourceFile": "853394beb92c1b6916c2e7a34452b979.svg",
+      "assetId": "853394beb92c1b6916c2e7a34452b979",
+      "dataFormat": "svg",
+      "chosenName": "Chess_wlt45",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "225__kind_of_chess_piece2__Chess_wlt45__853394beb92c1b6916c2e7a34452b979.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 25,
+          "costumeName": "Chess_wlt45",
+          "rotationCenterX": 16.19170655000002,
+          "rotationCenterY": 16.732571699999994
+        }
+      ]
+    },
+    {
+      "sourceFile": "4c9222c3804c85250ed6be43a790d09e.svg",
+      "assetId": "4c9222c3804c85250ed6be43a790d09e",
+      "dataFormat": "svg",
+      "chosenName": "Chess_Zlt45",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "226__kind_of_chess_piece2__Chess_Zlt45__4c9222c3804c85250ed6be43a790d09e.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 15,
+          "costumeName": "Chess_Zlt45",
+          "rotationCenterX": 18.971802316424146,
+          "rotationCenterY": 18.948004999999995
+        }
+      ]
+    },
+    {
+      "sourceFile": "261cfd13de7ee79d44e1b2e852b29f3a.svg",
+      "assetId": "261cfd13de7ee79d44e1b2e852b29f3a",
+      "dataFormat": "svg",
+      "chosenName": "Chess_zlt45 (1)",
+      "chosenSprite": "kind of chess piece2",
+      "outputFile": "227__kind_of_chess_piece2__Chess_zlt45_1__261cfd13de7ee79d44e1b2e852b29f3a.svg",
+      "references": [
+        {
+          "sprite": "kind of chess piece2",
+          "costumeIndex": 26,
+          "costumeName": "Chess_zlt45 (1)",
+          "rotationCenterX": 18.250042316254195,
+          "rotationCenterY": 20.045235665934342
+        }
+      ]
+    },
+    {
+      "sourceFile": "d5a95ef23bdebe6c2a6b684ac525578a.svg",
+      "assetId": "d5a95ef23bdebe6c2a6b684ac525578a",
+      "dataFormat": "svg",
+      "chosenName": "barrier",
+      "chosenSprite": "movement",
+      "outputFile": "228__movement__barrier__d5a95ef23bdebe6c2a6b684ac525578a.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 4,
+          "costumeName": "barrier",
+          "rotationCenterX": 11.52000000000001,
+          "rotationCenterY": 11.52000000000001
+        }
+      ]
+    },
+    {
+      "sourceFile": "a66d78276b423247fca5072a64d698b8.svg",
+      "assetId": "a66d78276b423247fca5072a64d698b8",
+      "dataFormat": "svg",
+      "chosenName": "catch",
+      "chosenSprite": "movement",
+      "outputFile": "229__movement__catch__a66d78276b423247fca5072a64d698b8.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 7,
+          "costumeName": "catch",
+          "rotationCenterX": 13.450835000000012,
+          "rotationCenterY": 13.026755000000009
+        }
+      ]
+    },
+    {
+      "sourceFile": "39c79e01146dfe83dfee04169c873879.svg",
+      "assetId": "39c79e01146dfe83dfee04169c873879",
+      "dataFormat": "svg",
+      "chosenName": "hold",
+      "chosenSprite": "movement",
+      "outputFile": "230__movement__hold__39c79e01146dfe83dfee04169c873879.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 9,
+          "costumeName": "hold",
+          "rotationCenterX": 9.587349999999986,
+          "rotationCenterY": 10.356404999999995
+        }
+      ]
+    },
+    {
+      "sourceFile": "452a21b22256c99b6227ea2bdf478726.svg",
+      "assetId": "452a21b22256c99b6227ea2bdf478726",
+      "dataFormat": "svg",
+      "chosenName": "jump",
+      "chosenSprite": "movement",
+      "outputFile": "231__movement__jump__452a21b22256c99b6227ea2bdf478726.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 8,
+          "costumeName": "jump",
+          "rotationCenterX": 11.793499999999995,
+          "rotationCenterY": 12.414080000000013
+        }
+      ]
+    },
+    {
+      "sourceFile": "adcdd2851305181a857a31022bfa0c72.svg",
+      "assetId": "adcdd2851305181a857a31022bfa0c72",
+      "dataFormat": "svg",
+      "chosenName": "move",
+      "chosenSprite": "movement",
+      "outputFile": "232__movement__move__adcdd2851305181a857a31022bfa0c72.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 3,
+          "costumeName": "move",
+          "rotationCenterX": 12.139260000000007,
+          "rotationCenterY": 12.139260000000007
+        }
+      ]
+    },
+    {
+      "sourceFile": "eea5291030ae67602d46e1c76092195a.svg",
+      "assetId": "eea5291030ae67602d46e1c76092195a",
+      "dataFormat": "svg",
+      "chosenName": "move take",
+      "chosenSprite": "movement",
+      "outputFile": "233__movement__move_take__eea5291030ae67602d46e1c76092195a.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 1,
+          "costumeName": "move take",
+          "rotationCenterX": 10.592594999999989,
+          "rotationCenterY": 10.592594999999989
+        }
+      ]
+    },
+    {
+      "sourceFile": "08867f219fbcf8330f4a88957bb780e2.svg",
+      "assetId": "08867f219fbcf8330f4a88957bb780e2",
+      "dataFormat": "svg",
+      "chosenName": "shift",
+      "chosenSprite": "movement",
+      "outputFile": "234__movement__shift__08867f219fbcf8330f4a88957bb780e2.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 10,
+          "costumeName": "shift",
+          "rotationCenterX": 12.7920385766744,
+          "rotationCenterY": 12.7920385766744
+        }
+      ]
+    },
+    {
+      "sourceFile": "315f0a907585e2d15051a3b5270d2ff0.svg",
+      "assetId": "315f0a907585e2d15051a3b5270d2ff0",
+      "dataFormat": "svg",
+      "chosenName": "take",
+      "chosenSprite": "movement",
+      "outputFile": "235__movement__take__315f0a907585e2d15051a3b5270d2ff0.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 2,
+          "costumeName": "take",
+          "rotationCenterX": 11.054620044759162,
+          "rotationCenterY": 11.054613072346712
+        }
+      ]
+    },
+    {
+      "sourceFile": "cce5c5c065e6de6469b0822af332b4b5.svg",
+      "assetId": "cce5c5c065e6de6469b0822af332b4b5",
+      "dataFormat": "svg",
+      "chosenName": "void",
+      "chosenSprite": "movement",
+      "outputFile": "236__movement__void__cce5c5c065e6de6469b0822af332b4b5.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 5,
+          "costumeName": "void",
+          "rotationCenterX": 14.000050590485785,
+          "rotationCenterY": 14.000042303381719
+        },
+        {
+          "sprite": "movement",
+          "costumeIndex": 6,
+          "costumeName": "void2",
+          "rotationCenterX": 14.000050590485785,
+          "rotationCenterY": 14.000042303381719
+        }
+      ]
+    },
+    {
+      "sourceFile": "391e91b182cd28bb60398c375a626d43.svg",
+      "assetId": "391e91b182cd28bb60398c375a626d43",
+      "dataFormat": "svg",
+      "chosenName": "void2 (1)",
+      "chosenSprite": "movement",
+      "outputFile": "237__movement__void2_1__391e91b182cd28bb60398c375a626d43.svg",
+      "references": [
+        {
+          "sprite": "movement",
+          "costumeIndex": 11,
+          "costumeName": "void2 (1)",
+          "rotationCenterX": 14.000055590485829,
+          "rotationCenterY": 14.000047303381706
+        }
+      ]
+    },
+    {
+      "sourceFile": "5f2c6ba1118cca219280eab90d0ddebd.svg",
+      "assetId": "5f2c6ba1118cca219280eab90d0ddebd",
+      "dataFormat": "svg",
+      "chosenName": "모양 1 (6)",
+      "chosenSprite": "wall2",
+      "outputFile": "238__wall2__1_6__5f2c6ba1118cca219280eab90d0ddebd.svg",
+      "references": [
+        {
+          "sprite": "wall2",
+          "costumeIndex": 1,
+          "costumeName": "모양 1 (6)",
+          "rotationCenterX": 212.87514924770147,
+          "rotationCenterY": 212.8751492477016
+        }
+      ]
+    },
+    {
+      "sourceFile": "eee35c3034a2848d0706d3f5d9028613.svg",
+      "assetId": "eee35c3034a2848d0706d3f5d9028613",
+      "dataFormat": "svg",
+      "chosenName": "tail",
+      "chosenSprite": "스프라이트 1",
+      "outputFile": "239__1__tail__eee35c3034a2848d0706d3f5d9028613.svg",
+      "references": [
+        {
+          "sprite": "스프라이트 1",
+          "costumeIndex": 2,
+          "costumeName": "tail",
+          "rotationCenterX": 20.454467069869935,
+          "rotationCenterY": 13.767240000000044
+        }
+      ]
+    },
+    {
+      "sourceFile": "8f55faa95b11807d2bf8cbe84feff7c7.svg",
+      "assetId": "8f55faa95b11807d2bf8cbe84feff7c7",
+      "dataFormat": "svg",
+      "chosenName": "모양 1",
+      "chosenSprite": "스프라이트 1",
+      "outputFile": "240__1__1__8f55faa95b11807d2bf8cbe84feff7c7.svg",
+      "references": [
+        {
+          "sprite": "스프라이트 1",
+          "costumeIndex": 1,
+          "costumeName": "모양 1",
+          "rotationCenterX": 20.01995500000001,
+          "rotationCenterY": 18.582605
+        }
+      ]
+    },
+    {
+      "sourceFile": "fffedefaa95bf116f608223c3e4b9fef.svg",
+      "assetId": "fffedefaa95bf116f608223c3e4b9fef",
+      "dataFormat": "svg",
+      "chosenName": "2474728 (2) (1)",
+      "chosenSprite": "스프라이트 2",
+      "outputFile": "241__2__2474728_2_1__fffedefaa95bf116f608223c3e4b9fef.svg",
+      "references": [
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 41,
+          "costumeName": "2474728 (2) (1)",
+          "rotationCenterX": 14.476214999999996,
+          "rotationCenterY": 17.42667499999999
+        }
+      ]
+    },
+    {
+      "sourceFile": "34fad5caf55fe70eb1266712c99960e9.svg",
+      "assetId": "34fad5caf55fe70eb1266712c99960e9",
+      "dataFormat": "svg",
+      "chosenName": "bw3 (1)",
+      "chosenSprite": "스프라이트 2",
+      "outputFile": "242__2__bw3_1__34fad5caf55fe70eb1266712c99960e9.svg",
+      "references": [
+        {
+          "sprite": "스프라이트 2",
+          "costumeIndex": 29,
+          "costumeName": "bw3 (1)",
+          "rotationCenterX": 17.24999999999997,
+          "rotationCenterY": 17.415584021587506
+        }
+      ]
+    }
+  ]
+}
