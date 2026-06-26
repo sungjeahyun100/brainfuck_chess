@@ -4,45 +4,46 @@
     <div class="header">
       <h2>Brainfuck Chess</h2>
       <div class="turn-info">
-        <span class="player-badge" :class="`player-${state.current_player}`">
-          {{ state.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
+        <span class="player-badge" :class="`player-${viewState.current_player}`">
+          {{ viewState.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
         </span>
         <span v-if="localPlayer" class="local-badge" :class="{ waiting: !isMyTurn }">
           {{ isBotTurn ? '봇 턴' : isMyTurn ? '내 턴' : '상대 턴' }}
         </span>
         <span v-if="botPlayer" class="bot-badge">🤖 {{ botDifficultyLabel }}</span>
-        <span class="turn-badge">Turn {{ state.turn_number }}</span>
-        <span class="mode-badge" v-if="state.turn_state.mode !== 'undecided'">
-          {{ state.turn_state.mode === 'move' ? '🏃 Move' : '🎯 Drop' }}
+        <span class="turn-badge">Turn {{ viewState.turn_number }}</span>
+        <span class="mode-badge" v-if="viewState.turn_state.mode !== 'undecided'">
+          {{ viewState.turn_state.mode === 'move' ? '🏃 Move' : '🎯 Drop' }}
         </span>
       </div>
     </div>
 
-    <div v-if="botPlayer" class="bot-status" :class="{ thinking: botThinking, failed: Boolean(botError) }" aria-live="polite">
+    <div v-if="botPlayer" class="bot-status" :class="{ thinking: botThinking || botReplaying, failed: Boolean(botError) }" aria-live="polite">
       <div>
-        <strong>{{ botThinking ? '봇이 수를 계산하고 있습니다…' : botError ? '봇 턴 실행 실패' : '봇 대전' }}</strong>
+        <strong>{{ botStatusTitle }}</strong>
+        <small v-if="botReplayMessage">{{ botReplayMessage }}</small>
         <small v-if="lastBotStats">
           최근 탐색 {{ lastBotStats.searched_nodes.toLocaleString() }}노드 · 깊이 {{ lastBotStats.depth_reached }} · {{ lastBotStats.elapsed_ms }}ms
         </small>
-        <small v-else>{{ playerName(botPlayer) }} 봇 · {{ botDifficultyLabel }}</small>
+        <small v-else-if="!botReplayMessage">{{ playerName(botPlayer) }} 봇 · {{ botDifficultyLabel }}</small>
       </div>
-      <button v-if="botError && isBotTurn && !botThinking" @click="runBotTurn">다시 시도</button>
+      <button v-if="botError && isBotTurn && !botThinking && !botReplaying" @click="runBotTurn">다시 시도</button>
     </div>
 
     <!-- Game over overlay -->
-    <div v-if="state.phase === 'ended'" class="game-over-overlay">
+    <div v-if="viewState.phase === 'ended'" class="game-over-overlay">
       <div class="game-over-box">
         <h2>Game Over</h2>
-        <p v-if="state.result?.winner">
-          {{ state.result.winner === 'white' ? '⬜ White' : '⬛ Black' }} wins!
-          <br><small>({{ state.result.reason }})</small>
+        <p v-if="viewState.result?.winner">
+          {{ viewState.result.winner === 'white' ? '⬜ White' : '⬛ Black' }} wins!
+          <br><small>({{ viewState.result.reason }})</small>
         </p>
         <p v-else>Draw</p>
         <button @click="$emit('restart')">New Game</button>
       </div>
     </div>
 
-    <div class="main-layout" :class="{ locked: botThinking || isBotTurn }">
+    <div class="main-layout" :class="{ locked: botThinking || botReplaying || isBotTurn }">
       <!-- Left: Pocket (White) -->
       <div class="pocket">
         <h4>⬜ White Pocket</h4>
@@ -57,8 +58,8 @@
             @dragstart="onPocketDragStart($event, pid)"
             @dragend="onPocketDragEnd"
           >
-            {{ pieceSymbol(state.pieces[pid]?.type_id) }}
-            <small>{{ state.piece_definitions[state.pieces[pid]?.type_id]?.score }}pt</small>
+            {{ pieceSymbol(viewState.pieces[pid]?.type_id) }}
+            <small>{{ viewState.piece_definitions[viewState.pieces[pid]?.type_id]?.score }}pt</small>
           </div>
         </div>
         <div class="score-info" v-if="whiteDeck">
@@ -68,12 +69,12 @@
 
       <!-- Center: Board -->
       <Board
-        :board="state.board"
-        :pieces="state.pieces"
-        :selected-piece-id="selectedPieceId"
-        :movable-squares="movableSquares"
-        :attack-squares="attackSquares"
-        :drop-squares="dropSquares"
+        :board="viewState.board"
+        :pieces="viewState.pieces"
+        :selected-piece-id="visibleSelectedPieceId"
+        :movable-squares="visibleMovableSquares"
+        :attack-squares="visibleAttackSquares"
+        :drop-squares="visibleDropSquares"
         @square-click="onSquareClick"
         @piece-drag-start="onBoardPieceDragStart"
         @square-drop="onSquareDrop"
@@ -93,8 +94,8 @@
             @dragstart="onPocketDragStart($event, pid)"
             @dragend="onPocketDragEnd"
           >
-            {{ pieceSymbol(state.pieces[pid]?.type_id) }}
-            <small>{{ state.piece_definitions[state.pieces[pid]?.type_id]?.score }}pt</small>
+            {{ pieceSymbol(viewState.pieces[pid]?.type_id) }}
+            <small>{{ viewState.piece_definitions[viewState.pieces[pid]?.type_id]?.score }}pt</small>
           </div>
         </div>
         <div class="score-info" v-if="blackDeck">
@@ -107,20 +108,20 @@
     <div class="footer">
       <button
         class="btn btn-end-turn"
-        :disabled="!isMyTurn || botThinking || state.turn_state.actions.length === 0 || state.phase === 'ended'"
+        :disabled="!canUsePlayerControls || viewState.turn_state.actions.length === 0 || viewState.phase === 'ended'"
         @click="onEndTurn"
       >
         End Turn
       </button>
       <button
         class="btn btn-resign"
-        :disabled="botThinking || state.phase === 'ended' || (Boolean(roomId) && !localPlayer)"
+        :disabled="botThinking || botReplaying || viewState.phase === 'ended' || (Boolean(roomId) && !localPlayer)"
         @click="onResign"
       >
         기권
       </button>
       <div class="turn-log">
-        <small>Actions this turn: {{ state.turn_state.actions.length }}</small>
+        <small>Actions this turn: {{ viewState.turn_state.actions.length }}</small>
       </div>
     </div>
 
@@ -131,6 +132,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import type {
+  AiAction,
   BotDifficulty,
   BotTurnStats,
   DropAction,
@@ -163,8 +165,19 @@ const dropSquares = ref<Square[]>([])
 const error = ref<string | null>(null)
 const botError = ref<string | null>(null)
 const botThinking = ref(false)
+const botReplaying = ref(false)
+const botReplayMessage = ref<string | null>(null)
 const lastBotStats = ref<BotTurnStats | null>(null)
 const draggedPocketPieceId = ref<string | null>(null)
+const botPreviewSelectedPieceId = ref<string | null>(null)
+const botPreviewMovableSquares = ref<Square[]>([])
+const botPreviewAttackSquares = ref<Square[]>([])
+const botPreviewDropSquares = ref<Square[]>([])
+const botReplayState = ref<GameState | null>(null)
+let botRunSerial = 0
+
+const BOT_ACTION_PREVIEW_MS = 520
+const BOT_ACTION_SETTLE_MS = 340
 
 interface LegalPieceOptions {
   legalTargets: Square[]
@@ -177,19 +190,33 @@ const pieceOptionsRequests = new Map<string, Promise<LegalPieceOptions>>()
 const dropOptionsCache = new Map<string, DropAction[]>()
 const dropOptionsRequests = new Map<string, Promise<DropAction[]>>()
 
+const viewState = computed(() => botReplayState.value ?? props.state)
 const whitePocket = computed(() =>
-  props.state.players['white']?.deck.pocket_pieces ?? []
+  viewState.value.players['white']?.deck.pocket_pieces ?? []
 )
 const blackPocket = computed(() =>
-  props.state.players['black']?.deck.pocket_pieces ?? []
+  viewState.value.players['black']?.deck.pocket_pieces ?? []
 )
-const whiteDeck = computed(() => props.state.players['white']?.deck)
-const blackDeck = computed(() => props.state.players['black']?.deck)
+const whiteDeck = computed(() => viewState.value.players['white']?.deck)
+const blackDeck = computed(() => viewState.value.players['black']?.deck)
 const isMyTurn = computed(() => !props.localPlayer || props.state.current_player === props.localPlayer)
 const isBotTurn = computed(() => Boolean(
   props.botPlayer
   && props.state.current_player === props.botPlayer
   && props.state.phase === 'playing',
+))
+const canUsePlayerControls = computed(() => isMyTurn.value && !botThinking.value && !botReplaying.value)
+const visibleSelectedPieceId = computed(() => (
+  botReplaying.value ? botPreviewSelectedPieceId.value : selectedPieceId.value
+))
+const visibleMovableSquares = computed(() => (
+  botReplaying.value ? botPreviewMovableSquares.value : movableSquares.value
+))
+const visibleAttackSquares = computed(() => (
+  botReplaying.value ? botPreviewAttackSquares.value : attackSquares.value
+))
+const visibleDropSquares = computed(() => (
+  botReplaying.value ? botPreviewDropSquares.value : dropSquares.value
 ))
 const botDifficultyLabel = computed(() => {
   const labels: Record<BotDifficulty, string> = {
@@ -199,29 +226,257 @@ const botDifficultyLabel = computed(() => {
   }
   return labels[props.botDifficulty ?? 'normal']
 })
+const botStatusTitle = computed(() => {
+  if (botThinking.value && !botReplaying.value) return '봇이 수를 계산하고 있습니다...'
+  if (botReplaying.value) return '봇이 수를 두고 있습니다'
+  if (botError.value) return '봇 턴 실행 실패'
+  return '봇 대전'
+})
 
 function playerName(player: PlayerId): string {
   return player === 'white' ? 'White' : 'Black'
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
+function cloneGameState(state: GameState): GameState {
+  return JSON.parse(JSON.stringify(state)) as GameState
+}
+
+function squareId(square: Square): string {
+  return `${square.file}_${square.rank}`
+}
+
+function otherPlayer(player: PlayerId): PlayerId {
+  return player === 'white' ? 'black' : 'white'
+}
+
+function clearBotPreview() {
+  botPreviewSelectedPieceId.value = null
+  botPreviewMovableSquares.value = []
+  botPreviewAttackSquares.value = []
+  botPreviewDropSquares.value = []
+}
+
+function clearBotReplay() {
+  botReplayState.value = null
+  clearBotPreview()
+}
+
+function actionLabel(action: AiAction): string {
+  if (action.type === 'end_turn') return '턴 종료'
+
+  const piece = props.state.pieces[action.piece_id]
+  const pieceName = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? action.piece_id
+  if (action.type === 'drop') {
+    return `${pieceName} 착수: ${action.to.file + 1}, ${action.to.rank + 1}`
+  }
+
+  const captureText = action.captured_piece_id ? ' 포획' : ' 이동'
+  return `${pieceName}${captureText}: ${action.from.file + 1}, ${action.from.rank + 1} -> ${action.to.file + 1}, ${action.to.rank + 1}`
+}
+
+function removePieceFromBoard(state: GameState, pieceId: string) {
+  for (const [id, occupant] of Object.entries(state.board.squares)) {
+    if (occupant === pieceId) state.board.squares[id] = null
+  }
+}
+
+function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
+  const next = cloneGameState(state)
+  next.turn_state.mode = 'move'
+  const movedPiece = next.pieces[action.piece_id]
+  const isCastling = movedPiece?.type_id === 'king'
+    && Math.abs(action.to.file - action.from.file) === 2
+    && action.to.rank === action.from.rank
+  next.board.squares[squareId(action.from)] = null
+
+  const capturedPieceId = action.captured_piece_id ?? next.board.squares[squareId(action.to)] ?? undefined
+  if (capturedPieceId) {
+    removePieceFromBoard(next, capturedPieceId)
+    const capturedPiece = next.pieces[capturedPieceId]
+    if (capturedPiece) {
+      capturedPiece.captured = true
+      capturedPiece.current_square = undefined
+    }
+    const opponent = next.players[otherPlayer(action.player_id)]
+    if (opponent && !opponent.captured_pieces.includes(capturedPieceId)) {
+      opponent.captured_pieces.push(capturedPieceId)
+    }
+  }
+
+  if (isCastling) {
+    const direction = Math.sign(action.to.file - action.from.file)
+    let rookFile = action.from.file + direction
+    while (rookFile >= 0 && rookFile < next.board.size) {
+      const rookSquare = { file: rookFile, rank: action.from.rank }
+      const rookId = next.board.squares[squareId(rookSquare)]
+      const rook = rookId ? next.pieces[rookId] : null
+      if (rookId && rook) {
+        if (rook.owner === action.player_id && rook.type_id === 'rook' && rook.current_square) {
+          const rookTo = { file: action.from.file + direction, rank: action.from.rank }
+          next.board.squares[squareId(rookSquare)] = null
+          next.board.squares[squareId(rookTo)] = rookId
+          rook.current_square = rookTo
+          rook.has_moved = true
+        }
+        break
+      }
+      rookFile += direction
+    }
+  }
+
+  next.board.squares[squareId(action.to)] = action.piece_id
+  if (movedPiece) {
+    movedPiece.current_square = action.to
+    movedPiece.move_stack = Math.max(0, movedPiece.move_stack - 1)
+    movedPiece.has_moved = true
+  }
+
+  if (!next.turn_state.moved_piece_ids.includes(action.piece_id)) {
+    next.turn_state.moved_piece_ids.push(action.piece_id)
+  }
+  next.turn_state.actions.push(action)
+
+  const capturedTypeId = capturedPieceId ? next.pieces[capturedPieceId]?.type_id : undefined
+  if (capturedTypeId && next.piece_definitions[capturedTypeId]?.is_king) {
+    next.phase = 'ended'
+    next.result = { winner: action.player_id, reason: 'king_capture' }
+  }
+
+  return next
+}
+
+function applyDropForReplay(state: GameState, action: DropAction): GameState {
+  const next = cloneGameState(state)
+  next.turn_state.mode = 'drop'
+
+  const player = next.players[action.player_id]
+  if (player) {
+    player.deck.pocket_pieces = player.deck.pocket_pieces.filter(id => id !== action.piece_id)
+  }
+
+  const piece = next.pieces[action.piece_id]
+  if (piece) {
+    piece.in_pocket = false
+    piece.current_square = action.to
+  }
+  next.board.squares[squareId(action.to)] = action.piece_id
+  next.turn_state.actions.push(action)
+
+  return next
+}
+
+function applyEndTurnForReplay(state: GameState): GameState {
+  if (state.turn_state.actions.length === 0) return state
+
+  const next = cloneGameState(state)
+  next.current_player = otherPlayer(next.current_player)
+  next.turn_number += 1
+  next.turn_state = {
+    mode: 'undecided',
+    actions: [],
+    moved_piece_ids: [],
+  }
+
+  for (const piece of Object.values(next.pieces)) {
+    if (piece.owner === next.current_player && piece.current_square && !piece.captured && !piece.in_pocket) {
+      piece.move_stack = 1
+    }
+  }
+
+  return next
+}
+
+function applyActionForReplay(state: GameState, action: AiAction): GameState {
+  if (action.type === 'move') return applyMoveForReplay(state, action)
+  if (action.type === 'drop') return applyDropForReplay(state, action)
+  return applyEndTurnForReplay(state)
+}
+
+function previewBotAction(action: AiAction) {
+  clearBotPreview()
+  if (action.type === 'move') {
+    botPreviewSelectedPieceId.value = action.piece_id
+    if (action.captured_piece_id) {
+      botPreviewAttackSquares.value = [action.to]
+    } else {
+      botPreviewMovableSquares.value = [action.to]
+    }
+  } else if (action.type === 'drop') {
+    botPreviewDropSquares.value = [action.to]
+  }
+}
+
+async function replayBotTurn(actions: AiAction[], finalState: GameState, runId: number) {
+  if (actions.length === 0) {
+    emit('stateUpdate', finalState)
+    return
+  }
+
+  botReplaying.value = true
+  let nextReplayState = cloneGameState(props.state)
+  for (let index = 0; index < actions.length; index++) {
+    if (runId !== botRunSerial) return
+
+    const action = actions[index]
+    botReplayMessage.value = `${index + 1}/${actions.length} ${actionLabel(action)}`
+    previewBotAction(action)
+    await wait(BOT_ACTION_PREVIEW_MS)
+    if (runId !== botRunSerial) return
+
+    nextReplayState = applyActionForReplay(nextReplayState, action)
+    botReplayState.value = nextReplayState
+    clearBotPreview()
+    await wait(BOT_ACTION_SETTLE_MS)
+  }
+
+  if (runId !== botRunSerial) return
+  botReplayState.value = null
+  emit('stateUpdate', finalState)
+}
+
 async function runBotTurn() {
   if (!props.botPlayer || !isBotTurn.value || botThinking.value) return
 
+  const runId = ++botRunSerial
   botThinking.value = true
+  botReplaying.value = false
+  botReplayMessage.value = null
   botError.value = null
   clearSelection()
+  clearBotReplay()
   try {
     const response = await api.botTurn(
       props.state.id,
       props.botPlayer,
       props.botDifficulty ?? 'normal',
     )
+    if (runId !== botRunSerial) return
     lastBotStats.value = response.stats
-    emit('stateUpdate', response.game_state)
+    await replayBotTurn(response.actions, response.game_state, runId)
   } catch (e: unknown) {
-    botError.value = e instanceof Error ? e.message : String(e)
+    const message = e instanceof Error ? e.message : String(e)
+    if (message.includes('현재 턴 플레이어와 bot_player_id가 일치하지 않습니다.')) {
+      try {
+        const syncedState = await api.getGame(props.state.id)
+        emit('stateUpdate', syncedState)
+        botError.value = null
+      } catch {
+        botError.value = message
+      }
+    } else {
+      botError.value = message
+    }
   } finally {
-    botThinking.value = false
+    if (runId === botRunSerial) {
+      botThinking.value = false
+      botReplaying.value = false
+      botReplayMessage.value = null
+      clearBotReplay()
+    }
   }
 }
 
@@ -448,7 +703,7 @@ async function submitDrop(pieceId: string, to: Square) {
 
 async function onSquareClick(sq: Square) {
   error.value = null
-  if (!isMyTurn.value) {
+  if (!canUsePlayerControls.value) {
     error.value = '상대 턴입니다.'
     clearSelection()
     return
@@ -481,7 +736,7 @@ async function onSquareClick(sq: Square) {
 
 async function onPocketClick(pieceId: string) {
   error.value = null
-  if (!isMyTurn.value) {
+  if (!canUsePlayerControls.value) {
     error.value = '상대 턴입니다.'
     clearSelection()
     return
@@ -496,7 +751,7 @@ async function onPocketClick(pieceId: string) {
 
 function onBoardPieceDragStart(pieceId: string) {
   error.value = null
-  if (!isMyTurn.value) {
+  if (!canUsePlayerControls.value) {
     clearSelection()
     return
   }
@@ -506,7 +761,7 @@ function onBoardPieceDragStart(pieceId: string) {
 
 async function onSquareDrop(sq: Square | null, pieceId: string) {
   error.value = null
-  if (!isMyTurn.value || !sq) {
+  if (!canUsePlayerControls.value || !sq) {
     clearSelection()
     return
   }
@@ -526,7 +781,7 @@ async function onSquareDrop(sq: Square | null, pieceId: string) {
 
 function onPocketDragStart(event: DragEvent, pieceId: string) {
   error.value = null
-  if (!isMyTurn.value || props.state.turn_state.mode === 'move') {
+  if (!canUsePlayerControls.value || props.state.turn_state.mode === 'move') {
     event.preventDefault()
     clearSelection()
     return
@@ -547,7 +802,7 @@ function onPocketDragEnd() {
 
 async function onEndTurn() {
   error.value = null
-  if (!isMyTurn.value) {
+  if (!canUsePlayerControls.value) {
     error.value = '상대 턴입니다.'
     return
   }
