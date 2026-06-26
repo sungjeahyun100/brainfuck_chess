@@ -192,7 +192,17 @@
           <div class="piece-catalog">
             <div v-for="section in catalogSections" :key="section.id" class="catalog-section">
               <div class="catalog-section-title">
-                <span>{{ section.label }}</span>
+                <span
+                  class="catalog-title-label"
+                  :class="{ 'has-tooltip': section.id === 'variant' }"
+                  :tabindex="section.id === 'variant' ? 0 : undefined"
+                >
+                  {{ section.label }}
+                  <span v-if="section.id === 'variant'" class="tooltip-mark" aria-hidden="true">?</span>
+                  <span v-if="section.id === 'variant'" class="variant-tooltip" role="tooltip">
+                    {{ variantTooltip }}
+                  </span>
+                </span>
                 <small>{{ section.pieces.length }}</small>
               </div>
 
@@ -200,8 +210,10 @@
                 <button
                   v-for="piece in section.pieces"
                   :key="piece.id"
+                  v-memo="[piece.id, piece.name, piece.score, pieceCount(activeDeck, piece.id), activePlayer, placementTool]"
                   class="palette-piece"
                   :class="{ active: isPieceToolActive(piece.id) }"
+                  :aria-label="pieceAriaLabel(piece)"
                   draggable="true"
                   @click="selectPieceTool(piece.id)"
                   @dragstart="onPieceDragStart($event, piece.id)"
@@ -213,6 +225,9 @@
                     <small>{{ piece.score === 0 ? '점수 제외' : `${piece.score}점` }}</small>
                   </span>
                   <span class="piece-count">{{ pieceCount(activeDeck, piece.id) }}</span>
+                  <span v-if="pieceMoveTip(piece.id)" class="piece-tooltip" role="tooltip">
+                    {{ pieceMoveTip(piece.id) }}
+                  </span>
                 </button>
               </div>
             </div>
@@ -254,6 +269,7 @@
             <button
               v-for="square in activeBaseZoneSquares"
               :key="`${square.file}_${square.rank}`"
+              v-memo="[activePlayer, square.file, square.rank, pieceAt(activePlayer, square.file, square.rank), draggedPiece]"
               class="placement-square"
               :class="squareClass(square.file, square.rank)"
               @click="onPlacementSquareClick(square.file, square.rank)"
@@ -384,6 +400,20 @@ const catalogCategoryLabels: Record<string, string> = {
   variant: 'Variant',
   minor: 'Minor',
   pawn: 'Pawn',
+}
+
+const variantTooltip = '시작 전 배치와 포켓 기물을 직접 구성합니다. 턴에는 여러 기물을 움직이거나 포켓 기물 하나를 자신의 초기 진영 또는 공격 가능한 칸에 착수할 수 있습니다.'
+
+const pieceMoveDescriptions: Record<string, string> = {
+  king: 'King: 한 칸씩 모든 방향으로 이동합니다.',
+  queen: 'Queen: 직선과 대각선 방향으로 이동합니다.',
+  amazon: 'Amazon: Queen과 Knight 행마를 함께 사용합니다.',
+  'tempest-rook': 'Tempest Rook: 등록된 Chessembly 행마법을 따르는 변형 Rook입니다.',
+  'bouncing-bishop': 'Bouncing Bishop: 등록된 Chessembly 행마법을 따르는 변형 Bishop입니다.',
+  rook: 'Rook: 직선 방향으로 이동합니다.',
+  bishop: 'Bishop: 대각선 방향으로 이동합니다.',
+  knight: 'Knight: 일반 체스 Knight처럼 L자로 이동합니다.',
+  pawn: 'Pawn: 플레이어 방향으로 전진하고 대각선으로 잡습니다.',
 }
 
 const gameState = ref<GameState | null>(null)
@@ -525,6 +555,15 @@ function pieceLabel(pieceType: DeckPieceType): string {
   return pieceById.value.get(pieceType)?.name ?? pieceType
 }
 
+function pieceMoveTip(pieceType: DeckPieceType): string {
+  return pieceMoveDescriptions[pieceType] ?? 'Custom Piece: 등록된 Chessembly 행마법을 따릅니다.'
+}
+
+function pieceAriaLabel(piece: PieceCatalogItem): string {
+  const score = piece.score === 0 ? '점수 제외' : `${piece.score}점`
+  return `${piece.name}, ${score}. ${pieceMoveTip(piece.id)}`
+}
+
 function pieceScore(pieceType: DeckPieceType): number {
   return pieceById.value.get(pieceType)?.score ?? 0
 }
@@ -598,7 +637,7 @@ function pieceAt(player: LobbyPlayer, file: number, rank: number): DeckPieceType
 
 function squareClass(file: number, rank: number): string[] {
   return [
-    (file + rank) % 2 === 0 ? 'light' : 'dark',
+    (file + rank) % 2 === 1 ? 'light' : 'dark',
     pieceAt(activePlayer.value, file, rank) ? 'occupied' : 'empty',
     draggedPiece.value ? 'drop-ready' : '',
   ].filter(Boolean)
@@ -1433,6 +1472,66 @@ body {
 
 .catalog-section-title small {
   color: var(--accent);
+}
+
+.catalog-title-label,
+.palette-piece {
+  position: relative;
+}
+
+.catalog-title-label.has-tooltip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  outline: none;
+}
+
+.tooltip-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(217, 164, 65, 0.18);
+  color: #f4dfb0;
+  font-size: 11px;
+}
+
+.variant-tooltip,
+.piece-tooltip {
+  position: absolute;
+  z-index: 20;
+  display: none;
+  width: min(280px, 70vw);
+  padding: 9px 10px;
+  border: 1px solid rgba(244, 223, 176, 0.24);
+  border-radius: 8px;
+  background: #111a27;
+  color: var(--text);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-transform: none;
+}
+
+.variant-tooltip {
+  left: 0;
+  top: calc(100% + 8px);
+}
+
+.piece-tooltip {
+  left: 10px;
+  right: 10px;
+  bottom: calc(100% + 8px);
+}
+
+.catalog-title-label.has-tooltip:hover .variant-tooltip,
+.catalog-title-label.has-tooltip:focus-visible .variant-tooltip,
+.palette-piece:hover .piece-tooltip,
+.palette-piece:focus-visible .piece-tooltip {
+  display: block;
 }
 
 .piece-palette,

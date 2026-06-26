@@ -52,7 +52,10 @@
             :key="pid"
             class="pocket-piece"
             :class="{ selected: selectedPocketPieceId === pid }"
+            draggable="true"
             @click="onPocketClick(pid)"
+            @dragstart="onPocketDragStart($event, pid)"
+            @dragend="onPocketDragEnd"
           >
             {{ pieceSymbol(state.pieces[pid]?.type_id) }}
             <small>{{ state.piece_definitions[state.pieces[pid]?.type_id]?.score }}pt</small>
@@ -72,6 +75,8 @@
         :attack-squares="attackSquares"
         :drop-squares="dropSquares"
         @square-click="onSquareClick"
+        @piece-drag-start="onBoardPieceDragStart"
+        @square-drop="onSquareDrop"
       />
 
       <!-- Right: Pocket (Black) -->
@@ -83,7 +88,10 @@
             :key="pid"
             class="pocket-piece"
             :class="{ selected: selectedPocketPieceId === pid }"
+            draggable="true"
             @click="onPocketClick(pid)"
+            @dragstart="onPocketDragStart($event, pid)"
+            @dragend="onPocketDragEnd"
           >
             {{ pieceSymbol(state.pieces[pid]?.type_id) }}
             <small>{{ state.piece_definitions[state.pieces[pid]?.type_id]?.score }}pt</small>
@@ -156,6 +164,18 @@ const error = ref<string | null>(null)
 const botError = ref<string | null>(null)
 const botThinking = ref(false)
 const lastBotStats = ref<BotTurnStats | null>(null)
+const draggedPocketPieceId = ref<string | null>(null)
+
+interface LegalPieceOptions {
+  legalTargets: Square[]
+  movable: Square[]
+  captures: Square[]
+}
+
+const pieceOptionsCache = new Map<string, LegalPieceOptions>()
+const pieceOptionsRequests = new Map<string, Promise<LegalPieceOptions>>()
+const dropOptionsCache = new Map<string, DropAction[]>()
+const dropOptionsRequests = new Map<string, Promise<DropAction[]>>()
 
 const whitePocket = computed(() =>
   props.state.players['white']?.deck.pocket_pieces ?? []
@@ -232,10 +252,198 @@ function pieceSymbol(typeId: string): string {
 function clearSelection() {
   selectedPieceId.value = null
   selectedPocketPieceId.value = null
+  draggedPocketPieceId.value = null
   legalTargetSquares.value = []
   movableSquares.value = []
   attackSquares.value = []
   dropSquares.value = []
+}
+
+function actionCacheKey(pieceId?: string): string {
+  return [
+    props.state.id,
+    props.state.current_player,
+    props.state.turn_number,
+    props.state.turn_state.mode,
+    props.state.turn_state.actions.length,
+    pieceId ?? '',
+  ].join(':')
+}
+
+function sameSquare(left: Square, right: Square): boolean {
+  return left.file === right.file && left.rank === right.rank
+}
+
+function isLegalSquare(square: Square, legalSquares: Square[]): boolean {
+  return legalSquares.some(target => sameSquare(target, square))
+}
+
+async function loadPieceOptions(pieceId: string): Promise<LegalPieceOptions> {
+  const key = actionCacheKey(pieceId)
+  const cached = pieceOptionsCache.get(key)
+  if (cached) return cached
+
+  const pending = pieceOptionsRequests.get(key)
+  if (pending) return pending
+
+  const request = api.getPieceOptions(props.state.id, pieceId).then(({ moves }) => {
+    const options: LegalPieceOptions = {
+      legalTargets: moves.map(move => move.to),
+      movable: moves.filter(move => !move.captured_piece_id).map(move => move.to),
+      captures: moves.filter(move => Boolean(move.captured_piece_id)).map(move => move.to),
+    }
+    pieceOptionsCache.set(key, options)
+    pieceOptionsRequests.delete(key)
+    return options
+  }).catch(error => {
+    pieceOptionsRequests.delete(key)
+    throw error
+  })
+
+  pieceOptionsRequests.set(key, request)
+  return request
+}
+
+async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | null> {
+  const piece = props.state.pieces[pieceId]
+  if (!piece || piece.owner !== props.state.current_player || piece.move_stack <= 0) {
+    clearSelection()
+    return null
+  }
+
+  selectedPieceId.value = pieceId
+  selectedPocketPieceId.value = null
+  legalTargetSquares.value = []
+  movableSquares.value = []
+  attackSquares.value = []
+  dropSquares.value = []
+
+  try {
+    const options = await loadPieceOptions(pieceId)
+    if (selectedPieceId.value !== pieceId) return options
+
+    legalTargetSquares.value = options.legalTargets
+    movableSquares.value = options.movable
+    attackSquares.value = options.captures
+    return options
+  } catch {
+    if (selectedPieceId.value === pieceId) {
+      legalTargetSquares.value = []
+      movableSquares.value = []
+      attackSquares.value = []
+    }
+    return null
+  }
+}
+
+async function loadDropOptions(): Promise<DropAction[]> {
+  const key = actionCacheKey('drops')
+  const cached = dropOptionsCache.get(key)
+  if (cached) return cached
+
+  const pending = dropOptionsRequests.get(key)
+  if (pending) return pending
+
+  const request = api.getLegalDrops(props.state.id).then(({ drops }) => {
+    dropOptionsCache.set(key, drops)
+    dropOptionsRequests.delete(key)
+    return drops
+  }).catch(error => {
+    dropOptionsRequests.delete(key)
+    throw error
+  })
+
+  dropOptionsRequests.set(key, request)
+  return request
+}
+
+async function selectPocketPiece(pieceId: string): Promise<Square[]> {
+  const piece = props.state.pieces[pieceId]
+  if (!piece || piece.owner !== props.state.current_player || props.state.turn_state.mode === 'move') {
+    clearSelection()
+    return []
+  }
+
+  selectedPieceId.value = null
+  selectedPocketPieceId.value = pieceId
+  legalTargetSquares.value = []
+  movableSquares.value = []
+  attackSquares.value = []
+  dropSquares.value = []
+
+  try {
+    const drops = await loadDropOptions()
+    const targets = drops.filter(drop => drop.piece_id === pieceId).map(drop => drop.to)
+    if (selectedPocketPieceId.value === pieceId) {
+      dropSquares.value = targets
+    }
+    return targets
+  } catch {
+    if (selectedPocketPieceId.value === pieceId) {
+      dropSquares.value = []
+    }
+    return []
+  }
+}
+
+async function submitMove(pieceId: string, to: Square) {
+  const fromPiece = props.state.pieces[pieceId]
+  if (!fromPiece?.current_square || sameSquare(fromPiece.current_square, to)) {
+    clearSelection()
+    return
+  }
+
+  const options = selectedPieceId.value === pieceId && legalTargetSquares.value.length > 0
+    ? { legalTargets: legalTargetSquares.value }
+    : await selectBoardPiece(pieceId)
+  if (!options || !isLegalSquare(to, options.legalTargets)) {
+    clearSelection()
+    return
+  }
+
+  const sqId = `${to.file}_${to.rank}`
+  try {
+    const capturedPieceId = props.state.board.squares[sqId] ?? undefined
+    const action: MoveAction = {
+      type: 'move',
+      player_id: props.state.current_player,
+      piece_id: pieceId,
+      from: fromPiece.current_square,
+      to,
+      captured_piece_id: capturedPieceId ?? undefined,
+    }
+    const newState = await api.submitAction(props.state.id, action)
+    emit('stateUpdate', newState)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    clearSelection()
+  }
+}
+
+async function submitDrop(pieceId: string, to: Square) {
+  const targets = selectedPocketPieceId.value === pieceId && dropSquares.value.length > 0
+    ? dropSquares.value
+    : await selectPocketPiece(pieceId)
+  if (!isLegalSquare(to, targets)) {
+    clearSelection()
+    return
+  }
+
+  try {
+    const action: DropAction = {
+      type: 'drop',
+      player_id: props.state.current_player,
+      piece_id: pieceId,
+      to,
+    }
+    const newState = await api.submitAction(props.state.id, action)
+    emit('stateUpdate', newState)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    clearSelection()
+  }
 }
 
 async function onSquareClick(sq: Square) {
@@ -253,67 +461,19 @@ async function onSquareClick(sq: Square) {
 
   // ── Drop mode: selected pocket piece → drop on target ──
   if (selectedPocketPieceId.value) {
-    const isDroppable = dropSquares.value.some(s => s.file === sq.file && s.rank === sq.rank)
-    if (isDroppable) {
-      try {
-        const action: DropAction = {
-          type: 'drop',
-          player_id: currentPlayer,
-          piece_id: selectedPocketPieceId.value,
-          to: sq,
-        }
-        const newState = await api.submitAction(props.state.id, action)
-        emit('stateUpdate', newState)
-      } catch (e: unknown) {
-        error.value = e instanceof Error ? e.message : String(e)
-      }
-    }
-    clearSelection()
+    await submitDrop(selectedPocketPieceId.value, sq)
     return
   }
 
   // ── Move mode: selected piece → move to target ──
   if (selectedPieceId.value) {
-    const isLegalTarget = legalTargetSquares.value.some(s => s.file === sq.file && s.rank === sq.rank)
-    if (isLegalTarget) {
-      const fromPiece = props.state.pieces[selectedPieceId.value]
-      if (fromPiece?.current_square) {
-        try {
-          const capturedPieceId = props.state.board.squares[sqId] ?? undefined
-          const action: MoveAction = {
-            type: 'move',
-            player_id: currentPlayer,
-            piece_id: selectedPieceId.value,
-            from: fromPiece.current_square,
-            to: sq,
-            captured_piece_id: capturedPieceId ?? undefined,
-          }
-          const newState = await api.submitAction(props.state.id, action)
-          emit('stateUpdate', newState)
-        } catch (e: unknown) {
-          error.value = e instanceof Error ? e.message : String(e)
-        }
-      }
-    }
-    clearSelection()
+    await submitMove(selectedPieceId.value, sq)
     return
   }
 
   // ── Select own piece ──
   if (pieceId && piece && piece.owner === currentPlayer && piece.move_stack > 0) {
-    clearSelection()
-    selectedPieceId.value = pieceId
-
-    try {
-      const { moves, attacks } = await api.getPieceOptions(props.state.id, pieceId)
-      legalTargetSquares.value = moves.map(m => m.to)
-      movableSquares.value = moves.filter(m => !m.captured_piece_id).map(m => m.to)
-      attackSquares.value = attacks
-    } catch {
-      legalTargetSquares.value = []
-      movableSquares.value = []
-      attackSquares.value = []
-    }
+    await selectBoardPiece(pieceId)
   } else {
     clearSelection()
   }
@@ -331,14 +491,58 @@ async function onPocketClick(pieceId: string) {
   if (!piece || piece.owner !== props.state.current_player) return
   if (props.state.turn_state.mode === 'move') return
 
-  clearSelection()
-  selectedPocketPieceId.value = pieceId
-  try {
-    const { drops } = await api.getLegalDrops(props.state.id)
-    dropSquares.value = drops.filter(d => d.piece_id === pieceId).map(d => d.to)
-  } catch {
-    dropSquares.value = []
+  await selectPocketPiece(pieceId)
+}
+
+function onBoardPieceDragStart(pieceId: string) {
+  error.value = null
+  if (!isMyTurn.value) {
+    clearSelection()
+    return
   }
+
+  void selectBoardPiece(pieceId)
+}
+
+async function onSquareDrop(sq: Square | null, pieceId: string) {
+  error.value = null
+  if (!isMyTurn.value || !sq) {
+    clearSelection()
+    return
+  }
+
+  const piece = props.state.pieces[pieceId]
+  if (!piece) {
+    clearSelection()
+    return
+  }
+
+  if (piece.in_pocket || draggedPocketPieceId.value === pieceId) {
+    await submitDrop(pieceId, sq)
+  } else {
+    await submitMove(pieceId, sq)
+  }
+}
+
+function onPocketDragStart(event: DragEvent, pieceId: string) {
+  error.value = null
+  if (!isMyTurn.value || props.state.turn_state.mode === 'move') {
+    event.preventDefault()
+    clearSelection()
+    return
+  }
+
+  draggedPocketPieceId.value = pieceId
+  event.dataTransfer?.setData('application/x-brainfuck-chess-pocket-piece', pieceId)
+  event.dataTransfer?.setData('text/plain', pieceId)
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+  }
+  void selectPocketPiece(pieceId)
+}
+
+function onPocketDragEnd() {
+  draggedPocketPieceId.value = null
 }
 
 async function onEndTurn() {
@@ -433,10 +637,10 @@ async function onResign() {
   to { background: rgba(217, 164, 65, 0.16); }
 }
 
-.main-layout { display: flex; gap: 16px; align-items: flex-start; }
+.main-layout { display: flex; gap: 16px; align-items: flex-start; justify-content: center; }
 .main-layout.locked { pointer-events: none; opacity: 0.78; }
 
-.pocket { min-width: 120px; display: flex; flex-direction: column; gap: 8px; }
+.pocket { width: 132px; min-width: 120px; display: flex; flex-direction: column; gap: 8px; }
 .pocket h4 { margin: 0; font-size: 14px; }
 .pocket-pieces { display: flex; flex-wrap: wrap; gap: 6px; }
 .pocket-piece {
@@ -444,7 +648,10 @@ async function onResign() {
   align-items: center; justify-content: center;
   border: 2px solid #bbb; border-radius: 6px; cursor: pointer;
   font-size: 22px; background: #f9f9f9; color: #1f2933;
+  user-select: none;
 }
+.pocket-piece[draggable="true"] { cursor: grab; }
+.pocket-piece[draggable="true"]:active { cursor: grabbing; }
 .pocket-piece.selected { border-color: #4a8fff; background: #e0eeff; }
 .score-info { font-size: 12px; color: #666; }
 
@@ -471,4 +678,26 @@ async function onResign() {
   color: #1f2933;
 }
 .game-over-box button { margin-top: 16px; padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
+
+@media (max-width: 900px) {
+  .game-screen { padding: 12px; }
+  .header,
+  .footer {
+    flex-wrap: wrap;
+  }
+  .turn-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .main-layout {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  .pocket {
+    order: 2;
+    width: min(320px, 100%);
+    flex: 1 1 220px;
+  }
+}
 </style>
