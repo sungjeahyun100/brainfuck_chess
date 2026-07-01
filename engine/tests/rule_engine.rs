@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use brainfuck_chess_engine::attack_map::generate_attack_map;
-use brainfuck_chess_engine::endgame::{apply_move_action, has_living_king};
+use brainfuck_chess_engine::endgame::{
+    apply_activate_ability_action, apply_move_action, has_living_king,
+};
 use brainfuck_chess_engine::legal_moves::{
     generate_drop_candidates_by_type, generate_legal_drop_actions, generate_legal_move_actions,
     generate_piece_legal_drop_actions, generate_piece_legal_move_actions,
@@ -84,6 +86,7 @@ fn add_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, file: 
         captured: false,
         move_stack: 1,
         has_moved: false,
+        active_ability: None,
     };
     state.board.squares.insert(sq.to_id(), Some(id.into()));
     state.pieces.insert(id.into(), piece.clone());
@@ -106,6 +109,7 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         captured: false,
         move_stack: 0,
         has_moved: false,
+        active_ability: None,
     };
     state.pieces.insert(id.into(), piece);
     state
@@ -115,6 +119,32 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         .deck
         .pocket_pieces
         .push(id.into());
+}
+
+fn add_ability_test_definition(state: &mut GameState, duration: AbilityDuration) {
+    state.piece_definitions.insert(
+        "ability-test".into(),
+        PieceDefinition {
+            id: "ability-test".into(),
+            name: "Ability Test".into(),
+            score: 1,
+            chessembly_code: "take-move(0, 1);".into(),
+            chessembly_version: "1.0".into(),
+            dialect: None,
+            extensions: None,
+            is_king: false,
+            promotion: None,
+            promotion_pool: Vec::new(),
+            abilities: vec![PieceAbilityDefinition {
+                id: "side_step".into(),
+                name: "Side Step".into(),
+                description: "Moves east while active.".into(),
+                chessembly_code: "take-move(1, 0);".into(),
+                duration,
+                once_per_turn: true,
+            }],
+        },
+    );
 }
 
 // ─── Board creation ───────────────────────────────────────────────────────────
@@ -521,10 +551,7 @@ fn test_pawn_reaching_back_rank_generates_promotion_choices() {
     add_piece(&mut state, "wp", "white", "pawn-white", 4, 6);
 
     let moves = generate_piece_legal_move_actions(&state, &"wp".into());
-    let promotions: Vec<&MoveAction> = moves
-        .iter()
-        .filter(|m| m.to == Square::new(4, 7))
-        .collect();
+    let promotions: Vec<&MoveAction> = moves.iter().filter(|m| m.to == Square::new(4, 7)).collect();
     assert_eq!(
         promotions.len(),
         4,
@@ -567,12 +594,58 @@ fn test_non_promoting_pawn_move_has_single_action_without_promotion() {
     add_piece(&mut state, "wp", "white", "pawn-white", 4, 3);
 
     let moves = generate_piece_legal_move_actions(&state, &"wp".into());
-    let single_step: Vec<&MoveAction> = moves
-        .iter()
-        .filter(|m| m.to == Square::new(4, 4))
-        .collect();
+    let single_step: Vec<&MoveAction> =
+        moves.iter().filter(|m| m.to == Square::new(4, 4)).collect();
     assert_eq!(single_step.len(), 1);
     assert_eq!(single_step[0].promotion, None);
+}
+
+#[test]
+fn test_custom_piece_definition_can_generate_promotion_choices() {
+    let mut state = make_game_state(8);
+    state.piece_definitions.insert(
+        "promoter".into(),
+        PieceDefinition {
+            id: "promoter".into(),
+            name: "Promoter".into(),
+            score: 2,
+            chessembly_code: "move(0, 1);".into(),
+            chessembly_version: "1.0".into(),
+            dialect: None,
+            extensions: None,
+            is_king: false,
+            promotion: Some(PromotionRule {
+                condition: PromotionCondition::LastRank,
+            }),
+            promotion_pool: vec!["queen".into(), "knight".into()],
+            abilities: Vec::new(),
+        },
+    );
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "pr", "white", "promoter", 4, 6);
+
+    let moves = generate_piece_legal_move_actions(&state, &"pr".into());
+    let mut choices: Vec<String> = moves
+        .iter()
+        .filter(|m| m.to == Square::new(4, 7))
+        .filter_map(|m| m.promotion.clone())
+        .collect();
+    choices.sort();
+    assert_eq!(choices, vec!["knight", "queen"]);
+
+    let promoted_state = apply_move_action(
+        state,
+        MoveAction {
+            player_id: "white".into(),
+            piece_id: "pr".into(),
+            from: Square::new(4, 6),
+            to: Square::new(4, 7),
+            captured_piece_id: None,
+            promotion: Some("knight".into()),
+        },
+    );
+    assert_eq!(promoted_state.pieces.get("pr").unwrap().type_id, "knight");
 }
 
 #[test]
@@ -619,9 +692,14 @@ fn test_chessembly_cache_preserves_legal_moves_and_attack_map() {
 #[test]
 fn test_chessembly_cache_clone_and_deserialize_rebuild() {
     let state = make_game_state(8);
+    let expected_program_count: usize = state
+        .piece_definitions
+        .values()
+        .map(|definition| 1 + definition.abilities.len())
+        .sum();
     assert_eq!(
         state.cached_chessembly_program_count(),
-        state.piece_definitions.len()
+        expected_program_count
     );
 
     let cloned = state.clone();
@@ -638,7 +716,7 @@ fn test_chessembly_cache_clone_and_deserialize_rebuild() {
     deserialized.ensure_chessembly_cache();
     assert_eq!(
         deserialized.cached_chessembly_program_count(),
-        deserialized.piece_definitions.len()
+        expected_program_count
     );
 }
 
@@ -767,4 +845,168 @@ fn test_drop_candidates_are_grouped_by_piece_type() {
         .iter()
         .all(|candidate| candidate.count == 2));
     assert!(rook_candidates.iter().all(|candidate| candidate.count == 1));
+}
+
+#[test]
+fn test_inactive_ability_piece_uses_base_chessembly_code() {
+    let mut state = make_game_state(8);
+    add_ability_test_definition(&mut state, AbilityDuration::UntilTurnEnd);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "ab", "white", "ability-test", 2, 2);
+
+    let moves = generate_piece_legal_move_actions(&state, &"ab".into());
+
+    assert!(moves.iter().any(|action| action.to == Square::new(2, 3)));
+    assert!(!moves.iter().any(|action| action.to == Square::new(3, 2)));
+}
+
+#[test]
+fn test_active_ability_piece_uses_ability_chessembly_code() {
+    let mut state = make_game_state(8);
+    add_ability_test_definition(&mut state, AbilityDuration::UntilTurnEnd);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "ab", "white", "ability-test", 2, 2);
+
+    let state = apply_activate_ability_action(
+        state,
+        ActivateAbilityAction {
+            player_id: "white".into(),
+            piece_id: "ab".into(),
+            ability_id: "side_step".into(),
+        },
+    );
+    let moves = generate_piece_legal_move_actions(&state, &"ab".into());
+
+    assert!(moves.iter().any(|action| action.to == Square::new(3, 2)));
+    assert!(!moves.iter().any(|action| action.to == Square::new(2, 3)));
+    assert_eq!(state.pieces.get("ab").unwrap().type_id, "ability-test");
+}
+
+#[test]
+fn test_active_ability_is_reflected_in_attack_map() {
+    let mut state = make_game_state(8);
+    add_ability_test_definition(&mut state, AbilityDuration::UntilTurnEnd);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "ab", "white", "ability-test", 2, 2);
+
+    let state = apply_activate_ability_action(
+        state,
+        ActivateAbilityAction {
+            player_id: "white".into(),
+            piece_id: "ab".into(),
+            ability_id: "side_step".into(),
+        },
+    );
+    let attack_map = generate_attack_map(&state, &"white".into(), &HashMap::new());
+
+    assert!(attack_map
+        .attacked_squares
+        .contains(&Square::new(3, 2).to_id()));
+    assert!(!attack_map
+        .attacked_squares
+        .contains(&Square::new(2, 3).to_id()));
+    assert_eq!(
+        attack_map.source_map.get(&Square::new(3, 2).to_id()),
+        Some(&vec![PieceId::from("ab")])
+    );
+}
+
+#[test]
+fn test_until_turn_end_ability_expires_when_activating_player_ends_turn() {
+    let mut state = make_game_state(8);
+    add_ability_test_definition(&mut state, AbilityDuration::UntilTurnEnd);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "ab", "white", "ability-test", 2, 2);
+
+    let state = apply_activate_ability_action(
+        state,
+        ActivateAbilityAction {
+            player_id: "white".into(),
+            piece_id: "ab".into(),
+            ability_id: "side_step".into(),
+        },
+    );
+    assert!(can_end_turn(&state));
+
+    let state = end_turn(state);
+    assert!(state.pieces.get("ab").unwrap().active_ability.is_none());
+}
+
+#[test]
+fn test_permanent_ability_survives_turn_end() {
+    let mut state = make_game_state(8);
+    add_ability_test_definition(&mut state, AbilityDuration::Permanent);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "ab", "white", "ability-test", 2, 2);
+
+    let state = apply_activate_ability_action(
+        state,
+        ActivateAbilityAction {
+            player_id: "white".into(),
+            piece_id: "ab".into(),
+            ability_id: "side_step".into(),
+        },
+    );
+    let state = end_turn(state);
+
+    assert_eq!(
+        state
+            .pieces
+            .get("ab")
+            .unwrap()
+            .active_ability
+            .as_ref()
+            .map(|active| active.ability_id.as_str()),
+        Some("side_step")
+    );
+}
+
+#[test]
+fn test_until_piece_moves_ability_expires_after_move() {
+    let mut state = make_game_state(8);
+    add_ability_test_definition(&mut state, AbilityDuration::UntilPieceMoves);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "ab", "white", "ability-test", 2, 2);
+
+    let state = apply_activate_ability_action(
+        state,
+        ActivateAbilityAction {
+            player_id: "white".into(),
+            piece_id: "ab".into(),
+            ability_id: "side_step".into(),
+        },
+    );
+    let state = apply_move_action(
+        state,
+        MoveAction {
+            player_id: "white".into(),
+            piece_id: "ab".into(),
+            from: Square::new(2, 2),
+            to: Square::new(3, 2),
+            captured_piece_id: None,
+            promotion: None,
+        },
+    );
+
+    assert!(state.pieces.get("ab").unwrap().active_ability.is_none());
+}
+
+#[test]
+fn test_bishop_bounce_mode_ability_is_registered() {
+    let bishop = bishop_definition();
+    let ability = bishop
+        .abilities
+        .iter()
+        .find(|ability| ability.id == "bounce_mode")
+        .unwrap();
+
+    assert_eq!(ability.duration, AbilityDuration::UntilTurnEnd);
+    assert!(ability.once_per_turn);
+    assert!(ability.chessembly_code.contains("edge(1, 1)"));
 }

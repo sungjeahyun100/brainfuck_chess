@@ -546,7 +546,7 @@ watch(
 
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
-  amazon: 'A', 'tempest-rook': 'T', 'bouncing-bishop': 'B',
+  amazon: 'A', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'bouncing-bishop': 'B',
   'pawn-white': '♙', 'pawn-black': '♟',
 }
 function pieceSymbol(typeId: string): string {

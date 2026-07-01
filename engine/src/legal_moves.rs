@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::attack_map::generate_attack_map;
-use crate::chessembly::interpreter::{run, ExecutionContext};
+use crate::chessembly::run_effective_chessembly_for_piece;
 use crate::placement::get_placement_squares;
 use crate::types::*;
 
@@ -27,18 +27,6 @@ fn pawn_start_rank(type_id: &str, board_size: i32) -> Option<i32> {
     }
 }
 
-/// The back rank a Pawn must reach to promote, if `type_id` is a Pawn.
-fn pawn_promotion_rank(type_id: &str, board_size: i32) -> Option<i32> {
-    match type_id {
-        "pawn-white" => Some(board_size - 1),
-        "pawn-black" => Some(0),
-        _ => None,
-    }
-}
-
-/// Piece types a Pawn may promote to.
-pub const PROMOTION_PIECE_TYPES: [&str; 4] = ["queen", "rook", "bishop", "knight"];
-
 fn is_rook_piece(piece: &Piece) -> bool {
     piece.type_id == "rook"
 }
@@ -53,10 +41,10 @@ fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
 }
 
 /// Push a move action, expanding it into one action per promotion choice
-/// when the moving piece is a Pawn reaching the opponent's back rank.
+/// when the moving piece's definition has a matching promotion rule.
 fn push_move_or_promotions(
     actions: &mut Vec<MoveAction>,
-    piece_type_id: &str,
+    definition: &PieceDefinition,
     board_size: i32,
     player_id: &PlayerId,
     piece_id: &PieceId,
@@ -64,8 +52,8 @@ fn push_move_or_promotions(
     to: Square,
     captured_piece_id: Option<PieceId>,
 ) {
-    if pawn_promotion_rank(piece_type_id, board_size) == Some(to.rank) {
-        for promo in PROMOTION_PIECE_TYPES {
+    if let Some(promotion_options) = definition.promotion_options_for_rank(to.rank, board_size) {
+        for promo in promotion_options {
             push_action_if_unique(
                 actions,
                 MoveAction {
@@ -74,7 +62,7 @@ fn push_move_or_promotions(
                     from,
                     to,
                     captured_piece_id: captured_piece_id.clone(),
-                    promotion: Some(promo.to_string()),
+                    promotion: Some(promo.clone()),
                 },
             );
         }
@@ -112,23 +100,16 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
         return Vec::new();
     };
 
-    let Some(program) = game_state.chessembly_program(&piece.type_id) else {
-        return Vec::new();
-    };
-    let empty_maps = HashMap::new();
     let empty_global_state = HashMap::new();
-    let ctx = ExecutionContext {
-        board: &game_state.board,
+    let empty_maps = HashMap::new();
+    let result = run_effective_chessembly_for_piece(
+        game_state,
         piece,
-        piece_definition: definition,
-        all_definitions: &game_state.piece_definitions,
-        all_pieces: &game_state.pieces,
-        player: game_state.current_player.clone(),
-        global_state: &empty_global_state,
-        attack_maps: &empty_maps,
-    };
-
-    let result = run(program.as_ref(), &ctx);
+        definition,
+        game_state.current_player.clone(),
+        &empty_global_state,
+        &empty_maps,
+    );
     result
         .attack_squares
         .into_iter()
@@ -171,21 +152,14 @@ pub fn generate_piece_legal_move_actions(
         return Vec::new();
     };
 
-    let Some(program) = game_state.chessembly_program(&piece.type_id) else {
-        return Vec::new();
-    };
-    let ctx = ExecutionContext {
-        board: &game_state.board,
+    let result = run_effective_chessembly_for_piece(
+        game_state,
         piece,
-        piece_definition: definition,
-        all_definitions: &game_state.piece_definitions,
-        all_pieces: &game_state.pieces,
-        player: player_id.clone(),
-        global_state: &empty_global_state,
-        attack_maps: &empty_maps,
-    };
-
-    let result = run(program.as_ref(), &ctx);
+        definition,
+        player_id.clone(),
+        &empty_global_state,
+        &empty_maps,
+    );
     let from = piece.current_square.unwrap();
     let pawn_dir = pawn_forward_dir(&piece.type_id);
     let pawn_start = pawn_start_rank(&piece.type_id, game_state.board.size);
@@ -219,7 +193,7 @@ pub fn generate_piece_legal_move_actions(
 
         push_move_or_promotions(
             &mut actions,
-            &piece.type_id,
+            definition,
             game_state.board.size,
             player_id,
             piece_id,
@@ -249,7 +223,7 @@ pub fn generate_piece_legal_move_actions(
 
         push_move_or_promotions(
             &mut actions,
-            &piece.type_id,
+            definition,
             game_state.board.size,
             player_id,
             piece_id,

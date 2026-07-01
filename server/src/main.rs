@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use brainfuck_chess_engine::{
     ai::{play_bot_turn_detailed, AiAction, BotDifficulty},
-    endgame::{apply_drop_action, apply_move_action},
+    endgame::{apply_activate_ability_action, apply_drop_action, apply_move_action},
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_drop_actions, generate_piece_legal_move_actions,
@@ -153,7 +153,7 @@ struct PieceOptionsResponse {
     attacks: Vec<Square>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
 }
@@ -161,7 +161,7 @@ struct ErrorResponse {
 fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
         "king" | "queen" | "rook" | "bishop" | "knight" | "amazon" | "tempest-rook"
-        | "bouncing-bishop" => Some(raw_piece_type.into()),
+        | "tempest-queen" | "bouncing-bishop" => Some(raw_piece_type.into()),
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
             "pawn-white".into()
         } else {
@@ -228,6 +228,7 @@ fn build_player_deck(
             captured: false,
             move_stack: 0,
             has_moved: false,
+            active_ability: None,
         };
 
         board
@@ -250,6 +251,7 @@ fn build_player_deck(
             captured: false,
             move_stack: 0,
             has_moved: false,
+            active_ability: None,
         };
 
         pieces.insert(piece_id.clone(), piece);
@@ -790,7 +792,9 @@ async fn submit_action(
             // Validate against only the submitted piece's legal actions.
             let is_legal = generate_piece_legal_move_actions(state, &action.piece_id)
                 .iter()
-                .any(|m| m.from == action.from && m.to == action.to && m.promotion == action.promotion);
+                .any(|m| {
+                    m.from == action.from && m.to == action.to && m.promotion == action.promotion
+                });
             if !is_legal {
                 return Err((
                     StatusCode::BAD_REQUEST,
@@ -835,6 +839,99 @@ async fn submit_action(
 
             state.turn_state.mode = TurnMode::Drop;
             let new_state = apply_drop_action(state.clone(), action);
+            *state = new_state;
+        }
+        TurnAction::ActivateAbility(action) => {
+            if action.player_id != state.current_player {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(ErrorResponse {
+                        error: "현재 턴 플레이어만 행동할 수 있습니다.".into(),
+                    }),
+                ));
+            }
+            if state.turn_state.mode == TurnMode::Drop {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: "착수 턴에는 능력을 발동할 수 없습니다.".into(),
+                    }),
+                ));
+            }
+
+            let piece = state.pieces.get(&action.piece_id).ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: "기물을 찾을 수 없습니다.".into(),
+                    }),
+                )
+            })?;
+            if piece.owner != state.current_player {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(ErrorResponse {
+                        error: "자신의 기물 능력만 발동할 수 있습니다.".into(),
+                    }),
+                ));
+            }
+            if !piece.is_on_board() {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: "보드 위의 기물만 능력을 발동할 수 있습니다.".into(),
+                    }),
+                ));
+            }
+            if piece.active_ability.is_some() {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: "이미 활성화된 능력이 있습니다.".into(),
+                    }),
+                ));
+            }
+
+            let definition = state.piece_definitions.get(&piece.type_id).ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: "기물 정의를 찾을 수 없습니다.".into(),
+                    }),
+                )
+            })?;
+            let ability = definition
+                .abilities
+                .iter()
+                .find(|ability| ability.id == action.ability_id)
+                .ok_or_else(|| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorResponse {
+                            error: "해당 기물에 없는 능력입니다.".into(),
+                        }),
+                    )
+                })?;
+            if ability.once_per_turn
+                && state.turn_state.actions.iter().any(|existing| {
+                    matches!(
+                        existing,
+                        TurnAction::ActivateAbility(previous)
+                            if previous.piece_id == action.piece_id
+                                && previous.ability_id == action.ability_id
+                    )
+                })
+            {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: "이 능력은 같은 턴에 한 번만 발동할 수 있습니다.".into(),
+                    }),
+                ));
+            }
+
+            state.turn_state.mode = TurnMode::Move;
+            let new_state = apply_activate_ability_action(state.clone(), action);
             *state = new_state;
         }
     }
@@ -1046,6 +1143,37 @@ mod tests {
         (app, game_id)
     }
 
+    fn test_app_with_ability_bishop() -> (AppState, String) {
+        let game_id = "ability-game".to_string();
+        let white_deck = PlayerDeckSpec {
+            starting: vec![
+                StartingPieceSpec {
+                    piece_type: "king".into(),
+                    square: Square::new(4, 0),
+                },
+                StartingPieceSpec {
+                    piece_type: "bishop".into(),
+                    square: Square::new(2, 0),
+                },
+            ],
+            pocket: vec![],
+        };
+        let black_deck = PlayerDeckSpec {
+            starting: vec![StartingPieceSpec {
+                piece_type: "king".into(),
+                square: Square::new(4, 7),
+            }],
+            pocket: vec![],
+        };
+        let state = build_game_state(game_id.clone(), 8, &white_deck, &black_deck).unwrap();
+        let app = AppState {
+            games: Arc::new(DashMap::new()),
+            rooms: Arc::new(DashMap::new()),
+        };
+        app.games.insert(game_id.clone(), state);
+        (app, game_id)
+    }
+
     #[tokio::test]
     async fn piece_options_returns_only_selected_piece_moves() {
         let (app, game_id) = test_app_with_game();
@@ -1138,5 +1266,121 @@ mod tests {
 
         assert_eq!(error.0, StatusCode::BAD_REQUEST);
         assert!(error.1.error.contains("difficulty"));
+    }
+
+    #[tokio::test]
+    async fn submit_action_activates_ability_and_records_action() {
+        let (app, game_id) = test_app_with_ability_bishop();
+
+        let response = match submit_action(
+            State(app.clone()),
+            Path(game_id.clone()),
+            Json(SubmitActionRequest {
+                action: TurnAction::ActivateAbility(ActivateAbilityAction {
+                    player_id: "white".into(),
+                    piece_id: "white_bishop_1".into(),
+                    ability_id: "bounce_mode".into(),
+                }),
+            }),
+        )
+        .await
+        {
+            Ok(Json(state)) => state,
+            Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+        };
+
+        let bishop = response.pieces.get("white_bishop_1").unwrap();
+        assert_eq!(bishop.type_id, "bishop");
+        assert_eq!(
+            bishop
+                .active_ability
+                .as_ref()
+                .map(|active| active.ability_id.as_str()),
+            Some("bounce_mode")
+        );
+        assert_eq!(response.turn_state.mode, TurnMode::Move);
+        assert!(can_end_turn(&response));
+        assert!(matches!(
+            response.turn_state.actions.as_slice(),
+            [TurnAction::ActivateAbility(_)]
+        ));
+    }
+
+    #[tokio::test]
+    async fn submit_action_rejects_ability_during_drop_mode() {
+        let (app, game_id) = test_app_with_ability_bishop();
+        {
+            let mut state = app.games.get_mut(&game_id).unwrap();
+            state.turn_state.mode = TurnMode::Drop;
+        }
+
+        let error = submit_action(
+            State(app),
+            Path(game_id),
+            Json(SubmitActionRequest {
+                action: TurnAction::ActivateAbility(ActivateAbilityAction {
+                    player_id: "white".into(),
+                    piece_id: "white_bishop_1".into(),
+                    ability_id: "bounce_mode".into(),
+                }),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert!(error.1.error.contains("능력"));
+    }
+
+    #[tokio::test]
+    async fn submit_action_rejects_reactivating_active_ability() {
+        let (app, game_id) = test_app_with_ability_bishop();
+        let request = || SubmitActionRequest {
+            action: TurnAction::ActivateAbility(ActivateAbilityAction {
+                player_id: "white".into(),
+                piece_id: "white_bishop_1".into(),
+                ability_id: "bounce_mode".into(),
+            }),
+        };
+
+        let _ = submit_action(State(app.clone()), Path(game_id.clone()), Json(request()))
+            .await
+            .unwrap();
+        let error = submit_action(State(app), Path(game_id), Json(request()))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert!(error.1.error.contains("이미 활성화"));
+    }
+
+    #[tokio::test]
+    async fn submit_action_rejects_once_per_turn_repeat_even_after_manual_clear() {
+        let (app, game_id) = test_app_with_ability_bishop();
+        let request = || SubmitActionRequest {
+            action: TurnAction::ActivateAbility(ActivateAbilityAction {
+                player_id: "white".into(),
+                piece_id: "white_bishop_1".into(),
+                ability_id: "bounce_mode".into(),
+            }),
+        };
+
+        let _ = submit_action(State(app.clone()), Path(game_id.clone()), Json(request()))
+            .await
+            .unwrap();
+        {
+            let mut state = app.games.get_mut(&game_id).unwrap();
+            state
+                .pieces
+                .get_mut("white_bishop_1")
+                .unwrap()
+                .active_ability = None;
+        }
+        let error = submit_action(State(app), Path(game_id), Json(request()))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert!(error.1.error.contains("한 번"));
     }
 }

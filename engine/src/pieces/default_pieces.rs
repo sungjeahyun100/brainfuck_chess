@@ -3,7 +3,9 @@
 //! Pawn direction is handled by storing separate definitions for White and Black.
 //! `hasMoved` tracking is done by the rule engine (Pawn 2-step rule).
 
-use crate::types::PieceDefinition;
+use crate::types::{
+    AbilityDuration, PieceAbilityDefinition, PieceDefinition, PromotionCondition, PromotionRule,
+};
 
 /// King: one step in any of 8 directions, can move and capture.
 pub fn king_definition() -> PieceDefinition {
@@ -25,6 +27,9 @@ take-move(-1, -1);"
         dialect: None,
         extensions: None,
         is_king: true,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     }
 }
 
@@ -48,6 +53,9 @@ take-move(-1, -1) repeat(1);"
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     }
 }
 
@@ -67,11 +75,15 @@ take-move(0, -1) repeat(1);"
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     }
 }
 
 /// Bishop: slides diagonally.
 pub fn bishop_definition() -> PieceDefinition {
+    let bounce_code = bouncing_bishop_definition().chessembly_code;
     PieceDefinition {
         id: "bishop".into(),
         name: "Bishop".into(),
@@ -86,6 +98,16 @@ take-move(-1, -1) repeat(1);"
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: vec![PieceAbilityDefinition {
+            id: "bounce_mode".into(),
+            name: "Reflective Movement".into(),
+            description: "Moves like a Bouncing Bishop until this turn ends.".into(),
+            chessembly_code: bounce_code,
+            duration: AbilityDuration::UntilTurnEnd,
+            once_per_turn: true,
+        }],
     }
 }
 
@@ -109,6 +131,9 @@ take-move(-1, 2);"
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     }
 }
 
@@ -140,6 +165,9 @@ take-move(-1, 2);"
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     }
 }
 
@@ -176,6 +204,9 @@ pub fn tempest_rook_definition() -> PieceDefinition {
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     }
 }
 
@@ -226,6 +257,9 @@ edge(-1, -1) {
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     }
 }
 
@@ -249,6 +283,16 @@ take(-1, 1);"
         dialect: Some(crate::types::ChessemblyDialect::BrainfuckChess),
         extensions: None,
         is_king: false,
+        promotion: Some(PromotionRule {
+            condition: PromotionCondition::LastRank,
+        }),
+        promotion_pool: vec![
+            "queen".into(),
+            "rook".into(),
+            "bishop".into(),
+            "knight".into(),
+        ],
+        abilities: Vec::new(),
     }
 }
 
@@ -268,6 +312,57 @@ take(-1, -1);"
         dialect: Some(crate::types::ChessemblyDialect::BrainfuckChess),
         extensions: None,
         is_king: false,
+        promotion: Some(PromotionRule {
+            condition: PromotionCondition::FirstRank,
+        }),
+        promotion_pool: vec![
+            "queen".into(),
+            "rook".into(),
+            "bishop".into(),
+            "knight".into(),
+        ],
+        abilities: Vec::new(),
+    }
+}
+
+pub fn tempest_queen_definition() -> PieceDefinition {
+    PieceDefinition {
+        id: "tempest-queen".into(),
+        name: "Tempest Queen".into(),
+        score: 12,
+        chessembly_code: "\
+    {
+        take-move(1, 1)
+        { take-move(1, 0) repeat(1) }
+        { take-move(1, 1) repeat(1) }
+        { take-move(0, 1) repeat(1) }
+    }
+    {
+        take-move(-1, 1)
+        { take-move(-1, 0) repeat(1) }
+        { take-move(-1, 1) repeat(1) }
+        { take-move(0, 1) repeat(1) }
+    }
+    {
+        take-move(-1, -1)
+        { take-move(-1, 0) repeat(1) }
+        { take-move(-1, -1) repeat(1) }
+        { take-move(0, -1) repeat(1) }
+    }
+    {
+        take-move(1, -1)
+        { take-move(1, 0) repeat(1) }
+        { take-move(1, -1) repeat(1) }
+        { take-move(0, -1) repeat(1) }
+    };"
+        .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     }
 }
 
@@ -284,5 +379,6 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bouncing_bishop_definition(),
         pawn_white_definition(),
         pawn_black_definition(),
+        tempest_queen_definition(),
     ]
 }

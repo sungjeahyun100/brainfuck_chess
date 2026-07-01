@@ -73,11 +73,21 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
     // Move the piece
     game_state = move_piece_on_board(game_state, &action);
 
-    // Promote a Pawn that reached the opponent's back rank.
-    if let Some(promotion_type) = action.promotion.clone() {
+    // Promote when the moving piece's definition allows this target type.
+    if let Some(promotion_type) = action.promotion.as_ref() {
+        let can_promote = game_state
+            .pieces
+            .get(&action.piece_id)
+            .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+            .and_then(|definition| {
+                definition.promotion_options_for_rank(action.to.rank, game_state.board.size)
+            })
+            .map(|options| options.iter().any(|option| option == promotion_type))
+            .unwrap_or(false);
+
         if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
-            if is_pawn_type(&piece.type_id) {
-                piece.type_id = promotion_type;
+            if can_promote {
+                piece.type_id = promotion_type.clone();
             }
         }
     }
@@ -86,6 +96,13 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
     if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
         piece.move_stack = piece.move_stack.saturating_sub(1);
         piece.has_moved = true;
+        if piece
+            .active_ability
+            .as_ref()
+            .is_some_and(|active| active.duration == AbilityDuration::UntilPieceMoves)
+        {
+            piece.active_ability = None;
+        }
     }
 
     // A new pawn double-step replaces the previous right. Otherwise, only an
@@ -155,6 +172,41 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
     if game_state.en_passant_available_to.as_ref() == Some(&game_state.current_player) {
         game_state.en_passant_target = None;
         game_state.en_passant_available_to = None;
+    }
+
+    game_state
+}
+
+/// Apply an already validated ActivateAbilityAction to the game state.
+pub fn apply_activate_ability_action(
+    mut game_state: GameState,
+    action: ActivateAbilityAction,
+) -> GameState {
+    let ability = game_state
+        .pieces
+        .get(&action.piece_id)
+        .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+        .and_then(|definition| {
+            definition
+                .abilities
+                .iter()
+                .find(|ability| ability.id == action.ability_id)
+        })
+        .cloned();
+
+    if let Some(ability) = ability {
+        if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
+            piece.active_ability = Some(ActiveAbilityState {
+                ability_id: action.ability_id.clone(),
+                activated_turn_number: game_state.turn_number,
+                activated_player: action.player_id.clone(),
+                duration: ability.duration,
+            });
+        }
+        game_state
+            .turn_state
+            .actions
+            .push(TurnAction::ActivateAbility(action));
     }
 
     game_state

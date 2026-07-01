@@ -12,11 +12,14 @@ Brainfuck Chess의 기물 행마는 기본적으로 `PieceDefinition`의 Chessem
 
 - 도착 칸으로 직접 이동하거나 도착 칸의 적을 포획한다.
 - 이동 가능 칸과 공격 가능 칸만으로 행마를 설명할 수 있다.
-- 기물 고유 상태, 진급, 변신, 원거리 포획 후 제자리 유지, 자리 교환, 다중 기물 이동 같은 별도 효과가 없다.
+- 기물 고유 상태, 변신, 원거리 포획 후 제자리 유지, 자리 교환, 다중 기물 이동 같은 별도 효과가 없다.
+
+진급은 `PieceDefinition`의 `promotion`과 `promotion_pool`로 설정할 수 있다. "특정 랭크에 도착하면 정해진 후보 중 하나로 타입이 바뀐다" 정도의 진급은 순수 Chessembly 행마에 정의 기반 프로모션 설정만 추가하면 된다.
 
 아래에 해당하면 엔진 룰 확장이 필요하다.
 
-- Pawn처럼 진영별 방향, 첫 이동 2칸, 앙파상, 진급이 필요하다.
+- Pawn처럼 진영별 방향, 첫 이동 2칸, 앙파상 같은 별도 특례가 필요하다.
+- 진급 조건이 랭크 도착보다 복잡하거나, 승격 후보가 게임 상태에 따라 동적으로 바뀐다.
 - King/Rook처럼 캐슬링 등 다른 기물과 연동되는 특례가 필요하다.
 - `catch`처럼 적을 잡고도 현재 위치에 남아야 한다.
 - `shift`처럼 다른 기물과 자리를 바꿔야 한다.
@@ -37,6 +40,14 @@ engine/src/pieces/default_pieces.rs
 
 새 함수 하나를 추가하고 `all_default_definitions()`에 넣는다.
 
+프로모션이나 능력을 쓰는 기물이 있으면 import도 함께 확인한다.
+
+```rust
+use crate::types::{
+    AbilityDuration, PieceAbilityDefinition, PieceDefinition, PromotionCondition, PromotionRule,
+};
+```
+
 예시: Wazir
 
 ```rust
@@ -56,6 +67,9 @@ take-move(0, -1);"
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     }
 }
 ```
@@ -87,12 +101,120 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
 - `dialect`: 기본 Chessembly만 쓰면 `None`, Brainfuck Chess 확장 문법 의존 시 `Some(ChessemblyDialect::BrainfuckChess)`.
 - `extensions`: 확장 플래그가 필요할 때만 사용한다.
 - `is_king`: 이 기물을 잡으면 즉시 게임이 끝나는 왕족 기물 여부다. 일반 변형기물은 `false`.
+- `promotion`: 이 기물이 언제 진급할 수 있는지 정한다. 진급하지 않는 기물은 `None`.
+- `promotion_pool`: 진급 가능한 대상 타입 ID 목록이다. 진급하지 않는 기물은 `Vec::new()`.
+- `abilities`: 이 기물이 발동할 수 있는 능력 목록이다. 없으면 `Vec::new()`.
 
 주의: `is_king: true`는 단순히 "중요한 기물" 표시가 아니라 승리 조건에 직접 연결된다. 새 왕족 기물을 추가하는 경우 덱 검증의 "King 1개" 정책도 함께 재검토해야 한다.
 
+### 프로모션 설정
+
+프로모션은 조건과 후보 풀을 분리해서 정의한다.
+
+```rust
+promotion: Some(PromotionRule {
+    condition: PromotionCondition::LastRank,
+}),
+promotion_pool: vec!["queen".into(), "rook".into(), "bishop".into(), "knight".into()],
+```
+
+- `PromotionCondition::LastRank`: 보드의 마지막 랭크(`board_size - 1`)에 도착하면 진급한다. White Pawn 기본값이다.
+- `PromotionCondition::FirstRank`: 0번 랭크에 도착하면 진급한다. Black Pawn 기본값이다.
+- `PromotionCondition::Rank { rank }`: 특정 랭크 번호에 도착하면 진급한다.
+- `promotion_pool`: 실제 `MoveAction.promotion`으로 선택 가능한 타입 ID 목록이다. 여기에 없는 타입으로는 진급할 수 없다.
+
+예시: 마지막 랭크에 도착하면 `queen` 또는 `knight`로만 진급 가능한 커스텀 기물
+
+```rust
+pub fn promoter_definition() -> PieceDefinition {
+    PieceDefinition {
+        id: "promoter".into(),
+        name: "Promoter".into(),
+        score: 2,
+        chessembly_code: "move(0, 1);".into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: Some(PromotionRule {
+            condition: PromotionCondition::LastRank,
+        }),
+        promotion_pool: vec!["queen".into(), "knight".into()],
+        abilities: Vec::new(),
+    }
+}
+```
+
+프로모션 가능한 이동은 합법수 생성 단계에서 후보마다 별도 `MoveAction`으로 확장된다. 예를 들어 후보 풀이 `queen`, `knight`라면 같은 도착 칸에 대해 `promotion: Some("queen")`, `promotion: Some("knight")` 액션이 각각 만들어진다.
+
+주의할 점:
+
+- `promotion`만 있고 `promotion_pool`이 비어 있으면 프로모션 액션이 생성되지 않는다.
+- `promotion_pool`만 있고 `promotion: None`이면 프로모션 액션이 생성되지 않는다.
+- 후보 타입 ID는 `piece_definitions`에 존재해야 실제 게임에서 의미가 있다.
+- 후보 타입이 게임 생성 API에서 덱에 직접 넣을 수 있어야 하는지는 별개다. 진급 전용 타입이라면 서버의 `resolve_piece_type()`에는 허용하지 않고 엔진 정의에만 둘 수도 있다.
+
 ---
 
-## 3. Chessembly 작성 기준
+## 3. 능력 추가
+
+기물 능력은 기본 행마와 별도의 Chessembly 코드로 정의한다. Rust 룰 엔진은 기본 코드와 능력 코드를 합치지 않는다.
+
+```text
+Piece.active_ability == None
+→ PieceDefinition.chessembly_code 실행
+
+Piece.active_ability == Some(...)
+→ PieceDefinition.abilities 안의 해당 ability.chessembly_code 실행
+```
+
+기본 예시는 Bishop의 `bounce_mode`다. 평소에는 Bishop 코드가 실행되고, 능력이 활성화된 동안에는 Bouncing Bishop 코드가 실행된다.
+
+```rust
+abilities: vec![PieceAbilityDefinition {
+    id: "bounce_mode".into(),
+    name: "Reflective Movement".into(),
+    description: "Moves like a Bouncing Bishop until this turn ends.".into(),
+    chessembly_code: bouncing_bishop_definition().chessembly_code,
+    duration: AbilityDuration::UntilTurnEnd,
+    once_per_turn: true,
+}],
+```
+
+능력 필드:
+
+- `id`: 기물 타입 안에서 능력을 식별하는 문자열이다.
+- `name`: UI 표시용 이름이다.
+- `description`: UI 설명용 텍스트다.
+- `chessembly_code`: 능력이 켜져 있을 때 사용할 이동/공격 범위 코드다.
+- `duration`: `UntilTurnEnd`, `UntilPieceMoves`, `Permanent`, `Turns(u32)` 중 하나다. 현재 `Turns(u32)`는 구조만 준비되어 있고 만료 정책은 TODO다.
+- `once_per_turn`: `true`면 같은 턴에 같은 기물이 같은 능력을 두 번 발동할 수 없다.
+
+능력 발동은 `TurnAction::ActivateAbility`로 제출한다.
+
+```json
+{
+  "action": {
+    "type": "activate_ability",
+    "player_id": "white",
+    "piece_id": "white_bishop_1",
+    "ability_id": "bounce_mode"
+  }
+}
+```
+
+주의할 점:
+
+- 능력 발동은 Move 모드 행동이다. Drop 모드가 선택된 턴에는 발동할 수 없다.
+- 한 기물은 동시에 하나의 `active_ability`만 가질 수 있다.
+- 능력 발동은 `turn_state.actions`에 기록되므로, 능력만 발동하고 턴 종료할 수 있다.
+- 능력이 활성화되면 legal move와 attack map 모두 같은 능력 Chessembly 코드를 기준으로 계산된다.
+- 기물의 `type_id`는 능력 발동으로 바뀌지 않는다.
+- 기본 행마에 능력 행마를 더하는 기능은 아직 없다. 그런 조합은 Chessembly 코드 자체로 표현하거나 별도 설계가 필요하다.
+
+---
+
+## 4. Chessembly 작성 기준
 
 현재 가장 안전하게 쓸 수 있는 기본 행마식은 다음이다.
 
@@ -140,7 +262,7 @@ take(-1, 1);
 
 ---
 
-## 4. 서버 입력 허용 목록 추가
+## 5. 서버 입력 허용 목록 추가
 
 서버는 `PlayerDeckSpec`의 문자열을 곧바로 신뢰하지 않고 `resolve_piece_type()`에서 허용된 타입만 받는다.
 
@@ -186,7 +308,7 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
 
 ---
 
-## 5. 프론트엔드 카탈로그와 심볼 추가
+## 6. 프론트엔드 카탈로그와 심볼 추가
 
 로비의 덱 빌더는 기물 목록을 하드코딩한다.
 
@@ -227,7 +349,7 @@ wazir: 'W',
 
 ---
 
-## 6. 타입 정의 확인
+## 7. 타입 정의 확인
 
 프론트엔드의 서버 응답 타입은 이미 확장 가능한 문자열 타입을 쓴다.
 
@@ -243,11 +365,11 @@ Rust 쪽 `PieceDefinition`도 이미 커스텀 기물을 담을 수 있다.
 engine/src/types.rs
 ```
 
-별도 필드가 필요한 상태성 기물이 아니라면 `types.rs` 수정은 보통 필요 없다.
+별도 필드가 필요한 상태성 기물이 아니라면 `types.rs` 수정은 보통 필요 없다. 프로모션은 `promotion`과 `promotion_pool`로 설정하고, 단순한 "발동 중에는 다른 행마 코드를 쓴다" 능력은 `abilities`와 `Piece.active_ability` 모델로 설정할 수 있다.
 
 ---
 
-## 7. 특수 룰이 필요한 경우
+## 8. 특수 룰이 필요한 경우
 
 다음 파일들이 특수 룰의 주요 연결점이다.
 
@@ -263,6 +385,7 @@ engine/src/rules.rs
 
 - Pawn 2칸 이동 제한: `engine/src/legal_moves.rs`
 - 앙파상 가능/만료/적용: `engine/src/legal_moves.rs`, `engine/src/endgame.rs`
+- 정의 기반 프로모션 생성/적용: `engine/src/legal_moves.rs`, `engine/src/endgame.rs`
 - 캐슬링 후보 생성과 룩 이동: `engine/src/legal_moves.rs`, `engine/src/endgame.rs`
 - King 포획 시 게임 종료: `engine/src/endgame.rs`
 - 포켓 착수 가능 칸: `engine/src/placement.rs`
@@ -272,7 +395,7 @@ engine/src/rules.rs
 
 ---
 
-## 8. 테스트 추가
+## 9. 테스트 추가
 
 최소 테스트는 두 종류를 권장한다.
 
@@ -309,6 +432,22 @@ engine/tests/rule_engine.rs
 
 실제 `GameState`에서 합법수 생성, 아군 충돌, 적 포획, 포켓 착수, 점수 계산까지 확인한다.
 
+프로모션 기물이라면 다음도 확인한다.
+
+- 프로모션 랭크에 도착하는 이동이 `promotion_pool` 후보 수만큼 생성되는지
+- 프로모션 랭크가 아닌 이동은 `promotion: None` 하나만 생성되는지
+- `apply_move_action()` 뒤 기물의 `type_id`가 선택한 후보 타입으로 바뀌는지
+- `promotion_pool` 밖의 타입은 서버 검증에서 합법수로 인정되지 않는지
+
+능력 기물이라면 다음도 확인한다.
+
+- 능력 비활성 상태에서는 기본 `chessembly_code`를 사용하는지
+- 능력 활성 상태에서는 해당 ability의 `chessembly_code`를 사용하는지
+- legal move와 attack map 양쪽에 능력 코드가 반영되는지
+- `UntilTurnEnd`, `UntilPieceMoves`, `Permanent` 만료가 의도대로 동작하는지
+- `once_per_turn`과 이미 활성화된 능력 재발동이 서버에서 거부되는지
+- 능력 발동 뒤에도 기물의 `type_id`가 바뀌지 않는지
+
 새 기물이 서버/프론트에서 선택 가능해야 한다면 다음도 수동 확인한다.
 
 - 로비 카탈로그에 표시되는지
@@ -320,7 +459,7 @@ engine/tests/rule_engine.rs
 
 ---
 
-## 9. 검증 명령
+## 10. 검증 명령
 
 엔진 테스트:
 
@@ -345,12 +484,14 @@ npm run build
 
 ---
 
-## 10. 새 기물 추가 체크리스트
+## 11. 새 기물 추가 체크리스트
 
 - 기물 ID를 정했다. 예: `wazir`, `knightrider`, `archbishop`
 - 점수와 포켓 허용 여부를 정했다.
 - `engine/src/pieces/default_pieces.rs`에 `PieceDefinition` 함수를 추가했다.
 - `all_default_definitions()`에 새 정의를 넣었다.
+- 진급 기물이라면 `promotion` 조건과 `promotion_pool` 후보를 설정했다.
+- 능력 기물이라면 `abilities`에 별도 Chessembly 코드와 지속 시간을 설정했다.
 - `server/src/main.rs`의 `resolve_piece_type()`에 새 타입을 허용했다.
 - `frontend/src/App.vue`의 카탈로그, 라벨, 심볼을 갱신했다.
 - `frontend/src/components/GameScreen.vue`와 `frontend/src/components/Board.vue`의 `PIECE_SYMBOLS`를 갱신했다.
@@ -362,7 +503,7 @@ npm run build
 
 ---
 
-## 11. 작업 예시 요약: Wazir
+## 12. 작업 예시 요약: Wazir
 
 1. `default_pieces.rs`에 `wazir_definition()` 추가
 2. `all_default_definitions()`에 `wazir_definition()` 추가

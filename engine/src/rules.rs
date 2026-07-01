@@ -125,6 +125,7 @@ pub fn end_turn(game_state: GameState) -> GameState {
         return game_state;
     }
 
+    let ending_player = game_state.current_player.clone();
     let next_player = if game_state.current_player == "white" {
         "black".to_string()
     } else {
@@ -132,6 +133,17 @@ pub fn end_turn(game_state: GameState) -> GameState {
     };
 
     let mut new_state = game_state;
+    for piece in new_state.pieces.values_mut() {
+        if piece.active_ability.as_ref().is_some_and(|active| {
+            active.duration == AbilityDuration::UntilTurnEnd
+                && active.activated_player == ending_player
+        }) {
+            piece.active_ability = None;
+        }
+        // TODO: Decide whether Turns(n) counts full rounds or owner turns,
+        // then decrement and expire it here.
+    }
+
     new_state.current_player = next_player.clone();
     new_state.turn_number += 1;
     new_state.turn_state = TurnState::new();

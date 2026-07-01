@@ -244,6 +244,7 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'king': '♔',
   'queen': '♕',
   'amazon': 'A',
+  'tempest-queen': 'Q',
   'tempest-rook': 'T',
   'bouncing-bishop': 'B',
   'rook': '♖',

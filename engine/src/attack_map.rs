@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::chessembly::interpreter::{run, ExecutionContext};
+use crate::chessembly::run_effective_chessembly_for_piece;
 use crate::types::*;
 
 /// Compute the full attack map for a player: the union of attackSquares from
@@ -28,21 +28,14 @@ pub fn generate_attack_map(
             None => continue,
         };
 
-        let Some(program) = game_state.chessembly_program(&piece.type_id) else {
-            continue;
-        };
-        let ctx = ExecutionContext {
-            board: &game_state.board,
+        let chessembly_result = run_effective_chessembly_for_piece(
+            game_state,
             piece,
-            piece_definition: definition,
-            all_definitions: &game_state.piece_definitions,
-            all_pieces: &game_state.pieces,
-            player: player_id.clone(),
-            global_state: &empty_global_state,
-            attack_maps: existing_attack_maps,
-        };
-
-        let chessembly_result = run(program.as_ref(), &ctx);
+            definition,
+            player_id.clone(),
+            &empty_global_state,
+            existing_attack_maps,
+        );
 
         for sq in &chessembly_result.attack_squares {
             let sq_id = sq.to_id();

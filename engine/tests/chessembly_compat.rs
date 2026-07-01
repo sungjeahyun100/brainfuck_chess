@@ -23,6 +23,7 @@ fn make_piece(id: &str, owner: &str, type_id: &str, file: i32, rank: i32) -> Pie
         captured: false,
         move_stack: 1,
         has_moved: false,
+        active_ability: None,
     }
 }
 
@@ -75,6 +76,9 @@ take-move(0, -1);"
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     };
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
@@ -195,6 +199,9 @@ take-move(-1, 2) repeat(1);"
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     };
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
@@ -214,6 +221,7 @@ fn test_variant_piece_definitions_are_registered() {
     let find = |id: &str| definitions.iter().find(|def| def.id == id).unwrap();
 
     assert_eq!(find("amazon").score, 13);
+    assert_eq!(find("tempest-queen").score, 12);
     assert_eq!(find("tempest-rook").score, 8);
     assert_eq!(find("bouncing-bishop").score, 7);
 }
@@ -414,6 +422,9 @@ fn test_scope_block_y_move() {
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     };
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
@@ -455,6 +466,9 @@ fn test_catch_scans_and_marks_threatened_squares() {
         dialect: None,
         extensions: None,
         is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
     };
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);

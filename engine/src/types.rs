@@ -171,6 +171,56 @@ pub struct PieceDefinition {
     pub extensions: Option<Vec<String>>,
     /// If true, capturing this piece ends the game immediately
     pub is_king: bool,
+    /// Optional rule that decides when this piece may promote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promotion: Option<PromotionRule>,
+    /// Piece types this piece may promote into when its promotion rule matches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub promotion_pool: Vec<PieceTypeId>,
+    /// Optional activated Chessembly move/attack programs for this piece type.
+    #[serde(default)]
+    pub abilities: Vec<PieceAbilityDefinition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromotionRule {
+    pub condition: PromotionCondition,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PromotionCondition {
+    FirstRank,
+    LastRank,
+    Rank { rank: i32 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PieceAbilityDefinition {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub chessembly_code: String,
+    pub duration: AbilityDuration,
+    #[serde(default)]
+    pub once_per_turn: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AbilityDuration {
+    UntilTurnEnd,
+    Turns(u32),
+    UntilPieceMoves,
+    Permanent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveAbilityState {
+    pub ability_id: String,
+    pub activated_turn_number: u32,
+    pub activated_player: PlayerId,
+    pub duration: AbilityDuration,
 }
 
 /// Move generation dispatch seam. Native implementations can be enabled per
@@ -187,13 +237,31 @@ impl PieceDefinition {
         // backends can be introduced piece-by-piece with parity tests.
         MovegenBackend::Chessembly
     }
+
+    pub fn promotion_options_for_rank(&self, rank: i32, board_size: i32) -> Option<&[PieceTypeId]> {
+        let rule = self.promotion.as_ref()?;
+        if self.promotion_pool.is_empty() || !rule.condition.matches_rank(rank, board_size) {
+            return None;
+        }
+        Some(self.promotion_pool.as_slice())
+    }
+}
+
+impl PromotionCondition {
+    pub fn matches_rank(&self, rank: i32, board_size: i32) -> bool {
+        match self {
+            PromotionCondition::FirstRank => rank == 0,
+            PromotionCondition::LastRank => rank == board_size - 1,
+            PromotionCondition::Rank { rank: target_rank } => rank == *target_rank,
+        }
+    }
 }
 
 // ─── Chessembly Program Cache ───────────────────────────────────────────────
 
 #[derive(Debug, Default)]
 pub struct ChessemblyProgramCache {
-    pub programs: RwLock<HashMap<PieceTypeId, Arc<Program>>>,
+    pub programs: RwLock<HashMap<String, Arc<Program>>>,
 }
 
 impl Clone for ChessemblyProgramCache {
@@ -213,28 +281,45 @@ impl ChessemblyProgramCache {
 
     pub fn rebuild(&self, definitions: &HashMap<PieceTypeId, PieceDefinition>) {
         crate::profiling::record_cache_rebuild(1);
-        let programs = definitions
-            .iter()
-            .map(|(type_id, definition)| {
-                (
-                    type_id.clone(),
-                    Arc::new(parse(&definition.chessembly_code)),
-                )
-            })
-            .collect();
+        let mut programs = HashMap::new();
+        for (type_id, definition) in definitions {
+            programs.insert(
+                type_id.clone(),
+                Arc::new(parse(&definition.chessembly_code)),
+            );
+            for ability in &definition.abilities {
+                programs.insert(
+                    Self::ability_key(type_id, &ability.id),
+                    Arc::new(parse(&ability.chessembly_code)),
+                );
+            }
+        }
         *self.write_programs() = programs;
     }
 
     pub fn is_complete_for(&self, definitions: &HashMap<PieceTypeId, PieceDefinition>) -> bool {
         let programs = self.read_programs();
-        programs.len() == definitions.len()
-            && definitions
-                .keys()
-                .all(|type_id| programs.contains_key(type_id))
+        let expected_len: usize = definitions
+            .values()
+            .map(|definition| 1 + definition.abilities.len())
+            .sum();
+        programs.len() == expected_len
+            && definitions.iter().all(|(type_id, definition)| {
+                programs.contains_key(type_id)
+                    && definition.abilities.iter().all(|ability| {
+                        programs.contains_key(&Self::ability_key(type_id, &ability.id))
+                    })
+            })
     }
 
     pub fn get(&self, type_id: &PieceTypeId) -> Option<Arc<Program>> {
         self.read_programs().get(type_id).cloned()
+    }
+
+    pub fn get_ability(&self, type_id: &PieceTypeId, ability_id: &str) -> Option<Arc<Program>> {
+        self.read_programs()
+            .get(&Self::ability_key(type_id, ability_id))
+            .cloned()
     }
 
     pub fn get_or_parse(
@@ -254,6 +339,24 @@ impl ChessemblyProgramCache {
             .clone()
     }
 
+    pub fn get_or_parse_ability(
+        &self,
+        type_id: &PieceTypeId,
+        ability: &PieceAbilityDefinition,
+    ) -> Arc<Program> {
+        if let Some(program) = self.get_ability(type_id, &ability.id) {
+            return program;
+        }
+
+        let key = Self::ability_key(type_id, &ability.id);
+        let program = Arc::new(parse(&ability.chessembly_code));
+        let mut programs = self.write_programs();
+        programs
+            .entry(key)
+            .or_insert_with(|| program.clone())
+            .clone()
+    }
+
     pub fn len(&self) -> usize {
         self.read_programs().len()
     }
@@ -262,13 +365,17 @@ impl ChessemblyProgramCache {
         self.read_programs().is_empty()
     }
 
-    fn read_programs(&self) -> RwLockReadGuard<'_, HashMap<PieceTypeId, Arc<Program>>> {
+    pub fn ability_key(type_id: &PieceTypeId, ability_id: &str) -> String {
+        format!("{type_id}::{ability_id}")
+    }
+
+    fn read_programs(&self) -> RwLockReadGuard<'_, HashMap<String, Arc<Program>>> {
         self.programs
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn write_programs(&self) -> RwLockWriteGuard<'_, HashMap<PieceTypeId, Arc<Program>>> {
+    fn write_programs(&self) -> RwLockWriteGuard<'_, HashMap<String, Arc<Program>>> {
         self.programs
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -297,6 +404,9 @@ pub struct Piece {
     pub move_stack: u32,
     /// Whether this piece has ever moved (used for Pawn 2-step rule)
     pub has_moved: bool,
+    /// Currently active ability program, if any.
+    #[serde(default)]
+    pub active_ability: Option<ActiveAbilityState>,
 }
 
 impl Piece {
@@ -371,6 +481,7 @@ impl Default for TurnState {
 pub enum TurnAction {
     Move(MoveAction),
     Drop(DropAction),
+    ActivateAbility(ActivateAbilityAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -380,8 +491,7 @@ pub struct MoveAction {
     pub from: Square,
     pub to: Square,
     pub captured_piece_id: Option<PieceId>,
-    /// Piece type to promote to when a Pawn reaches the opponent's back rank
-    /// (must be one of "queen", "rook", "bishop", "knight").
+    /// Piece type to promote to when the moving piece's definition allows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promotion: Option<PieceTypeId>,
 }
@@ -391,6 +501,13 @@ pub struct DropAction {
     pub player_id: PlayerId,
     pub piece_id: PieceId,
     pub to: Square,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivateAbilityAction {
+    pub player_id: PlayerId,
+    pub piece_id: PieceId,
+    pub ability_id: String,
 }
 
 /// Search-oriented drop candidate. Identical pocket pieces are represented by
@@ -480,6 +597,34 @@ impl GameState {
             self.chessembly_program_cache
                 .get_or_parse(type_id, definition),
         )
+    }
+
+    pub fn effective_chessembly_program(
+        &self,
+        piece: &Piece,
+        definition: &PieceDefinition,
+    ) -> Option<Arc<Program>> {
+        if let Some(active) = &piece.active_ability {
+            if let Some(ability) = definition
+                .abilities
+                .iter()
+                .find(|ability| ability.id == active.ability_id)
+            {
+                if let Some(program) = self
+                    .chessembly_program_cache
+                    .get_ability(&definition.id, &ability.id)
+                {
+                    crate::profiling::record_cache_hit(1);
+                    return Some(program);
+                }
+                return Some(
+                    self.chessembly_program_cache
+                        .get_or_parse_ability(&definition.id, ability),
+                );
+            }
+        }
+
+        self.chessembly_program(&piece.type_id)
     }
 
     pub fn cached_chessembly_program_count(&self) -> usize {

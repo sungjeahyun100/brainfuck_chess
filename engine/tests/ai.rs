@@ -67,6 +67,7 @@ fn add_board_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, 
             captured: false,
             move_stack: 1,
             has_moved: false,
+            active_ability: None,
         },
     );
     state
@@ -91,6 +92,7 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
             captured: false,
             move_stack: 0,
             has_moved: false,
+            active_ability: None,
         },
     );
     state
