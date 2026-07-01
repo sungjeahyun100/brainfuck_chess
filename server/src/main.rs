@@ -790,7 +790,7 @@ async fn submit_action(
             // Validate against only the submitted piece's legal actions.
             let is_legal = generate_piece_legal_move_actions(state, &action.piece_id)
                 .iter()
-                .any(|m| m.from == action.from && m.to == action.to);
+                .any(|m| m.from == action.from && m.to == action.to && m.promotion == action.promotion);
             if !is_legal {
                 return Err((
                     StatusCode::BAD_REQUEST,

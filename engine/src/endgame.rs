@@ -73,6 +73,15 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
     // Move the piece
     game_state = move_piece_on_board(game_state, &action);
 
+    // Promote a Pawn that reached the opponent's back rank.
+    if let Some(promotion_type) = action.promotion.clone() {
+        if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
+            if is_pawn_type(&piece.type_id) {
+                piece.type_id = promotion_type;
+            }
+        }
+    }
+
     // Consume move stack
     if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
         piece.move_stack = piece.move_stack.saturating_sub(1);

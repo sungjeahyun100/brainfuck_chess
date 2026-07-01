@@ -230,6 +230,7 @@ fn special_moves_are_exposed_through_ai_actions() {
             from: Square::new(5, 6),
             to: Square::new(5, 4),
             captured_piece_id: None,
+            promotion: None,
         },
     );
     en_passant_state.current_player = "white".into();

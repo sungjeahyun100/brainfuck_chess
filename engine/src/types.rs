@@ -380,6 +380,10 @@ pub struct MoveAction {
     pub from: Square,
     pub to: Square,
     pub captured_piece_id: Option<PieceId>,
+    /// Piece type to promote to when a Pawn reaches the opponent's back rank
+    /// (must be one of "queen", "rook", "bishop", "knight").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promotion: Option<PieceTypeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

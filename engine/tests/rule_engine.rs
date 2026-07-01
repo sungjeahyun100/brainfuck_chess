@@ -242,6 +242,7 @@ fn test_end_turn_switches_player() {
         from: Square::new(4, 0),
         to: Square::new(4, 1),
         captured_piece_id: None,
+        promotion: None,
     };
     state.turn_state.actions.push(TurnAction::Move(action));
     assert!(can_end_turn(&state));
@@ -266,6 +267,7 @@ fn test_king_capture_ends_game() {
         from: Square::new(4, 0),
         to: Square::new(4, 1),
         captured_piece_id: Some("k2".into()),
+        promotion: None,
     };
 
     let result_state = apply_move_action(state, action);
@@ -292,6 +294,7 @@ fn test_normal_capture_does_not_end_game() {
         from: Square::new(4, 0),
         to: Square::new(4, 1),
         captured_piece_id: Some("p1".into()),
+        promotion: None,
     };
 
     let result_state = apply_move_action(state, action);
@@ -320,6 +323,7 @@ fn test_move_stack_consumed() {
         from: Square::new(4, 0),
         to: Square::new(4, 1),
         captured_piece_id: None,
+        promotion: None,
     };
 
     let new_state = apply_move_action(state, action);
@@ -339,6 +343,7 @@ fn test_move_stack_reset_on_end_turn() {
         from: Square::new(4, 0),
         to: Square::new(4, 1),
         captured_piece_id: None,
+        promotion: None,
     };
 
     let mut new_state = apply_move_action(state, action);
@@ -389,6 +394,7 @@ fn test_castling_kingside_generated_and_applied() {
         from: Square::new(4, 0),
         to: Square::new(6, 0),
         captured_piece_id: None,
+        promotion: None,
     };
     let new_state = apply_move_action(state, action);
 
@@ -414,6 +420,7 @@ fn test_en_passant_generated_and_applied() {
         from: Square::new(5, 6),
         to: Square::new(5, 4),
         captured_piece_id: None,
+        promotion: None,
     };
     let mut state = apply_move_action(state, black_double);
     state.current_player = "white".into();
@@ -437,6 +444,7 @@ fn test_en_passant_generated_and_applied() {
         from: Square::new(4, 4),
         to: Square::new(5, 5),
         captured_piece_id: Some("bp".into()),
+        promotion: None,
     };
     let new_state = apply_move_action(state, white_ep);
 
@@ -469,6 +477,7 @@ fn test_en_passant_survives_remaining_moves_before_opponent_response() {
             from: Square::new(5, 6),
             to: Square::new(5, 4),
             captured_piece_id: None,
+            promotion: None,
         },
     );
     state = apply_move_action(
@@ -479,6 +488,7 @@ fn test_en_passant_survives_remaining_moves_before_opponent_response() {
             from: Square::new(0, 7),
             to: Square::new(0, 6),
             captured_piece_id: None,
+            promotion: None,
         },
     );
 
@@ -494,10 +504,75 @@ fn test_en_passant_survives_remaining_moves_before_opponent_response() {
             from: Square::new(4, 0),
             to: Square::new(4, 1),
             captured_piece_id: None,
+            promotion: None,
         },
     );
     assert_eq!(state.en_passant_target, None);
     assert_eq!(state.en_passant_available_to, None);
+}
+
+// ─── Promotion ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_pawn_reaching_back_rank_generates_promotion_choices() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "wp", "white", "pawn-white", 4, 6);
+
+    let moves = generate_piece_legal_move_actions(&state, &"wp".into());
+    let promotions: Vec<&MoveAction> = moves
+        .iter()
+        .filter(|m| m.to == Square::new(4, 7))
+        .collect();
+    assert_eq!(
+        promotions.len(),
+        4,
+        "Pawn reaching the back rank should offer 4 promotion choices"
+    );
+    let mut choices: Vec<String> = promotions
+        .iter()
+        .filter_map(|m| m.promotion.clone())
+        .collect();
+    choices.sort();
+    assert_eq!(choices, vec!["bishop", "knight", "queen", "rook"]);
+}
+
+#[test]
+fn test_pawn_promotion_applies_chosen_piece_type() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "wp", "white", "pawn-white", 4, 6);
+
+    let action = MoveAction {
+        player_id: "white".into(),
+        piece_id: "wp".into(),
+        from: Square::new(4, 6),
+        to: Square::new(4, 7),
+        captured_piece_id: None,
+        promotion: Some("queen".into()),
+    };
+    let new_state = apply_move_action(state, action);
+    let promoted = new_state.pieces.get("wp").unwrap();
+    assert_eq!(promoted.type_id, "queen");
+    assert_eq!(promoted.current_square, Some(Square::new(4, 7)));
+}
+
+#[test]
+fn test_non_promoting_pawn_move_has_single_action_without_promotion() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "wp", "white", "pawn-white", 4, 3);
+
+    let moves = generate_piece_legal_move_actions(&state, &"wp".into());
+    let single_step: Vec<&MoveAction> = moves
+        .iter()
+        .filter(|m| m.to == Square::new(4, 4))
+        .collect();
+    assert_eq!(single_step.len(), 1);
+    assert_eq!(single_step[0].promotion, None);
 }
 
 #[test]

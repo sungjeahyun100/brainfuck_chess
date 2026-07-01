@@ -11,8 +11,8 @@
     <div v-if="!gameState" class="lobby">
       <div class="lobby-hero">
         <p class="eyebrow">Deck Builder Lobby</p>
-        <h1>Brainfuck Chess</h1>
-        <p class="subtitle">보드 크기, 시작 배치, 포켓 기물을 한 화면에서 설정합니다.</p>
+        <h1>덱체스 <span class="hero-en">Deck Chess</span></h1>
+        <p class="subtitle">덱 제한 점수 안에서 기물을 고르고, 시작 기물과 포켓 기물로 나만의 덱을 만드는 체스입니다.</p>
       </div>
 
       <div class="mode-tabs">
@@ -79,11 +79,11 @@
         </div>
 
         <div class="limit-panel">
-          <span class="limit-label">점수 상한</span>
+          <span class="limit-label">덱 제한 점수</span>
           <strong>{{ scoreLimit(selectedSize) }}점</strong>
         </div>
 
-        <button class="btn-secondary" @click="resetDecks()">추천 덱으로 초기화</button>
+        <button class="btn-secondary" @click="resetDecks()">기본 배치로 초기화</button>
       </div>
 
       <div v-if="playMode === 'multiplayer'" class="card multiplayer-panel">
@@ -151,14 +151,14 @@
       <div v-if="playMode !== 'multiplayer'" class="summary-grid">
         <div class="card summary-card" :class="{ invalid: !whiteSummary.valid }">
           <p class="summary-title">White<span v-if="playMode === 'bot'"> · {{ botHumanSide === 'white' ? '나' : '봇' }}</span></p>
-          <strong>{{ whiteSummary.totalScore }} / {{ scoreLimit(selectedSize) }}점</strong>
+          <strong>덱 점수: {{ whiteSummary.totalScore }} / {{ scoreLimit(selectedSize) }}</strong>
           <span>시작 {{ whiteDeck.starting.length }}개 / 포켓 {{ totalPocketCount(whiteDeck) }}개</span>
           <p class="summary-status">{{ whiteSummary.valid ? '시작 가능' : whiteSummary.errors[0] }}</p>
         </div>
 
         <div class="card summary-card" :class="{ invalid: !blackSummary.valid }">
           <p class="summary-title">Black<span v-if="playMode === 'bot'"> · {{ botHumanSide === 'black' ? '나' : '봇' }}</span></p>
-          <strong>{{ blackSummary.totalScore }} / {{ scoreLimit(selectedSize) }}점</strong>
+          <strong>덱 점수: {{ blackSummary.totalScore }} / {{ scoreLimit(selectedSize) }}</strong>
           <span>시작 {{ blackDeck.starting.length }}개 / 포켓 {{ totalPocketCount(blackDeck) }}개</span>
           <p class="summary-status">{{ blackSummary.valid ? '시작 가능' : blackSummary.errors[0] }}</p>
         </div>
@@ -166,11 +166,32 @@
       <div v-else class="summary-grid">
         <div class="card summary-card" :class="{ invalid: !activeSummary.valid }">
           <p class="summary-title">내 덱 설정</p>
-          <strong>{{ activeSummary.totalScore }} / {{ scoreLimit(selectedSize) }}점</strong>
+          <strong>덱 점수: {{ activeSummary.totalScore }} / {{ scoreLimit(selectedSize) }}</strong>
           <span>시작 {{ activeDeck.starting.length }}개 / 포켓 {{ totalPocketCount(activeDeck) }}개</span>
           <p class="summary-status">{{ activeSummary.valid ? '방 생성/입장 가능' : activeSummary.errors[0] }}</p>
         </div>
       </div>
+
+      <section class="card preset-panel">
+        <div class="section-header">
+          <div>
+            <p class="section-kicker">Preset</p>
+            <h2>프리셋 덱으로 바로 시작하기</h2>
+          </div>
+          <p class="section-description">{{ deckEditorLabel }} 덱에 프리셋을 적용합니다. 적용 후에도 자유롭게 기물을 바꿀 수 있습니다.</p>
+        </div>
+        <div class="preset-list">
+          <button
+            v-for="preset in deckPresets"
+            :key="preset.id"
+            class="preset-card"
+            @click="applyPresetToActive(preset.id)"
+          >
+            <strong>{{ preset.name }}</strong>
+            <span>{{ preset.description }}</span>
+          </button>
+        </div>
+      </section>
 
       <div class="builder-grid">
         <section class="card piece-list-panel">
@@ -420,6 +441,58 @@ const pocketCatalog = pieceCatalog.filter(
   piece => piece.canPocket,
 )
 
+interface DeckPreset {
+  id: string
+  name: string
+  description: string
+  backline: (DeckPieceType | null)[]
+  pawns: (DeckPieceType | null)[]
+  pocket: Partial<Record<DeckPieceType, number>>
+}
+
+const deckPresets: DeckPreset[] = [
+  {
+    id: 'classic',
+    name: '기본 체스 덱',
+    description: '익숙한 기물 중심의 표준 배치. 처음이라면 이 덱으로 시작해 보세요.',
+    backline: ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'],
+    pawns: ['pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn'],
+    pocket: {},
+  },
+  {
+    id: 'swarm',
+    name: '물량 덱',
+    description: '낮은 점수의 Knight와 Pawn을 잔뜩 채운 물량 승부 덱입니다.',
+    backline: ['knight', 'knight', 'knight', 'king', 'knight', 'knight', 'knight', 'knight'],
+    pawns: ['pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn'],
+    pocket: { pawn: 10 },
+  },
+  {
+    id: 'pocket',
+    name: '포켓 덱',
+    description: '시작 기물은 최소화하고, 게임 중 포켓 기물을 꺼내 쓰는 덱입니다.',
+    backline: [null, null, null, 'king', null, null, null, null],
+    pawns: ['pawn', 'pawn', 'pawn', 'pawn', null, null, null, null],
+    pocket: { rook: 2, bishop: 2, knight: 2, queen: 1, pawn: 4 },
+  },
+  {
+    id: 'mobility',
+    name: '기동 덱',
+    description: 'Knight·Bishop과 변형 기물로 기동력을 살린 덱입니다.',
+    backline: ['knight', 'bishop', 'knight', 'king', 'knight', 'bishop', 'knight', 'bishop'],
+    pawns: ['pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn'],
+    pocket: { 'bouncing-bishop': 1, knight: 1 },
+  },
+  {
+    id: 'firepower',
+    name: '고화력 덱',
+    description: 'Queen과 Rook 같은 고점수 기물로 화력을 극대화한 덱입니다.',
+    backline: ['rook', 'queen', 'king', 'queen', 'rook', null, null, null],
+    pawns: ['pawn', 'pawn', 'pawn', 'pawn', null, null, null, null],
+    pocket: { bishop: 1, pawn: 4 },
+  },
+]
+
 const catalogCategoryLabels: Record<string, string> = {
   royal: 'Royal',
   major: 'Major',
@@ -428,7 +501,7 @@ const catalogCategoryLabels: Record<string, string> = {
   pawn: 'Pawn',
 }
 
-const variantTooltip = '시작 전 배치와 포켓 기물을 직접 구성합니다. 턴에는 여러 기물을 움직이거나 포켓 기물 하나를 자신의 초기 진영 또는 공격 가능한 칸에 착수할 수 있습니다.'
+const variantTooltip = '시작 전 배치와 포켓 기물을 직접 구성합니다. 턴에는 여러 기물을 움직이거나 포켓 기물 하나를 자신의 초기 진영 또는 공격 범위의 칸에 놓을 수 있습니다.'
 
 const pieceMoveDescriptions: Record<string, string> = {
   king: 'King: 한 칸씩 모든 방향으로 이동합니다.',
@@ -502,6 +575,37 @@ function createLobbyDeck(player: LobbyPlayer, boardSize: number): LobbyDeck {
     starting: createStandardStarting(player, boardSize),
     pocket: emptyPocket(),
   }
+}
+
+function createPresetStarting(player: LobbyPlayer, boardSize: number, preset: DeckPreset): LobbyPlacement[] {
+  const offset = Math.floor((boardSize - 8) / 2)
+  const backRank = player === 'white' ? 0 : boardSize - 1
+  const pawnRank = player === 'white' ? 1 : boardSize - 2
+
+  return [
+    ...preset.backline
+      .map((pieceType, index) => (pieceType ? { pieceType, square: { file: offset + index, rank: backRank } } : null))
+      .filter((placement): placement is LobbyPlacement => placement !== null),
+    ...preset.pawns
+      .map((pieceType, index) => (pieceType ? { pieceType, square: { file: offset + index, rank: pawnRank } } : null))
+      .filter((placement): placement is LobbyPlacement => placement !== null),
+  ]
+}
+
+function applyPresetToActive(presetId: string) {
+  const preset = deckPresets.find(entry => entry.id === presetId)
+  if (!preset) return
+
+  const pocket = emptyPocket()
+  for (const [pieceType, count] of Object.entries(preset.pocket)) {
+    pocket[pieceType] = count ?? 0
+  }
+
+  lobbyDecks.value[activePlayer.value] = {
+    starting: createPresetStarting(activePlayer.value, selectedSize.value, preset),
+    pocket,
+  }
+  lobbyError.value = null
 }
 
 function createLobbyDecks(boardSize: number): Record<LobbyPlayer, LobbyDeck> {
@@ -613,11 +717,13 @@ function deckSummary(deck: LobbyDeck): DeckSummary {
   const errors: string[] = []
 
   if (kingCount !== 1) {
-    errors.push('King은 기본 진영에 정확히 1개 있어야 합니다.')
+    errors.push('King은 기본 진영에 정확히 1개 있어야 합니다. (King은 필수 기물이며 점수에서 제외됩니다)')
   }
 
-  if (totalScore > scoreLimit(selectedSize.value)) {
-    errors.push(`덱 점수 ${totalScore}점이 상한 ${scoreLimit(selectedSize.value)}점을 초과했습니다.`)
+  const limit = scoreLimit(selectedSize.value)
+  if (totalScore > limit) {
+    const over = totalScore - limit
+    errors.push(`점수가 ${over}점 초과되었습니다. 기물을 줄이거나 더 낮은 점수의 기물로 바꿔보세요.`)
   }
 
   return {
@@ -1188,6 +1294,13 @@ body {
   color: #f4dfb0;
 }
 
+.hero-en {
+  font-size: 0.5em;
+  color: var(--muted);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+
 .mode-tabs {
   display: flex;
   gap: 10px;
@@ -1439,6 +1552,47 @@ body {
 
 .summary-card.invalid {
   border-color: rgba(255, 125, 125, 0.32);
+}
+
+.preset-panel {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.preset-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.preset-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.preset-card:hover {
+  border-color: rgba(217, 164, 65, 0.52);
+  background: rgba(217, 164, 65, 0.12);
+}
+
+.preset-card strong {
+  color: #f4dfb0;
+}
+
+.preset-card span {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .builder-grid {

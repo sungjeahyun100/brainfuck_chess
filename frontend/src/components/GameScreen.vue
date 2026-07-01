@@ -2,7 +2,7 @@
   <div class="game-screen">
     <!-- Header -->
     <div class="header">
-      <h2>Brainfuck Chess</h2>
+      <h2>덱체스 <small class="title-en">Deck Chess</small></h2>
       <div class="turn-info">
         <span class="player-badge" :class="`player-${viewState.current_player}`">
           {{ viewState.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
@@ -13,7 +13,7 @@
         <span v-if="botPlayer" class="bot-badge">🤖 {{ botDifficultyLabel }}</span>
         <span class="turn-badge">Turn {{ viewState.turn_number }}</span>
         <span class="mode-badge" v-if="viewState.turn_state.mode !== 'undecided'">
-          {{ viewState.turn_state.mode === 'move' ? '🏃 Move' : '🎯 Drop' }}
+          {{ viewState.turn_state.mode === 'move' ? '🏃 이동' : '🎯 포켓 기물 놓기' }}
         </span>
       </div>
     </div>
@@ -28,6 +28,32 @@
         <small v-else-if="!botReplayMessage">{{ playerName(botPlayer) }} 봇 · {{ botDifficultyLabel }}</small>
       </div>
       <button v-if="botError && isBotTurn && !botThinking && !botReplaying" @click="runBotTurn">다시 시도</button>
+    </div>
+
+    <!-- Promotion picker overlay -->
+    <div v-if="promotionRequest" class="promotion-overlay">
+      <div class="promotion-box">
+        <h3>기물 승격</h3>
+        <p>Pawn이 도착할 기물을 선택하세요.</p>
+        <div class="promotion-choices">
+          <button
+            v-for="choice in promotionRequest.options"
+            :key="choice"
+            class="promotion-choice"
+            type="button"
+            @click="choosePromotion(choice)"
+          >
+            <img
+              v-if="pieceAsset(choice, promotionRequest.owner)"
+              class="promotion-choice-image"
+              :src="pieceAsset(choice, promotionRequest.owner)"
+              :alt="promotionPieceLabel(choice)"
+            />
+            <span v-else>{{ pieceSymbol(choice) }}</span>
+            <small>{{ promotionPieceLabel(choice) }}</small>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Game over overlay -->
@@ -185,6 +211,8 @@ const botReplaying = ref(false)
 const botReplayMessage = ref<string | null>(null)
 const lastBotStats = ref<BotTurnStats | null>(null)
 const draggedPocketPieceId = ref<string | null>(null)
+const promotionRequest = ref<{ pieceId: string; to: Square; owner: PlayerId; options: string[] } | null>(null)
+let promotionResolve: ((choice: string | null) => void) | null = null
 const botPreviewSelectedPieceId = ref<string | null>(null)
 const botPreviewMovableSquares = ref<Square[]>([])
 const botPreviewAttackSquares = ref<Square[]>([])
@@ -199,6 +227,7 @@ interface LegalPieceOptions {
   legalTargets: Square[]
   movable: Square[]
   captures: Square[]
+  moves: MoveAction[]
 }
 
 const pieceOptionsCache = new Map<string, LegalPieceOptions>()
@@ -221,7 +250,7 @@ const isBotTurn = computed(() => Boolean(
   && props.state.current_player === props.botPlayer
   && props.state.phase === 'playing',
 ))
-const canUsePlayerControls = computed(() => isMyTurn.value && !botThinking.value && !botReplaying.value)
+const canUsePlayerControls = computed(() => isMyTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value)
 const visibleSelectedPieceId = computed(() => (
   botReplaying.value ? botPreviewSelectedPieceId.value : selectedPieceId.value
 ))
@@ -288,7 +317,7 @@ function actionLabel(action: AiAction): string {
   const piece = props.state.pieces[action.piece_id]
   const pieceName = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? action.piece_id
   if (action.type === 'drop') {
-    return `${pieceName} 착수: ${action.to.file + 1}, ${action.to.rank + 1}`
+    return `${pieceName} 포켓 기물 놓기: ${action.to.file + 1}, ${action.to.rank + 1}`
   }
 
   const captureText = action.captured_piece_id ? ' 포획' : ' 이동'
@@ -350,6 +379,9 @@ function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
     movedPiece.current_square = action.to
     movedPiece.move_stack = Math.max(0, movedPiece.move_stack - 1)
     movedPiece.has_moved = true
+    if (action.promotion) {
+      movedPiece.type_id = action.promotion
+    }
   }
 
   if (!next.turn_state.moved_piece_ids.includes(action.piece_id)) {
@@ -531,6 +563,42 @@ function pieceAlt(pieceId: string): string {
   return piece ? `${piece.owner} ${piece.type_id}` : pieceId
 }
 
+const PROMOTION_ORDER = ['queen', 'rook', 'bishop', 'knight']
+
+function promotionPieceLabel(pieceType: string): string {
+  return viewState.value.piece_definitions[pieceType]?.name ?? pieceType
+}
+
+function requestPromotionChoice(
+  pieceId: string,
+  to: Square,
+  owner: PlayerId,
+  choices: string[],
+): Promise<string | null> {
+  cancelPromotion()
+  const options = [...choices].sort(
+    (a, b) => PROMOTION_ORDER.indexOf(a) - PROMOTION_ORDER.indexOf(b),
+  )
+  promotionRequest.value = { pieceId, to, owner, options }
+  return new Promise(resolve => {
+    promotionResolve = resolve
+  })
+}
+
+function choosePromotion(pieceType: string) {
+  const resolve = promotionResolve
+  promotionRequest.value = null
+  promotionResolve = null
+  resolve?.(pieceType)
+}
+
+function cancelPromotion() {
+  const resolve = promotionResolve
+  promotionRequest.value = null
+  promotionResolve = null
+  resolve?.(null)
+}
+
 function clearSelection() {
   selectedPieceId.value = null
   selectedPocketPieceId.value = null
@@ -573,6 +641,7 @@ async function loadPieceOptions(pieceId: string): Promise<LegalPieceOptions> {
       legalTargets: moves.map(move => move.to),
       movable: moves.filter(move => !move.captured_piece_id).map(move => move.to),
       captures: moves.filter(move => Boolean(move.captured_piece_id)).map(move => move.to),
+      moves,
     }
     pieceOptionsCache.set(key, options)
     pieceOptionsRequests.delete(key)
@@ -676,11 +745,25 @@ async function submitMove(pieceId: string, to: Square) {
   }
 
   const options = selectedPieceId.value === pieceId && legalTargetSquares.value.length > 0
-    ? { legalTargets: legalTargetSquares.value }
+    ? await loadPieceOptions(pieceId)
     : await selectBoardPiece(pieceId)
   if (!options || !isLegalSquare(to, options.legalTargets)) {
     clearSelection()
     return
+  }
+
+  const promotionChoices = options.moves
+    .filter(move => move.piece_id === pieceId && sameSquare(move.to, to) && move.promotion)
+    .map(move => move.promotion as string)
+
+  let promotion: string | undefined
+  if (promotionChoices.length > 0) {
+    const chosen = await requestPromotionChoice(pieceId, to, fromPiece.owner, promotionChoices)
+    if (!chosen) {
+      clearSelection()
+      return
+    }
+    promotion = chosen
   }
 
   const sqId = `${to.file}_${to.rank}`
@@ -693,6 +776,7 @@ async function submitMove(pieceId: string, to: Square) {
       from: fromPiece.current_square,
       to,
       captured_piece_id: capturedPieceId ?? undefined,
+      promotion,
     }
     const newState = await api.submitAction(props.state.id, action)
     emit('stateUpdate', newState)
@@ -730,6 +814,7 @@ async function submitDrop(pieceId: string, to: Square) {
 
 async function onSquareClick(sq: Square) {
   error.value = null
+  if (promotionRequest.value) return
   if (!canUsePlayerControls.value) {
     error.value = '상대 턴입니다.'
     clearSelection()
@@ -866,6 +951,7 @@ async function onResign() {
 .game-screen { display: flex; flex-direction: column; gap: 12px; padding: 16px; position: relative; }
 
 .header { display: flex; align-items: center; gap: 16px; }
+.title-en { font-size: 0.55em; font-weight: 400; opacity: 0.65; margin-left: 6px; }
 .player-badge { padding: 4px 10px; border-radius: 6px; font-weight: bold; }
 .player-badge.player-white { background: #eee; color: #333; }
 .player-badge.player-black { background: #333; color: #eee; }
@@ -966,6 +1052,27 @@ async function onResign() {
   color: #1f2933;
 }
 .game-over-box button { margin-top: 16px; padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
+
+.promotion-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 60;
+}
+.promotion-box {
+  background: white; padding: 24px 32px; border-radius: 12px; text-align: center;
+  color: #1f2933; max-width: 320px;
+}
+.promotion-box h3 { margin: 0 0 4px; }
+.promotion-box p { margin: 0 0 16px; color: #52606d; font-size: 14px; }
+.promotion-choices { display: flex; gap: 12px; justify-content: center; }
+.promotion-choice {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: #f0f4f8; border: 2px solid transparent; border-radius: 10px;
+  padding: 10px 12px; cursor: pointer; font-size: 13px; color: #1f2933;
+}
+.promotion-choice:hover, .promotion-choice:focus-visible {
+  border-color: #1976d2; background: #e3f2fd;
+}
+.promotion-choice-image { width: 48px; height: 48px; }
 
 @media (max-width: 900px) {
   .game-screen { padding: 12px; }

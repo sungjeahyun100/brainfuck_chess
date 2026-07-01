@@ -27,16 +27,69 @@ fn pawn_start_rank(type_id: &str, board_size: i32) -> Option<i32> {
     }
 }
 
+/// The back rank a Pawn must reach to promote, if `type_id` is a Pawn.
+fn pawn_promotion_rank(type_id: &str, board_size: i32) -> Option<i32> {
+    match type_id {
+        "pawn-white" => Some(board_size - 1),
+        "pawn-black" => Some(0),
+        _ => None,
+    }
+}
+
+/// Piece types a Pawn may promote to.
+pub const PROMOTION_PIECE_TYPES: [&str; 4] = ["queen", "rook", "bishop", "knight"];
+
 fn is_rook_piece(piece: &Piece) -> bool {
     piece.type_id == "rook"
 }
 
 fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
-    let exists = actions
-        .iter()
-        .any(|m| m.piece_id == action.piece_id && m.to == action.to);
+    let exists = actions.iter().any(|m| {
+        m.piece_id == action.piece_id && m.to == action.to && m.promotion == action.promotion
+    });
     if !exists {
         actions.push(action);
+    }
+}
+
+/// Push a move action, expanding it into one action per promotion choice
+/// when the moving piece is a Pawn reaching the opponent's back rank.
+fn push_move_or_promotions(
+    actions: &mut Vec<MoveAction>,
+    piece_type_id: &str,
+    board_size: i32,
+    player_id: &PlayerId,
+    piece_id: &PieceId,
+    from: Square,
+    to: Square,
+    captured_piece_id: Option<PieceId>,
+) {
+    if pawn_promotion_rank(piece_type_id, board_size) == Some(to.rank) {
+        for promo in PROMOTION_PIECE_TYPES {
+            push_action_if_unique(
+                actions,
+                MoveAction {
+                    player_id: player_id.clone(),
+                    piece_id: piece_id.clone(),
+                    from,
+                    to,
+                    captured_piece_id: captured_piece_id.clone(),
+                    promotion: Some(promo.to_string()),
+                },
+            );
+        }
+    } else {
+        push_action_if_unique(
+            actions,
+            MoveAction {
+                player_id: player_id.clone(),
+                piece_id: piece_id.clone(),
+                from,
+                to,
+                captured_piece_id,
+                promotion: None,
+            },
+        );
     }
 }
 
@@ -164,15 +217,15 @@ pub fn generate_piece_legal_move_actions(
             }
         }
 
-        push_action_if_unique(
+        push_move_or_promotions(
             &mut actions,
-            MoveAction {
-                player_id: player_id.clone(),
-                piece_id: piece_id.clone(),
-                from,
-                to,
-                captured_piece_id,
-            },
+            &piece.type_id,
+            game_state.board.size,
+            player_id,
+            piece_id,
+            from,
+            to,
+            captured_piece_id,
         );
     }
 
@@ -194,15 +247,15 @@ pub fn generate_piece_legal_move_actions(
             continue;
         }
 
-        push_action_if_unique(
+        push_move_or_promotions(
             &mut actions,
-            MoveAction {
-                player_id: player_id.clone(),
-                piece_id: piece_id.clone(),
-                from,
-                to,
-                captured_piece_id: Some(captured_piece_id),
-            },
+            &piece.type_id,
+            game_state.board.size,
+            player_id,
+            piece_id,
+            from,
+            to,
+            Some(captured_piece_id),
         );
     }
 
@@ -228,6 +281,7 @@ pub fn generate_piece_legal_move_actions(
                                         from,
                                         to: target,
                                         captured_piece_id: Some(captured_id.clone()),
+                                        promotion: None,
                                     },
                                 );
                             }
@@ -319,6 +373,7 @@ pub fn generate_piece_legal_move_actions(
                         from,
                         to: king_to,
                         captured_piece_id: None,
+                        promotion: None,
                     },
                 );
             }

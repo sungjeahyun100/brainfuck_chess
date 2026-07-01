@@ -69,6 +69,7 @@ export interface MoveAction {
   from: Square
   to: Square
   captured_piece_id?: PieceId
+  promotion?: PieceTypeId
 }
 
 export interface DropAction {
