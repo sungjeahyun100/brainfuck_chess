@@ -178,11 +178,11 @@
             <p class="section-kicker">Preset</p>
             <h2>프리셋 덱으로 바로 시작하기</h2>
           </div>
-          <p class="section-description">{{ deckEditorLabel }} 덱에 프리셋을 적용합니다. 적용 후에도 자유롭게 기물을 바꿀 수 있습니다.</p>
+          <p class="section-description">{{ selectedSize }} × {{ selectedSize }} 보드에 맞춘 프리셋을 {{ deckEditorLabel }} 덱에 적용합니다. 적용 후에도 자유롭게 기물을 바꿀 수 있습니다.</p>
         </div>
         <div class="preset-list">
           <button
-            v-for="preset in deckPresets"
+            v-for="preset in activeDeckPresets"
             :key="preset.id"
             class="preset-card"
             @click="applyPresetToActive(preset.id)"
@@ -442,55 +442,95 @@ const pocketCatalog = pieceCatalog.filter(
   piece => piece.canPocket,
 )
 
+interface DeckPresetLayout {
+  backline: (DeckPieceType | null)[]
+  pawns: (DeckPieceType | null)[]
+  pocket: Partial<Record<DeckPieceType, number>>
+}
+
 interface DeckPreset {
   id: string
   name: string
   description: string
-  backline: (DeckPieceType | null)[]
-  pawns: (DeckPieceType | null)[]
-  pocket: Partial<Record<DeckPieceType, number>>
+  layouts: Record<number, DeckPresetLayout>
+}
+
+function createPawnLine(size: number, count = size): (DeckPieceType | null)[] {
+  return Array.from({ length: size }, (_, index) => (index < count ? 'pawn' : null))
+}
+
+function createPresetLayout(
+  backline: (DeckPieceType | null)[],
+  pawnCount = backline.length,
+  pocket: Partial<Record<DeckPieceType, number>> = {},
+): DeckPresetLayout {
+  return {
+    backline,
+    pawns: createPawnLine(backline.length, pawnCount),
+    pocket,
+  }
 }
 
 const deckPresets: DeckPreset[] = [
   {
     id: 'classic',
     name: '기본 체스 덱',
-    description: '익숙한 기물 중심의 표준 배치. 처음이라면 이 덱으로 시작해 보세요.',
-    backline: ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'],
-    pawns: ['pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn'],
-    pocket: {},
+    description: '익숙한 기물 중심의 표준 배치. 보드가 커질수록 주력 기물이 자연스럽게 늘어납니다.',
+    layouts: {
+      8: createPresetLayout(['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook']),
+      9: createPresetLayout(['rook', 'knight', 'bishop', 'queen', 'king', 'queen', 'bishop', 'knight', 'rook']),
+      10: createPresetLayout(['rook', 'knight', 'bishop', 'queen', 'bishop', 'king', 'queen', 'bishop', 'knight', 'rook']),
+      11: createPresetLayout(['rook', 'knight', 'bishop', 'rook', 'queen', 'king', 'queen', 'rook', 'bishop', 'knight', 'rook']),
+      12: createPresetLayout(['rook', 'knight', 'bishop', 'rook', 'queen', 'bishop', 'king', 'queen', 'rook', 'bishop', 'knight', 'rook']),
+    },
   },
   {
     id: 'swarm',
     name: '물량 덱',
     description: '낮은 점수의 Knight와 Pawn을 잔뜩 채운 물량 승부 덱입니다.',
-    backline: ['knight', 'knight', 'knight', 'king', 'knight', 'knight', 'knight', 'knight'],
-    pawns: ['pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn'],
-    pocket: { pawn: 10 },
+    layouts: {
+      8: createPresetLayout(['knight', 'knight', 'knight', 'king', 'knight', 'knight', 'knight', 'knight'], 8, { pawn: 10 }),
+      9: createPresetLayout(['knight', 'knight', 'knight', 'knight', 'king', 'knight', 'knight', 'knight', 'knight'], 9, { pawn: 14 }),
+      10: createPresetLayout(['knight', 'knight', 'knight', 'knight', 'king', 'knight', 'knight', 'knight', 'knight', 'knight'], 10, { pawn: 18 }),
+      11: createPresetLayout(['knight', 'knight', 'knight', 'knight', 'knight', 'king', 'knight', 'knight', 'knight', 'knight', 'knight'], 11, { pawn: 24 }),
+      12: createPresetLayout(['knight', 'knight', 'knight', 'knight', 'knight', 'king', 'knight', 'knight', 'knight', 'knight', 'knight', 'knight'], 12, { pawn: 30 }),
+    },
   },
   {
     id: 'pocket',
     name: '포켓 덱',
     description: '시작 기물은 최소화하고, 게임 중 포켓 기물을 꺼내 쓰는 덱입니다.',
-    backline: [null, null, null, 'king', null, null, null, null],
-    pawns: ['pawn', 'pawn', 'pawn', 'pawn', null, null, null, null],
-    pocket: { rook: 2, bishop: 2, knight: 2, queen: 1, pawn: 4 },
+    layouts: {
+      8: createPresetLayout([null, null, null, 'king', null, null, null, null], 4, { rook: 2, bishop: 2, knight: 2, queen: 1, pawn: 4 }),
+      9: createPresetLayout([null, null, null, null, 'king', null, null, null, null], 5, { rook: 2, bishop: 2, knight: 2, queen: 1, pawn: 8 }),
+      10: createPresetLayout([null, null, null, null, 'king', null, null, null, null, null], 6, { rook: 2, bishop: 2, knight: 2, queen: 2, pawn: 10 }),
+      11: createPresetLayout([null, null, null, null, null, 'king', null, null, null, null, null], 7, { rook: 3, bishop: 2, knight: 2, queen: 2, pawn: 14 }),
+      12: createPresetLayout([null, null, null, null, null, 'king', null, null, null, null, null, null], 8, { rook: 3, bishop: 3, knight: 3, queen: 2, amazon: 1, pawn: 18 }),
+    },
   },
   {
     id: 'mobility',
     name: '기동 덱',
     description: 'Knight·Bishop과 변형 기물로 기동력을 살린 덱입니다.',
-    backline: ['knight', 'bishop', 'knight', 'king', 'knight', 'bishop', 'knight', 'bishop'],
-    pawns: ['pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn'],
-    pocket: { 'bouncing-bishop': 1, knight: 1 },
+    layouts: {
+      8: createPresetLayout(['knight', 'bishop', 'knight', 'king', 'knight', 'bishop', 'knight', 'bishop'], 8, { 'bouncing-bishop': 1, knight: 1 }),
+      9: createPresetLayout(['knight', 'bishop', 'bouncing-bishop', 'knight', 'king', 'bishop', 'knight', 'bishop', 'knight'], 9, { 'bouncing-bishop': 1, knight: 2 }),
+      10: createPresetLayout(['knight', 'bishop', 'bouncing-bishop', 'knight', 'king', 'knight', 'bouncing-bishop', 'bishop', 'knight', 'bishop'], 10, { 'bouncing-bishop': 1, knight: 2 }),
+      11: createPresetLayout(['knight', 'bishop', 'bouncing-bishop', 'knight', 'tempest-rook', 'king', 'knight', 'bouncing-bishop', 'bishop', 'knight', 'bishop'], 11, { 'bouncing-bishop': 2, knight: 3 }),
+      12: createPresetLayout(['knight', 'bishop', 'bouncing-bishop', 'knight', 'tempest-rook', 'king', 'knight', 'tempest-rook', 'bouncing-bishop', 'bishop', 'knight', 'bishop'], 12, { 'bouncing-bishop': 2, knight: 4 }),
+    },
   },
   {
     id: 'firepower',
     name: '고화력 덱',
     description: 'Queen과 Rook 같은 고점수 기물로 화력을 극대화한 덱입니다.',
-    backline: ['rook', 'queen', 'king', 'queen', 'rook', null, null, null],
-    pawns: ['pawn', 'pawn', 'pawn', 'pawn', null, null, null, null],
-    pocket: { bishop: 1, pawn: 4 },
+    layouts: {
+      8: createPresetLayout(['rook', 'queen', 'king', 'queen', 'rook', null, null, null], 4, { bishop: 1, pawn: 4 }),
+      9: createPresetLayout(['rook', 'queen', 'king', 'queen', 'rook', 'queen', null, null, null], 5, { bishop: 1, pawn: 8 }),
+      10: createPresetLayout(['rook', 'queen', 'rook', 'king', 'queen', 'rook', 'queen', null, null, null], 6, { bishop: 2, pawn: 10 }),
+      11: createPresetLayout(['rook', 'queen', 'rook', 'queen', 'king', 'queen', 'rook', 'queen', null, null, null], 7, { bishop: 2, knight: 2, pawn: 12 }),
+      12: createPresetLayout(['rook', 'queen', 'rook', 'tempest-queen', 'queen', 'king', 'queen', 'tempest-rook', 'rook', 'queen', null, null], 8, { bishop: 2, knight: 2, pawn: 16 }),
+    },
   },
 ]
 
@@ -555,21 +595,16 @@ function emptyPocket(): Record<DeckPieceType, number> {
 }
 
 function createStandardStarting(player: LobbyPlayer, boardSize: number): LobbyPlacement[] {
-  const offset = Math.floor((boardSize - 8) / 2)
-  const backRank = player === 'white' ? 0 : boardSize - 1
-  const pawnRank = player === 'white' ? 1 : boardSize - 2
-  const backline: DeckPieceType[] = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook']
+  const classicLayout = deckPresets.find(preset => preset.id === 'classic')?.layouts[boardSize]
+  if (classicLayout) {
+    return createPresetStarting(player, boardSize, classicLayout)
+  }
 
-  return [
-    ...backline.map((pieceType, index) => ({
-      pieceType,
-      square: { file: offset + index, rank: backRank },
-    })),
-    ...Array.from({ length: 8 }, (_, index) => ({
-      pieceType: 'pawn' as const,
-      square: { file: offset + index, rank: pawnRank },
-    })),
-  ]
+  return createPresetStarting(
+    player,
+    boardSize,
+    createPresetLayout(['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook']),
+  )
 }
 
 function createLobbyDeck(player: LobbyPlayer, boardSize: number): LobbyDeck {
@@ -579,32 +614,43 @@ function createLobbyDeck(player: LobbyPlayer, boardSize: number): LobbyDeck {
   }
 }
 
-function createPresetStarting(player: LobbyPlayer, boardSize: number, preset: DeckPreset): LobbyPlacement[] {
-  const offset = Math.floor((boardSize - 8) / 2)
+function presetLayoutForBoard(preset: DeckPreset, boardSize: number): DeckPresetLayout | null {
+  return preset.layouts[boardSize] ?? null
+}
+
+function createPresetStarting(player: LobbyPlayer, boardSize: number, layout: DeckPresetLayout): LobbyPlacement[] {
+  const offset = Math.max(0, Math.floor((boardSize - layout.backline.length) / 2))
   const backRank = player === 'white' ? 0 : boardSize - 1
   const pawnRank = player === 'white' ? 1 : boardSize - 2
 
   return [
-    ...preset.backline
-      .map((pieceType, index) => (pieceType ? { pieceType, square: { file: offset + index, rank: backRank } } : null))
+    ...layout.backline
+      .map((pieceType, index) => {
+        const file = offset + index
+        return pieceType && file < boardSize ? { pieceType, square: { file, rank: backRank } } : null
+      })
       .filter((placement): placement is LobbyPlacement => placement !== null),
-    ...preset.pawns
-      .map((pieceType, index) => (pieceType ? { pieceType, square: { file: offset + index, rank: pawnRank } } : null))
+    ...layout.pawns
+      .map((pieceType, index) => {
+        const file = offset + index
+        return pieceType && file < boardSize ? { pieceType, square: { file, rank: pawnRank } } : null
+      })
       .filter((placement): placement is LobbyPlacement => placement !== null),
   ]
 }
 
 function applyPresetToActive(presetId: string) {
   const preset = deckPresets.find(entry => entry.id === presetId)
-  if (!preset) return
+  const layout = preset ? presetLayoutForBoard(preset, selectedSize.value) : null
+  if (!layout) return
 
   const pocket = emptyPocket()
-  for (const [pieceType, count] of Object.entries(preset.pocket)) {
+  for (const [pieceType, count] of Object.entries(layout.pocket)) {
     pocket[pieceType] = count ?? 0
   }
 
   lobbyDecks.value[activePlayer.value] = {
-    starting: createPresetStarting(activePlayer.value, selectedSize.value, preset),
+    starting: createPresetStarting(activePlayer.value, selectedSize.value, layout),
     pocket,
   }
   lobbyError.value = null
@@ -638,6 +684,7 @@ watch(selectedSize, () => {
 const whiteDeck = computed(() => lobbyDecks.value.white)
 const blackDeck = computed(() => lobbyDecks.value.black)
 const activeDeck = computed(() => lobbyDecks.value[activePlayer.value])
+const activeDeckPresets = computed(() => deckPresets.filter(preset => presetLayoutForBoard(preset, selectedSize.value)))
 const pieceById = computed(() => new Map(pieceCatalog.map(piece => [piece.id, piece])))
 const filteredPieceCatalog = computed(() => {
   const query = pieceSearch.value.toLowerCase()
