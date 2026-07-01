@@ -67,7 +67,12 @@ pub fn apply_ai_action(mut state: GameState, action: &AiAction) -> Result<GameSt
                 return Err("AI가 합법적이지 않은 이동을 선택했습니다.".into());
             }
             state.turn_state.mode = TurnMode::Move;
-            Ok(apply_move_action(state, action.clone()))
+            let state = apply_move_action(state, action.clone());
+            if state.phase == GamePhase::Ended || state.result.is_some() {
+                Ok(state)
+            } else {
+                Ok(end_turn(state))
+            }
         }
         AiAction::Drop(action) => {
             let legal = generate_legal_drop_actions(&state)
@@ -77,7 +82,7 @@ pub fn apply_ai_action(mut state: GameState, action: &AiAction) -> Result<GameSt
                 return Err("AI가 합법적이지 않은 착수를 선택했습니다.".into());
             }
             state.turn_state.mode = TurnMode::Drop;
-            Ok(apply_drop_action(state, action.clone()))
+            Ok(end_turn(apply_drop_action(state, action.clone())))
         }
         AiAction::EndTurn => {
             if !can_end_turn(&state) {

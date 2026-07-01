@@ -114,12 +114,12 @@ pub fn get_base_zone_squares(player_id: &PlayerId, board_size: i32) -> Vec<Squar
     squares
 }
 
-/// Check if the current player has performed at least one action this turn.
+/// Check if the current player has performed exactly one required action this turn.
 pub fn can_end_turn(game_state: &GameState) -> bool {
     !game_state.turn_state.actions.is_empty()
 }
 
-/// End the current turn: switch player, reset turn state, grant move stacks.
+/// End the current turn: switch player and reset turn state.
 pub fn end_turn(game_state: GameState) -> GameState {
     if !can_end_turn(&game_state) {
         return game_state;
@@ -148,22 +148,5 @@ pub fn end_turn(game_state: GameState) -> GameState {
     new_state.turn_number += 1;
     new_state.turn_state = TurnState::new();
 
-    // Grant move stack 1 to all board pieces of the next player
-    for piece in new_state.pieces.values_mut() {
-        if piece.owner == next_player && piece.is_on_board() {
-            piece.move_stack = 1;
-        }
-    }
-
     new_state
-}
-
-/// Grant move stacks at the start of a turn (called when game state is first created / turn begins).
-pub fn grant_move_stacks(game_state: &mut GameState) {
-    let current = game_state.current_player.clone();
-    for piece in game_state.pieces.values_mut() {
-        if piece.owner == current && piece.is_on_board() {
-            piece.move_stack = 1;
-        }
-    }
 }

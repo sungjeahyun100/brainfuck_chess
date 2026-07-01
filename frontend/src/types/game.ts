@@ -36,7 +36,6 @@ export interface Piece {
   current_square?: Square
   in_pocket: boolean
   captured: boolean
-  move_stack: number
   has_moved: boolean
 }
 
@@ -59,7 +58,6 @@ export type TurnMode = 'undecided' | 'move' | 'drop'
 export interface TurnState {
   mode: TurnMode
   actions: TurnAction[]
-  moved_piece_ids: PieceId[]
 }
 
 export interface MoveAction {

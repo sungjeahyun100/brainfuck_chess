@@ -22,7 +22,7 @@ use brainfuck_chess_engine::{
     pieces::default_pieces::all_default_definitions,
     rules::{
         calculate_deck_score, calculate_score_limit, can_end_turn, create_board, end_turn,
-        get_base_zone_squares, grant_move_stacks, validate_deck,
+        get_base_zone_squares, validate_deck,
     },
     types::*,
 };
@@ -226,7 +226,6 @@ fn build_player_deck(
             current_square: Some(placement.square),
             in_pocket: false,
             captured: false,
-            move_stack: 0,
             has_moved: false,
             active_ability: None,
         };
@@ -249,7 +248,6 @@ fn build_player_deck(
             current_square: None,
             in_pocket: true,
             captured: false,
-            move_stack: 0,
             has_moved: false,
             active_ability: None,
         };
@@ -329,7 +327,7 @@ fn build_game_state(
         },
     );
 
-    let mut state = GameState {
+    let state = GameState {
         id,
         board,
         pieces,
@@ -345,7 +343,6 @@ fn build_game_state(
         chessembly_program_cache,
     };
 
-    grant_move_stacks(&mut state);
     Ok(state)
 }
 
@@ -354,6 +351,21 @@ fn opponent_side(side: &PlayerId) -> PlayerId {
         "black".into()
     } else {
         "white".into()
+    }
+}
+
+fn has_move_or_drop_action(turn_state: &TurnState) -> bool {
+    turn_state
+        .actions
+        .iter()
+        .any(|action| matches!(action, TurnAction::Move(_) | TurnAction::Drop(_)))
+}
+
+fn end_turn_after_action(state: GameState) -> GameState {
+    if state.phase == GamePhase::Ended || state.result.is_some() {
+        state
+    } else {
+        end_turn(state)
     }
 }
 
@@ -745,6 +757,15 @@ async fn submit_action(
         ));
     }
 
+    if has_move_or_drop_action(&state.turn_state) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "이번 턴에는 이미 행동했습니다. 턴을 종료하세요.".into(),
+            }),
+        ));
+    }
+
     match req.action {
         TurnAction::Move(action) => {
             if action.player_id != state.current_player {
@@ -781,14 +802,6 @@ async fn submit_action(
                     }),
                 ));
             }
-            if piece.move_stack == 0 {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "이동 스택이 없습니다.".into(),
-                    }),
-                ));
-            }
             // Validate against only the submitted piece's legal actions.
             let is_legal = generate_piece_legal_move_actions(state, &action.piece_id)
                 .iter()
@@ -806,7 +819,7 @@ async fn submit_action(
 
             state.turn_state.mode = TurnMode::Move;
             let new_state = apply_move_action(state.clone(), action);
-            *state = new_state;
+            *state = end_turn_after_action(new_state);
         }
         TurnAction::Drop(action) => {
             if action.player_id != state.current_player {
@@ -839,7 +852,7 @@ async fn submit_action(
 
             state.turn_state.mode = TurnMode::Drop;
             let new_state = apply_drop_action(state.clone(), action);
-            *state = new_state;
+            *state = end_turn_after_action(new_state);
         }
         TurnAction::ActivateAbility(action) => {
             if action.player_id != state.current_player {
@@ -1187,6 +1200,37 @@ mod tests {
 
         assert!(!response.moves.is_empty());
         assert!(response.moves.iter().all(|m| m.piece_id == piece_id));
+    }
+
+    #[tokio::test]
+    async fn submit_move_action_automatically_ends_turn() {
+        let (app, game_id) = test_app_with_game();
+
+        let response = match submit_action(
+            State(app.clone()),
+            Path(game_id.clone()),
+            Json(SubmitActionRequest {
+                action: TurnAction::Move(MoveAction {
+                    player_id: "white".into(),
+                    piece_id: "white_rook_1".into(),
+                    from: Square::new(0, 0),
+                    to: Square::new(0, 1),
+                    captured_piece_id: None,
+                    promotion: None,
+                }),
+            }),
+        )
+        .await
+        {
+            Ok(Json(state)) => state,
+            Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+        };
+
+        assert_eq!(response.current_player, "black");
+        assert_eq!(response.turn_number, 2);
+        assert!(response.turn_state.actions.is_empty());
+        let stored = app.games.get(&game_id).unwrap();
+        assert_eq!(stored.current_player, "black");
     }
 
     #[tokio::test]

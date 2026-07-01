@@ -400,8 +400,6 @@ pub struct Piece {
     pub current_square: Option<Square>,
     pub in_pocket: bool,
     pub captured: bool,
-    /// Remaining move stack for this turn (reset to 1 at turn start)
-    pub move_stack: u32,
     /// Whether this piece has ever moved (used for Pawn 2-step rule)
     pub has_moved: bool,
     /// Currently active ability program, if any.
@@ -454,8 +452,6 @@ pub enum TurnMode {
 pub struct TurnState {
     pub mode: TurnMode,
     pub actions: Vec<TurnAction>,
-    /// Piece IDs that have already moved this turn
-    pub moved_piece_ids: HashSet<PieceId>,
 }
 
 impl TurnState {
@@ -463,7 +459,6 @@ impl TurnState {
         Self {
             mode: TurnMode::Undecided,
             actions: Vec::new(),
-            moved_piece_ids: HashSet::new(),
         }
     }
 }

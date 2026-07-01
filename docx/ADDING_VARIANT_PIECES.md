@@ -207,7 +207,7 @@ abilities: vec![PieceAbilityDefinition {
 
 - 능력 발동은 Move 모드 행동이다. Drop 모드가 선택된 턴에는 발동할 수 없다.
 - 한 기물은 동시에 하나의 `active_ability`만 가질 수 있다.
-- 능력 발동은 `turn_state.actions`에 기록되므로, 능력만 발동하고 턴 종료할 수 있다.
+- 능력 발동은 `turn_state.actions`에 기록되며, 이후 이동 또는 착수를 완료하면 턴이 자동으로 넘어간다.
 - 능력이 활성화되면 legal move와 attack map 모두 같은 능력 Chessembly 코드를 기준으로 계산된다.
 - 기물의 `type_id`는 능력 발동으로 바뀌지 않는다.
 - 기본 행마에 능력 행마를 더하는 기능은 아직 없다. 그런 조합은 Chessembly 코드 자체로 표현하거나 별도 설계가 필요하다.

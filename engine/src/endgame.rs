@@ -92,9 +92,7 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         }
     }
 
-    // Consume move stack
     if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
-        piece.move_stack = piece.move_stack.saturating_sub(1);
         piece.has_moved = true;
         if piece
             .active_ability
@@ -105,9 +103,8 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         }
     }
 
-    // A new pawn double-step replaces the previous right. Otherwise, only an
-    // action by the player who could claim en passant consumes that right;
-    // extra moves by the double-stepping player happen before the response.
+    // A new pawn double-step replaces the previous right. Otherwise, only the
+    // player who can claim en passant consumes that right by taking another action.
     if let Some(target) = en_passant_target_for_action(&game_state, &action) {
         game_state.en_passant_target = Some(target);
         game_state.en_passant_available_to = Some(if action.player_id == "white" {
@@ -121,10 +118,6 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
     }
 
     // Record action
-    game_state
-        .turn_state
-        .moved_piece_ids
-        .insert(action.piece_id.clone());
     game_state
         .turn_state
         .actions

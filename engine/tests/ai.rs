@@ -5,7 +5,7 @@ use brainfuck_chess_engine::ai::{
 };
 use brainfuck_chess_engine::endgame::apply_move_action;
 use brainfuck_chess_engine::pieces::default_pieces::all_default_definitions;
-use brainfuck_chess_engine::rules::{create_board, grant_move_stacks};
+use brainfuck_chess_engine::rules::create_board;
 use brainfuck_chess_engine::types::*;
 
 fn make_state() -> GameState {
@@ -65,7 +65,6 @@ fn add_board_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, 
             current_square: Some(square),
             in_pocket: false,
             captured: false,
-            move_stack: 1,
             has_moved: false,
             active_ability: None,
         },
@@ -90,7 +89,6 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
             current_square: None,
             in_pocket: true,
             captured: false,
-            move_stack: 0,
             has_moved: false,
             active_ability: None,
         },
@@ -149,7 +147,7 @@ fn bot_always_selects_an_immediate_king_capture() {
 }
 
 #[test]
-fn drop_and_move_modes_cannot_be_mixed() {
+fn drop_and_move_actions_end_the_turn() {
     let mut state = make_state();
     add_board_piece(&mut state, "wk", "white", "king", Square::new(4, 0));
     add_board_piece(&mut state, "bk", "black", "king", Square::new(4, 7));
@@ -160,16 +158,16 @@ fn drop_and_move_modes_cannot_be_mixed() {
         .find(|action| matches!(action, AiAction::Drop(_)))
         .unwrap();
     let dropped = apply_ai_action(state.clone(), &drop).unwrap();
-    assert_eq!(generate_ai_actions(&dropped), vec![AiAction::EndTurn]);
+    assert_eq!(dropped.current_player, "black");
+    assert!(dropped.turn_state.actions.is_empty());
 
     let movement = generate_ai_actions(&state)
         .into_iter()
         .find(|action| matches!(action, AiAction::Move(_)))
         .unwrap();
     let moved = apply_ai_action(state, &movement).unwrap();
-    assert!(generate_ai_actions(&moved)
-        .iter()
-        .all(|action| !matches!(action, AiAction::Drop(_))));
+    assert_eq!(moved.current_player, "black");
+    assert!(moved.turn_state.actions.is_empty());
 }
 
 #[test]
@@ -178,7 +176,6 @@ fn bot_turn_finishes_or_ends_the_game_within_the_difficulty_limit() {
     add_board_piece(&mut state, "wk", "white", "king", Square::new(4, 0));
     add_board_piece(&mut state, "bk", "black", "king", Square::new(4, 7));
     add_board_piece(&mut state, "wn", "white", "knight", Square::new(1, 0));
-    grant_move_stacks(&mut state);
 
     let next = play_bot_turn(state, &"white".into(), BotDifficulty::Easy).unwrap();
     assert!(next.phase == GamePhase::Ended || next.current_player == "black");

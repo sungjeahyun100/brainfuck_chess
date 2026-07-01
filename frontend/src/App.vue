@@ -45,7 +45,7 @@
             <p class="section-kicker">Bot Match</p>
             <h2>봇 대전 설정</h2>
           </div>
-          <p class="section-description">사람 진영과 봇 난이도를 선택합니다. 봇은 자기 차례의 모든 행동과 턴 종료를 자동으로 처리합니다.</p>
+          <p class="section-description">사람 진영과 봇 난이도를 선택합니다. 이동이나 착수 후 턴은 자동으로 넘어갑니다.</p>
         </div>
         <div class="bot-options">
           <div class="color-match">
@@ -542,7 +542,7 @@ const catalogCategoryLabels: Record<string, string> = {
   pawn: 'Pawn',
 }
 
-const variantTooltip = '시작 전 배치와 포켓 기물을 직접 구성합니다. 턴에는 여러 기물을 움직이거나 포켓 기물 하나를 자신의 초기 진영 또는 공격 범위의 칸에 놓을 수 있습니다.'
+const variantTooltip = '시작 전 배치와 포켓 기물을 직접 구성합니다. 한 턴에는 기물 하나를 움직이거나 포켓 기물 하나를 자신의 초기 진영 또는 공격 범위의 칸에 놓을 수 있습니다.'
 
 const pieceMoveDescriptions: Record<string, string> = {
   king: 'King: 한 칸씩 모든 방향으로 이동합니다.',

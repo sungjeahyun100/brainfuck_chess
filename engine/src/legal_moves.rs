@@ -31,6 +31,13 @@ fn is_rook_piece(piece: &Piece) -> bool {
     piece.type_id == "rook"
 }
 
+fn has_move_or_drop_action(turn_state: &TurnState) -> bool {
+    turn_state
+        .actions
+        .iter()
+        .any(|action| matches!(action, TurnAction::Move(_) | TurnAction::Drop(_)))
+}
+
 fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
     let exists = actions.iter().any(|m| {
         m.piece_id == action.piece_id && m.to == action.to && m.promotion == action.promotion
@@ -126,8 +133,10 @@ pub fn generate_piece_legal_move_actions(
 
     let player_id = &game_state.current_player;
 
-    // Cannot generate move actions during a drop turn
-    if game_state.turn_state.mode == TurnMode::Drop {
+    // A turn allows exactly one action: either one move or one pocket drop.
+    if game_state.turn_state.mode == TurnMode::Drop
+        || has_move_or_drop_action(&game_state.turn_state)
+    {
         return Vec::new();
     }
 
@@ -139,12 +148,8 @@ pub fn generate_piece_legal_move_actions(
         return Vec::new();
     };
 
-    // Must belong to current player, be on board, and have move stack.
-    if piece.owner != *player_id
-        || !piece.is_on_board()
-        || piece.move_stack == 0
-        || game_state.turn_state.moved_piece_ids.contains(piece_id)
-    {
+    // Must belong to current player and be on board.
+    if piece.owner != *player_id || !piece.is_on_board() {
         return Vec::new();
     }
 
@@ -363,7 +368,9 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
     let started = Instant::now();
     let player_id = &game_state.current_player;
 
-    if game_state.turn_state.mode == TurnMode::Drop {
+    if game_state.turn_state.mode == TurnMode::Drop
+        || has_move_or_drop_action(&game_state.turn_state)
+    {
         return Vec::new();
     }
 
@@ -396,18 +403,10 @@ pub fn generate_piece_legal_drop_actions(
 ) -> Vec<DropAction> {
     let player_id = &game_state.current_player;
 
-    // Cannot drop during a move turn
-    if game_state.turn_state.mode == TurnMode::Move {
-        return Vec::new();
-    }
-
-    // Only one drop allowed per turn
-    let already_dropped = game_state
-        .turn_state
-        .actions
-        .iter()
-        .any(|a| matches!(a, TurnAction::Drop(_)));
-    if already_dropped {
+    // A turn allows exactly one action: either one move or one pocket drop.
+    if game_state.turn_state.mode == TurnMode::Move
+        || has_move_or_drop_action(&game_state.turn_state)
+    {
         return Vec::new();
     }
 
@@ -446,18 +445,10 @@ pub fn generate_piece_legal_drop_actions(
 pub fn generate_legal_drop_actions(game_state: &GameState) -> Vec<DropAction> {
     let player_id = &game_state.current_player;
 
-    // Cannot drop during a move turn
-    if game_state.turn_state.mode == TurnMode::Move {
-        return Vec::new();
-    }
-
-    // Only one drop allowed per turn
-    let already_dropped = game_state
-        .turn_state
-        .actions
-        .iter()
-        .any(|a| matches!(a, TurnAction::Drop(_)));
-    if already_dropped {
+    // A turn allows exactly one action: either one move or one pocket drop.
+    if game_state.turn_state.mode == TurnMode::Move
+        || has_move_or_drop_action(&game_state.turn_state)
+    {
         return Vec::new();
     }
 
@@ -483,14 +474,9 @@ pub fn generate_drop_candidates_by_type(
     game_state: &GameState,
     player_id: &PlayerId,
 ) -> Vec<DropCandidateByType> {
-    if &game_state.current_player != player_id || game_state.turn_state.mode == TurnMode::Move {
-        return Vec::new();
-    }
-    if game_state
-        .turn_state
-        .actions
-        .iter()
-        .any(|action| matches!(action, TurnAction::Drop(_)))
+    if &game_state.current_player != player_id
+        || game_state.turn_state.mode == TurnMode::Move
+        || has_move_or_drop_action(&game_state.turn_state)
     {
         return Vec::new();
     }

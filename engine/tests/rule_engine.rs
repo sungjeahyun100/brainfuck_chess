@@ -84,7 +84,6 @@ fn add_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, file: 
         current_square: Some(sq),
         in_pocket: false,
         captured: false,
-        move_stack: 1,
         has_moved: false,
         active_ability: None,
     };
@@ -107,7 +106,6 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         current_square: None,
         in_pocket: true,
         captured: false,
-        move_stack: 0,
         has_moved: false,
         active_ability: None,
     };
@@ -340,12 +338,13 @@ fn test_has_living_king() {
     assert!(!has_living_king(&state, &"black".to_string()));
 }
 
-// ─── Move stack ───────────────────────────────────────────────────────────────
+// ─── Single-action turns ─────────────────────────────────────────────────────
 
 #[test]
-fn test_move_stack_consumed() {
+fn test_move_action_blocks_additional_moves_this_turn() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "k1", "white", "king", 4, 0);
+    add_piece(&mut state, "r1", "white", "rook", 0, 0);
 
     let action = MoveAction {
         player_id: "white".into(),
@@ -357,12 +356,13 @@ fn test_move_stack_consumed() {
     };
 
     let new_state = apply_move_action(state, action);
-    let piece = new_state.pieces.get("k1").unwrap();
-    assert_eq!(piece.move_stack, 0, "Move stack should be consumed");
+    assert!(generate_piece_legal_move_actions(&new_state, &"r1".into()).is_empty());
+    assert!(generate_legal_move_actions(&new_state).is_empty());
+    assert!(can_end_turn(&new_state));
 }
 
 #[test]
-fn test_move_stack_reset_on_end_turn() {
+fn test_end_turn_resets_single_action_state() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "k1", "white", "king", 4, 0);
     add_piece(&mut state, "k2", "black", "king", 4, 7);
@@ -388,11 +388,10 @@ fn test_move_stack_reset_on_end_turn() {
         .insert(Square::new(4, 1).to_id(), Some("k1".into()));
 
     let final_state = end_turn(new_state);
-    // After end_turn, black's pieces get stacks; white's "k1" shouldn't have been reset
-    // (it belongs to white but now it's black's turn — white pieces don't get stacks yet)
-    // Black's king should have received a stack
-    let bk = final_state.pieces.get("k2").unwrap();
-    assert_eq!(bk.move_stack, 1, "Black king should have move stack 1");
+    assert_eq!(final_state.current_player, "black");
+    assert_eq!(final_state.turn_number, 2);
+    assert!(final_state.turn_state.actions.is_empty());
+    assert!(!generate_piece_legal_move_actions(&final_state, &"k2".into()).is_empty());
 }
 
 #[test]
@@ -452,8 +451,7 @@ fn test_en_passant_generated_and_applied() {
         captured_piece_id: None,
         promotion: None,
     };
-    let mut state = apply_move_action(state, black_double);
-    state.current_player = "white".into();
+    let state = end_turn(apply_move_action(state, black_double));
 
     let legal = generate_legal_move_actions(&state);
     let ep = legal
@@ -491,15 +489,14 @@ fn test_en_passant_generated_and_applied() {
 }
 
 #[test]
-fn test_en_passant_survives_remaining_moves_before_opponent_response() {
+fn test_en_passant_expires_when_opponent_chooses_another_action() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 4, 0);
     add_piece(&mut state, "bk", "black", "king", 4, 7);
     add_piece(&mut state, "bp", "black", "pawn-black", 5, 6);
-    add_piece(&mut state, "br", "black", "rook", 0, 7);
     state.current_player = "black".into();
 
-    state = apply_move_action(
+    state = end_turn(apply_move_action(
         state,
         MoveAction {
             player_id: "black".into(),
@@ -509,23 +506,11 @@ fn test_en_passant_survives_remaining_moves_before_opponent_response() {
             captured_piece_id: None,
             promotion: None,
         },
-    );
-    state = apply_move_action(
-        state,
-        MoveAction {
-            player_id: "black".into(),
-            piece_id: "br".into(),
-            from: Square::new(0, 7),
-            to: Square::new(0, 6),
-            captured_piece_id: None,
-            promotion: None,
-        },
-    );
+    ));
 
     assert_eq!(state.en_passant_target, Some(Square::new(5, 5)));
     assert_eq!(state.en_passant_available_to.as_deref(), Some("white"));
 
-    state.current_player = "white".into();
     state = apply_move_action(
         state,
         MoveAction {

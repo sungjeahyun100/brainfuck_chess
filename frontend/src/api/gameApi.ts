@@ -98,10 +98,6 @@ export const api = {
     })
   },
 
-  endTurn(id: string): Promise<GameState> {
-    return request(`${BASE}/${id}/end-turn`, { method: 'POST' })
-  },
-
   botTurn(id: string, botPlayerId: PlayerId, difficulty: BotDifficulty): Promise<BotTurnResponse> {
     return request(`${BASE}/${id}/bot-turn`, {
       method: 'POST',

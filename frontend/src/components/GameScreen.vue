@@ -148,22 +148,12 @@
     <!-- Footer: actions -->
     <div class="footer">
       <button
-        class="btn btn-end-turn"
-        :disabled="!canUsePlayerControls || viewState.turn_state.actions.length === 0 || viewState.phase === 'ended'"
-        @click="onEndTurn"
-      >
-        End Turn
-      </button>
-      <button
         class="btn btn-resign"
         :disabled="botThinking || botReplaying || viewState.phase === 'ended' || (Boolean(roomId) && !localPlayer)"
         @click="onResign"
       >
         기권
       </button>
-      <div class="turn-log">
-        <small>Actions this turn: {{ viewState.turn_state.actions.length }}</small>
-      </div>
     </div>
 
     <div v-if="error || botError" class="error-banner">{{ error || botError }}</div>
@@ -377,16 +367,12 @@ function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
   next.board.squares[squareId(action.to)] = action.piece_id
   if (movedPiece) {
     movedPiece.current_square = action.to
-    movedPiece.move_stack = Math.max(0, movedPiece.move_stack - 1)
     movedPiece.has_moved = true
     if (action.promotion) {
       movedPiece.type_id = action.promotion
     }
   }
 
-  if (!next.turn_state.moved_piece_ids.includes(action.piece_id)) {
-    next.turn_state.moved_piece_ids.push(action.piece_id)
-  }
   next.turn_state.actions.push(action)
 
   const capturedTypeId = capturedPieceId ? next.pieces[capturedPieceId]?.type_id : undefined
@@ -427,13 +413,6 @@ function applyEndTurnForReplay(state: GameState): GameState {
   next.turn_state = {
     mode: 'undecided',
     actions: [],
-    moved_piece_ids: [],
-  }
-
-  for (const piece of Object.values(next.pieces)) {
-    if (piece.owner === next.current_player && piece.current_square && !piece.captured && !piece.in_pocket) {
-      piece.move_stack = 1
-    }
   }
 
   return next
@@ -657,7 +636,7 @@ async function loadPieceOptions(pieceId: string): Promise<LegalPieceOptions> {
 
 async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | null> {
   const piece = props.state.pieces[pieceId]
-  if (!piece || piece.owner !== props.state.current_player || piece.move_stack <= 0) {
+  if (!piece || piece.owner !== props.state.current_player || props.state.turn_state.actions.length > 0) {
     clearSelection()
     return null
   }
@@ -710,7 +689,7 @@ async function loadDropOptions(): Promise<DropAction[]> {
 
 async function selectPocketPiece(pieceId: string): Promise<Square[]> {
   const piece = props.state.pieces[pieceId]
-  if (!piece || piece.owner !== props.state.current_player || props.state.turn_state.mode === 'move') {
+  if (!piece || piece.owner !== props.state.current_player || props.state.turn_state.mode === 'move' || props.state.turn_state.actions.length > 0) {
     clearSelection()
     return []
   }
@@ -839,7 +818,7 @@ async function onSquareClick(sq: Square) {
   }
 
   // ── Select own piece ──
-  if (pieceId && piece && piece.owner === currentPlayer && piece.move_stack > 0) {
+  if (pieceId && piece && piece.owner === currentPlayer && props.state.turn_state.actions.length === 0) {
     await selectBoardPiece(pieceId)
   } else {
     clearSelection()
@@ -856,7 +835,7 @@ async function onPocketClick(pieceId: string) {
 
   const piece = props.state.pieces[pieceId]
   if (!piece || piece.owner !== props.state.current_player) return
-  if (props.state.turn_state.mode === 'move') return
+  if (props.state.turn_state.mode === 'move' || props.state.turn_state.actions.length > 0) return
 
   await selectPocketPiece(pieceId)
 }
@@ -893,7 +872,7 @@ async function onSquareDrop(sq: Square | null, pieceId: string) {
 
 function onPocketDragStart(event: DragEvent, pieceId: string) {
   error.value = null
-  if (!canUsePlayerControls.value || props.state.turn_state.mode === 'move') {
+  if (!canUsePlayerControls.value || props.state.turn_state.mode === 'move' || props.state.turn_state.actions.length > 0) {
     event.preventDefault()
     clearSelection()
     return
@@ -910,22 +889,6 @@ function onPocketDragStart(event: DragEvent, pieceId: string) {
 
 function onPocketDragEnd() {
   draggedPocketPieceId.value = null
-}
-
-async function onEndTurn() {
-  error.value = null
-  if (!canUsePlayerControls.value) {
-    error.value = '상대 턴입니다.'
-    return
-  }
-
-  try {
-    const newState = await api.endTurn(props.state.id)
-    clearSelection()
-    emit('stateUpdate', newState)
-  } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
-  }
 }
 
 async function onResign() {
@@ -1032,8 +995,6 @@ async function onResign() {
 .footer { display: flex; align-items: center; gap: 16px; }
 .btn { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-end-turn { background: #4caf50; color: white; }
-.btn-end-turn:hover:not(:disabled) { background: #388e3c; }
 .btn-resign { background: #c62828; color: white; }
 .btn-resign:hover:not(:disabled) { background: #a61f1f; }
 

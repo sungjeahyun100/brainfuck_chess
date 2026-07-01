@@ -27,9 +27,6 @@
           />
           <span v-else>{{ pieceSymbol(sq.piece.type_id) }}</span>
         </span>
-        <span v-if="sq.moveStack !== undefined && sq.moveStack > 0" class="stack-badge">
-          {{ sq.moveStack }}
-        </span>
       </div>
     </div>
   </div>
@@ -45,7 +42,6 @@ interface SquareInfo {
   file: number
   rank: number
   piece?: Piece
-  moveStack?: number
   isLight: boolean
 }
 
@@ -89,7 +85,6 @@ const allSquares = computed((): SquareInfo[] => {
         file,
         rank,
         piece,
-        moveStack: piece?.move_stack,
         isLight: (file + rank) % 2 === 1,
       })
     }
@@ -358,15 +353,4 @@ function pieceAlt(piece: Piece): string {
 
 .piece.owner-white { color: #fff; text-shadow: 0 0 2px #333; }
 .piece.owner-black { color: #111; text-shadow: 0 0 2px #ccc; }
-
-.stack-badge {
-  position: absolute;
-  top: 2px;
-  right: 3px;
-  font-size: 10px;
-  background: rgba(0,0,0,0.5);
-  color: #fff;
-  border-radius: 3px;
-  padding: 0 2px;
-}
 </style>

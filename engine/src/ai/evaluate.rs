@@ -1,5 +1,4 @@
 use crate::legal_moves::{generate_legal_drop_actions, generate_legal_move_actions};
-use crate::rules::grant_move_stacks;
 use crate::types::{GamePhase, GameState, PlayerId, TurnState};
 
 pub const WIN_SCORE: i32 = 1_000_000;
@@ -8,7 +7,6 @@ const MATERIAL_WEIGHT: i32 = 100;
 const POCKET_MATERIAL_WEIGHT: i32 = 60;
 const DROP_MOBILITY_WEIGHT: i32 = 5;
 const MOVE_MOBILITY_WEIGHT: i32 = 2;
-const TURN_MOMENTUM_WEIGHT: i32 = 3;
 
 fn player_view(state: &GameState, player_id: &PlayerId) -> GameState {
     if &state.current_player == player_id {
@@ -18,7 +16,6 @@ fn player_view(state: &GameState, player_id: &PlayerId) -> GameState {
     let mut view = state.clone();
     view.current_player = player_id.clone();
     view.turn_state = TurnState::new();
-    grant_move_stacks(&mut view);
     view
 }
 
@@ -99,19 +96,5 @@ pub fn evaluate(state: &GameState, bot_player_id: &PlayerId) -> i32 {
     if opponent_king_capture {
         score -= i64::from(KING_CAPTURE_THREAT);
     }
-    if &state.current_player == bot_player_id {
-        let remaining = state
-            .pieces
-            .values()
-            .filter(|piece| {
-                piece.owner == *bot_player_id
-                    && piece.is_on_board()
-                    && piece.move_stack > 0
-                    && !state.turn_state.moved_piece_ids.contains(&piece.id)
-            })
-            .count();
-        score += remaining as i64 * i64::from(TURN_MOMENTUM_WEIGHT);
-    }
-
     score.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }

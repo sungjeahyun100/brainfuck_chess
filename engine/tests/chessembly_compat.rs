@@ -21,7 +21,6 @@ fn make_piece(id: &str, owner: &str, type_id: &str, file: i32, rank: i32) -> Pie
         current_square: Some(Square::new(file, rank)),
         in_pocket: false,
         captured: false,
-        move_stack: 1,
         has_moved: false,
         active_ability: None,
     }
