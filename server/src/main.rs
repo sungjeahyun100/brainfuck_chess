@@ -161,12 +161,19 @@ struct ErrorResponse {
 fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
         "king" | "queen" | "rook" | "bishop" | "knight" | "amazon" | "tempest-rook"
-        | "tempest-queen" | "bouncing-bishop" => Some(raw_piece_type.into()),
+        | "tempest-queen" | "tempest-knight" | "bouncing-bishop" => Some(raw_piece_type.into()),
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
             "pawn-white".into()
         } else {
             "pawn-black".into()
         }),
+        "tempest-pawn" | "tempest-pawn-white" | "tempest-pawn-black" => {
+            Some(if player_id == "white" {
+                "tempest-pawn-white".into()
+            } else {
+                "tempest-pawn-black".into()
+            })
+        }
         _ => None,
     }
 }

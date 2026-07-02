@@ -16,6 +16,10 @@ import rookBlack from './assets/pieces/rook-black.svg'
 import rookWhite from './assets/pieces/rook-white.svg'
 import tempestQueenBlack from './assets/pieces/tempest-queen-black.svg'
 import tempestQueenWhite from './assets/pieces/tempest-queen-white.svg'
+import tempestKnightBlack from './assets/pieces/tempest-knight-black.svg'
+import tempestKnightWhite from './assets/pieces/tempest-knight-white.svg'
+import tempestPawnBlack from './assets/pieces/tempest-pawn-black.svg'
+import tempestPawnWhite from './assets/pieces/tempest-pawn-white.svg'
 import tempestRookBlack from './assets/pieces/tempest-rook-black.svg'
 import tempestRookWhite from './assets/pieces/tempest-rook-white.svg'
 import type { PlayerId } from './types/game'
@@ -29,9 +33,13 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   pawn: { white: pawnWhite, black: pawnBlack },
   'pawn-white': { white: pawnWhite, black: pawnBlack },
   'pawn-black': { white: pawnWhite, black: pawnBlack },
+  'tempest-pawn': { white: tempestPawnWhite, black: tempestPawnBlack },
+  'tempest-pawn-white': { white: tempestPawnWhite, black: tempestPawnBlack },
+  'tempest-pawn-black': { white: tempestPawnWhite, black: tempestPawnBlack },
   queen: { white: queenWhite, black: queenBlack },
   rook: { white: rookWhite, black: rookBlack },
   'tempest-queen': { white: tempestQueenWhite, black: tempestQueenBlack },
+  'tempest-knight': { white: tempestKnightWhite, black: tempestKnightBlack },
   'tempest-rook': { white: tempestRookWhite, black: tempestRookBlack },
 }
 

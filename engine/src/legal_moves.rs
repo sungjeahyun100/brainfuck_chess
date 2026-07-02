@@ -8,21 +8,24 @@ use crate::placement::get_placement_squares;
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
-    type_id == "pawn-white" || type_id == "pawn-black"
+    matches!(
+        type_id,
+        "pawn-white" | "pawn-black" | "tempest-pawn-white" | "tempest-pawn-black"
+    )
 }
 
 fn pawn_forward_dir(type_id: &str) -> Option<i32> {
     match type_id {
-        "pawn-white" => Some(1),
-        "pawn-black" => Some(-1),
+        "pawn-white" | "tempest-pawn-white" => Some(1),
+        "pawn-black" | "tempest-pawn-black" => Some(-1),
         _ => None,
     }
 }
 
 fn pawn_start_rank(type_id: &str, board_size: i32) -> Option<i32> {
     match type_id {
-        "pawn-white" => Some(1),
-        "pawn-black" => Some(board_size - 2),
+        "pawn-white" | "tempest-pawn-white" => Some(1),
+        "pawn-black" | "tempest-pawn-black" => Some(board_size - 2),
         _ => None,
     }
 }

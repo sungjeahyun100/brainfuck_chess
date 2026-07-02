@@ -1,7 +1,10 @@
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
-    type_id == "pawn-white" || type_id == "pawn-black"
+    matches!(
+        type_id,
+        "pawn-white" | "pawn-black" | "tempest-pawn-white" | "tempest-pawn-black"
+    )
 }
 
 fn is_king_type(type_id: &str) -> bool {

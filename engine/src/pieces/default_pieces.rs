@@ -325,6 +325,35 @@ take(-1, -1);"
     }
 }
 
+fn tempest_pawn_promotion_pool() -> Vec<String> {
+    vec![
+        "tempest-queen".into(),
+        "tempest-rook".into(),
+        "bouncing-bishop".into(),
+        "tempest-knight".into(),
+    ]
+}
+
+/// White Tempest Pawn: moves exactly like a White Pawn, but promotes only into
+/// tempest-line pieces.
+pub fn tempest_pawn_white_definition() -> PieceDefinition {
+    let mut definition = pawn_white_definition();
+    definition.id = "tempest-pawn-white".into();
+    definition.name = "Tempest Pawn".into();
+    definition.promotion_pool = tempest_pawn_promotion_pool();
+    definition
+}
+
+/// Black Tempest Pawn: moves exactly like a Black Pawn, but promotes only into
+/// tempest-line pieces.
+pub fn tempest_pawn_black_definition() -> PieceDefinition {
+    let mut definition = pawn_black_definition();
+    definition.id = "tempest-pawn-black".into();
+    definition.name = "Tempest Pawn".into();
+    definition.promotion_pool = tempest_pawn_promotion_pool();
+    definition
+}
+
 pub fn tempest_queen_definition() -> PieceDefinition {
     PieceDefinition {
         id: "tempest-queen".into(),
@@ -366,6 +395,47 @@ pub fn tempest_queen_definition() -> PieceDefinition {
     }
 }
 
+pub fn tempest_knight_definition() -> PieceDefinition {
+    PieceDefinition {
+        id: "tempest-knight".into(),
+        name: "Tempest Knight".into(),
+        score: 7,
+        chessembly_code: "\
+        {
+            take-move(1, 1)
+            { take-move(2, 1) }
+            { take-move(1, 2) }
+        }
+        {
+            take-move(1, -1)
+            { take-move(2, -1) }
+            { take-move(1, -2) }
+        }
+        {
+            take-move(-1, 1)
+            { take-move(-2, 1) }
+            { take-move(-1, 2) }
+        }
+        {
+            take-move(-1, -1)
+            { take-move(-2, -1) }
+            { take-move(-1, -2) }
+        };
+        take-move(3, 0);
+        take-move(0, 3);
+        take-move(-3, 0);
+        take-move(0, -3);"
+            .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
+    }
+}
+
 /// Return all standard piece definitions.
 pub fn all_default_definitions() -> Vec<PieceDefinition> {
     vec![
@@ -379,6 +449,9 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bouncing_bishop_definition(),
         pawn_white_definition(),
         pawn_black_definition(),
+        tempest_pawn_white_definition(),
+        tempest_pawn_black_definition(),
         tempest_queen_definition(),
+        tempest_knight_definition(),
     ]
 }

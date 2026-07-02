@@ -222,7 +222,10 @@ fn test_variant_piece_definitions_are_registered() {
     assert_eq!(find("amazon").score, 13);
     assert_eq!(find("tempest-queen").score, 12);
     assert_eq!(find("tempest-rook").score, 8);
+    assert_eq!(find("tempest-knight").score, 7);
     assert_eq!(find("bouncing-bishop").score, 7);
+    assert_eq!(find("tempest-pawn-white").score, 1);
+    assert_eq!(find("tempest-pawn-black").score, 1);
 }
 
 #[test]
@@ -286,6 +289,38 @@ fn test_tempest_rook_steps_diagonal_then_rays_outward() {
     assert!(
         !result.movement_squares.contains(&Square::new(3, 4)),
         "no direct rook move"
+    );
+}
+
+#[test]
+fn test_tempest_knight_executes_diagonal_chain_and_three_step_jumps() {
+    let board = create_board(8);
+    let def = tempest_knight_definition();
+    let piece = make_piece("tn1", "white", "tempest-knight", 3, 3);
+    let mut pieces = HashMap::new();
+    pieces.insert("tn1".into(), piece.clone());
+
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+
+    assert!(
+        result.movement_squares.contains(&Square::new(4, 4)),
+        "diagonal setup step"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(6, 5)),
+        "knight continuation from diagonal step"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(5, 6)),
+        "alternate knight continuation from diagonal step"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(6, 3)),
+        "horizontal three-step jump"
+    );
+    assert!(
+        result.movement_squares.contains(&Square::new(3, 6)),
+        "vertical three-step jump"
     );
 }
 

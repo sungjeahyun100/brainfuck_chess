@@ -525,8 +525,8 @@ watch(
 
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
-  amazon: 'A', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'bouncing-bishop': 'B',
-  'pawn-white': '♙', 'pawn-black': '♟',
+  amazon: 'A', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-knight': 'N', 'bouncing-bishop': 'B',
+  'pawn-white': '♙', 'pawn-black': '♟', 'tempest-pawn-white': '♙', 'tempest-pawn-black': '♟',
 }
 function pieceSymbol(typeId: string): string {
   return PIECE_SYMBOLS[typeId] ?? '?'
@@ -542,7 +542,16 @@ function pieceAlt(pieceId: string): string {
   return piece ? `${piece.owner} ${piece.type_id}` : pieceId
 }
 
-const PROMOTION_ORDER = ['queen', 'rook', 'bishop', 'knight']
+const PROMOTION_ORDER = [
+  'queen',
+  'rook',
+  'bishop',
+  'knight',
+  'tempest-queen',
+  'tempest-rook',
+  'bouncing-bishop',
+  'tempest-knight',
+]
 
 function promotionPieceLabel(pieceType: string): string {
   return viewState.value.piece_definitions[pieceType]?.name ?? pieceType

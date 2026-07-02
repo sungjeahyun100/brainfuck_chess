@@ -241,12 +241,15 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'amazon': 'A',
   'tempest-queen': 'Q',
   'tempest-rook': 'T',
+  'tempest-knight': 'N',
   'bouncing-bishop': 'B',
   'rook': '♖',
   'bishop': '♗',
   'knight': '♘',
   'pawn-white': '♙',
   'pawn-black': '♟',
+  'tempest-pawn-white': '♙',
+  'tempest-pawn-black': '♟',
 }
 
 function pieceSymbol(typeId: string): string {

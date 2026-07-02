@@ -529,6 +529,82 @@ fn test_en_passant_expires_when_opponent_chooses_another_action() {
 // ─── Promotion ───────────────────────────────────────────────────────────────
 
 #[test]
+fn test_tempest_pawn_moves_like_pawn() {
+    let mut pawn_state = make_game_state(8);
+    add_piece(&mut pawn_state, "wk", "white", "king", 0, 0);
+    add_piece(&mut pawn_state, "bk", "black", "king", 7, 7);
+    add_piece(&mut pawn_state, "wp", "white", "pawn-white", 3, 1);
+
+    let mut tempest_state = make_game_state(8);
+    add_piece(&mut tempest_state, "wk", "white", "king", 0, 0);
+    add_piece(&mut tempest_state, "bk", "black", "king", 7, 7);
+    add_piece(
+        &mut tempest_state,
+        "tp",
+        "white",
+        "tempest-pawn-white",
+        3,
+        1,
+    );
+
+    let mut pawn_moves: Vec<(i32, i32, Option<String>)> =
+        generate_piece_legal_move_actions(&pawn_state, &"wp".into())
+            .into_iter()
+            .map(|action| (action.to.file, action.to.rank, action.promotion))
+            .collect();
+    let mut tempest_moves: Vec<(i32, i32, Option<String>)> =
+        generate_piece_legal_move_actions(&tempest_state, &"tp".into())
+            .into_iter()
+            .map(|action| (action.to.file, action.to.rank, action.promotion))
+            .collect();
+
+    pawn_moves.sort();
+    tempest_moves.sort();
+    assert_eq!(tempest_moves, pawn_moves);
+}
+
+#[test]
+fn test_tempest_pawn_attacks_like_pawn() {
+    let mut pawn_state = make_game_state(8);
+    add_piece(&mut pawn_state, "wk", "white", "king", 0, 0);
+    add_piece(&mut pawn_state, "bk", "black", "king", 7, 7);
+    add_piece(&mut pawn_state, "wp", "white", "pawn-white", 3, 3);
+    add_piece(&mut pawn_state, "be1", "black", "knight", 2, 4);
+    add_piece(&mut pawn_state, "be2", "black", "bishop", 4, 4);
+
+    let mut tempest_state = make_game_state(8);
+    add_piece(&mut tempest_state, "wk", "white", "king", 0, 0);
+    add_piece(&mut tempest_state, "bk", "black", "king", 7, 7);
+    add_piece(
+        &mut tempest_state,
+        "tp",
+        "white",
+        "tempest-pawn-white",
+        3,
+        3,
+    );
+    add_piece(&mut tempest_state, "be1", "black", "knight", 2, 4);
+    add_piece(&mut tempest_state, "be2", "black", "bishop", 4, 4);
+
+    let mut pawn_captures: Vec<(i32, i32)> =
+        generate_piece_legal_move_actions(&pawn_state, &"wp".into())
+            .into_iter()
+            .filter(|action| action.captured_piece_id.is_some())
+            .map(|action| (action.to.file, action.to.rank))
+            .collect();
+    let mut tempest_captures: Vec<(i32, i32)> =
+        generate_piece_legal_move_actions(&tempest_state, &"tp".into())
+            .into_iter()
+            .filter(|action| action.captured_piece_id.is_some())
+            .map(|action| (action.to.file, action.to.rank))
+            .collect();
+
+    pawn_captures.sort();
+    tempest_captures.sort();
+    assert_eq!(tempest_captures, pawn_captures);
+}
+
+#[test]
 fn test_pawn_reaching_back_rank_generates_promotion_choices() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 0, 0);
@@ -551,6 +627,36 @@ fn test_pawn_reaching_back_rank_generates_promotion_choices() {
 }
 
 #[test]
+fn test_tempest_pawn_reaching_back_rank_generates_tempest_promotion_choices() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "tp", "white", "tempest-pawn-white", 4, 6);
+
+    let moves = generate_piece_legal_move_actions(&state, &"tp".into());
+    let promotions: Vec<&MoveAction> = moves.iter().filter(|m| m.to == Square::new(4, 7)).collect();
+    assert_eq!(
+        promotions.len(),
+        4,
+        "Tempest Pawn reaching the back rank should offer 4 promotion choices"
+    );
+    let mut choices: Vec<String> = promotions
+        .iter()
+        .filter_map(|m| m.promotion.clone())
+        .collect();
+    choices.sort();
+    assert_eq!(
+        choices,
+        vec![
+            "bouncing-bishop",
+            "tempest-knight",
+            "tempest-queen",
+            "tempest-rook"
+        ]
+    );
+}
+
+#[test]
 fn test_pawn_promotion_applies_chosen_piece_type() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 0, 0);
@@ -569,6 +675,42 @@ fn test_pawn_promotion_applies_chosen_piece_type() {
     let promoted = new_state.pieces.get("wp").unwrap();
     assert_eq!(promoted.type_id, "queen");
     assert_eq!(promoted.current_square, Some(Square::new(4, 7)));
+}
+
+#[test]
+fn test_tempest_pawn_promotion_applies_chosen_piece_type() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "tp", "white", "tempest-pawn-white", 4, 6);
+
+    let action = MoveAction {
+        player_id: "white".into(),
+        piece_id: "tp".into(),
+        from: Square::new(4, 6),
+        to: Square::new(4, 7),
+        captured_piece_id: None,
+        promotion: Some("tempest-queen".into()),
+    };
+    let new_state = apply_move_action(state, action);
+    let promoted = new_state.pieces.get("tp").unwrap();
+    assert_eq!(promoted.type_id, "tempest-queen");
+    assert_eq!(promoted.current_square, Some(Square::new(4, 7)));
+}
+
+#[test]
+fn test_tempest_pawn_type_survives_save_load() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "tp", "white", "tempest-pawn-white", 4, 1);
+
+    let json = serde_json::to_string(&state).unwrap();
+    let restored: GameState = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        restored.pieces.get("tp").unwrap().type_id,
+        "tempest-pawn-white"
+    );
 }
 
 #[test]
