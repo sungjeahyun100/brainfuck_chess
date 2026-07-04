@@ -10,6 +10,7 @@ use brainfuck_chess_engine::endgame::{
 use brainfuck_chess_engine::legal_moves::{
     generate_drop_candidates_by_type, generate_legal_drop_actions, generate_legal_move_actions,
     generate_piece_legal_drop_actions, generate_piece_legal_move_actions,
+    generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
 };
 use brainfuck_chess_engine::pieces::default_pieces::*;
 use brainfuck_chess_engine::rules::*;
@@ -86,6 +87,7 @@ fn add_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, file: 
         captured: false,
         has_moved: false,
         active_ability: None,
+        ability_cooldowns: HashMap::new(),
     };
     state.board.squares.insert(sq.to_id(), Some(id.into()));
     state.pieces.insert(id.into(), piece.clone());
@@ -108,6 +110,7 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         captured: false,
         has_moved: false,
         active_ability: None,
+        ability_cooldowns: HashMap::new(),
     };
     state.pieces.insert(id.into(), piece);
     state
@@ -140,6 +143,7 @@ fn add_ability_test_definition(state: &mut GameState, duration: AbilityDuration)
                 chessembly_code: "take-move(1, 0);".into(),
                 duration,
                 once_per_turn: true,
+                cooldown_turns: 0,
             }],
         },
     );
@@ -271,6 +275,7 @@ fn test_end_turn_switches_player() {
         to: Square::new(4, 1),
         captured_piece_id: None,
         promotion: None,
+        ability_id: None,
     };
     state.turn_state.actions.push(TurnAction::Move(action));
     assert!(can_end_turn(&state));
@@ -296,6 +301,7 @@ fn test_king_capture_ends_game() {
         to: Square::new(4, 1),
         captured_piece_id: Some("k2".into()),
         promotion: None,
+        ability_id: None,
     };
 
     let result_state = apply_move_action(state, action);
@@ -323,6 +329,7 @@ fn test_normal_capture_does_not_end_game() {
         to: Square::new(4, 1),
         captured_piece_id: Some("p1".into()),
         promotion: None,
+        ability_id: None,
     };
 
     let result_state = apply_move_action(state, action);
@@ -353,6 +360,7 @@ fn test_move_action_blocks_additional_moves_this_turn() {
         to: Square::new(4, 1),
         captured_piece_id: None,
         promotion: None,
+        ability_id: None,
     };
 
     let new_state = apply_move_action(state, action);
@@ -374,6 +382,7 @@ fn test_end_turn_resets_single_action_state() {
         to: Square::new(4, 1),
         captured_piece_id: None,
         promotion: None,
+        ability_id: None,
     };
 
     let mut new_state = apply_move_action(state, action);
@@ -424,6 +433,7 @@ fn test_castling_kingside_generated_and_applied() {
         to: Square::new(6, 0),
         captured_piece_id: None,
         promotion: None,
+        ability_id: None,
     };
     let new_state = apply_move_action(state, action);
 
@@ -450,6 +460,7 @@ fn test_en_passant_generated_and_applied() {
         to: Square::new(5, 4),
         captured_piece_id: None,
         promotion: None,
+        ability_id: None,
     };
     let state = end_turn(apply_move_action(state, black_double));
 
@@ -473,6 +484,7 @@ fn test_en_passant_generated_and_applied() {
         to: Square::new(5, 5),
         captured_piece_id: Some("bp".into()),
         promotion: None,
+        ability_id: None,
     };
     let new_state = apply_move_action(state, white_ep);
 
@@ -505,6 +517,7 @@ fn test_en_passant_expires_when_opponent_chooses_another_action() {
             to: Square::new(5, 4),
             captured_piece_id: None,
             promotion: None,
+            ability_id: None,
         },
     ));
 
@@ -520,6 +533,7 @@ fn test_en_passant_expires_when_opponent_chooses_another_action() {
             to: Square::new(4, 1),
             captured_piece_id: None,
             promotion: None,
+            ability_id: None,
         },
     );
     assert_eq!(state.en_passant_target, None);
@@ -670,6 +684,7 @@ fn test_pawn_promotion_applies_chosen_piece_type() {
         to: Square::new(4, 7),
         captured_piece_id: None,
         promotion: Some("queen".into()),
+        ability_id: None,
     };
     let new_state = apply_move_action(state, action);
     let promoted = new_state.pieces.get("wp").unwrap();
@@ -691,6 +706,7 @@ fn test_tempest_pawn_promotion_applies_chosen_piece_type() {
         to: Square::new(4, 7),
         captured_piece_id: None,
         promotion: Some("tempest-queen".into()),
+        ability_id: None,
     };
     let new_state = apply_move_action(state, action);
     let promoted = new_state.pieces.get("tp").unwrap();
@@ -770,6 +786,7 @@ fn test_custom_piece_definition_can_generate_promotion_choices() {
             to: Square::new(4, 7),
             captured_piece_id: None,
             promotion: Some("knight".into()),
+            ability_id: None,
         },
     );
     assert_eq!(promoted_state.pieces.get("pr").unwrap().type_id, "knight");
@@ -1012,6 +1029,80 @@ fn test_active_ability_piece_uses_ability_chessembly_code() {
 }
 
 #[test]
+fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "cr", "white", "cannon-rook", 3, 3);
+    add_piece(&mut state, "screen", "white", "pawn-white", 3, 4);
+    add_piece(&mut state, "enemy", "black", "pawn-black", 3, 6);
+    add_piece(&mut state, "screen2", "black", "pawn-black", 5, 3);
+    add_piece(&mut state, "blocked", "white", "pawn-white", 6, 3);
+
+    let base_moves = generate_piece_legal_move_actions(&state, &"cr".into());
+    assert!(base_moves.iter().any(|action| action.to == Square::new(4, 3)));
+    assert!(!base_moves.iter().any(|action| action.to == Square::new(3, 5)));
+
+    let cannon_moves = generate_piece_legal_move_actions_with_options(
+        &state,
+        &"cr".into(),
+        &MoveGenerationOptions {
+            ability_id: Some("cannon_move".into()),
+        },
+    );
+
+    assert!(cannon_moves.iter().any(|action| {
+        action.to == Square::new(3, 5) && action.ability_id.as_deref() == Some("cannon_move")
+    }));
+    assert!(cannon_moves.iter().any(|action| {
+        action.to == Square::new(3, 6)
+            && action.captured_piece_id.as_ref().map(|id| id.as_str()) == Some("enemy")
+            && action.ability_id.as_deref() == Some("cannon_move")
+    }));
+    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(4, 3)));
+    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(5, 3)));
+    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(6, 3)));
+    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(7, 3)));
+
+    let action = cannon_moves
+        .iter()
+        .find(|action| action.to == Square::new(3, 5))
+        .cloned()
+        .unwrap();
+    let mut used_state = apply_move_action(state, action);
+    let cooldown_turn = used_state
+        .pieces
+        .get("cr")
+        .unwrap()
+        .ability_cooldowns
+        .get("cannon_move")
+        .copied();
+    assert_eq!(cooldown_turn, Some(5));
+
+    used_state.turn_state = TurnState::new();
+    used_state.current_player = "white".into();
+    used_state.turn_number = 4;
+    assert!(generate_piece_legal_move_actions_with_options(
+        &used_state,
+        &"cr".into(),
+        &MoveGenerationOptions {
+            ability_id: Some("cannon_move".into()),
+        },
+    )
+    .is_empty());
+
+    used_state.turn_number = 5;
+    assert!(!generate_piece_legal_move_actions_with_options(
+        &used_state,
+        &"cr".into(),
+        &MoveGenerationOptions {
+            ability_id: Some("cannon_move".into()),
+        },
+    )
+    .is_empty());
+}
+
+#[test]
 fn test_active_ability_is_reflected_in_attack_map() {
     let mut state = make_game_state(8);
     add_ability_test_definition(&mut state, AbilityDuration::UntilTurnEnd);
@@ -1118,6 +1209,7 @@ fn test_until_piece_moves_ability_expires_after_move() {
             to: Square::new(3, 2),
             captured_piece_id: None,
             promotion: None,
+            ability_id: None,
         },
     );
 

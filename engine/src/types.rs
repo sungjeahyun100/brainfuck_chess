@@ -204,6 +204,8 @@ pub struct PieceAbilityDefinition {
     pub duration: AbilityDuration,
     #[serde(default)]
     pub once_per_turn: bool,
+    #[serde(default)]
+    pub cooldown_turns: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -405,6 +407,9 @@ pub struct Piece {
     /// Currently active ability program, if any.
     #[serde(default)]
     pub active_ability: Option<ActiveAbilityState>,
+    /// Ability id -> first global turn number when it may be used again.
+    #[serde(default)]
+    pub ability_cooldowns: HashMap<String, u32>,
 }
 
 impl Piece {
@@ -489,6 +494,9 @@ pub struct MoveAction {
     /// Piece type to promote to when the moving piece's definition allows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promotion: Option<PieceTypeId>,
+    /// Optional selected ability used only for this submitted move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ability_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

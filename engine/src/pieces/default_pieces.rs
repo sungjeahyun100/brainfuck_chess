@@ -81,6 +81,38 @@ take-move(0, -1) repeat(1);"
     }
 }
 
+/// Cannon Rook: moves like a Rook normally, or like a Janggi cannon when its
+/// `cannon_move` ability is selected for the move.
+pub fn cannon_rook_definition() -> PieceDefinition {
+    let rook_code = rook_definition().chessembly_code;
+    PieceDefinition {
+        id: "cannon-rook".into(),
+        name: "Cannon Rook".into(),
+        score: 7,
+        chessembly_code: rook_code,
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: vec![PieceAbilityDefinition {
+            id: "cannon_move".into(),
+            name: "포 이동".into(),
+            description: "이번 이동 동안 장기의 포처럼 정확히 하나의 기물을 뛰어넘어 이동합니다. 사용 후 3턴 동안 다시 사용할 수 없습니다.".into(),
+            chessembly_code: "\
+do peek(0, 1) while take-move(0, 1) repeat(1);
+do peek(1, 0) while take-move(1, 0) repeat(1);
+do peek(0, -1) while take-move(0, -1) repeat(1);
+do peek(-1, 0) while take-move(-1, 0) repeat(1);"
+                .into(),
+            duration: AbilityDuration::UntilPieceMoves,
+            once_per_turn: false,
+            cooldown_turns: 3,
+        }],
+    }
+}
+
 /// Bishop: slides diagonally.
 pub fn bishop_definition() -> PieceDefinition {
     let bounce_code = bouncing_bishop_definition().chessembly_code;
@@ -107,6 +139,7 @@ take-move(-1, -1) repeat(1);"
             chessembly_code: bounce_code,
             duration: AbilityDuration::UntilTurnEnd,
             once_per_turn: true,
+            cooldown_turns: 0,
         }],
     }
 }
@@ -445,6 +478,7 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bishop_definition(),
         knight_definition(),
         amazon_definition(),
+        cannon_rook_definition(),
         tempest_rook_definition(),
         bouncing_bishop_definition(),
         pawn_white_definition(),

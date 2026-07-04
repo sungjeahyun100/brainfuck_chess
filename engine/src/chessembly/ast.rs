@@ -41,7 +41,7 @@ pub enum Expr {
     // ── Conditional expressions ──────────────────────────────────────────────
     /// True if (dx,dy) from anchor is empty.
     Observe(i32, i32),
-    /// True if (dx,dy) is empty; also moves anchor if true.
+    /// True if (dx,dy) is empty; moves anchor to the checked square.
     Peek(i32, i32),
     /// True if (dx,dy) contains an enemy piece.
     Enemy(i32, i32),

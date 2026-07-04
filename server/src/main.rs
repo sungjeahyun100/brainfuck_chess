@@ -2,7 +2,7 @@ use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json, Router,
 };
 use dashmap::DashMap;
@@ -17,7 +17,8 @@ use brainfuck_chess_engine::{
     endgame::{apply_activate_ability_action, apply_drop_action, apply_move_action},
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
-        generate_piece_legal_drop_actions, generate_piece_legal_move_actions,
+        generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
+        MoveGenerationOptions,
     },
     pieces::default_pieces::all_default_definitions,
     rules::{
@@ -166,6 +167,11 @@ struct PieceOptionsResponse {
     attacks: Vec<Square>,
 }
 
+#[derive(Default, Deserialize)]
+struct PieceOptionsQuery {
+    ability_id: Option<String>,
+}
+
 #[derive(Clone, Deserialize)]
 struct LabPieceSpec {
     id: String,
@@ -179,6 +185,7 @@ struct LabPieceOptionsRequest {
     board_size: i32,
     pieces: Vec<LabPieceSpec>,
     selected_piece_id: String,
+    ability_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -205,8 +212,9 @@ struct ErrorResponse {
 
 fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
-        "king" | "queen" | "rook" | "bishop" | "knight" | "amazon" | "tempest-rook"
-        | "tempest-queen" | "tempest-knight" | "bouncing-bishop" => Some(raw_piece_type.into()),
+        "king" | "queen" | "rook" | "bishop" | "knight" | "amazon" | "cannon-rook"
+        | "cannon_rook" | "tempest-rook" | "tempest-queen" | "tempest-knight"
+        | "bouncing-bishop" => Some(raw_piece_type.replace('_', "-")),
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
             "pawn-white".into()
         } else {
@@ -280,6 +288,7 @@ fn build_player_deck(
             captured: false,
             has_moved: false,
             active_ability: None,
+            ability_cooldowns: HashMap::new(),
         };
 
         board
@@ -302,6 +311,7 @@ fn build_player_deck(
             captured: false,
             has_moved: false,
             active_ability: None,
+            ability_cooldowns: HashMap::new(),
         };
 
         pieces.insert(piece_id.clone(), piece);
@@ -446,6 +456,7 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
             captured: false,
             has_moved: false,
             active_ability: None,
+            ability_cooldowns: HashMap::new(),
         };
 
         board
@@ -1158,10 +1169,20 @@ async fn submit_action(
                 ));
             }
             // Validate against only the submitted piece's legal actions.
-            let is_legal = generate_piece_legal_move_actions(state, &action.piece_id)
+            let move_options = MoveGenerationOptions {
+                ability_id: action.ability_id.clone(),
+            };
+            let is_legal = generate_piece_legal_move_actions_with_options(
+                state,
+                &action.piece_id,
+                &move_options,
+            )
                 .iter()
                 .any(|m| {
-                    m.from == action.from && m.to == action.to && m.promotion == action.promotion
+                    m.from == action.from
+                        && m.to == action.to
+                        && m.promotion == action.promotion
+                        && m.ability_id == action.ability_id
                 });
             if !is_legal {
                 return Err((
@@ -1459,11 +1480,18 @@ async fn get_piece_attacks(
 async fn get_piece_options(
     State(app): State<AppState>,
     Path((id, piece_id)): Path<(String, String)>,
+    Query(query): Query<PieceOptionsQuery>,
 ) -> Result<Json<PieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
     let piece_id = PieceId::from(piece_id);
     match app.games.get(&id) {
         Some(state) => {
-            let moves = generate_piece_legal_move_actions(&state, &piece_id);
+            let moves = generate_piece_legal_move_actions_with_options(
+                &state,
+                &piece_id,
+                &MoveGenerationOptions {
+                    ability_id: query.ability_id,
+                },
+            );
             let attacks = generate_piece_attack_squares(&state, &piece_id);
             Ok(Json(PieceOptionsResponse { moves, attacks }))
         }
@@ -1481,8 +1509,14 @@ async fn get_lab_piece_options(
 ) -> Result<Json<LabPieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
     let state = build_lab_game_state(&req)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
-    let piece_id = PieceId::from(req.selected_piece_id);
-    let legal_moves = generate_piece_legal_move_actions(&state, &piece_id);
+    let piece_id = PieceId::from(req.selected_piece_id.clone());
+    let legal_moves = generate_piece_legal_move_actions_with_options(
+        &state,
+        &piece_id,
+        &MoveGenerationOptions {
+            ability_id: req.ability_id.clone(),
+        },
+    );
     let mut seen_moves = HashSet::new();
     let moves = legal_moves
         .iter()
@@ -1507,7 +1541,7 @@ async fn get_lab_piece_options(
                     name: ability.name.clone(),
                     description: ability.description.clone(),
                     available: true,
-                    connected: false,
+                    connected: ability.id == "cannon_move",
                 })
                 .collect()
         })
@@ -1592,7 +1626,12 @@ mod tests {
         let (app, game_id) = test_app_with_game();
         let piece_id = "white_rook_1".to_string();
 
-        let response = match get_piece_options(State(app), Path((game_id, piece_id.clone()))).await
+        let response = match get_piece_options(
+            State(app),
+            Path((game_id, piece_id.clone())),
+            Query(PieceOptionsQuery::default()),
+        )
+        .await
         {
             Ok(Json(response)) => response,
             Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
@@ -1611,6 +1650,7 @@ mod tests {
         let req = LabPieceOptionsRequest {
             board_size: 8,
             selected_piece_id: "lab_white_rook_1".into(),
+            ability_id: None,
             pieces: vec![
                 LabPieceSpec {
                     id: "lab_white_rook_1".into(),
@@ -1652,6 +1692,7 @@ mod tests {
                     to: Square::new(0, 1),
                     captured_piece_id: None,
                     promotion: None,
+                    ability_id: None,
                 }),
             }),
         )

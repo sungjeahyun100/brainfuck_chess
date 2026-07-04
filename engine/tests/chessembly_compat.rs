@@ -23,6 +23,7 @@ fn make_piece(id: &str, owner: &str, type_id: &str, file: i32, rank: i32) -> Pie
         captured: false,
         has_moved: false,
         active_ability: None,
+        ability_cooldowns: HashMap::new(),
     }
 }
 

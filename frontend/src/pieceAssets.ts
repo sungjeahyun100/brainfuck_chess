@@ -4,6 +4,8 @@ import bishopBlack from './assets/pieces/bishop-black.svg'
 import bishopWhite from './assets/pieces/bishop-white.svg'
 import bouncingBishopBlack from './assets/pieces/bouncing-bishop-black.svg'
 import bouncingBishopWhite from './assets/pieces/bouncing-bishop-white.svg'
+import cannonRookBlack from './assets/pieces/cannon-rook-black.svg'
+import cannonRookWhite from './assets/pieces/cannon-rook-white.svg'
 import kingBlack from './assets/pieces/king-black.svg'
 import kingWhite from './assets/pieces/king-white.svg'
 import knightBlack from './assets/pieces/knight-black.svg'
@@ -38,6 +40,8 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   'tempest-pawn-black': { white: tempestPawnWhite, black: tempestPawnBlack },
   queen: { white: queenWhite, black: queenBlack },
   rook: { white: rookWhite, black: rookBlack },
+  // TODO: temporary placeholder art (rook flipped upside-down) to visually distinguish from the regular rook
+  'cannon-rook': { white: cannonRookWhite, black: cannonRookBlack },
   'tempest-queen': { white: tempestQueenWhite, black: tempestQueenBlack },
   'tempest-knight': { white: tempestKnightWhite, black: tempestKnightBlack },
   'tempest-rook': { white: tempestRookWhite, black: tempestRookBlack },

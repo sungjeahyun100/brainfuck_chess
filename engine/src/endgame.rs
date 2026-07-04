@@ -72,6 +72,19 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
             .and_then(|p| game_state.piece_definitions.get(&p.type_id))
             .map(is_royal_piece)
     });
+    let used_ability_cooldown = action.ability_id.as_ref().and_then(|ability_id| {
+        game_state
+            .pieces
+            .get(&action.piece_id)
+            .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+            .and_then(|definition| {
+                definition
+                    .abilities
+                    .iter()
+                    .find(|ability| ability.id == *ability_id)
+            })
+            .map(|ability| (ability_id.clone(), ability.cooldown_turns))
+    });
 
     // Move the piece
     game_state = move_piece_on_board(game_state, &action);
@@ -97,6 +110,14 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
 
     if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
         piece.has_moved = true;
+        if let Some((ability_id, cooldown_turns)) = used_ability_cooldown {
+            if cooldown_turns > 0 {
+                piece.ability_cooldowns.insert(
+                    ability_id,
+                    game_state.turn_number + cooldown_turns + 1,
+                );
+            }
+        }
         if piece
             .active_ability
             .as_ref()

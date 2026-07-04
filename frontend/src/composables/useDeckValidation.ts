@@ -14,6 +14,7 @@ export const boardSizes = [8, 9, 10, 11, 12] as const
 export const pieceCatalog: PieceCatalogItem[] = [
   { id: 'king', name: 'King', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
   { id: 'queen', name: 'Queen', score: 9, category: 'major', canPocket: true },
+  { id: 'cannon-rook', name: 'Cannon Rook', score: 7, category: 'variant', canPocket: true, aliases: ['cannon', 'po rook', '포 룩'] },
   { id: 'amazon', name: 'Amazon', score: 13, category: 'variant', canPocket: true },
   { id: 'tempest-queen', name: 'Tempest Queen', score: 12, category: 'variant', canPocket: true, aliases: ['storm queen'] },
   { id: 'tempest-rook', name: 'Tempest Rook', score: 8, category: 'variant', canPocket: true, aliases: ['storm rook'] },

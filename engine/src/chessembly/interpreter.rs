@@ -124,6 +124,13 @@ fn run_chain(
         i += consumed;
         state.last_value = res.is_true();
 
+        // `while` is allowed to observe a false body result in `do ... while`
+        // chains. This lets scanner-style expressions such as `peek` stop at
+        // a screen piece before the following movement expression runs.
+        if !res.is_true() && matches!(chain.get(i), Some(Expr::While)) {
+            continue;
+        }
+
         // `false` from a non-exceptional expression terminates the chain
         if !res.is_true() {
             // Flush pending take that was never paired with jump
@@ -347,8 +354,12 @@ fn eval_expr(
 
         Expr::Peek(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
-            if ctx.board.is_in_bounds(&target) && ctx.board.is_empty(&target) {
-                state.anchor = target;
+            if !ctx.board.is_in_bounds(&target) {
+                return (ExprResult::False, 1);
+            }
+
+            state.anchor = target;
+            if ctx.board.is_empty(&target) {
                 (ExprResult::True, 1)
             } else {
                 (ExprResult::False, 1)

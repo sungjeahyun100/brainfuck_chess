@@ -43,11 +43,19 @@ fn has_move_or_drop_action(turn_state: &TurnState) -> bool {
 
 fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
     let exists = actions.iter().any(|m| {
-        m.piece_id == action.piece_id && m.to == action.to && m.promotion == action.promotion
+        m.piece_id == action.piece_id
+            && m.to == action.to
+            && m.promotion == action.promotion
+            && m.ability_id == action.ability_id
     });
     if !exists {
         actions.push(action);
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MoveGenerationOptions {
+    pub ability_id: Option<String>,
 }
 
 /// Push a move action, expanding it into one action per promotion choice
@@ -61,6 +69,7 @@ fn push_move_or_promotions(
     from: Square,
     to: Square,
     captured_piece_id: Option<PieceId>,
+    ability_id: Option<&str>,
 ) {
     if let Some(promotion_options) = definition.promotion_options_for_rank(to.rank, board_size) {
         for promo in promotion_options {
@@ -73,6 +82,7 @@ fn push_move_or_promotions(
                     to,
                     captured_piece_id: captured_piece_id.clone(),
                     promotion: Some(promo.clone()),
+                    ability_id: ability_id.map(str::to_string),
                 },
             );
         }
@@ -86,9 +96,71 @@ fn push_move_or_promotions(
                 to,
                 captured_piece_id,
                 promotion: None,
+                ability_id: ability_id.map(str::to_string),
             },
         );
     }
+}
+
+fn can_use_selected_ability(
+    game_state: &GameState,
+    piece: &Piece,
+    definition: &PieceDefinition,
+    ability_id: &str,
+) -> Option<PieceAbilityDefinition> {
+    if piece
+        .ability_cooldowns
+        .get(ability_id)
+        .is_some_and(|usable_turn| *usable_turn > game_state.turn_number)
+    {
+        return None;
+    }
+
+    let ability = definition
+        .abilities
+        .iter()
+        .find(|ability| ability.id == ability_id)?
+        .clone();
+
+    if ability.once_per_turn
+        && game_state.turn_state.actions.iter().any(|existing| {
+            matches!(
+                existing,
+                TurnAction::ActivateAbility(previous)
+                    if previous.piece_id == piece.id && previous.ability_id == ability_id
+            )
+        })
+    {
+        return None;
+    }
+
+    Some(ability)
+}
+
+fn run_selected_ability_for_piece(
+    game_state: &GameState,
+    piece: &Piece,
+    definition: &PieceDefinition,
+    ability: &PieceAbilityDefinition,
+    player_id: &PlayerId,
+    empty_global_state: &HashMap<String, i32>,
+    empty_maps: &HashMap<PlayerId, std::collections::HashSet<SquareId>>,
+) -> ChessemblyResult {
+    let mut ability_piece = piece.clone();
+    ability_piece.active_ability = Some(ActiveAbilityState {
+        ability_id: ability.id.clone(),
+        activated_turn_number: game_state.turn_number,
+        activated_player: player_id.clone(),
+        duration: ability.duration.clone(),
+    });
+    run_effective_chessembly_for_piece(
+        game_state,
+        &ability_piece,
+        definition,
+        player_id.clone(),
+        empty_global_state,
+        empty_maps,
+    )
 }
 
 /// Generate attack/threat squares for a specific piece.
@@ -132,6 +204,20 @@ pub fn generate_piece_legal_move_actions(
     game_state: &GameState,
     piece_id: &PieceId,
 ) -> Vec<MoveAction> {
+    generate_piece_legal_move_actions_with_options(
+        game_state,
+        piece_id,
+        &MoveGenerationOptions::default(),
+    )
+}
+
+/// Generate legal move actions, optionally using one selected ability for this
+/// move only. Normal callers should use generate_piece_legal_move_actions.
+pub fn generate_piece_legal_move_actions_with_options(
+    game_state: &GameState,
+    piece_id: &PieceId,
+    options: &MoveGenerationOptions,
+) -> Vec<MoveAction> {
     game_state.ensure_chessembly_cache();
 
     let player_id = &game_state.current_player;
@@ -160,17 +246,37 @@ pub fn generate_piece_legal_move_actions(
         return Vec::new();
     };
 
-    let result = run_effective_chessembly_for_piece(
-        game_state,
-        piece,
-        definition,
-        player_id.clone(),
-        &empty_global_state,
-        &empty_maps,
-    );
+    let selected_ability = options.ability_id.as_deref().and_then(|ability_id| {
+        can_use_selected_ability(game_state, piece, definition, ability_id)
+    });
+    if options.ability_id.is_some() && selected_ability.is_none() {
+        return Vec::new();
+    }
+
+    let result = if let Some(ability) = selected_ability.as_ref() {
+        run_selected_ability_for_piece(
+            game_state,
+            piece,
+            definition,
+            ability,
+            player_id,
+            &empty_global_state,
+            &empty_maps,
+        )
+    } else {
+        run_effective_chessembly_for_piece(
+            game_state,
+            piece,
+            definition,
+            player_id.clone(),
+            &empty_global_state,
+            &empty_maps,
+        )
+    };
     let from = piece.current_square.unwrap();
     let pawn_dir = pawn_forward_dir(&piece.type_id);
     let pawn_start = pawn_start_rank(&piece.type_id, game_state.board.size);
+    let action_ability_id = selected_ability.as_ref().map(|ability| ability.id.as_str());
 
     // Executable movement/capture squares from movement paths.
     for to in result.movement_squares.iter().copied() {
@@ -208,6 +314,7 @@ pub fn generate_piece_legal_move_actions(
             from,
             to,
             captured_piece_id,
+            action_ability_id,
         );
     }
 
@@ -238,6 +345,7 @@ pub fn generate_piece_legal_move_actions(
             from,
             to,
             Some(captured_piece_id),
+            action_ability_id,
         );
     }
 
@@ -264,6 +372,7 @@ pub fn generate_piece_legal_move_actions(
                                         to: target,
                                         captured_piece_id: Some(captured_id.clone()),
                                         promotion: None,
+                                        ability_id: action_ability_id.map(str::to_string),
                                     },
                                 );
                             }
@@ -356,6 +465,7 @@ pub fn generate_piece_legal_move_actions(
                         to: king_to,
                         captured_piece_id: None,
                         promotion: None,
+                        ability_id: action_ability_id.map(str::to_string),
                     },
                 );
             }

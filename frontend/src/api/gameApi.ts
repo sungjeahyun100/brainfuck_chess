@@ -63,6 +63,7 @@ export interface PieceLabOptionsRequest {
   board_size: number
   pieces: PieceLabPieceRequest[]
   selected_piece_id: string
+  ability_id?: string
 }
 
 export interface PieceLabAbilityOption {
@@ -154,8 +155,9 @@ export const api = {
     return request(`${BASE}/${id}/piece-attacks/${pieceId}`)
   },
 
-  getPieceOptions(id: string, pieceId: string): Promise<PieceOptionsResponse> {
-    return request(`${BASE}/${id}/pieces/${pieceId}/options`)
+  getPieceOptions(id: string, pieceId: string, abilityId?: string | null): Promise<PieceOptionsResponse> {
+    const query = abilityId ? `?ability_id=${encodeURIComponent(abilityId)}` : ''
+    return request(`${BASE}/${id}/pieces/${pieceId}/options${query}`)
   },
 
   getPieceLabOptions(payload: PieceLabOptionsRequest): Promise<PieceLabOptionsResponse> {

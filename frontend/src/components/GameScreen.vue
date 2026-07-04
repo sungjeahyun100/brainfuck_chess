@@ -101,18 +101,47 @@
       </div>
 
       <!-- Center: Board -->
-      <Board
-        :board="viewState.board"
-        :pieces="viewState.pieces"
-        :selected-piece-id="visibleSelectedPieceId"
-        :movable-squares="visibleMovableSquares"
-        :attack-squares="visibleAttackSquares"
-        :drop-squares="visibleDropSquares"
-        :orientation="boardOrientation"
-        @square-click="onSquareClick"
-        @piece-drag-start="onBoardPieceDragStart"
-        @square-drop="onSquareDrop"
-      />
+      <div class="board-column">
+        <Board
+          :board="viewState.board"
+          :pieces="viewState.pieces"
+          :selected-piece-id="visibleSelectedPieceId"
+          :movable-squares="visibleMovableSquares"
+          :attack-squares="visibleAttackSquares"
+          :drop-squares="visibleDropSquares"
+          :orientation="boardOrientation"
+          :ability-mode="visibleAbilityMode"
+          @square-click="onSquareClick"
+          @piece-drag-start="onBoardPieceDragStart"
+          @square-drop="onSquareDrop"
+        />
+
+        <div v-if="selectedPieceId && selectedPieceDefinition" class="selected-piece-panel" :class="{ active: abilityMode }">
+          <div>
+            <strong>{{ selectedPieceDefinition.name }}</strong>
+            <small v-if="abilityMode && selectedAbility">특수 능력 모드 · {{ selectedAbility.name }}</small>
+            <small v-else-if="selectedPieceAbilities.length">특수 능력 사용 가능</small>
+            <small v-else>일반 이동 모드</small>
+          </div>
+          <div v-if="selectedPieceAbilities.length" class="ability-actions">
+            <button
+              v-for="ability in selectedPieceAbilities"
+              :key="ability.id"
+              class="ability-button"
+              :class="{ active: abilityMode && activeAbilityId === ability.id }"
+              type="button"
+              :disabled="Boolean(abilityUnavailableReason(ability))"
+              :title="abilityUnavailableReason(ability) || ability.description"
+              @click="toggleAbilityMode(ability.id)"
+            >
+              {{ ability.name || '특수 능력' }}
+            </button>
+          </div>
+          <small v-if="selectedPieceAbilities.length && selectedAbilityHelpText" class="ability-help">
+            {{ selectedAbilityHelpText }}
+          </small>
+        </div>
+      </div>
 
       <!-- Right: Pocket (Black) -->
       <div class="pocket">
@@ -169,6 +198,7 @@ import type {
   DropAction,
   GameState,
   MoveAction,
+  PieceAbilityDefinition,
   PlayerId,
   Square,
 } from '../types/game'
@@ -190,6 +220,8 @@ const emit = defineEmits<{
 
 const selectedPieceId = ref<string | null>(null)
 const selectedPocketPieceId = ref<string | null>(null)
+const abilityMode = ref(false)
+const activeAbilityId = ref<string | null>(null)
 const legalTargetSquares = ref<Square[]>([])
 const movableSquares = ref<Square[]>([])
 const attackSquares = ref<Square[]>([])
@@ -214,6 +246,7 @@ const BOT_ACTION_PREVIEW_MS = 520
 const BOT_ACTION_SETTLE_MS = 340
 
 interface LegalPieceOptions {
+  abilityId: string | null
   legalTargets: Square[]
   movable: Square[]
   captures: Square[]
@@ -253,7 +286,39 @@ const visibleAttackSquares = computed(() => (
 const visibleDropSquares = computed(() => (
   botReplaying.value ? botPreviewDropSquares.value : dropSquares.value
 ))
+const visibleAbilityMode = computed(() => !botReplaying.value && abilityMode.value)
 const boardOrientation = computed(() => props.localPlayer ?? viewState.value.current_player)
+const selectedPiece = computed(() => (
+  selectedPieceId.value ? props.state.pieces[selectedPieceId.value] ?? null : null
+))
+const selectedPieceDefinition = computed(() => (
+  selectedPiece.value ? props.state.piece_definitions[selectedPiece.value.type_id] ?? null : null
+))
+const selectedPieceAbilities = computed<PieceAbilityDefinition[]>(() => (
+  selectedPieceDefinition.value?.abilities ?? []
+))
+const selectedAbility = computed(() => (
+  selectedPieceAbilities.value.find(ability => ability.id === activeAbilityId.value) ?? null
+))
+const selectedAbilityHelpText = computed(() => {
+  const unavailable = selectedPieceAbilities.value
+    .map(abilityUnavailableReason)
+    .find(reason => reason.length > 0)
+  return unavailable ?? ''
+})
+
+function abilityUnavailableReason(ability: PieceAbilityDefinition): string {
+  if (!selectedPiece.value) return '선택한 기물이 없습니다.'
+  if (selectedPieceAbilities.value.length === 0) return '선택한 기물은 특수 능력이 없습니다.'
+  if (selectedPiece.value.owner !== props.state.current_player) return '현재 턴의 기물이 아닙니다.'
+  if (props.state.turn_state.mode === 'drop') return '착수 턴에는 사용할 수 없습니다.'
+  if (props.state.turn_state.actions.length > 0) return '이번 턴에는 사용할 수 없습니다.'
+  const usableTurn = selectedPiece.value.ability_cooldowns?.[ability.id]
+  if (usableTurn && usableTurn > props.state.turn_number) {
+    return `${usableTurn - props.state.turn_number}턴 후 다시 사용할 수 있습니다.`
+  }
+  return ''
+}
 const botDifficultyLabel = computed(() => {
   const labels: Record<BotDifficulty, string> = {
     easy: 'Easy',
@@ -525,7 +590,7 @@ watch(
 
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
-  amazon: 'A', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-knight': 'N', 'bouncing-bishop': 'B',
+  amazon: 'A', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-knight': 'N', 'bouncing-bishop': 'B',
   'pawn-white': '♙', 'pawn-black': '♟', 'tempest-pawn-white': '♙', 'tempest-pawn-black': '♟',
 }
 function pieceSymbol(typeId: string): string {
@@ -591,13 +656,15 @@ function clearSelection() {
   selectedPieceId.value = null
   selectedPocketPieceId.value = null
   draggedPocketPieceId.value = null
+  abilityMode.value = false
+  activeAbilityId.value = null
   legalTargetSquares.value = []
   movableSquares.value = []
   attackSquares.value = []
   dropSquares.value = []
 }
 
-function actionCacheKey(pieceId?: string): string {
+function actionCacheKey(pieceId?: string, abilityId?: string | null): string {
   return [
     props.state.id,
     props.state.current_player,
@@ -605,6 +672,7 @@ function actionCacheKey(pieceId?: string): string {
     props.state.turn_state.mode,
     props.state.turn_state.actions.length,
     pieceId ?? '',
+    abilityId ?? '',
   ].join(':')
 }
 
@@ -616,16 +684,17 @@ function isLegalSquare(square: Square, legalSquares: Square[]): boolean {
   return legalSquares.some(target => sameSquare(target, square))
 }
 
-async function loadPieceOptions(pieceId: string): Promise<LegalPieceOptions> {
-  const key = actionCacheKey(pieceId)
+async function loadPieceOptions(pieceId: string, abilityId: string | null = null): Promise<LegalPieceOptions> {
+  const key = actionCacheKey(pieceId, abilityId)
   const cached = pieceOptionsCache.get(key)
   if (cached) return cached
 
   const pending = pieceOptionsRequests.get(key)
   if (pending) return pending
 
-  const request = api.getPieceOptions(props.state.id, pieceId).then(({ moves }) => {
+  const request = api.getPieceOptions(props.state.id, pieceId, abilityId).then(({ moves }) => {
     const options: LegalPieceOptions = {
+      abilityId,
       legalTargets: moves.map(move => move.to),
       movable: moves.filter(move => !move.captured_piece_id).map(move => move.to),
       captures: moves.filter(move => Boolean(move.captured_piece_id)).map(move => move.to),
@@ -652,6 +721,8 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
 
   selectedPieceId.value = pieceId
   selectedPocketPieceId.value = null
+  abilityMode.value = false
+  activeAbilityId.value = null
   legalTargetSquares.value = []
   movableSquares.value = []
   attackSquares.value = []
@@ -659,7 +730,7 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
 
   try {
     const options = await loadPieceOptions(pieceId)
-    if (selectedPieceId.value !== pieceId) return options
+    if (selectedPieceId.value !== pieceId || abilityMode.value) return options
 
     legalTargetSquares.value = options.legalTargets
     movableSquares.value = options.movable
@@ -672,6 +743,38 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
       attackSquares.value = []
     }
     return null
+  }
+}
+
+async function toggleAbilityMode(abilityId: string) {
+  const ability = selectedPieceAbilities.value.find(ability => ability.id === abilityId)
+  if (!selectedPieceId.value || !ability || abilityUnavailableReason(ability)) return
+
+  if (abilityMode.value && activeAbilityId.value === abilityId) {
+    const pieceId = selectedPieceId.value
+    abilityMode.value = false
+    activeAbilityId.value = null
+    const options = await loadPieceOptions(pieceId)
+    if (!abilityMode.value && selectedPieceId.value === pieceId) {
+      legalTargetSquares.value = options.legalTargets
+      movableSquares.value = options.movable
+      attackSquares.value = options.captures
+    }
+    return
+  }
+
+  abilityMode.value = true
+  activeAbilityId.value = abilityId
+  legalTargetSquares.value = []
+  movableSquares.value = []
+  attackSquares.value = []
+
+  const pieceId = selectedPieceId.value
+  const options = await loadPieceOptions(pieceId, abilityId)
+  if (selectedPieceId.value === pieceId && abilityMode.value && activeAbilityId.value === abilityId) {
+    legalTargetSquares.value = options.legalTargets
+    movableSquares.value = options.movable
+    attackSquares.value = options.captures
   }
 }
 
@@ -705,6 +808,8 @@ async function selectPocketPiece(pieceId: string): Promise<Square[]> {
 
   selectedPieceId.value = null
   selectedPocketPieceId.value = pieceId
+  abilityMode.value = false
+  activeAbilityId.value = null
   legalTargetSquares.value = []
   movableSquares.value = []
   attackSquares.value = []
@@ -732,8 +837,11 @@ async function submitMove(pieceId: string, to: Square) {
     return
   }
 
+  const moveAbilityId = selectedPieceId.value === pieceId && abilityMode.value
+    ? activeAbilityId.value
+    : null
   const options = selectedPieceId.value === pieceId && legalTargetSquares.value.length > 0
-    ? await loadPieceOptions(pieceId)
+    ? await loadPieceOptions(pieceId, moveAbilityId)
     : await selectBoardPiece(pieceId)
   if (!options || !isLegalSquare(to, options.legalTargets)) {
     clearSelection()
@@ -754,17 +862,22 @@ async function submitMove(pieceId: string, to: Square) {
     promotion = chosen
   }
 
-  const sqId = `${to.file}_${to.rank}`
+  const selectedMove = options.moves.find(move =>
+    move.piece_id === pieceId
+    && sameSquare(move.to, to)
+    && (move.promotion ?? undefined) === promotion
+    && (move.ability_id ?? null) === (moveAbilityId ?? null)
+  )
   try {
-    const capturedPieceId = props.state.board.squares[sqId] ?? undefined
     const action: MoveAction = {
       type: 'move',
       player_id: props.state.current_player,
       piece_id: pieceId,
       from: fromPiece.current_square,
       to,
-      captured_piece_id: capturedPieceId ?? undefined,
+      captured_piece_id: selectedMove?.captured_piece_id,
       promotion,
+      ability_id: moveAbilityId ?? undefined,
     }
     const newState = await api.submitAction(props.state.id, action)
     emit('stateUpdate', newState)
@@ -822,6 +935,10 @@ async function onSquareClick(sq: Square) {
 
   // ── Move mode: selected piece → move to target ──
   if (selectedPieceId.value) {
+    if (pieceId && piece && piece.owner === currentPlayer && pieceId !== selectedPieceId.value) {
+      await selectBoardPiece(pieceId)
+      return
+    }
     await submitMove(selectedPieceId.value, sq)
     return
   }
@@ -980,6 +1097,76 @@ async function onResign() {
 .main-layout { display: flex; gap: 16px; align-items: flex-start; justify-content: center; }
 .main-layout.locked { pointer-events: none; opacity: 0.78; }
 
+.board-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.selected-piece-panel {
+  width: min(80vw, 80vh);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(82, 96, 109, 0.28);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #1f2933;
+}
+
+.selected-piece-panel.active {
+  border-color: rgba(20, 184, 166, 0.72);
+  background: #ecfdf9;
+}
+
+.selected-piece-panel > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.selected-piece-panel small {
+  color: #52606d;
+}
+
+.ability-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ability-button {
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid #0f766e;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f766e;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.ability-button.active {
+  background: #0f766e;
+  color: white;
+}
+
+.ability-button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.ability-help {
+  flex-basis: 100%;
+  text-align: right;
+}
+
 .pocket { width: 132px; min-width: 120px; display: flex; flex-direction: column; gap: 8px; }
 .pocket h4 { margin: 0; font-size: 14px; }
 .pocket-pieces { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1063,6 +1250,23 @@ async function onResign() {
     order: 2;
     width: min(320px, 100%);
     flex: 1 1 220px;
+  }
+  .board-column,
+  .selected-piece-panel {
+    width: 100%;
+  }
+  .selected-piece-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .ability-actions {
+    justify-content: stretch;
+  }
+  .ability-button {
+    flex: 1 1 160px;
+  }
+  .ability-help {
+    text-align: left;
   }
 }
 </style>

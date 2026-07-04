@@ -102,6 +102,7 @@ const props = defineProps<{
   attackSquares: Square[]
   dropSquares: Square[]
   orientation?: PlayerId
+  abilityMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -190,6 +191,7 @@ function squareClasses(sq: SquareInfo) {
 
   if (sq.piece && sq.piece.id === props.selectedPieceId) {
     classes.push('selected')
+    if (props.abilityMode) classes.push('ability-selected')
   }
   if (sq.piece?.id === draggingPieceId.value) {
     classes.push('dragging')
@@ -201,8 +203,8 @@ function squareClasses(sq: SquareInfo) {
 }
 
 function legalMarker(sq: SquareInfo): string | null {
-  if (attackSquareIds.value.has(sq.id)) return 'capture'
-  if (movableSquareIds.value.has(sq.id)) return 'move'
+  if (attackSquareIds.value.has(sq.id)) return props.abilityMode ? 'ability capture' : 'capture'
+  if (movableSquareIds.value.has(sq.id)) return props.abilityMode ? 'ability move' : 'move'
   if (dropSquareIds.value.has(sq.id)) return 'drop'
   return null
 }
@@ -478,6 +480,7 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'king': '♔',
   'queen': '♕',
   'amazon': 'A',
+  'cannon-rook': 'C',
   'tempest-queen': 'Q',
   'tempest-rook': 'T',
   'tempest-knight': 'N',
@@ -542,6 +545,11 @@ function pieceAlt(piece: Piece): string {
   pointer-events: none;
 }
 
+.square.ability-selected::before {
+  border-color: rgba(19, 184, 166, 0.95);
+  box-shadow: 0 0 0 2px rgba(19, 184, 166, 0.22);
+}
+
 .square.drag-over::before {
   border-color: rgba(74, 143, 255, 0.82);
 }
@@ -562,6 +570,17 @@ function pieceAlt(piece: Piece): string {
 
 .legal-move-dot.capture {
   background: rgba(220, 50, 50, 0.78);
+}
+
+.legal-move-dot.ability {
+  width: 18px;
+  height: 18px;
+  background: rgba(20, 184, 166, 0.84);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22), 0 0 0 6px rgba(20, 184, 166, 0.18);
+}
+
+.legal-move-dot.ability.capture {
+  background: rgba(217, 119, 6, 0.9);
 }
 
 .legal-move-dot.drop {

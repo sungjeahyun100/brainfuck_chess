@@ -285,6 +285,7 @@ function displayPieceSymbol(pieceType: DeckPieceType): string {
     king: '♔',
     queen: '♕',
     amazon: 'A',
+    'cannon-rook': 'C',
     'tempest-queen': 'Q',
     'tempest-rook': 'T',
     'tempest-knight': 'N',

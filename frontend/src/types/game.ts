@@ -27,6 +27,16 @@ export interface PieceDefinition {
   dialect?: ChessemblyDialect
   extensions?: string[]
   is_king: boolean
+  abilities?: PieceAbilityDefinition[]
+}
+
+export interface PieceAbilityDefinition {
+  id: string
+  name: string
+  description: string
+  duration: 'until_turn_end' | 'until_piece_moves' | 'permanent' | { turns: number }
+  once_per_turn: boolean
+  cooldown_turns?: number
 }
 
 export interface Piece {
@@ -37,6 +47,7 @@ export interface Piece {
   in_pocket: boolean
   captured: boolean
   has_moved: boolean
+  ability_cooldowns?: Record<string, number>
 }
 
 export interface Deck {
@@ -68,6 +79,7 @@ export interface MoveAction {
   to: Square
   captured_piece_id?: PieceId
   promotion?: PieceTypeId
+  ability_id?: string
 }
 
 export interface DropAction {

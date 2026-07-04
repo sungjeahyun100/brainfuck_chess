@@ -229,7 +229,15 @@
                 <strong>{{ ability.name }}</strong>
                 <p>{{ ability.description }}</p>
                 <small>{{ ability.available ? '현재 상태에서 사용 가능' : '현재 상태에서 사용 불가' }}</small>
-                <button class="btn-start" type="button" disabled>실행</button>
+                <button
+                  class="btn-start"
+                  type="button"
+                  :class="{ active: activeAbilityId === ability.id }"
+                  :disabled="!selectedLabPiece || !ability.connected || !ability.available"
+                  @click="toggleAbility(ability)"
+                >
+                  {{ activeAbilityId === ability.id ? '해제' : '실행' }}
+                </button>
                 <small v-if="!ability.connected">이 기물의 특수능력 테스트는 아직 연결되지 않았습니다.</small>
               </div>
             </template>
@@ -300,6 +308,7 @@ const legalMoves = ref<MoveAction[]>([])
 const attacks = ref<Square[]>([])
 const abilitySquares = ref<Square[]>([])
 const abilities = ref<PieceLabAbilityOption[]>([])
+const activeAbilityId = ref<string | null>(null)
 const optionsLoading = ref(false)
 const optionsError = ref<string | null>(null)
 const draggedCatalogPiece = ref<string | null>(null)
@@ -387,6 +396,10 @@ watch(
   { immediate: true },
 )
 
+watch(selectedPieceId, () => {
+  activeAbilityId.value = null
+})
+
 watch(
   () => [selectedPieceId.value, pieces.value.map(piece => `${piece.id}:${piece.pieceType}:${piece.owner}:${piece.square.file}_${piece.square.rank}`).join('|'), boardSize.value],
   () => {
@@ -411,6 +424,7 @@ function displayPieceSymbol(pieceType: string): string {
     king: 'K',
     queen: 'Q',
     amazon: 'A',
+    'cannon-rook': 'C',
     'tempest-queen': 'Q',
     'tempest-rook': 'T',
     'tempest-knight': 'N',
@@ -429,6 +443,7 @@ function movementDescription(pieceType: string): string {
     king: '8방향으로 한 칸 이동하고 공격합니다. 실제 게임에서는 캐슬링도 지원됩니다.',
     queen: '가로, 세로, 대각선으로 막히기 전까지 이동하고 공격합니다.',
     rook: '가로와 세로로 막히기 전까지 이동하고 공격합니다.',
+    'cannon-rook': '기본은 Rook처럼 이동합니다. 특수능력으로 이번 선택 동안 장기의 포처럼 정확히 하나의 기물을 뛰어넘습니다.',
     bishop: '대각선으로 막히기 전까지 이동하고 공격합니다. 특수능력으로 Bouncing Bishop 행마를 일시 적용할 수 있습니다.',
     knight: 'L자 형태로 도약하며 중간 기물에 막히지 않습니다.',
     pawn: 'White는 위로, Black은 아래로 전진합니다. 대각선 전방을 공격하고 시작 위치에서는 2칸 전진할 수 있습니다.',
@@ -443,6 +458,15 @@ function movementDescription(pieceType: string): string {
 }
 
 function staticAbilities(pieceType: string): PieceLabAbilityOption[] {
+  if (pieceType === 'cannon-rook') {
+    return [{
+      id: 'cannon_move',
+      name: '포 이동',
+      description: '이번 이동 동안 장기의 포처럼 정확히 하나의 기물을 뛰어넘어 이동합니다. 사용 후 3턴 동안 다시 사용할 수 없습니다.',
+      available: false,
+      connected: true,
+    }]
+  }
   if (pieceType !== 'bishop') return []
   return [{
     id: 'bounce_mode',
@@ -469,6 +493,7 @@ function resetLabPieces() {
   attacks.value = []
   abilitySquares.value = []
   abilities.value = []
+  activeAbilityId.value = null
   loadedOptionsPieceId.value = null
   promotionRequest.value = null
   optionsError.value = null
@@ -481,6 +506,7 @@ function clearSelection() {
   attacks.value = []
   abilitySquares.value = []
   abilities.value = []
+  activeAbilityId.value = null
   loadedOptionsPieceId.value = null
   promotionRequest.value = null
   optionsError.value = null
@@ -848,6 +874,14 @@ function isAttackSquare(square: Square): boolean {
   return attacks.value.some(attack => squareId(attack) === id)
 }
 
+async function toggleAbility(ability: PieceLabAbilityOption) {
+  if (!selectedLabPiece.value || !ability.connected || !ability.available) return
+
+  activeAbilityId.value = activeAbilityId.value === ability.id ? null : ability.id
+  loadedOptionsPieceId.value = null
+  await loadSelectedPieceOptions()
+}
+
 function isAbilitySquare(square: Square): boolean {
   const id = squareId(square)
   return abilitySquares.value.some(abilitySquare => squareId(abilitySquare) === id)
@@ -875,12 +909,13 @@ async function loadSelectedPieceOptions() {
         square: piece.square,
       })),
       selected_piece_id: selected.id,
+      ability_id: activeAbilityId.value ?? undefined,
     })
     if (serial !== optionsSerial) return
     moves.value = response.moves
     legalMoves.value = response.legal_moves
     attacks.value = response.attacks
-    abilitySquares.value = []
+    abilitySquares.value = activeAbilityId.value ? response.moves : []
     abilities.value = response.abilities
     loadedOptionsPieceId.value = selected.id
   } catch (e: unknown) {
@@ -1213,6 +1248,12 @@ onBeforeUnmount(() => {
 
 .ability-card .btn-start {
   width: max-content;
+}
+
+.ability-card .btn-start.active {
+  background: var(--accent);
+  color: #06121f;
+  border-color: var(--accent);
 }
 
 @media (max-width: 1200px) {

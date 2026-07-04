@@ -67,6 +67,7 @@ fn add_board_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, 
             captured: false,
             has_moved: false,
             active_ability: None,
+            ability_cooldowns: HashMap::new(),
         },
     );
     state
@@ -91,6 +92,7 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
             captured: false,
             has_moved: false,
             active_ability: None,
+            ability_cooldowns: HashMap::new(),
         },
     );
     state
@@ -230,6 +232,7 @@ fn special_moves_are_exposed_through_ai_actions() {
             to: Square::new(5, 4),
             captured_piece_id: None,
             promotion: None,
+            ability_id: None,
         },
     );
     en_passant_state.current_player = "white".into();
