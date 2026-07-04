@@ -107,7 +107,13 @@
           <span v-else-if="optionsError" class="error">{{ optionsError }}</span>
         </div>
 
-        <div class="lab-board" :style="{ '--lab-board-size': boardSize }">
+        <div
+          ref="labBoardElement"
+          class="lab-board"
+          :style="{ '--lab-board-size': boardSize }"
+          @contextmenu.prevent
+          @pointerdown="onLabBoardPointerDown"
+        >
           <button
             v-for="square in boardSquares"
             :key="square.id"
@@ -139,6 +145,38 @@
               <span v-else>{{ displayPieceSymbol(pieceAt(square.file, square.rank)!.pieceType) }}</span>
             </span>
           </button>
+          <svg
+            v-if="renderedArrows.length"
+            class="lab-arrow-overlay"
+            :viewBox="arrowViewBox"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <defs>
+              <marker
+                :id="arrowMarkerId"
+                markerWidth="4"
+                markerHeight="4"
+                refX="3.4"
+                refY="2"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M 0 0 L 4 2 L 0 4 z" class="lab-arrow-head" />
+              </marker>
+            </defs>
+            <line
+              v-for="arrow in renderedArrows"
+              :key="arrow.key"
+              class="lab-arrow"
+              :class="{ preview: arrow.preview }"
+              :x1="arrow.x1"
+              :y1="arrow.y1"
+              :x2="arrow.x2"
+              :y2="arrow.y2"
+              :marker-end="`url(#${arrowMarkerId})`"
+            />
+          </svg>
         </div>
       </section>
 
@@ -209,7 +247,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, type PieceLabAbilityOption } from '../api/gameApi'
 import { pieceAsset } from '../pieceAssets'
 import type { DeckPieceType } from '../types/deck'
@@ -225,6 +263,20 @@ interface PieceLabPiece {
 
 interface LabSquare extends Square {
   id: string
+}
+
+interface LabArrow {
+  from: string
+  to: string
+}
+
+interface RenderedArrow extends LabArrow {
+  key: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  preview: boolean
 }
 
 const props = defineProps<{
@@ -253,6 +305,13 @@ const optionsError = ref<string | null>(null)
 const draggedCatalogPiece = ref<string | null>(null)
 const draggedPieceId = ref<string | null>(null)
 const loadedOptionsPieceId = ref<string | null>(null)
+const labBoardElement = ref<HTMLElement | null>(null)
+const arrows = ref<LabArrow[]>([])
+const rightDrag = ref<{
+  pointerId: number
+  from: string
+  previewTo: string | null
+} | null>(null)
 const promotionRequest = ref<{
   pieceId: string
   owner: PlayerId
@@ -261,6 +320,8 @@ const promotionRequest = ref<{
 } | null>(null)
 let nextPieceSerial = 1
 let optionsSerial = 0
+const arrowMarkerId = `lab-arrow-head-${Math.random().toString(36).slice(2)}`
+const arrowViewBox = computed(() => `0 0 ${boardSize.value} ${boardSize.value}`)
 
 const filteredPieceCatalog = computed(() => {
   const query = pieceSearch.value.toLowerCase()
@@ -283,6 +344,23 @@ const displayAbilities = computed<PieceLabAbilityOption[]>(() => {
 const abilitySummary = computed(() => {
   if (displayAbilities.value.length > 0) return `${displayAbilities.value.length}개 등록`
   return '없음'
+})
+const renderedArrows = computed(() => {
+  const rendered = arrows.value
+    .map((arrow, index) => renderArrow(arrow, `arrow-${index}-${arrow.from}-${arrow.to}`, false))
+    .filter((arrow): arrow is RenderedArrow => Boolean(arrow))
+
+  const drag = rightDrag.value
+  if (drag?.previewTo && drag.previewTo !== drag.from) {
+    const preview = renderArrow(
+      { from: drag.from, to: drag.previewTo },
+      `preview-${drag.from}-${drag.previewTo}`,
+      true,
+    )
+    if (preview) rendered.push(preview)
+  }
+
+  return rendered
 })
 
 const boardSquares = computed(() => {
@@ -383,6 +461,8 @@ function resetLab() {
 
 function resetLabPieces() {
   pieces.value = []
+  arrows.value = []
+  cleanupRightDrag()
   selectedPieceId.value = null
   moves.value = []
   legalMoves.value = []
@@ -542,6 +622,162 @@ function clearDragState() {
   draggedPieceId.value = null
 }
 
+function onLabBoardPointerDown(event: PointerEvent) {
+  if (event.button === 0) {
+    const squareId = squareIdFromClientPoint(event.clientX, event.clientY)
+    if (squareId) {
+      const square = squareFromId(squareId)
+      if (square && !pieceAt(square.file, square.rank)) {
+        clearArrows()
+      }
+    }
+    return
+  }
+
+  if (event.button !== 2) return
+
+  const from = squareIdFromClientPoint(event.clientX, event.clientY)
+  if (!from) return
+
+  event.preventDefault()
+  rightDrag.value = {
+    pointerId: event.pointerId,
+    from,
+    previewTo: null,
+  }
+  window.addEventListener('pointermove', onWindowRightPointerMove)
+  window.addEventListener('pointerup', onWindowRightPointerUp)
+  window.addEventListener('pointercancel', onWindowRightPointerCancel)
+  window.addEventListener('contextmenu', preventRightDragContextMenu)
+}
+
+function onWindowRightPointerMove(event: PointerEvent) {
+  const drag = rightDrag.value
+  if (!drag || drag.pointerId !== event.pointerId) return
+
+  event.preventDefault()
+  drag.previewTo = squareIdFromClientPoint(event.clientX, event.clientY)
+}
+
+function onWindowRightPointerUp(event: PointerEvent) {
+  const drag = rightDrag.value
+  if (!drag || drag.pointerId !== event.pointerId) return
+
+  event.preventDefault()
+  const to = squareIdFromClientPoint(event.clientX, event.clientY)
+  cleanupRightDrag()
+
+  if (!to || to === drag.from) return
+
+  toggleArrow({ from: drag.from, to })
+}
+
+function onWindowRightPointerCancel(event: PointerEvent) {
+  const drag = rightDrag.value
+  if (!drag || drag.pointerId !== event.pointerId) return
+
+  event.preventDefault()
+  cleanupRightDrag()
+}
+
+function cleanupRightDrag() {
+  rightDrag.value = null
+  window.removeEventListener('pointermove', onWindowRightPointerMove)
+  window.removeEventListener('pointerup', onWindowRightPointerUp)
+  window.removeEventListener('pointercancel', onWindowRightPointerCancel)
+  window.removeEventListener('contextmenu', preventRightDragContextMenu)
+}
+
+function onDocumentPointerDown(event: PointerEvent) {
+  if (event.button !== 0 || !labBoardElement.value) return
+  if (labBoardElement.value.contains(event.target as Node | null)) return
+
+  clearArrows()
+}
+
+function clearArrows() {
+  arrows.value = []
+}
+
+function preventRightDragContextMenu(event: MouseEvent) {
+  if (!rightDrag.value) return
+
+  event.preventDefault()
+}
+
+function toggleArrow(nextArrow: LabArrow) {
+  const existingIndex = arrows.value.findIndex(
+    arrow => arrow.from === nextArrow.from && arrow.to === nextArrow.to,
+  )
+
+  if (existingIndex >= 0) {
+    arrows.value.splice(existingIndex, 1)
+    return
+  }
+
+  arrows.value.push(nextArrow)
+}
+
+function squareIdFromClientPoint(clientX: number, clientY: number): string | null {
+  const board = labBoardElement.value
+  if (!board) return null
+
+  const rect = board.getBoundingClientRect()
+  const boardLeft = rect.left + board.clientLeft
+  const boardTop = rect.top + board.clientTop
+  const boardWidth = board.clientWidth
+  const boardHeight = board.clientHeight
+  const x = clientX - boardLeft
+  const y = clientY - boardTop
+  if (x < 0 || y < 0 || x >= boardWidth || y >= boardHeight) return null
+
+  const displayFile = Math.floor((x / boardWidth) * boardSize.value)
+  const displayRank = Math.floor((y / boardHeight) * boardSize.value)
+  return squareId({
+    file: displayFile,
+    rank: boardSize.value - 1 - displayRank,
+  })
+}
+
+function squareFromId(id: string): Square | null {
+  const [file, rank] = id.split('_').map(Number)
+  if (!Number.isFinite(file) || !Number.isFinite(rank)) return null
+  return { file, rank }
+}
+
+function renderArrow(arrow: LabArrow, key: string, preview: boolean): RenderedArrow | null {
+  const from = squareCenterFromId(arrow.from)
+  const to = squareCenterFromId(arrow.to)
+  if (!from || !to) return null
+
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const length = Math.hypot(dx, dy)
+  if (length === 0) return null
+
+  const startPadding = 0.18
+  const endPadding = 0.28
+  return {
+    ...arrow,
+    key,
+    x1: from.x + (dx / length) * startPadding,
+    y1: from.y + (dy / length) * startPadding,
+    x2: to.x - (dx / length) * endPadding,
+    y2: to.y - (dy / length) * endPadding,
+    preview,
+  }
+}
+
+function squareCenterFromId(id: string): { x: number; y: number } | null {
+  const square = squareFromId(id)
+  if (!square) return null
+
+  return {
+    x: square.file + 0.5,
+    y: boardSize.value - 1 - square.rank + 0.5,
+  }
+}
+
 function onSquareDragOver(event: DragEvent, file: number, rank: number) {
   if (!event.dataTransfer) return
   const existing = pieceAt(file, rank)
@@ -660,6 +896,15 @@ async function loadSelectedPieceOptions() {
     if (serial === optionsSerial) optionsLoading.value = false
   }
 }
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+  cleanupRightDrag()
+})
 
 </script>
 
@@ -804,12 +1049,38 @@ async function loadSelectedPieceOptions() {
   display: grid;
   grid-template-columns: repeat(var(--lab-board-size), 1fr);
   grid-template-rows: repeat(var(--lab-board-size), minmax(0, 1fr));
+  position: relative;
   width: min(100%, 78vh);
   aspect-ratio: 1;
   margin: 0 auto;
   border: 2px solid rgba(244, 223, 176, 0.28);
   border-radius: 8px;
   overflow: hidden;
+}
+
+.lab-arrow-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.lab-arrow {
+  stroke: rgba(236, 126, 30, 0.86);
+  stroke-width: 0.16;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.lab-arrow.preview {
+  opacity: 0.58;
+}
+
+.lab-arrow-head {
+  fill: rgba(236, 126, 30, 0.86);
 }
 
 .lab-square {

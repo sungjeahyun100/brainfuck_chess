@@ -1,8 +1,11 @@
 <template>
   <div class="board-wrapper">
     <div
+      ref="boardElement"
       class="board"
       :style="{ '--size': board.size }"
+      @contextmenu.prevent
+      @pointerdown="onBoardPointerDown"
     >
       <div
         v-for="sq in allSquares"
@@ -28,12 +31,44 @@
           <span v-else>{{ pieceSymbol(sq.piece.type_id) }}</span>
         </span>
       </div>
+      <svg
+        v-if="renderedArrows.length"
+        class="board-arrow-overlay"
+        :viewBox="arrowViewBox"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <defs>
+          <marker
+            :id="arrowMarkerId"
+            markerWidth="4"
+            markerHeight="4"
+            refX="3.4"
+            refY="2"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M 0 0 L 4 2 L 0 4 z" class="board-arrow-head" />
+          </marker>
+        </defs>
+        <line
+          v-for="arrow in renderedArrows"
+          :key="arrow.key"
+          class="board-arrow"
+          :class="{ preview: arrow.preview }"
+          :x1="arrow.x1"
+          :y1="arrow.y1"
+          :x2="arrow.x2"
+          :y2="arrow.y2"
+          :marker-end="`url(#${arrowMarkerId})`"
+        />
+      </svg>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Board, Piece, PlayerId, Square } from '../types/game'
 import { pieceAsset } from '../pieceAssets'
 
@@ -43,6 +78,20 @@ interface SquareInfo {
   rank: number
   piece?: Piece
   isLight: boolean
+}
+
+interface BoardArrow {
+  from: string
+  to: string
+}
+
+interface RenderedArrow extends BoardArrow {
+  key: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  preview: boolean
 }
 
 const props = defineProps<{
@@ -95,6 +144,13 @@ const allSquares = computed((): SquareInfo[] => {
 const movableSquareIds = computed(() => new Set(props.movableSquares.map(squareIdFromSquare)))
 const attackSquareIds = computed(() => new Set(props.attackSquares.map(squareIdFromSquare)))
 const dropSquareIds = computed(() => new Set(props.dropSquares.map(squareIdFromSquare)))
+const boardElement = ref<HTMLElement | null>(null)
+const arrows = ref<BoardArrow[]>([])
+const rightDrag = ref<{
+  pointerId: number
+  from: string
+  previewTo: string | null
+} | null>(null)
 const draggingPieceId = ref<string | null>(null)
 const dragOverSquareId = ref<string | null>(null)
 const pointerDrag = ref<{
@@ -105,6 +161,25 @@ const pointerDrag = ref<{
   active: boolean
 } | null>(null)
 let suppressNextClick = false
+const arrowMarkerId = `board-arrow-head-${Math.random().toString(36).slice(2)}`
+const arrowViewBox = computed(() => `0 0 ${props.board.size} ${props.board.size}`)
+const renderedArrows = computed(() => {
+  const rendered = arrows.value
+    .map((arrow, index) => renderArrow(arrow, `arrow-${index}-${arrow.from}-${arrow.to}`, false))
+    .filter((arrow): arrow is RenderedArrow => Boolean(arrow))
+
+  const drag = rightDrag.value
+  if (drag?.previewTo && drag.previewTo !== drag.from) {
+    const preview = renderArrow(
+      { from: drag.from, to: drag.previewTo },
+      `preview-${drag.from}-${drag.previewTo}`,
+      true,
+    )
+    if (preview) rendered.push(preview)
+  }
+
+  return rendered
+})
 
 function squareIdFromSquare(square: Square) {
   return squareId(square.file, square.rank)
@@ -155,6 +230,32 @@ function onSquarePointerDown(event: PointerEvent, sq: SquareInfo) {
   window.addEventListener('pointercancel', onWindowPointerCancel)
 }
 
+function onBoardPointerDown(event: PointerEvent) {
+  if (event.button === 0) {
+    const squareId = squareIdFromClientPoint(event.clientX, event.clientY)
+    if (squareId && !props.board.squares[squareId]) {
+      clearArrows()
+    }
+    return
+  }
+
+  if (event.button !== 2) return
+
+  const from = squareIdFromClientPoint(event.clientX, event.clientY)
+  if (!from) return
+
+  event.preventDefault()
+  rightDrag.value = {
+    pointerId: event.pointerId,
+    from,
+    previewTo: null,
+  }
+  window.addEventListener('pointermove', onWindowRightPointerMove)
+  window.addEventListener('pointerup', onWindowRightPointerUp)
+  window.addEventListener('pointercancel', onWindowRightPointerCancel)
+  window.addEventListener('contextmenu', preventRightDragContextMenu)
+}
+
 function onWindowPointerMove(event: PointerEvent) {
   const drag = pointerDrag.value
   if (!drag || drag.pointerId !== event.pointerId) return
@@ -194,6 +295,35 @@ function onWindowPointerCancel(event: PointerEvent) {
   if (wasActive) emit('squareDrop', null, pieceId)
 }
 
+function onWindowRightPointerMove(event: PointerEvent) {
+  const drag = rightDrag.value
+  if (!drag || drag.pointerId !== event.pointerId) return
+
+  event.preventDefault()
+  drag.previewTo = squareIdFromClientPoint(event.clientX, event.clientY)
+}
+
+function onWindowRightPointerUp(event: PointerEvent) {
+  const drag = rightDrag.value
+  if (!drag || drag.pointerId !== event.pointerId) return
+
+  event.preventDefault()
+  const to = squareIdFromClientPoint(event.clientX, event.clientY)
+  cleanupRightDrag()
+
+  if (!to || to === drag.from) return
+
+  toggleArrow({ from: drag.from, to })
+}
+
+function onWindowRightPointerCancel(event: PointerEvent) {
+  const drag = rightDrag.value
+  if (!drag || drag.pointerId !== event.pointerId) return
+
+  event.preventDefault()
+  cleanupRightDrag()
+}
+
 function cleanupPointerDrag() {
   pointerDrag.value = null
   draggingPieceId.value = null
@@ -201,6 +331,44 @@ function cleanupPointerDrag() {
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
   window.removeEventListener('pointercancel', onWindowPointerCancel)
+}
+
+function cleanupRightDrag() {
+  rightDrag.value = null
+  window.removeEventListener('pointermove', onWindowRightPointerMove)
+  window.removeEventListener('pointerup', onWindowRightPointerUp)
+  window.removeEventListener('pointercancel', onWindowRightPointerCancel)
+  window.removeEventListener('contextmenu', preventRightDragContextMenu)
+}
+
+function onDocumentPointerDown(event: PointerEvent) {
+  if (event.button !== 0 || !boardElement.value) return
+  if (boardElement.value.contains(event.target as Node | null)) return
+
+  clearArrows()
+}
+
+function clearArrows() {
+  arrows.value = []
+}
+
+function preventRightDragContextMenu(event: MouseEvent) {
+  if (!rightDrag.value) return
+
+  event.preventDefault()
+}
+
+function toggleArrow(nextArrow: BoardArrow) {
+  const existingIndex = arrows.value.findIndex(
+    arrow => arrow.from === nextArrow.from && arrow.to === nextArrow.to,
+  )
+
+  if (existingIndex >= 0) {
+    arrows.value.splice(existingIndex, 1)
+    return
+  }
+
+  arrows.value.push(nextArrow)
 }
 
 function squareIdFromPoint(clientX: number, clientY: number): string | null {
@@ -213,6 +381,31 @@ function squareIdFromPoint(clientX: number, clientY: number): string | null {
   return Number.isFinite(file) && Number.isFinite(rank) ? squareId(file, rank) : null
 }
 
+function squareIdFromClientPoint(clientX: number, clientY: number): string | null {
+  const board = boardElement.value
+  if (!board) return null
+
+  const rect = board.getBoundingClientRect()
+  const boardLeft = rect.left + board.clientLeft
+  const boardTop = rect.top + board.clientTop
+  const boardWidth = board.clientWidth
+  const boardHeight = board.clientHeight
+  const x = clientX - boardLeft
+  const y = clientY - boardTop
+  if (x < 0 || y < 0 || x >= boardWidth || y >= boardHeight) return null
+
+  const displayFile = Math.floor((x / boardWidth) * props.board.size)
+  const displayRank = Math.floor((y / boardHeight) * props.board.size)
+  const file = props.orientation === 'black'
+    ? props.board.size - 1 - displayFile
+    : displayFile
+  const rank = props.orientation === 'black'
+    ? displayRank
+    : props.board.size - 1 - displayRank
+
+  return squareId(file, rank)
+}
+
 function squareFromId(id: string | null): Square | null {
   if (!id) return null
 
@@ -220,6 +413,46 @@ function squareFromId(id: string | null): Square | null {
   if (!Number.isFinite(file) || !Number.isFinite(rank)) return null
 
   return { file, rank }
+}
+
+function renderArrow(arrow: BoardArrow, key: string, preview: boolean): RenderedArrow | null {
+  const from = squareCenterFromId(arrow.from)
+  const to = squareCenterFromId(arrow.to)
+  if (!from || !to) return null
+
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const length = Math.hypot(dx, dy)
+  if (length === 0) return null
+
+  const startPadding = 0.18
+  const endPadding = 0.28
+  return {
+    ...arrow,
+    key,
+    x1: from.x + (dx / length) * startPadding,
+    y1: from.y + (dy / length) * startPadding,
+    x2: to.x - (dx / length) * endPadding,
+    y2: to.y - (dy / length) * endPadding,
+    preview,
+  }
+}
+
+function squareCenterFromId(id: string): { x: number; y: number } | null {
+  const square = squareFromId(id)
+  if (!square) return null
+
+  const displayFile = props.orientation === 'black'
+    ? props.board.size - 1 - square.file
+    : square.file
+  const displayRank = props.orientation === 'black'
+    ? square.rank
+    : props.board.size - 1 - square.rank
+
+  return {
+    x: displayFile + 0.5,
+    y: displayRank + 0.5,
+  }
 }
 
 function onNativeDrop(event: DragEvent, sq: SquareInfo) {
@@ -231,8 +464,14 @@ function onNativeDrop(event: DragEvent, sq: SquareInfo) {
   emit('squareDrop', { file: sq.file, rank: sq.rank }, pieceId)
 }
 
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+})
+
 onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
   cleanupPointerDrag()
+  cleanupRightDrag()
 })
 
 const PIECE_SYMBOLS: Record<string, string> = {
@@ -272,6 +511,7 @@ function pieceAlt(piece: Piece): string {
   display: grid;
   grid-template-columns: repeat(var(--size), 1fr);
   grid-template-rows: repeat(var(--size), 1fr);
+  position: relative;
   border: 2px solid #555;
   width: min(80vw, 80vh);
   aspect-ratio: 1;
@@ -326,6 +566,31 @@ function pieceAlt(piece: Piece): string {
 
 .legal-move-dot.drop {
   background: rgba(74, 143, 255, 0.78);
+}
+
+.board-arrow-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.board-arrow {
+  stroke: rgba(236, 126, 30, 0.86);
+  stroke-width: 0.16;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.board-arrow.preview {
+  opacity: 0.58;
+}
+
+.board-arrow-head {
+  fill: rgba(236, 126, 30, 0.86);
 }
 
 .piece {
