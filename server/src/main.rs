@@ -57,8 +57,10 @@ struct MultiplayerRoom {
     host_client_id: String,
     #[serde(skip_serializing)]
     guest_client_id: Option<String>,
-    host_deck: PlayerDeckSpec,
+    host_deck: Option<PlayerDeckSpec>,
     guest_deck: Option<PlayerDeckSpec>,
+    host_ready: bool,
+    guest_ready: bool,
     game_id: Option<String>,
 }
 
@@ -74,6 +76,17 @@ struct CreateRoomRequest {
 struct JoinRoomRequest {
     client_id: String,
     deck: PlayerDeckSpec,
+}
+
+#[derive(Deserialize)]
+struct SelectDeckRequest {
+    client_id: String,
+    deck: PlayerDeckSpec,
+}
+
+#[derive(Deserialize)]
+struct RoomReadyRequest {
+    client_id: String,
 }
 
 #[derive(Deserialize)]
@@ -151,6 +164,37 @@ struct PieceAttacksResponse {
 struct PieceOptionsResponse {
     moves: Vec<MoveAction>,
     attacks: Vec<Square>,
+}
+
+#[derive(Clone, Deserialize)]
+struct LabPieceSpec {
+    id: String,
+    piece_type: String,
+    owner: PlayerId,
+    square: Square,
+}
+
+#[derive(Deserialize)]
+struct LabPieceOptionsRequest {
+    board_size: i32,
+    pieces: Vec<LabPieceSpec>,
+    selected_piece_id: String,
+}
+
+#[derive(Serialize)]
+struct LabAbilityOption {
+    id: String,
+    name: String,
+    description: String,
+    available: bool,
+    connected: bool,
+}
+
+#[derive(Serialize)]
+struct LabPieceOptionsResponse {
+    moves: Vec<Square>,
+    attacks: Vec<Square>,
+    abilities: Vec<LabAbilityOption>,
 }
 
 #[derive(Debug, Serialize)]
@@ -353,6 +397,123 @@ fn build_game_state(
     Ok(state)
 }
 
+fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, String> {
+    if !(8..=12).contains(&req.board_size) {
+        return Err("보드 크기는 8부터 12까지 선택할 수 있습니다.".into());
+    }
+
+    let mut board = create_board(req.board_size);
+    let defs: HashMap<String, PieceDefinition> = all_default_definitions()
+        .into_iter()
+        .map(|d| (d.id.clone(), d))
+        .collect();
+    let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&defs);
+    let mut pieces = HashMap::new();
+    let mut white_starting = Vec::new();
+    let mut black_starting = Vec::new();
+    let mut seen_piece_ids = HashSet::new();
+
+    for lab_piece in &req.pieces {
+        if lab_piece.owner != "white" && lab_piece.owner != "black" {
+            return Err("기물 owner는 white 또는 black이어야 합니다.".into());
+        }
+        if !seen_piece_ids.insert(lab_piece.id.clone()) {
+            return Err(format!("중복된 테스트 기물 id입니다: {}", lab_piece.id));
+        }
+        if !board.is_in_bounds(&lab_piece.square) {
+            return Err(format!(
+                "{} 배치가 보드 밖입니다.",
+                lab_piece.square.to_id()
+            ));
+        }
+        if !board.is_empty(&lab_piece.square) {
+            return Err(format!(
+                "{} 칸에 이미 기물이 있습니다.",
+                lab_piece.square.to_id()
+            ));
+        }
+
+        let type_id = resolve_piece_type(&lab_piece.owner, &lab_piece.piece_type)
+            .ok_or_else(|| format!("알 수 없는 기물 타입입니다: {}", lab_piece.piece_type))?;
+        let piece_id = PieceId::from(lab_piece.id.clone());
+        let piece = Piece {
+            id: piece_id.clone(),
+            owner: lab_piece.owner.clone(),
+            type_id,
+            current_square: Some(lab_piece.square),
+            in_pocket: false,
+            captured: false,
+            has_moved: false,
+            active_ability: None,
+        };
+
+        board
+            .squares
+            .insert(lab_piece.square.to_id(), Some(piece_id.clone()));
+        if lab_piece.owner == "white" {
+            white_starting.push(piece_id.clone());
+        } else {
+            black_starting.push(piece_id.clone());
+        }
+        pieces.insert(piece_id, piece);
+    }
+
+    let selected_piece_id = PieceId::from(req.selected_piece_id.clone());
+    let selected_piece = pieces
+        .get(&selected_piece_id)
+        .ok_or_else(|| "선택한 테스트 기물을 찾을 수 없습니다.".to_string())?;
+    let current_player = selected_piece.owner.clone();
+
+    let white_deck = Deck {
+        player_id: "white".into(),
+        starting_pieces: white_starting,
+        pocket_pieces: Vec::new(),
+        score_limit: calculate_score_limit(req.board_size),
+        total_score: 0,
+    };
+    let black_deck = Deck {
+        player_id: "black".into(),
+        starting_pieces: black_starting,
+        pocket_pieces: Vec::new(),
+        score_limit: calculate_score_limit(req.board_size),
+        total_score: 0,
+    };
+
+    let mut players = HashMap::new();
+    players.insert(
+        "white".into(),
+        Player {
+            id: "white".into(),
+            deck: white_deck,
+            captured_pieces: Vec::new(),
+        },
+    );
+    players.insert(
+        "black".into(),
+        Player {
+            id: "black".into(),
+            deck: black_deck,
+            captured_pieces: Vec::new(),
+        },
+    );
+
+    Ok(GameState {
+        id: "piece-lab".into(),
+        board,
+        pieces,
+        piece_definitions: defs,
+        players,
+        current_player,
+        turn_number: 1,
+        phase: GamePhase::Playing,
+        en_passant_target: None,
+        en_passant_available_to: None,
+        turn_state: TurnState::new(),
+        result: None,
+        chessembly_program_cache,
+    })
+}
+
 fn opponent_side(side: &PlayerId) -> PlayerId {
     if side == "white" {
         "black".into()
@@ -424,6 +585,47 @@ fn generate_room_id(rooms: &RoomStore) -> String {
         .to_uppercase()
 }
 
+fn start_room_game(
+    room: &mut MultiplayerRoom,
+    games: &GameStore,
+) -> Result<Option<GameResponse>, String> {
+    if let Some(game_id) = &room.game_id {
+        let state = games
+            .get(game_id)
+            .ok_or_else(|| "방의 게임을 찾을 수 없습니다.".to_string())?;
+        return Ok(Some(GameResponse {
+            id: game_id.clone(),
+            state: state.clone(),
+        }));
+    }
+
+    if !room.host_ready || !room.guest_ready {
+        return Ok(None);
+    }
+
+    let host_spec = room
+        .host_deck
+        .as_ref()
+        .ok_or_else(|| "방장 덱이 선택되지 않았습니다.".to_string())?;
+    let guest_spec = room
+        .guest_deck
+        .as_ref()
+        .ok_or_else(|| "참가자 덱이 선택되지 않았습니다.".to_string())?;
+    let game_id = Uuid::new_v4().to_string();
+    let host_deck = materialize_neutral_deck(host_spec, &room.host_side, room.board_size);
+    let guest_deck = materialize_neutral_deck(guest_spec, &room.guest_side, room.board_size);
+    let (white_deck, black_deck) = if room.host_side == "white" {
+        (&host_deck, &guest_deck)
+    } else {
+        (&guest_deck, &host_deck)
+    };
+    let state = build_game_state(game_id.clone(), room.board_size, white_deck, black_deck)?;
+
+    room.game_id = Some(game_id.clone());
+    games.insert(game_id.clone(), state.clone());
+    Ok(Some(GameResponse { id: game_id, state }))
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -452,10 +654,14 @@ async fn main() {
             "/games/:id/pieces/:piece_id/options",
             get(get_piece_options),
         )
+        .route("/lab/piece-options", post(get_lab_piece_options))
         .route("/games/:id/legal-drops", get(get_legal_drops))
         .route("/rooms", post(create_room))
         .route("/rooms/:id", get(get_room))
         .route("/rooms/:id/join", post(join_room))
+        .route("/rooms/:id/select-deck", post(select_room_deck))
+        .route("/rooms/:id/ready", post(ready_room))
+        .route("/rooms/:id/unready", post(unready_room))
         .route("/rooms/:id/resign", post(resign_room))
         .with_state(state);
 
@@ -547,8 +753,10 @@ async fn create_room(
         host_client_id: req.client_id,
         guest_client_id: None,
         host_side: req.host_side,
-        host_deck: req.deck,
+        host_deck: Some(req.deck),
         guest_deck: None,
+        host_ready: true,
+        guest_ready: false,
         game_id: None,
     };
 
@@ -612,22 +820,161 @@ async fn join_room(
         }));
     }
 
-    let game_id = Uuid::new_v4().to_string();
-    let host_deck = materialize_neutral_deck(&room.host_deck, &room.host_side, room.board_size);
-    let guest_deck = materialize_neutral_deck(&req.deck, &room.guest_side, room.board_size);
-    let (white_deck, black_deck) = if room.host_side == "white" {
-        (&host_deck, &guest_deck)
-    } else {
-        (&guest_deck, &host_deck)
-    };
-    let state = build_game_state(game_id.clone(), room.board_size, white_deck, black_deck)
-        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
-
     room.guest_deck = Some(req.deck);
     room.guest_client_id = Some(req.client_id);
-    room.game_id = Some(game_id.clone());
-    app.games.insert(game_id.clone(), state.clone());
-    Ok(Json(GameResponse { id: game_id, state }))
+    room.guest_ready = true;
+    let response = start_room_game(room.value_mut(), &app.games)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "양쪽 플레이어가 아직 준비되지 않았습니다.".into(),
+                }),
+            )
+        })?;
+    Ok(Json(response))
+}
+
+async fn select_room_deck(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<SelectDeckRequest>,
+) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
+    let room_id = id.to_uppercase();
+    let mut room = app.rooms.get_mut(&room_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "방을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+
+    if room.game_id.is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "이미 게임이 시작된 방에서는 덱을 변경할 수 없습니다.".into(),
+            }),
+        ));
+    }
+
+    if req.client_id == room.host_client_id {
+        room.host_deck = Some(req.deck);
+        room.host_ready = false;
+        return Ok(Json(room.clone()));
+    }
+
+    if room.guest_client_id.is_none() {
+        room.guest_client_id = Some(req.client_id.clone());
+    }
+
+    if room.guest_client_id.as_deref() == Some(req.client_id.as_str()) {
+        room.guest_deck = Some(req.deck);
+        room.guest_ready = false;
+        return Ok(Json(room.clone()));
+    }
+
+    Err((
+        StatusCode::FORBIDDEN,
+        Json(ErrorResponse {
+            error: "이 방의 플레이어만 덱을 변경할 수 있습니다.".into(),
+        }),
+    ))
+}
+
+async fn ready_room(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<RoomReadyRequest>,
+) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
+    let room_id = id.to_uppercase();
+    let mut room = app.rooms.get_mut(&room_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "방을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+
+    if room.game_id.is_some() {
+        return Ok(Json(room.clone()));
+    }
+
+    if req.client_id == room.host_client_id {
+        if room.host_deck.is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "방장 덱이 선택되지 않았습니다.".into(),
+                }),
+            ));
+        }
+        room.host_ready = true;
+    } else if room.guest_client_id.as_deref() == Some(req.client_id.as_str()) {
+        if room.guest_deck.is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "참가자 덱이 선택되지 않았습니다.".into(),
+                }),
+            ));
+        }
+        room.guest_ready = true;
+    } else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "이 방의 플레이어만 준비할 수 있습니다.".into(),
+            }),
+        ));
+    }
+
+    start_room_game(room.value_mut(), &app.games)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    Ok(Json(room.clone()))
+}
+
+async fn unready_room(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<RoomReadyRequest>,
+) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
+    let room_id = id.to_uppercase();
+    let mut room = app.rooms.get_mut(&room_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "방을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+
+    if room.game_id.is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "이미 게임이 시작된 방에서는 준비를 해제할 수 없습니다.".into(),
+            }),
+        ));
+    }
+
+    if req.client_id == room.host_client_id {
+        room.host_ready = false;
+    } else if room.guest_client_id.as_deref() == Some(req.client_id.as_str()) {
+        room.guest_ready = false;
+    } else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "이 방의 플레이어만 준비를 해제할 수 있습니다.".into(),
+            }),
+        ));
+    }
+
+    Ok(Json(room.clone()))
 }
 
 async fn resign_room(
@@ -1128,6 +1475,49 @@ async fn get_piece_options(
     }
 }
 
+async fn get_lab_piece_options(
+    Json(req): Json<LabPieceOptionsRequest>,
+) -> Result<Json<LabPieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let state = build_lab_game_state(&req)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    let piece_id = PieceId::from(req.selected_piece_id);
+    let mut seen_moves = HashSet::new();
+    let moves = generate_piece_legal_move_actions(&state, &piece_id)
+        .into_iter()
+        .map(|action| action.to)
+        .filter(|square| seen_moves.insert(square.to_id()))
+        .collect();
+    let mut seen_attacks = HashSet::new();
+    let attacks = generate_piece_attack_squares(&state, &piece_id)
+        .into_iter()
+        .filter(|square| seen_attacks.insert(square.to_id()))
+        .collect();
+    let abilities = state
+        .pieces
+        .get(&piece_id)
+        .and_then(|piece| state.piece_definitions.get(&piece.type_id))
+        .map(|definition| {
+            definition
+                .abilities
+                .iter()
+                .map(|ability| LabAbilityOption {
+                    id: ability.id.clone(),
+                    name: ability.name.clone(),
+                    description: ability.description.clone(),
+                    available: true,
+                    connected: false,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(Json(LabPieceOptionsResponse {
+        moves,
+        attacks,
+        abilities,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1207,6 +1597,41 @@ mod tests {
 
         assert!(!response.moves.is_empty());
         assert!(response.moves.iter().all(|m| m.piece_id == piece_id));
+    }
+
+    #[tokio::test]
+    async fn lab_piece_options_uses_temporary_state_without_storing_game() {
+        let app = AppState {
+            games: Arc::new(DashMap::new()),
+            rooms: Arc::new(DashMap::new()),
+        };
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_white_rook_1".into(),
+            pieces: vec![
+                LabPieceSpec {
+                    id: "lab_white_rook_1".into(),
+                    piece_type: "rook".into(),
+                    owner: "white".into(),
+                    square: Square::new(3, 3),
+                },
+                LabPieceSpec {
+                    id: "lab_black_knight_1".into(),
+                    piece_type: "knight".into(),
+                    owner: "black".into(),
+                    square: Square::new(3, 6),
+                },
+            ],
+        };
+
+        let response = match get_lab_piece_options(Json(req)).await {
+            Ok(Json(response)) => response,
+            Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+        };
+
+        assert!(response.moves.contains(&Square::new(3, 6)));
+        assert!(response.attacks.contains(&Square::new(3, 6)));
+        assert!(app.games.is_empty());
     }
 
     #[tokio::test]

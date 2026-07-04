@@ -31,8 +31,10 @@ export interface MultiplayerRoom {
   board_size: number
   host_side: 'white' | 'black'
   guest_side: 'white' | 'black'
-  host_deck: PlayerDeckRequest
+  host_deck?: PlayerDeckRequest | null
   guest_deck?: PlayerDeckRequest | null
+  host_ready: boolean
+  guest_ready: boolean
   game_id?: string | null
 }
 
@@ -48,6 +50,33 @@ interface ResignGameRequest {
 export interface PieceOptionsResponse {
   moves: MoveAction[]
   attacks: Square[]
+}
+
+export interface PieceLabPieceRequest {
+  id: string
+  piece_type: string
+  owner: PlayerId
+  square: Square
+}
+
+export interface PieceLabOptionsRequest {
+  board_size: number
+  pieces: PieceLabPieceRequest[]
+  selected_piece_id: string
+}
+
+export interface PieceLabAbilityOption {
+  id: string
+  name: string
+  description: string
+  available: boolean
+  connected: boolean
+}
+
+export interface PieceLabOptionsResponse {
+  moves: Square[]
+  attacks: Square[]
+  abilities: PieceLabAbilityOption[]
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -128,6 +157,13 @@ export const api = {
     return request(`${BASE}/${id}/pieces/${pieceId}/options`)
   },
 
+  getPieceLabOptions(payload: PieceLabOptionsRequest): Promise<PieceLabOptionsResponse> {
+    return request('/api/lab/piece-options', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
   getLegalDrops(id: string): Promise<{ drops: DropAction[] }> {
     return request(`${BASE}/${id}/legal-drops`)
   },
@@ -158,6 +194,34 @@ export const api = {
       body: JSON.stringify({
         client_id: getClientId(),
         deck,
+      }),
+    })
+  },
+
+  selectRoomDeck(id: string, deck: PlayerDeckRequest): Promise<MultiplayerRoom> {
+    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/select-deck`, {
+      method: 'POST',
+      body: JSON.stringify({
+        client_id: getClientId(),
+        deck,
+      }),
+    })
+  },
+
+  readyRoom(id: string): Promise<MultiplayerRoom> {
+    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/ready`, {
+      method: 'POST',
+      body: JSON.stringify({
+        client_id: getClientId(),
+      }),
+    })
+  },
+
+  unreadyRoom(id: string): Promise<MultiplayerRoom> {
+    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/unready`, {
+      method: 'POST',
+      body: JSON.stringify({
+        client_id: getClientId(),
       }),
     })
   },
