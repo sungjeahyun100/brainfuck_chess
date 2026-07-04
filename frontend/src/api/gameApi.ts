@@ -75,6 +75,7 @@ export interface PieceLabAbilityOption {
 
 export interface PieceLabOptionsResponse {
   moves: Square[]
+  legal_moves: MoveAction[]
   attacks: Square[]
   abilities: PieceLabAbilityOption[]
 }

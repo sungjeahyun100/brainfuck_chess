@@ -9,6 +9,33 @@
       <button class="btn-secondary danger" @click="resetLab">전체 초기화</button>
     </div>
 
+    <div v-if="promotionRequest" class="lab-promotion-overlay">
+      <div class="lab-promotion-box">
+        <h2>프로모션 선택</h2>
+        <p>{{ fileLabel(promotionRequest.to.file) }}{{ promotionRequest.to.rank + 1 }} 도착 후 변할 기물을 선택하세요.</p>
+        <div class="promotion-choices">
+          <button
+            v-for="action in promotionRequest.actions"
+            :key="action.promotion"
+            type="button"
+            class="promotion-choice"
+            @click="choosePromotion(action)"
+          >
+            <img
+              v-if="action.promotion && displayPieceAsset(action.promotion, promotionRequest.owner)"
+              class="piece-icon"
+              :src="displayPieceAsset(action.promotion, promotionRequest.owner)"
+              :alt="action.promotion ? pieceLabel(action.promotion) : 'Promotion'"
+              draggable="false"
+            />
+            <span v-else>{{ displayPieceSymbol(action.promotion ?? '') }}</span>
+            <small>{{ action.promotion ? pieceLabel(action.promotion) : '선택' }}</small>
+          </button>
+        </div>
+        <button class="btn-secondary" type="button" @click="promotionRequest = null">취소</button>
+      </div>
+    </div>
+
     <div class="piece-lab-grid">
       <section class="card lab-panel lab-controls">
         <div class="section-header">
@@ -186,7 +213,7 @@ import { computed, ref, watch } from 'vue'
 import { api, type PieceLabAbilityOption } from '../api/gameApi'
 import { pieceAsset } from '../pieceAssets'
 import type { DeckPieceType } from '../types/deck'
-import type { PlayerId, Square } from '../types/game'
+import type { MoveAction, PlayerId, Square } from '../types/game'
 import { boardSizes, pieceCatalog, pieceLabel } from '../composables/useDeckValidation'
 
 interface PieceLabPiece {
@@ -217,6 +244,7 @@ const selectedPieceId = ref<string | null>(null)
 const pieces = ref<PieceLabPiece[]>([])
 const pieceSearch = ref('')
 const moves = ref<Square[]>([])
+const legalMoves = ref<MoveAction[]>([])
 const attacks = ref<Square[]>([])
 const abilitySquares = ref<Square[]>([])
 const abilities = ref<PieceLabAbilityOption[]>([])
@@ -224,6 +252,13 @@ const optionsLoading = ref(false)
 const optionsError = ref<string | null>(null)
 const draggedCatalogPiece = ref<string | null>(null)
 const draggedPieceId = ref<string | null>(null)
+const loadedOptionsPieceId = ref<string | null>(null)
+const promotionRequest = ref<{
+  pieceId: string
+  owner: PlayerId
+  to: Square
+  actions: MoveAction[]
+} | null>(null)
 let nextPieceSerial = 1
 let optionsSerial = 0
 
@@ -350,18 +385,24 @@ function resetLabPieces() {
   pieces.value = []
   selectedPieceId.value = null
   moves.value = []
+  legalMoves.value = []
   attacks.value = []
   abilitySquares.value = []
   abilities.value = []
+  loadedOptionsPieceId.value = null
+  promotionRequest.value = null
   optionsError.value = null
 }
 
 function clearSelection() {
   selectedPieceId.value = null
   moves.value = []
+  legalMoves.value = []
   attacks.value = []
   abilitySquares.value = []
   abilities.value = []
+  loadedOptionsPieceId.value = null
+  promotionRequest.value = null
   optionsError.value = null
 }
 
@@ -374,7 +415,69 @@ function pieceAt(file: number, rank: number): PieceLabPiece | null {
   return pieces.value.find(piece => piece.square.file === file && piece.square.rank === rank) ?? null
 }
 
-function onSquareClick(file: number, rank: number) {
+function sameSquare(left: Square, right: Square): boolean {
+  return left.file === right.file && left.rank === right.rank
+}
+
+function legalActionsForTarget(pieceId: string, to: Square): MoveAction[] {
+  return legalMoves.value.filter(action => action.piece_id === pieceId && sameSquare(action.to, to))
+}
+
+function applyLabMove(action: MoveAction) {
+  pieces.value = pieces.value
+    .filter(piece => piece.id !== action.captured_piece_id)
+    .map(piece => (
+      piece.id === action.piece_id
+        ? {
+            ...piece,
+            pieceType: action.promotion ?? piece.pieceType,
+            square: action.to,
+          }
+        : piece
+    ))
+  selectedPieceId.value = action.piece_id
+  loadedOptionsPieceId.value = null
+  optionsError.value = null
+  promotionRequest.value = null
+}
+
+function choosePromotion(action: MoveAction) {
+  applyLabMove(action)
+}
+
+async function ensureLegalMovesForPiece(pieceId: string) {
+  if (selectedPieceId.value !== pieceId) {
+    selectedPieceId.value = pieceId
+  }
+  if (loadedOptionsPieceId.value === pieceId) return
+  await loadSelectedPieceOptions()
+}
+
+async function tryMovePlacedPiece(pieceId: string, file: number, rank: number): Promise<boolean> {
+  await ensureLegalMovesForPiece(pieceId)
+  const piece = pieces.value.find(entry => entry.id === pieceId)
+  if (!piece) return false
+
+  const to = { file, rank }
+  const actions = legalActionsForTarget(pieceId, to)
+  if (actions.length === 0) return false
+
+  const promotionActions = actions.filter(action => action.promotion)
+  if (promotionActions.length > 0) {
+    promotionRequest.value = {
+      pieceId,
+      owner: piece.owner,
+      to,
+      actions: promotionActions,
+    }
+    return true
+  }
+
+  applyLabMove(actions[0])
+  return true
+}
+
+async function onSquareClick(file: number, rank: number) {
   const existing = pieceAt(file, rank)
   if (selectedTool.value === eraseTool) {
     if (!existing) return
@@ -384,7 +487,20 @@ function onSquareClick(file: number, rank: number) {
   }
 
   if (existing) {
+    if (selectedPieceId.value && existing.id !== selectedPieceId.value) {
+      const selected = selectedLabPiece.value
+      if (selected && selected.owner !== existing.owner && await tryMovePlacedPiece(selectedPieceId.value, file, rank)) {
+        return
+      }
+    }
     selectedPieceId.value = existing.id
+    return
+  }
+
+  if (selectedPieceId.value) {
+    if (!await tryMovePlacedPiece(selectedPieceId.value, file, rank)) {
+      optionsError.value = '선택한 기물이 행마법상 이동할 수 없는 칸입니다.'
+    }
     return
   }
 
@@ -437,23 +553,21 @@ function onSquareDragOver(event: DragEvent, file: number, rank: number) {
   event.dataTransfer.dropEffect = boardPieceId && (!existing || existing.id === boardPieceId) ? 'move' : 'none'
 }
 
-function onSquareDrop(event: DragEvent, file: number, rank: number) {
+async function onSquareDrop(event: DragEvent, file: number, rank: number) {
   const boardPieceId = draggedPieceId.value || event.dataTransfer?.getData('application/x-piece-lab-board-piece') || null
   const catalogPiece = draggedCatalogPiece.value || event.dataTransfer?.getData('application/x-piece-lab-catalog-piece') || null
   clearDragState()
 
   const existing = pieceAt(file, rank)
   if (boardPieceId) {
-    if (existing && existing.id !== boardPieceId) {
+    const movingPiece = pieces.value.find(piece => piece.id === boardPieceId)
+    if (existing && existing.id !== boardPieceId && movingPiece?.owner === existing.owner) {
       selectedPieceId.value = existing.id
       return
     }
-    pieces.value = pieces.value.map(piece => (
-      piece.id === boardPieceId
-        ? { ...piece, square: { file, rank } }
-        : piece
-    ))
-    selectedPieceId.value = boardPieceId
+    if (!await tryMovePlacedPiece(boardPieceId, file, rank)) {
+      optionsError.value = '선택한 기물이 행마법상 이동할 수 없는 칸입니다.'
+    }
     return
   }
 
@@ -509,6 +623,7 @@ async function loadSelectedPieceOptions() {
   if (!selected) {
     optionsLoading.value = false
     optionsError.value = null
+    loadedOptionsPieceId.value = null
     return
   }
 
@@ -527,15 +642,19 @@ async function loadSelectedPieceOptions() {
     })
     if (serial !== optionsSerial) return
     moves.value = response.moves
+    legalMoves.value = response.legal_moves
     attacks.value = response.attacks
     abilitySquares.value = []
     abilities.value = response.abilities
+    loadedOptionsPieceId.value = selected.id
   } catch (e: unknown) {
     if (serial !== optionsSerial) return
     moves.value = []
+    legalMoves.value = []
     attacks.value = []
     abilitySquares.value = []
     abilities.value = []
+    loadedOptionsPieceId.value = null
     optionsError.value = e instanceof Error ? e.message : String(e)
   } finally {
     if (serial === optionsSerial) optionsLoading.value = false
@@ -554,6 +673,64 @@ async function loadSelectedPieceOptions() {
   grid-template-columns: minmax(260px, 0.85fr) minmax(480px, 1.5fr) minmax(300px, 0.9fr);
   gap: 16px;
   align-items: start;
+}
+
+.lab-promotion-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(5, 9, 14, 0.68);
+}
+
+.lab-promotion-box {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #131a27;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.42);
+}
+
+.lab-promotion-box p {
+  color: var(--muted);
+}
+
+.promotion-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 10px;
+}
+
+.promotion-choice {
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.promotion-choice:hover {
+  border-color: rgba(217, 164, 65, 0.58);
+  background: rgba(217, 164, 65, 0.14);
+}
+
+.promotion-choice .piece-icon {
+  width: 42px;
+  height: 42px;
 }
 
 .lab-panel {

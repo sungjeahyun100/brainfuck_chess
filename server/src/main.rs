@@ -193,6 +193,7 @@ struct LabAbilityOption {
 #[derive(Serialize)]
 struct LabPieceOptionsResponse {
     moves: Vec<Square>,
+    legal_moves: Vec<MoveAction>,
     attacks: Vec<Square>,
     abilities: Vec<LabAbilityOption>,
 }
@@ -1481,9 +1482,10 @@ async fn get_lab_piece_options(
     let state = build_lab_game_state(&req)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let piece_id = PieceId::from(req.selected_piece_id);
+    let legal_moves = generate_piece_legal_move_actions(&state, &piece_id);
     let mut seen_moves = HashSet::new();
-    let moves = generate_piece_legal_move_actions(&state, &piece_id)
-        .into_iter()
+    let moves = legal_moves
+        .iter()
         .map(|action| action.to)
         .filter(|square| seen_moves.insert(square.to_id()))
         .collect();
@@ -1513,6 +1515,7 @@ async fn get_lab_piece_options(
 
     Ok(Json(LabPieceOptionsResponse {
         moves,
+        legal_moves,
         attacks,
         abilities,
     }))
