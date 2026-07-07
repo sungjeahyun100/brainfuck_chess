@@ -22,11 +22,6 @@
           </option>
         </select>
       </label>
-      <div class="limit-panel">
-        <span class="limit-label">덱 점수</span>
-        <strong>{{ deckSummary.totalScore }} / {{ deckSummary.scoreLimit }}점</strong>
-        <span>{{ deckSummary.valid ? '게임 사용 가능' : '저장 가능 · 게임 사용 불가' }}</span>
-      </div>
     </section>
     <p v-if="saveError" class="error">{{ saveError }}</p>
 
@@ -45,6 +40,17 @@
           <strong>{{ preset.name }}</strong>
           <span>{{ preset.description }}</span>
         </button>
+      </div>
+    </section>
+
+    <section class="card deck-score-panel">
+      <div class="deck-score-copy">
+        <span class="limit-label">덱 점수</span>
+        <strong>{{ deckSummary.totalScore }} / {{ deckSummary.scoreLimit }}점</strong>
+        <span>{{ deckSummary.valid ? '게임 사용 가능' : '저장 가능 · 게임 사용 불가' }}</span>
+      </div>
+      <div class="deck-score-meter" :class="{ over: deckSummary.totalScore > deckSummary.scoreLimit }">
+        <span :style="{ width: scoreFillWidth }"></span>
       </div>
     </section>
 
@@ -101,7 +107,10 @@
       <section class="card board-panel">
         <div class="section-header">
           <p class="section-kicker">시작 기물 배치</p>
-          <h2>Frontline</h2>
+          <div class="section-title-row">
+            <h2>Frontline</h2>
+            <span class="section-score-pill">{{ frontlineScore }}점 · {{ scorePercent(frontlineScore) }}%</span>
+          </div>
         </div>
         <div class="placement-controls">
           <button class="tool-button" :class="{ active: placementTool === eraseTool }" @click="placementTool = eraseTool">
@@ -142,7 +151,10 @@
       <section class="card pocket-panel">
         <div class="section-header">
           <p class="section-kicker">포켓 기물 구성</p>
-          <h2>Pocket</h2>
+          <div class="section-title-row">
+            <h2>Pocket</h2>
+            <span class="section-score-pill">{{ pocketScore }}점 · {{ scorePercent(pocketScore) }}%</span>
+          </div>
         </div>
         <div
           class="pocket-drop-zone"
@@ -152,9 +164,9 @@
         >
           <span>{{ pocketDropMessage }}</span>
         </div>
-        <div class="pocket-summary">
-          <div v-for="piece in pocketCatalog" :key="piece.id" class="pocket-chip">
-            <span class="symbol">
+        <div v-if="activePocketCatalog.length > 0" class="pocket-summary">
+          <div v-for="piece in activePocketCatalog" :key="piece.id" class="pocket-chip">
+            <span class="symbol pocket-piece-symbol">
               <img
                 v-if="displayPieceAsset(piece.id)"
                 class="piece-icon"
@@ -164,9 +176,14 @@
               />
               <span v-else>{{ displayPieceSymbol(piece.id) }}</span>
             </span>
-            <strong>{{ deck.pocket[piece.id] ?? 0 }}</strong>
-            <button @click="changePocketCount(piece.id, -1)">-</button>
-            <button @click="changePocketCount(piece.id, 1)">+</button>
+            <span class="pocket-piece-name">{{ piece.name }}</span>
+            <span class="pocket-quantity">
+              <span class="pocket-quantity-bar">
+                <span :style="{ width: pocketFillWidth(piece.id) }"></span>
+              </span>
+              <strong>{{ deck.pocket[piece.id] ?? 0 }}</strong>
+            </span>
+            <button class="pocket-remove-button" aria-label="포켓 기물 제거" @click="changePocketCount(piece.id, -1)">-</button>
           </div>
         </div>
         <div v-if="deckSummary.errors.length > 0" class="validation-list">
@@ -190,6 +207,7 @@ import {
   isUniqueStartingPiece,
   pieceCatalog,
   pieceLabel,
+  pieceScore,
   pocketCatalog,
   presetLayoutForBoard,
   scoreLimit,
@@ -249,6 +267,11 @@ const deckSummary = computed(() => validateSavedDeck(deck.value))
 const canSaveDeck = computed(() => deck.value.name.trim().length > 0)
 const activePresets = computed(() => deckPresets.filter(preset => presetLayoutForBoard(preset, deck.value.boardSize)))
 const selectedToolLabel = computed(() => placementTool.value === eraseTool ? '지우개' : pieceLabel(placementTool.value))
+const scoreFillWidth = computed(() => `${Math.min(100, Math.round((deckSummary.value.totalScore / deckSummary.value.scoreLimit) * 100))}%`)
+const frontlineScore = computed(() => deck.value.starting.reduce((sum, piece) => sum + pieceScore(piece.pieceType), 0))
+const pocketScore = computed(() => Object.entries(deck.value.pocket).reduce((sum, [pieceType, count]) => sum + pieceScore(pieceType) * count, 0))
+const activePocketCatalog = computed(() => pocketCatalog.filter(piece => (deck.value.pocket[piece.id] ?? 0) > 0))
+const maxPocketCount = computed(() => Math.max(1, ...activePocketCatalog.value.map(piece => deck.value.pocket[piece.id] ?? 0)))
 const pocketDropMessage = computed(() => {
   if (!draggedPiece.value) return '여기에 드롭해서 포켓에 추가'
   if (!canUseInPocket(draggedPiece.value)) return `${pieceLabel(draggedPiece.value)}은 포켓에 넣을 수 없습니다.`
@@ -317,6 +340,15 @@ function pieceAt(file: number, rank: number): DeckPieceType | null {
 
 function pieceCount(pieceType: DeckPieceType): number {
   return deck.value.starting.filter(piece => piece.pieceType === pieceType).length
+}
+
+function scorePercent(score: number): number {
+  return Math.round((score / deckSummary.value.scoreLimit) * 100)
+}
+
+function pocketFillWidth(pieceType: DeckPieceType): string {
+  const count = deck.value.pocket[pieceType] ?? 0
+  return `${Math.round((count / maxPocketCount.value) * 100)}%`
 }
 
 function squareClass(file: number, rank: number): string[] {

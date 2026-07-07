@@ -75,24 +75,30 @@
         <h4>⬜ White Pocket</h4>
         <div class="pocket-pieces">
           <div
-            v-for="pid in whitePocket"
-            :key="pid"
-            class="pocket-piece"
-            :class="{ selected: selectedPocketPieceId === pid }"
+            v-for="group in whitePocketGroups"
+            :key="group.typeId"
+            class="pocket-piece-row"
+            :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
             draggable="true"
-            @click="onPocketClick(pid)"
-            @dragstart="onPocketDragStart($event, pid)"
+            @click="onPocketClick(group.representativeId)"
+            @dragstart="onPocketDragStart($event, group.representativeId)"
             @dragend="onPocketDragEnd"
           >
             <img
-              v-if="pieceImage(pid)"
+              v-if="pieceImage(group.representativeId)"
               class="pocket-piece-image"
-              :src="pieceImage(pid)"
-              :alt="pieceAlt(pid)"
+              :src="pieceImage(group.representativeId)"
+              :alt="pieceAlt(group.representativeId)"
               draggable="false"
             />
-            <span v-else>{{ pieceSymbol(viewState.pieces[pid]?.type_id) }}</span>
-            <small>{{ viewState.piece_definitions[viewState.pieces[pid]?.type_id]?.score }}pt</small>
+            <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
+            <span class="pocket-piece-meta">
+              <strong>{{ group.name }}</strong>
+              <span class="pocket-count-bar">
+                <span :style="{ width: pocketGroupFillWidth(group.count, maxWhitePocketCount) }"></span>
+              </span>
+            </span>
+            <span class="pocket-piece-count">{{ group.count }}</span>
           </div>
         </div>
         <div class="score-info" v-if="whiteDeck">
@@ -148,24 +154,30 @@
         <h4>⬛ Black Pocket</h4>
         <div class="pocket-pieces">
           <div
-            v-for="pid in blackPocket"
-            :key="pid"
-            class="pocket-piece"
-            :class="{ selected: selectedPocketPieceId === pid }"
+            v-for="group in blackPocketGroups"
+            :key="group.typeId"
+            class="pocket-piece-row"
+            :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
             draggable="true"
-            @click="onPocketClick(pid)"
-            @dragstart="onPocketDragStart($event, pid)"
+            @click="onPocketClick(group.representativeId)"
+            @dragstart="onPocketDragStart($event, group.representativeId)"
             @dragend="onPocketDragEnd"
           >
             <img
-              v-if="pieceImage(pid)"
+              v-if="pieceImage(group.representativeId)"
               class="pocket-piece-image"
-              :src="pieceImage(pid)"
-              :alt="pieceAlt(pid)"
+              :src="pieceImage(group.representativeId)"
+              :alt="pieceAlt(group.representativeId)"
               draggable="false"
             />
-            <span v-else>{{ pieceSymbol(viewState.pieces[pid]?.type_id) }}</span>
-            <small>{{ viewState.piece_definitions[viewState.pieces[pid]?.type_id]?.score }}pt</small>
+            <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
+            <span class="pocket-piece-meta">
+              <strong>{{ group.name }}</strong>
+              <span class="pocket-count-bar">
+                <span :style="{ width: pocketGroupFillWidth(group.count, maxBlackPocketCount) }"></span>
+              </span>
+            </span>
+            <span class="pocket-piece-count">{{ group.count }}</span>
           </div>
         </div>
         <div class="score-info" v-if="blackDeck">
@@ -245,6 +257,14 @@ let botRunSerial = 0
 const BOT_ACTION_PREVIEW_MS = 520
 const BOT_ACTION_SETTLE_MS = 340
 
+interface PocketGroup {
+  typeId: string
+  name: string
+  representativeId: string
+  pieceIds: string[]
+  count: number
+}
+
 interface LegalPieceOptions {
   abilityId: string | null
   legalTargets: Square[]
@@ -265,6 +285,10 @@ const whitePocket = computed(() =>
 const blackPocket = computed(() =>
   viewState.value.players['black']?.deck.pocket_pieces ?? []
 )
+const whitePocketGroups = computed(() => groupPocketPieces(whitePocket.value))
+const blackPocketGroups = computed(() => groupPocketPieces(blackPocket.value))
+const maxWhitePocketCount = computed(() => Math.max(1, ...whitePocketGroups.value.map(group => group.count)))
+const maxBlackPocketCount = computed(() => Math.max(1, ...blackPocketGroups.value.map(group => group.count)))
 const whiteDeck = computed(() => viewState.value.players['white']?.deck)
 const blackDeck = computed(() => viewState.value.players['black']?.deck)
 const isMyTurn = computed(() => !props.localPlayer || props.state.current_player === props.localPlayer)
@@ -605,6 +629,36 @@ function pieceImage(pieceId: string): string | undefined {
 function pieceAlt(pieceId: string): string {
   const piece = viewState.value.pieces[pieceId]
   return piece ? `${piece.owner} ${piece.type_id}` : pieceId
+}
+
+function groupPocketPieces(pieceIds: string[]): PocketGroup[] {
+  const groups = new Map<string, PocketGroup>()
+
+  for (const pieceId of pieceIds) {
+    const piece = viewState.value.pieces[pieceId]
+    if (!piece) continue
+
+    const existing = groups.get(piece.type_id)
+    if (existing) {
+      existing.pieceIds.push(pieceId)
+      existing.count += 1
+      continue
+    }
+
+    groups.set(piece.type_id, {
+      typeId: piece.type_id,
+      name: viewState.value.piece_definitions[piece.type_id]?.name ?? piece.type_id,
+      representativeId: pieceId,
+      pieceIds: [pieceId],
+      count: 1,
+    })
+  }
+
+  return Array.from(groups.values())
+}
+
+function pocketGroupFillWidth(count: number, maxCount: number): string {
+  return `${Math.round((count / Math.max(1, maxCount)) * 100)}%`
 }
 
 const PROMOTION_ORDER = [
@@ -1167,24 +1221,65 @@ async function onResign() {
   text-align: right;
 }
 
-.pocket { width: 132px; min-width: 120px; display: flex; flex-direction: column; gap: 8px; }
+.pocket { width: 170px; min-width: 150px; display: flex; flex-direction: column; gap: 8px; }
 .pocket h4 { margin: 0; font-size: 14px; }
-.pocket-pieces { display: flex; flex-wrap: wrap; gap: 6px; }
-.pocket-piece {
-  width: 44px; height: 44px; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  border: 2px solid #bbb; border-radius: 6px; cursor: pointer;
-  font-size: 22px; background: #f9f9f9; color: #1f2933;
+.pocket-pieces { display: grid; gap: 6px; }
+.pocket-piece-row {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 2px solid #bbb;
+  border-radius: 6px;
+  cursor: pointer;
+  background: #f9f9f9;
+  color: #1f2933;
   user-select: none;
 }
-.pocket-piece[draggable="true"] { cursor: grab; }
-.pocket-piece[draggable="true"]:active { cursor: grabbing; }
-.pocket-piece.selected { border-color: #4a8fff; background: #e0eeff; }
+.pocket-piece-row[draggable="true"] { cursor: grab; }
+.pocket-piece-row[draggable="true"]:active { cursor: grabbing; }
+.pocket-piece-row.selected { border-color: #4a8fff; background: #e0eeff; }
 .pocket-piece-image {
   display: block;
   width: 30px;
   height: 30px;
   object-fit: contain;
+}
+.pocket-piece-symbol {
+  font-size: 22px;
+  text-align: center;
+}
+.pocket-piece-meta {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.pocket-piece-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1;
+}
+.pocket-count-bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(31, 41, 51, 0.18);
+}
+.pocket-count-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #4a8fff;
+}
+.pocket-piece-count {
+  color: #1f2933;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
 }
 .score-info { font-size: 12px; color: #666; }
 

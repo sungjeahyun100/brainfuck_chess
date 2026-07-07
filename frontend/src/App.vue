@@ -482,7 +482,7 @@ select {
 
 .editor-topbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px) minmax(180px, max-content);
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px);
   gap: 16px;
   align-items: end;
   padding: 18px;
@@ -518,7 +518,55 @@ select {
   border-radius: 8px;
 }
 
+.deck-score-panel {
+  display: grid;
+  grid-template-columns: max-content minmax(220px, 1fr);
+  gap: 18px;
+  align-items: center;
+  padding: 18px;
+  border-color: rgba(217, 164, 65, 0.35);
+  background: linear-gradient(90deg, rgba(217, 164, 65, 0.13), rgba(255, 255, 255, 0.04));
+}
+
+.deck-score-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 190px;
+}
+
+.deck-score-copy strong {
+  color: #f4dfb0;
+  font-size: 26px;
+}
+
+.deck-score-copy span:last-child {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.deck-score-meter {
+  height: 18px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(5, 8, 13, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.deck-score-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #d9a441, #f4dfb0);
+  transition: width 0.18s ease;
+}
+
+.deck-score-meter.over > span {
+  background: linear-gradient(90deg, #ff7d7d, #ffc1a1);
+}
+
 .preset-panel,
+.deck-score-panel,
 .piece-list-panel,
 .board-panel,
 .pocket-panel,
@@ -533,6 +581,28 @@ select {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title-row h2 {
+  margin: 0;
+}
+
+.section-score-pill {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(217, 164, 65, 0.13);
+  color: #f4dfb0;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .preset-list {
@@ -778,28 +848,80 @@ select {
 }
 
 .pocket-summary {
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  grid-template-columns: 1fr;
 }
 
 .pocket-chip {
-  min-height: 58px;
+  min-height: 64px;
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: 42px minmax(90px, 0.8fr) minmax(110px, 1fr) 30px;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 10px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
 }
 
-.pocket-chip button {
-  width: 28px;
-  height: 28px;
+.pocket-piece-symbol {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+}
+
+.pocket-piece-name {
+  min-width: 0;
+  color: var(--text);
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pocket-quantity {
+  display: grid;
+  grid-template-columns: minmax(64px, 1fr) minmax(24px, max-content);
+  gap: 8px;
+  align-items: center;
+}
+
+.pocket-quantity-bar {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(5, 8, 13, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pocket-quantity-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #d9a441, #f4dfb0);
+  transition: width 0.18s ease;
+}
+
+.pocket-quantity strong {
+  color: #f4dfb0;
+  font-size: 13px;
+  text-align: right;
+}
+
+.pocket-remove-button {
+  width: 30px;
+  height: 30px;
+  border: none;
   border-radius: 50%;
   background: #243142;
   color: var(--text);
-  border: none;
   cursor: pointer;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pocket-remove-button:hover {
+  background: rgba(255, 125, 125, 0.18);
+  color: #ffc1c1;
 }
 
 .validation-list {
