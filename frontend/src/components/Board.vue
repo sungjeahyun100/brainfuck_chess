@@ -22,9 +22,9 @@
         <span v-if="legalMarker(sq)" class="legal-move-dot" :class="legalMarker(sq)" />
         <span v-if="sq.piece" class="piece" :class="`owner-${sq.piece.owner}`">
           <img
-            v-if="pieceAsset(sq.piece.type_id, sq.piece.owner)"
+            v-if="pieceImage(sq.piece.type_id, sq.piece.owner)"
             class="piece-image"
-            :src="pieceAsset(sq.piece.type_id, sq.piece.owner)"
+            :src="pieceImage(sq.piece.type_id, sq.piece.owner)"
             :alt="pieceAlt(sq.piece)"
             draggable="false"
           />
@@ -70,7 +70,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Board, Piece, PlayerId, Square } from '../types/game'
-import { pieceAsset } from '../pieceAssets'
+import { pieceAlt, pieceImage, pieceSymbol } from '../display/pieceDisplay'
 
 interface SquareInfo {
   id: string
@@ -476,31 +476,6 @@ onBeforeUnmount(() => {
   cleanupRightDrag()
 })
 
-const PIECE_SYMBOLS: Record<string, string> = {
-  'king': '♔',
-  'queen': '♕',
-  'amazon': 'A',
-  'cannon-rook': 'C',
-  'tempest-queen': 'Q',
-  'tempest-rook': 'T',
-  'tempest-knight': 'N',
-  'bouncing-bishop': 'B',
-  'rook': '♖',
-  'bishop': '♗',
-  'knight': '♘',
-  'pawn-white': '♙',
-  'pawn-black': '♟',
-  'tempest-pawn-white': '♙',
-  'tempest-pawn-black': '♟',
-}
-
-function pieceSymbol(typeId: string): string {
-  return PIECE_SYMBOLS[typeId] ?? '?'
-}
-
-function pieceAlt(piece: Piece): string {
-  return `${piece.owner} ${piece.type_id}`
-}
 </script>
 
 <style scoped>
