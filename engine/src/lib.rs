@@ -4,6 +4,7 @@ pub mod attack_map;
 pub mod chessembly;
 pub mod endgame;
 pub mod legal_moves;
+pub mod movegen;
 pub mod pieces;
 pub mod placement;
 pub mod profiling;
