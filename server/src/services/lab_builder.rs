@@ -1,12 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use brainfuck_chess_engine::{
-    pieces::default_pieces::all_default_definitions,
     rules::{calculate_score_limit, create_board},
-    types::{
-        ChessemblyProgramCache, Deck, GamePhase, GameState, Piece, PieceDefinition, PieceId,
-        Player, TurnState,
-    },
+    types::{Deck, GamePhase, GameState, Piece, PieceId, Player, TurnState},
 };
 
 use crate::dto::lab::LabPieceOptionsRequest;
@@ -18,11 +14,6 @@ pub fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, S
     }
 
     let mut board = create_board(req.board_size);
-    let defs: HashMap<String, PieceDefinition> = all_default_definitions()
-        .into_iter()
-        .map(|d| (d.id.clone(), d))
-        .collect();
-    let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&defs);
     let mut pieces = HashMap::new();
     let mut white_starting = Vec::new();
     let mut black_starting = Vec::new();
@@ -117,7 +108,6 @@ pub fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, S
         id: "piece-lab".into(),
         board,
         pieces,
-        piece_definitions: defs,
         players,
         current_player,
         turn_number: 1,
@@ -126,6 +116,5 @@ pub fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, S
         en_passant_available_to: None,
         turn_state: TurnState::new(),
         result: None,
-        chessembly_program_cache,
     })
 }

@@ -1,3 +1,4 @@
+use crate::catalog::PieceCatalog;
 use crate::legal_moves::{generate_legal_drop_actions, generate_legal_move_actions};
 use crate::types::{GamePhase, GameState, PlayerId, TurnState};
 
@@ -21,13 +22,14 @@ fn player_view(state: &GameState, player_id: &PlayerId) -> GameState {
 
 fn mobility(state: &GameState, player_id: &PlayerId) -> (usize, usize, bool) {
     let view = player_view(state, player_id);
+    let catalog = PieceCatalog::default_catalog();
     let moves = generate_legal_move_actions(&view);
     let can_capture_king = moves.iter().any(|action| {
         action
             .captured_piece_id
             .as_ref()
             .and_then(|id| view.pieces.get(id))
-            .and_then(|piece| view.piece_definitions.get(&piece.type_id))
+            .and_then(|piece| catalog.get(&piece.type_id))
             .is_some_and(|definition| definition.is_king)
     });
     (
@@ -38,6 +40,7 @@ fn mobility(state: &GameState, player_id: &PlayerId) -> (usize, usize, bool) {
 }
 
 pub fn evaluate(state: &GameState, bot_player_id: &PlayerId) -> i32 {
+    let catalog = PieceCatalog::default_catalog();
     if state.phase == GamePhase::Ended || state.result.is_some() {
         return match state
             .result
@@ -55,7 +58,7 @@ pub fn evaluate(state: &GameState, bot_player_id: &PlayerId) -> i32 {
         if piece.captured {
             continue;
         }
-        let Some(definition) = state.piece_definitions.get(&piece.type_id) else {
+        let Some(definition) = catalog.get(&piece.type_id) else {
             continue;
         };
         if definition.is_king {

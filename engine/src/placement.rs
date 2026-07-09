@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::attack_map::generate_attack_map;
+use crate::catalog::PieceCatalog;
 use crate::rules::get_base_zone_squares;
 use crate::types::*;
 #[cfg(feature = "profiling")]
@@ -79,7 +80,8 @@ pub fn validate_drop_action(game_state: &GameState, action: &DropAction) -> Resu
         .pieces
         .get(&action.piece_id)
         .ok_or("기물을 찾을 수 없습니다.")?;
-    if let Some(def) = game_state.piece_definitions.get(&piece.type_id) {
+    let catalog = PieceCatalog::default_catalog();
+    if let Some(def) = catalog.get(&piece.type_id) {
         if def.is_king {
             return Err("King은 착수할 수 없습니다.".into());
         }

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::chessembly::run_effective_chessembly_for_piece;
+use crate::chessembly::run_effective_chessembly_for_context;
+use crate::context::GameContext;
 use crate::types::*;
 
 #[derive(Debug, Clone, Default)]
@@ -9,15 +10,17 @@ pub struct MoveGenerationOptions {
 }
 
 pub(crate) fn can_use_selected_ability(
-    game_state: &GameState,
+    context: &GameContext<'_>,
     piece: &Piece,
     definition: &PieceDefinition,
     ability_id: &str,
 ) -> Option<PieceAbilityDefinition> {
+    let state = context.state;
+
     if piece
         .ability_cooldowns
         .get(ability_id)
-        .is_some_and(|usable_turn| *usable_turn > game_state.turn_number)
+        .is_some_and(|usable_turn| *usable_turn > state.turn_number)
     {
         return None;
     }
@@ -29,7 +32,7 @@ pub(crate) fn can_use_selected_ability(
         .clone();
 
     if ability.once_per_turn
-        && game_state.turn_state.actions.iter().any(|existing| {
+        && state.turn_state.actions.iter().any(|existing| {
             matches!(
                 existing,
                 TurnAction::ActivateAbility(previous)
@@ -44,7 +47,7 @@ pub(crate) fn can_use_selected_ability(
 }
 
 pub(crate) fn run_selected_ability_for_piece(
-    game_state: &GameState,
+    context: &GameContext<'_>,
     piece: &Piece,
     definition: &PieceDefinition,
     ability: &PieceAbilityDefinition,
@@ -55,12 +58,12 @@ pub(crate) fn run_selected_ability_for_piece(
     let mut ability_piece = piece.clone();
     ability_piece.active_ability = Some(ActiveAbilityState {
         ability_id: ability.id.clone(),
-        activated_turn_number: game_state.turn_number,
+        activated_turn_number: context.state.turn_number,
         activated_player: player_id.clone(),
         duration: ability.duration.clone(),
     });
-    run_effective_chessembly_for_piece(
-        game_state,
+    run_effective_chessembly_for_context(
+        context,
         &ability_piece,
         definition,
         player_id.clone(),

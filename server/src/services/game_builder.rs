@@ -7,8 +7,8 @@ use brainfuck_chess_engine::{
         validate_deck,
     },
     types::{
-        Board, ChessemblyProgramCache, Deck, GamePhase, GameState, Piece, PieceDefinition, PieceId,
-        PieceTypeId, Player, SquareId, TurnState,
+        Board, Deck, GamePhase, GameState, Piece, PieceDefinition, PieceId, PieceTypeId, Player,
+        SquareId, TurnState,
     },
 };
 
@@ -125,7 +125,6 @@ pub fn build_game_state(
         .into_iter()
         .map(|d| (d.id.clone(), d))
         .collect();
-    let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&defs);
     let mut pieces = HashMap::new();
 
     let white_deck = build_player_deck(
@@ -167,7 +166,6 @@ pub fn build_game_state(
         id,
         board,
         pieces,
-        piece_definitions: defs,
         players,
         current_player: "white".into(),
         turn_number: 1,
@@ -176,6 +174,5 @@ pub fn build_game_state(
         en_passant_available_to: None,
         turn_state: TurnState::new(),
         result: None,
-        chessembly_program_cache,
     })
 }

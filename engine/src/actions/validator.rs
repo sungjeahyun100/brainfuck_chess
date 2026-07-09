@@ -1,3 +1,4 @@
+use crate::catalog::PieceCatalog;
 use crate::legal_moves::{
     generate_legal_drop_actions, generate_legal_move_actions,
     generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
@@ -76,8 +77,8 @@ impl ActionValidator {
             return Err(ActionError::IllegalAbility);
         }
 
-        let definition = state
-            .piece_definitions
+        let catalog = PieceCatalog::default_catalog();
+        let definition = catalog
             .get(&piece.type_id)
             .ok_or(ActionError::IllegalAbility)?;
 

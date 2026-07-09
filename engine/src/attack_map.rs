@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::chessembly::run_effective_chessembly_for_piece;
+use crate::catalog::PieceCatalog;
+use crate::chessembly::run_effective_chessembly_for_context;
+use crate::context::GameContext;
+use crate::runtime::RuntimeResources;
 use crate::types::*;
 
 /// Compute the full attack map for a player: the union of attackSquares from
@@ -11,8 +14,24 @@ pub fn generate_attack_map(
     // Pre-computed attack maps for other players (used by `danger()` expression)
     existing_attack_maps: &HashMap<PlayerId, HashSet<SquareId>>,
 ) -> AttackMap {
+    let catalog = PieceCatalog::default_catalog();
+    let runtime = RuntimeResources::from_catalog(&catalog);
+    let context = GameContext {
+        state: game_state,
+        catalog: &catalog,
+        runtime: &runtime,
+    };
+    generate_attack_map_for_context(&context, player_id, existing_attack_maps)
+}
+
+pub fn generate_attack_map_for_context(
+    context: &GameContext<'_>,
+    player_id: &PlayerId,
+    existing_attack_maps: &HashMap<PlayerId, HashSet<SquareId>>,
+) -> AttackMap {
     crate::profiling::record_attack_map(1);
-    game_state.ensure_chessembly_cache();
+    context.ensure_chessembly_cache();
+    let game_state = context.state;
 
     let mut attacked_squares: HashSet<SquareId> = HashSet::new();
     let mut source_map: HashMap<SquareId, Vec<PieceId>> = HashMap::new();
@@ -23,13 +42,13 @@ pub fn generate_attack_map(
         if piece.owner != *player_id || !piece.is_on_board() {
             continue;
         }
-        let definition = match game_state.piece_definitions.get(&piece.type_id) {
+        let definition = match context.catalog.get(&piece.type_id) {
             Some(d) => d,
             None => continue,
         };
 
-        let chessembly_result = run_effective_chessembly_for_piece(
-            game_state,
+        let chessembly_result = run_effective_chessembly_for_context(
+            context,
             piece,
             definition,
             player_id.clone(),

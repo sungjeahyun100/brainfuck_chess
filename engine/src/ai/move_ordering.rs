@@ -1,16 +1,18 @@
 use std::cmp::Reverse;
 
 use crate::ai::types::AiAction;
+use crate::catalog::PieceCatalog;
 use crate::types::{GameState, PlayerId};
 
 fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
+    let catalog = PieceCatalog::default_catalog();
     match action {
         AiAction::Move(action) => {
             let Some(captured) = action
                 .captured_piece_id
                 .as_ref()
                 .and_then(|id| state.pieces.get(id))
-                .and_then(|piece| state.piece_definitions.get(&piece.type_id))
+                .and_then(|piece| catalog.get(&piece.type_id))
             else {
                 return (2, 0);
             };

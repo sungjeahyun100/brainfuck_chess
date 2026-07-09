@@ -2,6 +2,7 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::chessembly::ast::Program;
@@ -558,8 +559,6 @@ pub struct GameState {
     pub board: Board,
     /// All piece instances, keyed by PieceId
     pub pieces: HashMap<PieceId, Piece>,
-    /// All piece definitions, keyed by PieceTypeId
-    pub piece_definitions: HashMap<PieceTypeId, PieceDefinition>,
     pub players: HashMap<PlayerId, Player>,
     pub current_player: PlayerId,
     pub turn_number: u32,
@@ -570,68 +569,39 @@ pub struct GameState {
     pub en_passant_available_to: Option<PlayerId>,
     pub turn_state: TurnState,
     pub result: Option<GameResult>,
-    #[serde(skip, default)]
-    pub chessembly_program_cache: ChessemblyProgramCache,
 }
 
-impl GameState {
-    pub fn rebuild_chessembly_cache(&self) {
-        self.chessembly_program_cache
-            .rebuild(&self.piece_definitions);
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameSnapshot {
+    #[serde(flatten)]
+    pub state: GameState,
+    pub piece_definitions: HashMap<PieceTypeId, PieceDefinition>,
+}
 
-    pub fn ensure_chessembly_cache(&self) {
-        if !self
-            .chessembly_program_cache
-            .is_complete_for(&self.piece_definitions)
-        {
-            self.rebuild_chessembly_cache();
+impl GameSnapshot {
+    pub fn new(state: GameState, piece_definitions: HashMap<PieceTypeId, PieceDefinition>) -> Self {
+        Self {
+            state,
+            piece_definitions,
         }
     }
 
-    pub fn chessembly_program(&self, type_id: &PieceTypeId) -> Option<Arc<Program>> {
-        if let Some(program) = self.chessembly_program_cache.get(type_id) {
-            crate::profiling::record_cache_hit(1);
-            return Some(program);
-        }
-
-        let definition = self.piece_definitions.get(type_id)?;
-        Some(
-            self.chessembly_program_cache
-                .get_or_parse(type_id, definition),
-        )
+    pub fn into_state(self) -> GameState {
+        self.state
     }
+}
 
-    pub fn effective_chessembly_program(
-        &self,
-        piece: &Piece,
-        definition: &PieceDefinition,
-    ) -> Option<Arc<Program>> {
-        if let Some(active) = &piece.active_ability {
-            if let Some(ability) = definition
-                .abilities
-                .iter()
-                .find(|ability| ability.id == active.ability_id)
-            {
-                if let Some(program) = self
-                    .chessembly_program_cache
-                    .get_ability(&definition.id, &ability.id)
-                {
-                    crate::profiling::record_cache_hit(1);
-                    return Some(program);
-                }
-                return Some(
-                    self.chessembly_program_cache
-                        .get_or_parse_ability(&definition.id, ability),
-                );
-            }
-        }
+impl Deref for GameSnapshot {
+    type Target = GameState;
 
-        self.chessembly_program(&piece.type_id)
+    fn deref(&self) -> &Self::Target {
+        &self.state
     }
+}
 
-    pub fn cached_chessembly_program_count(&self) -> usize {
-        self.chessembly_program_cache.len()
+impl DerefMut for GameSnapshot {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
     }
 }
 

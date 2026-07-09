@@ -1,6 +1,7 @@
 use brainfuck_chess_engine::{
     ai::AiAction,
-    types::{DropAction, GameState, MoveAction, PlayerId, Square, TurnAction},
+    catalog::PieceCatalog,
+    types::{DropAction, GameSnapshot, GameState, MoveAction, PlayerId, Square, TurnAction},
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +27,12 @@ pub struct StartingPieceSpec {
 #[derive(Serialize)]
 pub struct GameResponse {
     pub id: String,
-    pub state: GameState,
+    pub state: GameSnapshot,
+}
+
+pub fn snapshot_for_state(state: GameState) -> GameSnapshot {
+    let catalog = PieceCatalog::default_catalog();
+    GameSnapshot::new(state, catalog.definitions().clone())
 }
 
 #[derive(Deserialize)]
@@ -51,7 +57,7 @@ pub struct BotTurnStats {
 #[derive(Debug, Serialize)]
 pub struct BotTurnResponse {
     pub ok: bool,
-    pub game_state: GameState,
+    pub game_state: GameSnapshot,
     pub actions: Vec<AiAction>,
     pub stats: BotTurnStats,
 }

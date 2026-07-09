@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use axum::{http::StatusCode, Json};
 use brainfuck_chess_engine::{
+    catalog::PieceCatalog,
     legal_moves::{
         generate_piece_attack_squares, generate_piece_legal_move_actions_with_options,
         MoveGenerationOptions,
@@ -37,10 +38,11 @@ pub async fn piece_lab_options(
         .into_iter()
         .filter(|square| seen_attacks.insert(square.to_id()))
         .collect();
+    let catalog = PieceCatalog::default_catalog();
     let abilities = state
         .pieces
         .get(&piece_id)
-        .and_then(|piece| state.piece_definitions.get(&piece.type_id))
+        .and_then(|piece| catalog.get(&piece.type_id))
         .map(|definition| {
             definition
                 .abilities

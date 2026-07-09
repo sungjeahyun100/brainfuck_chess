@@ -20,8 +20,8 @@ use uuid::Uuid;
 use crate::app_state::AppState;
 use crate::dto::error::{bad_request, not_found, ErrorBody as ErrorResponse};
 use crate::dto::game::{
-    BotTurnRequest, BotTurnResponse, BotTurnStats, CreateGameRequest, GameResponse,
-    LegalDropsResponse, LegalMovesResponse, PieceAttacksResponse, PieceOptionsQuery,
+    snapshot_for_state, BotTurnRequest, BotTurnResponse, BotTurnStats, CreateGameRequest,
+    GameResponse, LegalDropsResponse, LegalMovesResponse, PieceAttacksResponse, PieceOptionsQuery,
     PieceOptionsResponse, ResignGameRequest, SubmitActionRequest,
 };
 use crate::services::game_builder::build_game_state;
@@ -42,15 +42,18 @@ pub async fn create_game(
     let state = build_game_state(id.clone(), req.board_size, &req.white_deck, &req.black_deck)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     app.games.insert(id.clone(), state.clone());
-    Ok(Json(GameResponse { id, state }))
+    Ok(Json(GameResponse {
+        id,
+        state: snapshot_for_state(state),
+    }))
 }
 
 pub async fn get_game(
     State(app): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameSnapshot>, (StatusCode, Json<ErrorResponse>)> {
     match app.games.get(&id) {
-        Some(state) => Ok(Json(state.clone())),
+        Some(state) => Ok(Json(snapshot_for_state(state.clone()))),
         None => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -64,7 +67,7 @@ pub async fn resign_game(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<ResignGameRequest>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameSnapshot>, (StatusCode, Json<ErrorResponse>)> {
     if req.player_id != "white" && req.player_id != "black" {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -92,7 +95,7 @@ pub async fn resign_game(
         });
     }
 
-    Ok(Json(state.clone()))
+    Ok(Json(snapshot_for_state(state.clone())))
 }
 
 pub async fn submit_action(
@@ -107,7 +110,7 @@ pub async fn submit_action(
     match submit_turn_action(entry.clone(), req.action) {
         Ok(next_state) => {
             *entry = next_state.clone();
-            Json(next_state).into_response()
+            Json(snapshot_for_state(next_state)).into_response()
         }
         Err(error) => bad_request(error.to_string()),
     }
@@ -171,7 +174,7 @@ pub async fn bot_turn(
 
     Ok(Json(BotTurnResponse {
         ok: true,
-        game_state: result.state,
+        game_state: snapshot_for_state(result.state),
         actions: result.actions,
         stats: BotTurnStats {
             searched_nodes: result.searched_nodes,
@@ -184,7 +187,7 @@ pub async fn bot_turn(
 pub async fn end_game_turn(
     State(app): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameSnapshot>, (StatusCode, Json<ErrorResponse>)> {
     let mut entry = app.games.get_mut(&id).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -207,7 +210,7 @@ pub async fn end_game_turn(
 
     let new_state = end_turn(state.clone());
     *state = new_state;
-    Ok(Json(state.clone()))
+    Ok(Json(snapshot_for_state(state.clone())))
 }
 
 pub async fn get_legal_moves(

@@ -3,12 +3,12 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use brainfuck_chess_engine::types::{GameEndReason, GamePhase, GameResult, GameState, PlayerId};
+use brainfuck_chess_engine::types::{GameEndReason, GamePhase, GameResult, GameSnapshot, PlayerId};
 use uuid::Uuid;
 
 use crate::app_state::AppState;
 use crate::dto::error::ErrorBody as ErrorResponse;
-use crate::dto::game::GameResponse;
+use crate::dto::game::{snapshot_for_state, GameResponse};
 use crate::dto::room::{
     CreateRoomRequest, JoinRoomRequest, MultiplayerRoom, ResignRoomRequest, RoomReadyRequest,
     SelectDeckRequest,
@@ -59,7 +59,7 @@ fn start_room_game(
             .ok_or_else(|| "방의 게임을 찾을 수 없습니다.".to_string())?;
         return Ok(Some(GameResponse {
             id: game_id.clone(),
-            state: state.clone(),
+            state: snapshot_for_state(state.clone()),
         }));
     }
 
@@ -87,7 +87,10 @@ fn start_room_game(
 
     room.game_id = Some(game_id.clone());
     games.insert(game_id.clone(), state.clone());
-    Ok(Some(GameResponse { id: game_id, state }))
+    Ok(Some(GameResponse {
+        id: game_id,
+        state: snapshot_for_state(state),
+    }))
 }
 
 pub async fn create_room(
@@ -182,7 +185,7 @@ pub async fn join_room(
         })?;
         return Ok(Json(GameResponse {
             id: game_id.clone(),
-            state: state.clone(),
+            state: snapshot_for_state(state.clone()),
         }));
     }
 
@@ -347,7 +350,7 @@ pub async fn resign_room(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<ResignRoomRequest>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameSnapshot>, (StatusCode, Json<ErrorResponse>)> {
     let room = app
         .rooms
         .get(&id.to_uppercase())
@@ -399,5 +402,5 @@ pub async fn resign_room(
         });
     }
 
-    Ok(Json(state.clone()))
+    Ok(Json(snapshot_for_state(state.clone())))
 }

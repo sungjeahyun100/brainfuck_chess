@@ -4,15 +4,10 @@ use brainfuck_chess_engine::ai::{
     apply_ai_action, choose_bot_action, generate_ai_actions, play_bot_turn, AiAction, BotDifficulty,
 };
 use brainfuck_chess_engine::endgame::apply_move_action;
-use brainfuck_chess_engine::pieces::default_pieces::all_default_definitions;
 use brainfuck_chess_engine::rules::create_board;
 use brainfuck_chess_engine::types::*;
 
 fn make_state() -> GameState {
-    let definitions: HashMap<_, _> = all_default_definitions()
-        .into_iter()
-        .map(|definition| (definition.id.clone(), definition))
-        .collect();
     let players = ["white", "black"]
         .into_iter()
         .map(|id| {
@@ -37,8 +32,6 @@ fn make_state() -> GameState {
         id: "ai-test".into(),
         board: create_board(8),
         pieces: HashMap::new(),
-        chessembly_program_cache: ChessemblyProgramCache::from_definitions(&definitions),
-        piece_definitions: definitions,
         players,
         current_player: "white".into(),
         turn_number: 1,

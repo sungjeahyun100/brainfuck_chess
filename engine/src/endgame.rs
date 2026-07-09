@@ -1,3 +1,4 @@
+use crate::catalog::PieceCatalog;
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -49,34 +50,48 @@ pub fn is_royal_piece(definition: &PieceDefinition) -> bool {
 
 /// Returns true if the given player still has a living King on the board.
 pub fn has_living_king(game_state: &GameState, player_id: &PlayerId) -> bool {
+    let catalog = PieceCatalog::default_catalog();
+    has_living_king_with_catalog(game_state, player_id, &catalog)
+}
+
+pub fn has_living_king_with_catalog(
+    game_state: &GameState,
+    player_id: &PlayerId,
+    catalog: &PieceCatalog,
+) -> bool {
     game_state.pieces.values().any(|p| {
         p.owner == *player_id
             && p.is_on_board()
-            && game_state
-                .piece_definitions
-                .get(&p.type_id)
-                .map(is_royal_piece)
-                .unwrap_or(false)
+            && catalog.get(&p.type_id).map(is_royal_piece).unwrap_or(false)
     })
 }
 
 /// Apply a MoveAction to the game state.
 /// If the captured piece is a King, the game ends immediately.
-pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameState {
+pub fn apply_move_action(game_state: GameState, action: MoveAction) -> GameState {
+    let catalog = PieceCatalog::default_catalog();
+    apply_move_action_with_catalog(game_state, action, &catalog)
+}
+
+pub fn apply_move_action_with_catalog(
+    mut game_state: GameState,
+    action: MoveAction,
+    catalog: &PieceCatalog,
+) -> GameState {
     // Detect what is on the destination square before moving
     let target_piece_id = game_state.board.get_piece_at(&action.to).cloned();
     let target_is_king = target_piece_id.as_ref().and_then(|id| {
         game_state
             .pieces
             .get(id)
-            .and_then(|p| game_state.piece_definitions.get(&p.type_id))
+            .and_then(|p| catalog.get(&p.type_id))
             .map(is_royal_piece)
     });
     let used_ability_cooldown = action.ability_id.as_ref().and_then(|ability_id| {
         game_state
             .pieces
             .get(&action.piece_id)
-            .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+            .and_then(|piece| catalog.get(&piece.type_id))
             .and_then(|definition| {
                 definition
                     .abilities
@@ -94,7 +109,7 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         let can_promote = game_state
             .pieces
             .get(&action.piece_id)
-            .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+            .and_then(|piece| catalog.get(&piece.type_id))
             .and_then(|definition| {
                 definition.promotion_options_for_rank(action.to.rank, game_state.board.size)
             })
@@ -112,10 +127,9 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         piece.has_moved = true;
         if let Some((ability_id, cooldown_turns)) = used_ability_cooldown {
             if cooldown_turns > 0 {
-                piece.ability_cooldowns.insert(
-                    ability_id,
-                    game_state.turn_number + cooldown_turns + 1,
-                );
+                piece
+                    .ability_cooldowns
+                    .insert(ability_id, game_state.turn_number + cooldown_turns + 1);
             }
         }
         if piece
@@ -196,13 +210,22 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
 
 /// Apply an already validated ActivateAbilityAction to the game state.
 pub fn apply_activate_ability_action(
+    game_state: GameState,
+    action: ActivateAbilityAction,
+) -> GameState {
+    let catalog = PieceCatalog::default_catalog();
+    apply_activate_ability_action_with_catalog(game_state, action, &catalog)
+}
+
+pub fn apply_activate_ability_action_with_catalog(
     mut game_state: GameState,
     action: ActivateAbilityAction,
+    catalog: &PieceCatalog,
 ) -> GameState {
     let ability = game_state
         .pieces
         .get(&action.piece_id)
-        .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+        .and_then(|piece| catalog.get(&piece.type_id))
         .and_then(|definition| {
             definition
                 .abilities
