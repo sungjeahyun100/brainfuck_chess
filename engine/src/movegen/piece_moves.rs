@@ -1,18 +1,17 @@
-use std::collections::{HashMap, HashSet};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-use crate::chessembly::run_effective_chessembly_for_context;
 use crate::context::GameContext;
 use crate::types::*;
 
-use super::ability::{
-    can_use_selected_ability, run_selected_ability_for_piece, MoveGenerationOptions,
+use super::ability::{can_use_selected_ability, MoveGenerationOptions};
+use super::backend::{
+    ChessemblyBackend, NativeBackend, PieceMoveBackend, PieceMoveContext, PieceMovePattern,
 };
 use super::special::{castling, en_passant, pawn, promotion};
 
-struct PieceMovePattern {
-    result: ChessemblyResult,
+struct GeneratedPieceMovePattern {
+    pattern: PieceMovePattern,
     ability_id: Option<String>,
 }
 
@@ -98,10 +97,7 @@ fn run_piece_backend_or_ability(
     definition: &PieceDefinition,
     player_id: &PlayerId,
     options: &MoveGenerationOptions,
-) -> Option<PieceMovePattern> {
-    let empty_maps: HashMap<PlayerId, HashSet<SquareId>> = HashMap::new();
-    let empty_global_state = HashMap::new();
-
+) -> Option<GeneratedPieceMovePattern> {
     let selected_ability = options
         .ability_id
         .as_deref()
@@ -110,29 +106,37 @@ fn run_piece_backend_or_ability(
         return None;
     }
 
-    let result = if let Some(ability) = selected_ability.as_ref() {
-        run_selected_ability_for_piece(
-            context,
-            piece,
-            definition,
-            ability,
-            player_id,
-            &empty_global_state,
-            &empty_maps,
-        )
+    let mut ability_piece;
+    let backend_piece = if let Some(ability) = selected_ability.as_ref() {
+        ability_piece = piece.clone();
+        ability_piece.active_ability = Some(ActiveAbilityState {
+            ability_id: ability.id.clone(),
+            activated_turn_number: context.state.turn_number,
+            activated_player: player_id.clone(),
+            duration: ability.duration.clone(),
+        });
+        &ability_piece
     } else {
-        run_effective_chessembly_for_context(
-            context,
-            piece,
-            definition,
-            player_id.clone(),
-            &empty_global_state,
-            &empty_maps,
-        )
+        piece
     };
 
-    Some(PieceMovePattern {
-        result,
+    let backend_context = PieceMoveContext {
+        state: context.state,
+        piece: backend_piece,
+        definition,
+        player_id,
+    };
+    let pattern = if selected_ability.is_some() || piece.active_ability.is_some() {
+        ChessemblyBackend.generate(backend_context)
+    } else {
+        match definition.movegen_backend() {
+            MovegenBackend::Native => NativeBackend.generate(backend_context),
+            MovegenBackend::Chessembly => ChessemblyBackend.generate(backend_context),
+        }
+    };
+
+    Some(GeneratedPieceMovePattern {
+        pattern,
         ability_id: selected_ability.map(|ability| ability.id),
     })
 }
@@ -144,12 +148,12 @@ fn build_standard_move_actions(
     piece_id: &PieceId,
     player_id: &PlayerId,
     from: Square,
-    pattern: &PieceMovePattern,
+    pattern: &GeneratedPieceMovePattern,
 ) -> Vec<MoveAction> {
     let mut actions = Vec::new();
     let ability_id = pattern.ability_id.as_deref();
 
-    for to in pattern.result.movement_squares.iter().copied() {
+    for to in pattern.pattern.movement_squares.iter().copied() {
         if !state.board.is_in_bounds(&to) {
             continue;
         }
@@ -181,7 +185,7 @@ fn build_standard_move_actions(
         );
     }
 
-    for to in pattern.result.attack_squares.iter().copied() {
+    for to in pattern.pattern.attack_squares.iter().copied() {
         if !state.board.is_in_bounds(&to) {
             continue;
         }

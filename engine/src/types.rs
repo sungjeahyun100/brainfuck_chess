@@ -236,9 +236,10 @@ pub enum MovegenBackend {
 
 impl PieceDefinition {
     pub fn movegen_backend(&self) -> MovegenBackend {
-        // The first optimization pass keeps behavior identical. Native
-        // backends can be introduced piece-by-piece with parity tests.
-        MovegenBackend::Chessembly
+        match self.id.as_str() {
+            "king" | "queen" | "rook" | "bishop" | "knight" => MovegenBackend::Native,
+            _ => MovegenBackend::Chessembly,
+        }
     }
 
     pub fn promotion_options_for_rank(&self, rank: i32, board_size: i32) -> Option<&[PieceTypeId]> {

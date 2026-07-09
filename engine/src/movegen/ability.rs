@@ -1,6 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
-use crate::chessembly::run_effective_chessembly_for_context;
 use crate::context::GameContext;
 use crate::types::*;
 
@@ -44,30 +41,4 @@ pub(crate) fn can_use_selected_ability(
     }
 
     Some(ability)
-}
-
-pub(crate) fn run_selected_ability_for_piece(
-    context: &GameContext<'_>,
-    piece: &Piece,
-    definition: &PieceDefinition,
-    ability: &PieceAbilityDefinition,
-    player_id: &PlayerId,
-    empty_global_state: &HashMap<String, i32>,
-    empty_maps: &HashMap<PlayerId, HashSet<SquareId>>,
-) -> ChessemblyResult {
-    let mut ability_piece = piece.clone();
-    ability_piece.active_ability = Some(ActiveAbilityState {
-        ability_id: ability.id.clone(),
-        activated_turn_number: context.state.turn_number,
-        activated_player: player_id.clone(),
-        duration: ability.duration.clone(),
-    });
-    run_effective_chessembly_for_context(
-        context,
-        &ability_piece,
-        definition,
-        player_id.clone(),
-        empty_global_state,
-        empty_maps,
-    )
 }

@@ -19,7 +19,9 @@ pub fn run_effective_chessembly_for_piece(
     global_state: &HashMap<String, i32>,
     attack_maps: &HashMap<PlayerId, HashSet<SquareId>>,
 ) -> ChessemblyResult {
-    let catalog = PieceCatalog::default_catalog();
+    let mut definitions = PieceCatalog::default_catalog().definitions().clone();
+    definitions.insert(definition.id.clone(), definition.clone());
+    let catalog = PieceCatalog::from_definitions(definitions);
     let runtime = RuntimeResources::from_catalog(&catalog);
     let context = GameContext {
         state: game_state,
