@@ -1,12 +1,14 @@
 use axum::{
+    body::to_bytes,
     extract::{Path, Query, State},
     http::StatusCode,
+    response::IntoResponse,
     Json,
 };
 use brainfuck_chess_engine::{
     rules::can_end_turn,
     types::{
-        ActivateAbilityAction, GameEndReason, GamePhase, GameResult, MoveAction, Square,
+        ActivateAbilityAction, GameEndReason, GamePhase, GameResult, GameState, MoveAction, Square,
         TurnAction, TurnMode,
     },
 };
@@ -76,6 +78,29 @@ fn test_app_with_ability_bishop() -> (AppState, String) {
     (app, game_id)
 }
 
+async fn response_json<T: serde::de::DeserializeOwned>(response: axum::response::Response) -> T {
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+async fn submit_action_state(response: impl IntoResponse) -> GameState {
+    let response = response.into_response();
+    assert_eq!(response.status(), StatusCode::OK);
+    response_json(response).await
+}
+
+async fn submit_action_error(response: impl IntoResponse) -> (StatusCode, String) {
+    let response = response.into_response();
+    let status = response.status();
+    let body: serde_json::Value = response_json(response).await;
+    let message = body
+        .get("error")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    (status, message)
+}
+
 #[tokio::test]
 async fn piece_options_returns_only_selected_piece_moves() {
     let (app, game_id) = test_app_with_game();
@@ -133,26 +158,25 @@ async fn lab_piece_options_uses_temporary_state_without_storing_game() {
 async fn submit_move_action_automatically_ends_turn() {
     let (app, game_id) = test_app_with_game();
 
-    let response = match submit_action(
-        State(app.clone()),
-        Path(game_id.clone()),
-        Json(SubmitActionRequest {
-            action: TurnAction::Move(MoveAction {
-                player_id: "white".into(),
-                piece_id: "white_rook_1".into(),
-                from: Square::new(0, 0),
-                to: Square::new(0, 1),
-                captured_piece_id: None,
-                promotion: None,
-                ability_id: None,
+    let response = submit_action_state(
+        submit_action(
+            State(app.clone()),
+            Path(game_id.clone()),
+            Json(SubmitActionRequest {
+                action: TurnAction::Move(MoveAction {
+                    player_id: "white".into(),
+                    piece_id: "white_rook_1".into(),
+                    from: Square::new(0, 0),
+                    to: Square::new(0, 1),
+                    captured_piece_id: None,
+                    promotion: None,
+                    ability_id: None,
+                }),
             }),
-        }),
+        )
+        .await,
     )
-    .await
-    {
-        Ok(Json(state)) => state,
-        Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
-    };
+    .await;
 
     assert_eq!(response.current_player, "black");
     assert_eq!(response.turn_number, 2);
@@ -244,22 +268,21 @@ async fn bot_turn_api_rejects_an_unknown_difficulty() {
 async fn submit_action_activates_ability_and_records_action() {
     let (app, game_id) = test_app_with_ability_bishop();
 
-    let response = match submit_action(
-        State(app.clone()),
-        Path(game_id.clone()),
-        Json(SubmitActionRequest {
-            action: TurnAction::ActivateAbility(ActivateAbilityAction {
-                player_id: "white".into(),
-                piece_id: "white_bishop_1".into(),
-                ability_id: "bounce_mode".into(),
+    let response = submit_action_state(
+        submit_action(
+            State(app.clone()),
+            Path(game_id.clone()),
+            Json(SubmitActionRequest {
+                action: TurnAction::ActivateAbility(ActivateAbilityAction {
+                    player_id: "white".into(),
+                    piece_id: "white_bishop_1".into(),
+                    ability_id: "bounce_mode".into(),
+                }),
             }),
-        }),
+        )
+        .await,
     )
-    .await
-    {
-        Ok(Json(state)) => state,
-        Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
-    };
+    .await;
 
     let bishop = response.pieces.get("white_bishop_1").unwrap();
     assert_eq!(bishop.type_id, "bishop");
@@ -286,22 +309,24 @@ async fn submit_action_rejects_ability_during_drop_mode() {
         state.turn_state.mode = TurnMode::Drop;
     }
 
-    let error = submit_action(
-        State(app),
-        Path(game_id),
-        Json(SubmitActionRequest {
-            action: TurnAction::ActivateAbility(ActivateAbilityAction {
-                player_id: "white".into(),
-                piece_id: "white_bishop_1".into(),
-                ability_id: "bounce_mode".into(),
+    let (status, message) = submit_action_error(
+        submit_action(
+            State(app),
+            Path(game_id),
+            Json(SubmitActionRequest {
+                action: TurnAction::ActivateAbility(ActivateAbilityAction {
+                    player_id: "white".into(),
+                    piece_id: "white_bishop_1".into(),
+                    ability_id: "bounce_mode".into(),
+                }),
             }),
-        }),
+        )
+        .await,
     )
-    .await
-    .unwrap_err();
+    .await;
 
-    assert_eq!(error.0, StatusCode::BAD_REQUEST);
-    assert!(error.1.error.contains("능력"));
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(message.contains("능력"));
 }
 
 #[tokio::test]
@@ -315,15 +340,15 @@ async fn submit_action_rejects_reactivating_active_ability() {
         }),
     };
 
-    let _ = submit_action(State(app.clone()), Path(game_id.clone()), Json(request()))
-        .await
-        .unwrap();
-    let error = submit_action(State(app), Path(game_id), Json(request()))
-        .await
-        .unwrap_err();
+    let _ = submit_action_state(
+        submit_action(State(app.clone()), Path(game_id.clone()), Json(request())).await,
+    )
+    .await;
+    let (status, message) =
+        submit_action_error(submit_action(State(app), Path(game_id), Json(request())).await).await;
 
-    assert_eq!(error.0, StatusCode::BAD_REQUEST);
-    assert!(error.1.error.contains("이미 활성화"));
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(message.contains("사용할 수 없는 능력"));
 }
 
 #[tokio::test]
@@ -337,9 +362,10 @@ async fn submit_action_rejects_once_per_turn_repeat_even_after_manual_clear() {
         }),
     };
 
-    let _ = submit_action(State(app.clone()), Path(game_id.clone()), Json(request()))
-        .await
-        .unwrap();
+    let _ = submit_action_state(
+        submit_action(State(app.clone()), Path(game_id.clone()), Json(request())).await,
+    )
+    .await;
     {
         let mut state = app.games.get_mut(&game_id).unwrap();
         state
@@ -348,10 +374,9 @@ async fn submit_action_rejects_once_per_turn_repeat_even_after_manual_clear() {
             .unwrap()
             .active_ability = None;
     }
-    let error = submit_action(State(app), Path(game_id), Json(request()))
-        .await
-        .unwrap_err();
+    let (status, message) =
+        submit_action_error(submit_action(State(app), Path(game_id), Json(request())).await).await;
 
-    assert_eq!(error.0, StatusCode::BAD_REQUEST);
-    assert!(error.1.error.contains("한 번"));
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(message.contains("사용할 수 없는 능력"));
 }

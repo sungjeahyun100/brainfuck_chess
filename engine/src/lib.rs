@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod ai;
 pub mod attack_map;
 pub mod chessembly;

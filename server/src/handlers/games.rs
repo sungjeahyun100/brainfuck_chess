@@ -1,16 +1,16 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
+    response::IntoResponse,
     Json,
 };
 
 use brainfuck_chess_engine::{
+    actions::service::submit_turn_action,
     ai::{play_bot_turn_detailed, BotDifficulty},
-    endgame::{apply_activate_ability_action, apply_drop_action, apply_move_action},
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
-        generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
-        MoveGenerationOptions,
+        generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
     },
     rules::{can_end_turn, end_turn},
     types::*,
@@ -18,7 +18,7 @@ use brainfuck_chess_engine::{
 use uuid::Uuid;
 
 use crate::app_state::AppState;
-use crate::dto::error::ErrorBody as ErrorResponse;
+use crate::dto::error::{bad_request, not_found, ErrorBody as ErrorResponse};
 use crate::dto::game::{
     BotTurnRequest, BotTurnResponse, BotTurnStats, CreateGameRequest, GameResponse,
     LegalDropsResponse, LegalMovesResponse, PieceAttacksResponse, PieceOptionsQuery,
@@ -31,21 +31,6 @@ fn opponent_side(side: &PlayerId) -> PlayerId {
         "black".into()
     } else {
         "white".into()
-    }
-}
-
-fn has_move_or_drop_action(turn_state: &TurnState) -> bool {
-    turn_state
-        .actions
-        .iter()
-        .any(|action| matches!(action, TurnAction::Move(_) | TurnAction::Drop(_)))
-}
-
-fn end_turn_after_action(state: GameState) -> GameState {
-    if state.phase == GamePhase::Ended || state.result.is_some() {
-        state
-    } else {
-        end_turn(state)
     }
 }
 
@@ -114,227 +99,18 @@ pub async fn submit_action(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<SubmitActionRequest>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
-    let mut entry = app.games.get_mut(&id).ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "게임을 찾을 수 없습니다.".into(),
-            }),
-        )
-    })?;
+) -> impl IntoResponse {
+    let Some(mut entry) = app.games.get_mut(&id) else {
+        return not_found("게임을 찾을 수 없습니다.");
+    };
 
-    let state = entry.value_mut();
-
-    if state.phase == GamePhase::Ended {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "게임이 이미 종료되었습니다.".into(),
-            }),
-        ));
-    }
-
-    if has_move_or_drop_action(&state.turn_state) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "이번 턴에는 이미 행동했습니다. 턴을 종료하세요.".into(),
-            }),
-        ));
-    }
-
-    match req.action {
-        TurnAction::Move(action) => {
-            if action.player_id != state.current_player {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: "현재 턴 플레이어만 행동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            if state.turn_state.mode == TurnMode::Drop {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "착수 턴에는 이동할 수 없습니다.".into(),
-                    }),
-                ));
-            }
-            let piece = state.pieces.get(&action.piece_id).ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "기물을 찾을 수 없습니다.".into(),
-                    }),
-                )
-            })?;
-            if piece.owner != state.current_player {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: "자신의 기물만 이동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            let move_options = MoveGenerationOptions {
-                ability_id: action.ability_id.clone(),
-            };
-            let is_legal = generate_piece_legal_move_actions_with_options(
-                state,
-                &action.piece_id,
-                &move_options,
-            )
-            .iter()
-            .any(|m| {
-                m.from == action.from
-                    && m.to == action.to
-                    && m.promotion == action.promotion
-                    && m.ability_id == action.ability_id
-            });
-            if !is_legal {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "합법적이지 않은 이동입니다.".into(),
-                    }),
-                ));
-            }
-
-            state.turn_state.mode = TurnMode::Move;
-            let new_state = apply_move_action(state.clone(), action);
-            *state = end_turn_after_action(new_state);
+    match submit_turn_action(entry.clone(), req.action) {
+        Ok(next_state) => {
+            *entry = next_state.clone();
+            Json(next_state).into_response()
         }
-        TurnAction::Drop(action) => {
-            if action.player_id != state.current_player {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: "현재 턴 플레이어만 행동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            if state.turn_state.mode == TurnMode::Move {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "이동 턴에는 착수할 수 없습니다.".into(),
-                    }),
-                ));
-            }
-            let is_legal = generate_piece_legal_drop_actions(state, &action.piece_id)
-                .iter()
-                .any(|d| d.player_id == action.player_id && d.to == action.to);
-            if !is_legal {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "착수 가능한 칸이 아닙니다.".into(),
-                    }),
-                ));
-            }
-
-            state.turn_state.mode = TurnMode::Drop;
-            let new_state = apply_drop_action(state.clone(), action);
-            *state = end_turn_after_action(new_state);
-        }
-        TurnAction::ActivateAbility(action) => {
-            if action.player_id != state.current_player {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: "현재 턴 플레이어만 행동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            if state.turn_state.mode == TurnMode::Drop {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "착수 턴에는 능력을 발동할 수 없습니다.".into(),
-                    }),
-                ));
-            }
-
-            let piece = state.pieces.get(&action.piece_id).ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "기물을 찾을 수 없습니다.".into(),
-                    }),
-                )
-            })?;
-            if piece.owner != state.current_player {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: "자신의 기물 능력만 발동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            if !piece.is_on_board() {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "보드 위의 기물만 능력을 발동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            if piece.active_ability.is_some() {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "이미 활성화된 능력이 있습니다.".into(),
-                    }),
-                ));
-            }
-
-            let definition = state.piece_definitions.get(&piece.type_id).ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "기물 정의를 찾을 수 없습니다.".into(),
-                    }),
-                )
-            })?;
-            let ability = definition
-                .abilities
-                .iter()
-                .find(|ability| ability.id == action.ability_id)
-                .ok_or_else(|| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(ErrorResponse {
-                            error: "해당 기물에 없는 능력입니다.".into(),
-                        }),
-                    )
-                })?;
-            if ability.once_per_turn
-                && state.turn_state.actions.iter().any(|existing| {
-                    matches!(
-                        existing,
-                        TurnAction::ActivateAbility(previous)
-                            if previous.piece_id == action.piece_id
-                                && previous.ability_id == action.ability_id
-                    )
-                })
-            {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "이 능력은 같은 턴에 한 번만 발동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-
-            state.turn_state.mode = TurnMode::Move;
-            let new_state = apply_activate_ability_action(state.clone(), action);
-            *state = new_state;
-        }
+        Err(error) => bad_request(error.to_string()),
     }
-
-    Ok(Json(state.clone()))
 }
 
 pub async fn bot_turn(
