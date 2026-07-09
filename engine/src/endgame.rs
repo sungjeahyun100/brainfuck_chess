@@ -1,3 +1,5 @@
+use crate::actions::effect::AppliedAction;
+use crate::actions::effect_builder::build_state_diff_effects;
 use crate::catalog::PieceCatalog;
 use crate::types::*;
 
@@ -71,6 +73,17 @@ pub fn has_living_king_with_catalog(
 pub fn apply_move_action(game_state: GameState, action: MoveAction) -> GameState {
     let catalog = PieceCatalog::default_catalog();
     apply_move_action_with_catalog(game_state, action, &catalog)
+}
+
+pub fn apply_move_action_with_effects(game_state: GameState, action: MoveAction) -> AppliedAction {
+    let before = game_state.clone();
+    let next = apply_move_action(game_state, action.clone());
+
+    AppliedAction {
+        action: TurnAction::Move(action),
+        effects: build_state_diff_effects(&before, &next),
+        state: next,
+    }
 }
 
 pub fn apply_move_action_with_catalog(
@@ -208,6 +221,17 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
     game_state
 }
 
+pub fn apply_drop_action_with_effects(game_state: GameState, action: DropAction) -> AppliedAction {
+    let before = game_state.clone();
+    let next = apply_drop_action(game_state, action.clone());
+
+    AppliedAction {
+        action: TurnAction::Drop(action),
+        effects: build_state_diff_effects(&before, &next),
+        state: next,
+    }
+}
+
 /// Apply an already validated ActivateAbilityAction to the game state.
 pub fn apply_activate_ability_action(
     game_state: GameState,
@@ -215,6 +239,20 @@ pub fn apply_activate_ability_action(
 ) -> GameState {
     let catalog = PieceCatalog::default_catalog();
     apply_activate_ability_action_with_catalog(game_state, action, &catalog)
+}
+
+pub fn apply_activate_ability_action_with_effects(
+    game_state: GameState,
+    action: ActivateAbilityAction,
+) -> AppliedAction {
+    let before = game_state.clone();
+    let next = apply_activate_ability_action(game_state, action.clone());
+
+    AppliedAction {
+        action: TurnAction::ActivateAbility(action),
+        effects: build_state_diff_effects(&before, &next),
+        state: next,
+    }
 }
 
 pub fn apply_activate_ability_action_with_catalog(

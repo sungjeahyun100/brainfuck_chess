@@ -527,7 +527,7 @@ pub struct DropCandidateByType {
 
 // ─── GameResult ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameResult {
     pub winner: Option<PlayerId>,
     pub reason: GameEndReason,
