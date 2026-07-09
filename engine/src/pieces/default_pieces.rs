@@ -132,7 +132,15 @@ take-move(-1, -1) repeat(1);"
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
+        abilities: vec![PieceAbilityDefinition {
+            id: "bounce_mode".into(),
+            name: "Reflective Movement".into(),
+            description: "Moves like a Bouncing Bishop until this turn ends.".into(),
+            chessembly_code: bounce_code,
+            duration: AbilityDuration::UntilTurnEnd,
+            once_per_turn: true,
+            cooldown_turns: 0,
+        }],
     }
 }
 
