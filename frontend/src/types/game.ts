@@ -39,6 +39,13 @@ export interface PieceAbilityDefinition {
   cooldown_turns?: number
 }
 
+export interface ActiveAbilityState {
+  ability_id: string
+  activated_turn_number: number
+  activated_player: PlayerId
+  duration: PieceAbilityDefinition['duration']
+}
+
 export interface Piece {
   id: PieceId
   owner: PlayerId
@@ -47,6 +54,7 @@ export interface Piece {
   in_pocket: boolean
   captured: boolean
   has_moved: boolean
+  active_ability?: ActiveAbilityState | null
   ability_cooldowns?: Record<string, number>
 }
 
@@ -99,6 +107,73 @@ export interface EndTurnAiAction {
 
 export type AiAction = MoveAction | DropAction | EndTurnAiAction
 
+export type ActionEffect =
+  | {
+    type: 'move_piece'
+    piece_id: PieceId
+    from: Square
+    to: Square
+  }
+  | {
+    type: 'capture_piece'
+    piece_id: PieceId
+    at: Square
+  }
+  | {
+    type: 'drop_piece'
+    piece_id: PieceId
+    to: Square
+  }
+  | {
+    type: 'promote_piece'
+    piece_id: PieceId
+    from_type: PieceTypeId
+    to_type: PieceTypeId
+  }
+  | {
+    type: 'swap_pieces'
+    first_piece_id: PieceId
+    second_piece_id: PieceId
+    first_to: Square
+    second_to: Square
+  }
+  | {
+    type: 'set_piece_ability'
+    piece_id: PieceId
+    ability_id: string
+  }
+  | {
+    type: 'clear_piece_ability'
+    piece_id: PieceId
+    ability_id: string
+  }
+  | {
+    type: 'set_ability_cooldown'
+    piece_id: PieceId
+    ability_id: string
+    usable_turn: number
+  }
+  | {
+    type: 'set_en_passant'
+    target: Square | null
+    available_to: PlayerId | null
+  }
+  | {
+    type: 'advance_turn'
+    from_player: PlayerId
+    to_player: PlayerId
+    turn_number: number
+  }
+  | {
+    type: 'end_game'
+    result: GameResult
+  }
+
+export interface ActionTimelineFrame {
+  action: AiAction
+  effects: ActionEffect[]
+}
+
 export interface BotTurnStats {
   searched_nodes: number
   depth_reached: number
@@ -109,6 +184,7 @@ export interface BotTurnResponse {
   ok: boolean
   game_state: GameState
   actions: AiAction[]
+  timeline?: ActionTimelineFrame[]
   stats: BotTurnStats
 }
 

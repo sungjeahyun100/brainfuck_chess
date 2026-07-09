@@ -7,7 +7,7 @@ use axum::{
 
 use brainfuck_chess_engine::{
     actions::service::submit_turn_action,
-    ai::{play_bot_turn_detailed, BotDifficulty},
+    ai::BotDifficulty,
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
@@ -24,6 +24,7 @@ use crate::dto::game::{
     GameResponse, LegalDropsResponse, LegalMovesResponse, PieceAttacksResponse, PieceOptionsQuery,
     PieceOptionsResponse, ResignGameRequest, SubmitActionRequest,
 };
+use crate::services::bot_service::run_bot_turn;
 use crate::services::game_builder::build_game_state;
 
 fn opponent_side(side: &PlayerId) -> PlayerId {
@@ -168,7 +169,7 @@ pub async fn bot_turn(
         ));
     }
 
-    let result = play_bot_turn_detailed(entry.clone(), &req.bot_player_id, difficulty)
+    let result = run_bot_turn(entry.clone(), &req.bot_player_id, difficulty)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     *entry = result.state.clone();
 
@@ -176,6 +177,7 @@ pub async fn bot_turn(
         ok: true,
         game_state: snapshot_for_state(result.state),
         actions: result.actions,
+        timeline: result.timeline,
         stats: BotTurnStats {
             searched_nodes: result.searched_nodes,
             depth_reached: result.depth_reached,

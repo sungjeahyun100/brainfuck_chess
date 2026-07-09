@@ -205,6 +205,16 @@ async fn bot_turn_api_runs_and_persists_a_complete_turn() {
 
     assert!(response.ok);
     assert!(!response.actions.is_empty());
+    assert_eq!(response.timeline.len(), response.actions.len());
+    assert!(response
+        .timeline
+        .iter()
+        .all(|frame| !frame.effects.is_empty()));
+    assert!(response
+        .timeline
+        .iter()
+        .zip(&response.actions)
+        .all(|(frame, action)| &frame.action == action));
     assert!(
         response.game_state.phase == GamePhase::Ended
             || response.game_state.current_player == "black"

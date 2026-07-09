@@ -5,6 +5,8 @@ use brainfuck_chess_engine::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::dto::timeline::ActionTimelineFrame;
+
 #[derive(Deserialize)]
 pub struct CreateGameRequest {
     pub board_size: i32,
@@ -59,6 +61,7 @@ pub struct BotTurnResponse {
     pub ok: bool,
     pub game_state: GameSnapshot,
     pub actions: Vec<AiAction>,
+    pub timeline: Vec<ActionTimelineFrame>,
     pub stats: BotTurnStats,
 }
 

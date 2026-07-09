@@ -1,6 +1,8 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { api } from '../api/gameApi'
+import { useActionTimeline } from './useActionTimeline'
 import type {
+  ActionTimelineFrame,
   AiAction,
   BotDifficulty,
   BotTurnStats,
@@ -155,6 +157,7 @@ function applyActionForReplay(state: GameState, action: AiAction): GameState {
 }
 
 export function useBotReplay(options: UseBotReplayOptions) {
+  const { applyTimelineFrame } = useActionTimeline()
   const botError = ref<string | null>(null)
   const botThinking = ref(false)
   const botReplaying = ref(false)
@@ -250,6 +253,33 @@ export function useBotReplay(options: UseBotReplayOptions) {
     options.emitStateUpdate(finalState)
   }
 
+  async function replayTimeline(
+    timeline: ActionTimelineFrame[],
+    finalState: GameState,
+    runId: number,
+  ) {
+    botReplaying.value = true
+    let nextReplayState = cloneGameState(options.getState())
+    for (let index = 0; index < timeline.length; index++) {
+      if (runId !== botRunSerial) return
+
+      const frame = timeline[index]
+      botReplayMessage.value = `${index + 1}/${timeline.length} ${actionLabel(frame.action)}`
+      previewBotAction(frame.action)
+      await wait(BOT_ACTION_PREVIEW_MS)
+      if (runId !== botRunSerial) return
+
+      nextReplayState = applyTimelineFrame(nextReplayState, frame)
+      botReplayState.value = nextReplayState
+      clearBotPreview()
+      await wait(BOT_ACTION_SETTLE_MS)
+    }
+
+    if (runId !== botRunSerial) return
+    botReplayState.value = null
+    options.emitStateUpdate(finalState)
+  }
+
   async function runBotTurn() {
     const botPlayer = options.getBotPlayer()
     if (!botPlayer || !options.isBotTurn() || botThinking.value) return
@@ -270,7 +300,11 @@ export function useBotReplay(options: UseBotReplayOptions) {
       )
       if (runId !== botRunSerial) return
       lastBotStats.value = response.stats
-      await replayBotTurn(response.actions, response.game_state, runId)
+      if (response.timeline?.length) {
+        await replayTimeline(response.timeline, response.game_state, runId)
+      } else {
+        await replayBotTurn(response.actions, response.game_state, runId)
+      }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e)
       if (message.includes('현재 턴 플레이어와 bot_player_id가 일치하지 않습니다.')) {
