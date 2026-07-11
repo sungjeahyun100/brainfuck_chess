@@ -306,6 +306,7 @@ const pieceSearch = ref('')
 const moves = ref<Square[]>([])
 const legalMoves = ref<MoveAction[]>([])
 const attacks = ref<Square[]>([])
+const globalState = ref<Record<string, number>>({})
 const abilitySquares = ref<Square[]>([])
 const abilities = ref<PieceLabAbilityOption[]>([])
 const activeAbilityId = ref<string | null>(null)
@@ -427,8 +428,10 @@ function displayPieceSymbol(pieceType: string): string {
     'cannon-rook': 'C',
     'tempest-queen': 'Q',
     'tempest-rook': 'T',
+    'tempest-bishop': 'B',
     'tempest-knight': 'N',
     'bouncing-bishop': 'B',
+    windmill: 'W',
     rook: 'R',
     bishop: 'B',
     knight: 'N',
@@ -444,15 +447,17 @@ function movementDescription(pieceType: string): string {
     queen: '가로, 세로, 대각선으로 막히기 전까지 이동하고 공격합니다.',
     rook: '가로와 세로로 막히기 전까지 이동하고 공격합니다.',
     'cannon-rook': '기본은 Rook처럼 이동합니다. 특수능력으로 이번 선택 동안 장기의 포처럼 정확히 하나의 기물을 뛰어넘습니다.',
-    bishop: '대각선으로 막히기 전까지 이동하고 공격합니다. 특수능력으로 Bouncing Bishop 행마를 일시 적용할 수 있습니다.',
+    bishop: '대각선으로 막히기 전까지 이동하고 공격합니다.',
     knight: 'L자 형태로 도약하며 중간 기물에 막히지 않습니다.',
     pawn: 'White는 위로, Black은 아래로 전진합니다. 대각선 전방을 공격하고 시작 위치에서는 2칸 전진할 수 있습니다.',
     amazon: 'Queen의 장거리 행마와 Knight의 도약 행마를 모두 사용합니다.',
     'tempest-rook': '대각선으로 한 칸 진입한 뒤 그 지점에서 가로 또는 세로 방향으로 뻗어 나갑니다.',
+    'tempest-bishop': '가로 또는 세로로 한 칸 진입한 뒤 그 지점에서 대각선으로 뻗어 나갑니다.',
     'bouncing-bishop': '대각선으로 이동하며 보드 가장자리에서 반사되는 경로를 가집니다.',
     'tempest-pawn': 'Pawn과 같은 기본 행마를 사용하되, 승격 후보가 Tempest 계열 기물입니다.',
     'tempest-queen': '대각선 진입 후 가로, 세로, 대각선으로 폭풍처럼 뻗어 나갑니다.',
     'tempest-knight': '대각선 진입 후 확장된 Knight 계열 도약과 3칸 직선 도약을 사용합니다.',
+    windmill: '성공적으로 이동할 때마다 Bishop 계열 대각선 행마와 Rook 계열 직선 행마가 번갈아 전환됩니다.',
   }
   return descriptions[pieceType] ?? 'Custom Piece: 등록된 Chessembly 행마법을 따릅니다.'
 }
@@ -467,14 +472,7 @@ function staticAbilities(pieceType: string): PieceLabAbilityOption[] {
       connected: true,
     }]
   }
-  if (pieceType !== 'bishop') return []
-  return [{
-    id: 'bounce_mode',
-    name: 'Reflective Movement',
-    description: 'Moves like a Bouncing Bishop until this turn ends.',
-    available: false,
-    connected: false,
-  }]
+  return []
 }
 
 function resetLab() {
@@ -486,6 +484,7 @@ function resetLab() {
 function resetLabPieces() {
   pieces.value = []
   arrows.value = []
+  globalState.value = {}
   cleanupRightDrag()
   selectedPieceId.value = null
   moves.value = []
@@ -541,6 +540,12 @@ function applyLabMove(action: MoveAction) {
           }
         : piece
     ))
+  if (action.set_state) {
+    globalState.value = {
+      ...globalState.value,
+      [action.set_state.key]: action.set_state.value,
+    }
+  }
   selectedPieceId.value = action.piece_id
   loadedOptionsPieceId.value = null
   optionsError.value = null
@@ -910,6 +915,7 @@ async function loadSelectedPieceOptions() {
       })),
       selected_piece_id: selected.id,
       ability_id: activeAbilityId.value ?? undefined,
+      global_state: globalState.value,
     })
     if (serial !== optionsSerial) return
     moves.value = response.moves

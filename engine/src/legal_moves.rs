@@ -47,6 +47,7 @@ fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
             && m.to == action.to
             && m.promotion == action.promotion
             && m.ability_id == action.ability_id
+            && m.set_state == action.set_state
     });
     if !exists {
         actions.push(action);
@@ -70,6 +71,7 @@ fn push_move_or_promotions(
     to: Square,
     captured_piece_id: Option<PieceId>,
     ability_id: Option<&str>,
+    set_state: Option<StateUpdate>,
 ) {
     if let Some(promotion_options) = definition.promotion_options_for_rank(to.rank, board_size) {
         for promo in promotion_options {
@@ -83,6 +85,7 @@ fn push_move_or_promotions(
                     captured_piece_id: captured_piece_id.clone(),
                     promotion: Some(promo.clone()),
                     ability_id: ability_id.map(str::to_string),
+                    set_state: set_state.clone(),
                 },
             );
         }
@@ -97,7 +100,97 @@ fn push_move_or_promotions(
                 captured_piece_id,
                 promotion: None,
                 ability_id: ability_id.map(str::to_string),
+                set_state,
             },
+        );
+    }
+}
+
+fn append_actions_from_result(
+    actions: &mut Vec<MoveAction>,
+    game_state: &GameState,
+    piece_id: &PieceId,
+    piece: &Piece,
+    definition: &PieceDefinition,
+    player_id: &PlayerId,
+    result: &ChessemblyResult,
+    ability_id: Option<&str>,
+) {
+    let from = piece.current_square.unwrap();
+    let pawn_dir = pawn_forward_dir(&piece.type_id);
+    let pawn_start = pawn_start_rank(&piece.type_id, game_state.board.size);
+
+    for to in result.movement_squares.iter().copied() {
+        if !game_state.board.is_in_bounds(&to) {
+            continue;
+        }
+
+        if let (Some(dir), Some(start_rank)) = (pawn_dir, pawn_start) {
+            if to.file == from.file
+                && to.rank - from.rank == 2 * dir
+                && (from.rank != start_rank || piece.has_moved)
+            {
+                continue;
+            }
+        }
+
+        let captured_piece_id = game_state.board.get_piece_at(&to).cloned();
+        let set_state = result
+            .effects
+            .get(&to.to_id())
+            .and_then(|effect| effect.set_state.clone());
+        if let Some(ref cap_id) = captured_piece_id {
+            if let Some(cap_piece) = game_state.pieces.get(cap_id) {
+                if cap_piece.owner == *player_id {
+                    continue;
+                }
+            }
+        }
+
+        push_move_or_promotions(
+            actions,
+            definition,
+            game_state.board.size,
+            player_id,
+            piece_id,
+            from,
+            to,
+            captured_piece_id,
+            ability_id,
+            set_state,
+        );
+    }
+
+    for to in result.attack_squares.iter().copied() {
+        if !game_state.board.is_in_bounds(&to) {
+            continue;
+        }
+
+        let Some(captured_piece_id) = game_state.board.get_piece_at(&to).cloned() else {
+            continue;
+        };
+        let Some(captured_piece) = game_state.pieces.get(&captured_piece_id) else {
+            continue;
+        };
+        if captured_piece.owner == *player_id {
+            continue;
+        }
+        let set_state = result
+            .effects
+            .get(&to.to_id())
+            .and_then(|effect| effect.set_state.clone());
+
+        push_move_or_promotions(
+            actions,
+            definition,
+            game_state.board.size,
+            player_id,
+            piece_id,
+            from,
+            to,
+            Some(captured_piece_id),
+            ability_id,
+            set_state,
         );
     }
 }
@@ -143,7 +236,6 @@ fn run_selected_ability_for_piece(
     definition: &PieceDefinition,
     ability: &PieceAbilityDefinition,
     player_id: &PlayerId,
-    empty_global_state: &HashMap<String, i32>,
     empty_maps: &HashMap<PlayerId, std::collections::HashSet<SquareId>>,
 ) -> ChessemblyResult {
     let mut ability_piece = piece.clone();
@@ -158,7 +250,7 @@ fn run_selected_ability_for_piece(
         &ability_piece,
         definition,
         player_id.clone(),
-        empty_global_state,
+        &game_state.global_state,
         empty_maps,
     )
 }
@@ -182,14 +274,13 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
         return Vec::new();
     };
 
-    let empty_global_state = HashMap::new();
     let empty_maps = HashMap::new();
     let result = run_effective_chessembly_for_piece(
         game_state,
         piece,
         definition,
         game_state.current_player.clone(),
-        &empty_global_state,
+        &game_state.global_state,
         &empty_maps,
     );
     result
@@ -231,7 +322,6 @@ pub fn generate_piece_legal_move_actions_with_options(
 
     let mut actions = Vec::new();
     let empty_maps = HashMap::new();
-    let empty_global_state = HashMap::new();
 
     let Some(piece) = game_state.pieces.get(piece_id) else {
         return Vec::new();
@@ -246,9 +336,10 @@ pub fn generate_piece_legal_move_actions_with_options(
         return Vec::new();
     };
 
-    let selected_ability = options.ability_id.as_deref().and_then(|ability_id| {
-        can_use_selected_ability(game_state, piece, definition, ability_id)
-    });
+    let selected_ability = options
+        .ability_id
+        .as_deref()
+        .and_then(|ability_id| can_use_selected_ability(game_state, piece, definition, ability_id));
     if options.ability_id.is_some() && selected_ability.is_none() {
         return Vec::new();
     }
@@ -260,7 +351,6 @@ pub fn generate_piece_legal_move_actions_with_options(
             definition,
             ability,
             player_id,
-            &empty_global_state,
             &empty_maps,
         )
     } else {
@@ -269,88 +359,26 @@ pub fn generate_piece_legal_move_actions_with_options(
             piece,
             definition,
             player_id.clone(),
-            &empty_global_state,
+            &game_state.global_state,
             &empty_maps,
         )
     };
     let from = piece.current_square.unwrap();
-    let pawn_dir = pawn_forward_dir(&piece.type_id);
-    let pawn_start = pawn_start_rank(&piece.type_id, game_state.board.size);
     let action_ability_id = selected_ability.as_ref().map(|ability| ability.id.as_str());
 
-    // Executable movement/capture squares from movement paths.
-    for to in result.movement_squares.iter().copied() {
-        if !game_state.board.is_in_bounds(&to) {
-            continue;
-        }
-
-        if let (Some(dir), Some(start_rank)) = (pawn_dir, pawn_start) {
-            // Restrict pawn 2-step to starting rank and only before first move.
-            if to.file == from.file
-                && to.rank - from.rank == 2 * dir
-                && (from.rank != start_rank || piece.has_moved)
-            {
-                continue;
-            }
-        }
-
-        let captured_piece_id = game_state.board.get_piece_at(&to).cloned();
-
-        // Cannot capture own piece
-        if let Some(ref cap_id) = captured_piece_id {
-            if let Some(cap_piece) = game_state.pieces.get(cap_id) {
-                if cap_piece.owner == *player_id {
-                    continue;
-                }
-            }
-        }
-
-        push_move_or_promotions(
-            &mut actions,
-            definition,
-            game_state.board.size,
-            player_id,
-            piece_id,
-            from,
-            to,
-            captured_piece_id,
-            action_ability_id,
-        );
-    }
-
-    // Attack-only squares are legal only when an enemy occupies the square.
-    // This keeps legal moves executable while still allowing attack map UI
-    // to show empty threatened squares through generate_piece_attack_squares.
-    for to in result.attack_squares.iter().copied() {
-        if !game_state.board.is_in_bounds(&to) {
-            continue;
-        }
-
-        let Some(captured_piece_id) = game_state.board.get_piece_at(&to).cloned() else {
-            continue;
-        };
-        let Some(captured_piece) = game_state.pieces.get(&captured_piece_id) else {
-            continue;
-        };
-        if captured_piece.owner == *player_id {
-            continue;
-        }
-
-        push_move_or_promotions(
-            &mut actions,
-            definition,
-            game_state.board.size,
-            player_id,
-            piece_id,
-            from,
-            to,
-            Some(captured_piece_id),
-            action_ability_id,
-        );
-    }
+    append_actions_from_result(
+        &mut actions,
+        game_state,
+        piece_id,
+        piece,
+        definition,
+        player_id,
+        &result,
+        action_ability_id,
+    );
 
     // En passant: pawn can capture onto target square even when destination is empty.
-    if let Some(dir) = pawn_dir {
+    if let Some(dir) = pawn_forward_dir(&piece.type_id) {
         if game_state.en_passant_available_to.as_ref() == Some(player_id) {
             if let Some(target) = game_state.en_passant_target {
                 if target.rank == from.rank + dir
@@ -373,6 +401,7 @@ pub fn generate_piece_legal_move_actions_with_options(
                                         captured_piece_id: Some(captured_id.clone()),
                                         promotion: None,
                                         ability_id: action_ability_id.map(str::to_string),
+                                        set_state: None,
                                     },
                                 );
                             }
@@ -466,6 +495,7 @@ pub fn generate_piece_legal_move_actions_with_options(
                         captured_piece_id: None,
                         promotion: None,
                         ability_id: action_ability_id.map(str::to_string),
+                        set_state: None,
                     },
                 );
             }

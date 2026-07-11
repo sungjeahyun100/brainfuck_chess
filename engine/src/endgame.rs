@@ -112,10 +112,9 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         piece.has_moved = true;
         if let Some((ability_id, cooldown_turns)) = used_ability_cooldown {
             if cooldown_turns > 0 {
-                piece.ability_cooldowns.insert(
-                    ability_id,
-                    game_state.turn_number + cooldown_turns + 1,
-                );
+                piece
+                    .ability_cooldowns
+                    .insert(ability_id, game_state.turn_number + cooldown_turns + 1);
             }
         }
         if piece
@@ -125,6 +124,12 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         {
             piece.active_ability = None;
         }
+    }
+
+    if let Some(update) = action.set_state.as_ref() {
+        game_state
+            .global_state
+            .insert(update.key.clone(), update.value);
     }
 
     // A new pawn double-step replaces the previous right. Otherwise, only the

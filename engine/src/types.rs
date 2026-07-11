@@ -485,6 +485,18 @@ pub enum TurnAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateUpdate {
+    pub key: String,
+    pub value: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ChessemblyActionEffect {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_state: Option<StateUpdate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MoveAction {
     pub player_id: PlayerId,
     pub piece_id: PieceId,
@@ -497,6 +509,9 @@ pub struct MoveAction {
     /// Optional selected ability used only for this submitted move.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ability_id: Option<String>,
+    /// Optional Chessembly state write attached to this activated square.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_state: Option<StateUpdate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -568,6 +583,9 @@ pub struct GameState {
     pub en_passant_target: Option<Square>,
     /// Player allowed to capture via en passant on this turn.
     pub en_passant_available_to: Option<PlayerId>,
+    /// Chessembly global state variables read by `if-state` and written by `set-state`.
+    #[serde(default)]
+    pub global_state: HashMap<String, i32>,
     pub turn_state: TurnState,
     pub result: Option<GameResult>,
     #[serde(skip, default)]
@@ -677,4 +695,7 @@ pub struct ChessemblyResult {
     pub movement_squares: Vec<Square>,
     /// Squares the piece threatens/attacks
     pub attack_squares: Vec<Square>,
+    /// Optional effects attached to activated squares.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub effects: HashMap<SquareId, ChessemblyActionEffect>,
 }

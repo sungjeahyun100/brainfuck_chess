@@ -17,8 +17,6 @@ pub fn generate_attack_map(
     let mut attacked_squares: HashSet<SquareId> = HashSet::new();
     let mut source_map: HashMap<SquareId, Vec<PieceId>> = HashMap::new();
 
-    let empty_global_state = HashMap::new();
-
     for (piece_id, piece) in &game_state.pieces {
         if piece.owner != *player_id || !piece.is_on_board() {
             continue;
@@ -33,7 +31,7 @@ pub fn generate_attack_map(
             piece,
             definition,
             player_id.clone(),
-            &empty_global_state,
+            &game_state.global_state,
             existing_attack_maps,
         );
 

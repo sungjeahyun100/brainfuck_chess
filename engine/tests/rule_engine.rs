@@ -70,6 +70,7 @@ fn make_game_state(board_size: i32) -> GameState {
         phase: GamePhase::Playing,
         en_passant_target: None,
         en_passant_available_to: None,
+        global_state: HashMap::new(),
         turn_state: TurnState::new(),
         result: None,
         chessembly_program_cache,
@@ -166,6 +167,57 @@ fn test_create_board_10x10() {
     let board = create_board(10);
     assert_eq!(board.size, 10);
     assert_eq!(board.squares.len(), 100);
+}
+
+#[test]
+fn test_windmill_if_state_and_set_state_toggle_move_modes() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wm", "white", "windmill", 3, 3);
+
+    let bishop_mode_moves = generate_piece_legal_move_actions(&state, &"wm".into());
+    assert!(bishop_mode_moves
+        .iter()
+        .any(|action| action.to == Square::new(4, 4)));
+    assert!(bishop_mode_moves
+        .iter()
+        .all(|action| (action.to.file - 3).abs() == (action.to.rank - 3).abs()));
+    let bishop_move = bishop_mode_moves
+        .into_iter()
+        .find(|action| action.to == Square::new(4, 4))
+        .unwrap();
+    assert_eq!(
+        bishop_move.set_state,
+        Some(StateUpdate {
+            key: "mode".into(),
+            value: 1,
+        })
+    );
+
+    state = apply_move_action(state, bishop_move);
+    assert_eq!(state.global_state.get("mode"), Some(&1));
+
+    state.turn_state = TurnState::new();
+    let rook_mode_moves = generate_piece_legal_move_actions(&state, &"wm".into());
+    assert!(rook_mode_moves
+        .iter()
+        .any(|action| action.to == Square::new(4, 5)));
+    assert!(rook_mode_moves
+        .iter()
+        .all(|action| action.to.file == 4 || action.to.rank == 4));
+    let rook_move = rook_mode_moves
+        .into_iter()
+        .find(|action| action.to == Square::new(4, 5))
+        .unwrap();
+    assert_eq!(
+        rook_move.set_state,
+        Some(StateUpdate {
+            key: "mode".into(),
+            value: 0,
+        })
+    );
+
+    state = apply_move_action(state, rook_move);
+    assert_eq!(state.global_state.get("mode"), Some(&0));
 }
 
 // ─── Score limit ─────────────────────────────────────────────────────────────
@@ -276,6 +328,7 @@ fn test_end_turn_switches_player() {
         captured_piece_id: None,
         promotion: None,
         ability_id: None,
+        set_state: None,
     };
     state.turn_state.actions.push(TurnAction::Move(action));
     assert!(can_end_turn(&state));
@@ -302,6 +355,7 @@ fn test_king_capture_ends_game() {
         captured_piece_id: Some("k2".into()),
         promotion: None,
         ability_id: None,
+        set_state: None,
     };
 
     let result_state = apply_move_action(state, action);
@@ -330,6 +384,7 @@ fn test_normal_capture_does_not_end_game() {
         captured_piece_id: Some("p1".into()),
         promotion: None,
         ability_id: None,
+        set_state: None,
     };
 
     let result_state = apply_move_action(state, action);
@@ -361,6 +416,7 @@ fn test_move_action_blocks_additional_moves_this_turn() {
         captured_piece_id: None,
         promotion: None,
         ability_id: None,
+        set_state: None,
     };
 
     let new_state = apply_move_action(state, action);
@@ -383,6 +439,7 @@ fn test_end_turn_resets_single_action_state() {
         captured_piece_id: None,
         promotion: None,
         ability_id: None,
+        set_state: None,
     };
 
     let mut new_state = apply_move_action(state, action);
@@ -434,6 +491,7 @@ fn test_castling_kingside_generated_and_applied() {
         captured_piece_id: None,
         promotion: None,
         ability_id: None,
+        set_state: None,
     };
     let new_state = apply_move_action(state, action);
 
@@ -461,6 +519,7 @@ fn test_en_passant_generated_and_applied() {
         captured_piece_id: None,
         promotion: None,
         ability_id: None,
+        set_state: None,
     };
     let state = end_turn(apply_move_action(state, black_double));
 
@@ -485,6 +544,7 @@ fn test_en_passant_generated_and_applied() {
         captured_piece_id: Some("bp".into()),
         promotion: None,
         ability_id: None,
+        set_state: None,
     };
     let new_state = apply_move_action(state, white_ep);
 
@@ -518,6 +578,7 @@ fn test_en_passant_expires_when_opponent_chooses_another_action() {
             captured_piece_id: None,
             promotion: None,
             ability_id: None,
+            set_state: None,
         },
     ));
 
@@ -534,6 +595,7 @@ fn test_en_passant_expires_when_opponent_chooses_another_action() {
             captured_piece_id: None,
             promotion: None,
             ability_id: None,
+            set_state: None,
         },
     );
     assert_eq!(state.en_passant_target, None);
@@ -662,7 +724,7 @@ fn test_tempest_pawn_reaching_back_rank_generates_tempest_promotion_choices() {
     assert_eq!(
         choices,
         vec![
-            "bouncing-bishop",
+            "tempest-bishop",
             "tempest-knight",
             "tempest-queen",
             "tempest-rook"
@@ -685,6 +747,7 @@ fn test_pawn_promotion_applies_chosen_piece_type() {
         captured_piece_id: None,
         promotion: Some("queen".into()),
         ability_id: None,
+        set_state: None,
     };
     let new_state = apply_move_action(state, action);
     let promoted = new_state.pieces.get("wp").unwrap();
@@ -707,6 +770,7 @@ fn test_tempest_pawn_promotion_applies_chosen_piece_type() {
         captured_piece_id: None,
         promotion: Some("tempest-queen".into()),
         ability_id: None,
+        set_state: None,
     };
     let new_state = apply_move_action(state, action);
     let promoted = new_state.pieces.get("tp").unwrap();
@@ -787,6 +851,7 @@ fn test_custom_piece_definition_can_generate_promotion_choices() {
             captured_piece_id: None,
             promotion: Some("knight".into()),
             ability_id: None,
+            set_state: None,
         },
     );
     assert_eq!(promoted_state.pieces.get("pr").unwrap().type_id, "knight");
@@ -1040,8 +1105,12 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
     add_piece(&mut state, "blocked", "white", "pawn-white", 6, 3);
 
     let base_moves = generate_piece_legal_move_actions(&state, &"cr".into());
-    assert!(base_moves.iter().any(|action| action.to == Square::new(4, 3)));
-    assert!(!base_moves.iter().any(|action| action.to == Square::new(3, 5)));
+    assert!(base_moves
+        .iter()
+        .any(|action| action.to == Square::new(4, 3)));
+    assert!(!base_moves
+        .iter()
+        .any(|action| action.to == Square::new(3, 5)));
 
     let cannon_moves = generate_piece_legal_move_actions_with_options(
         &state,
@@ -1059,10 +1128,18 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
             && action.captured_piece_id.as_ref().map(|id| id.as_str()) == Some("enemy")
             && action.ability_id.as_deref() == Some("cannon_move")
     }));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(4, 3)));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(5, 3)));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(6, 3)));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(7, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(4, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(5, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(6, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(7, 3)));
 
     let action = cannon_moves
         .iter()
@@ -1210,22 +1287,9 @@ fn test_until_piece_moves_ability_expires_after_move() {
             captured_piece_id: None,
             promotion: None,
             ability_id: None,
+            set_state: None,
         },
     );
 
     assert!(state.pieces.get("ab").unwrap().active_ability.is_none());
-}
-
-#[test]
-fn test_bishop_bounce_mode_ability_is_registered() {
-    let bishop = bishop_definition();
-    let ability = bishop
-        .abilities
-        .iter()
-        .find(|ability| ability.id == "bounce_mode")
-        .unwrap();
-
-    assert_eq!(ability.duration, AbilityDuration::UntilTurnEnd);
-    assert!(ability.once_per_turn);
-    assert!(ability.chessembly_code.contains("edge(1, 1)"));
 }

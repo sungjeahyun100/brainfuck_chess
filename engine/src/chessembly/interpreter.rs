@@ -15,7 +15,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::types::{
-    Board, ChessemblyResult, Piece, PieceDefinition, PieceId, PlayerId, Square, SquareId,
+    Board, ChessemblyActionEffect, ChessemblyResult, Piece, PieceDefinition, PieceId, PlayerId,
+    Square, SquareId, StateUpdate,
 };
 
 use super::ast::{Expr, Program};
@@ -661,15 +662,31 @@ fn eval_expr(
 
 // ─── Activation helpers ──────────────────────────────────────────────────────
 
-fn activate_movement(sq: Square, _state: &ChainState, result: &mut ChessemblyResult) {
+fn activate_movement(sq: Square, state: &ChainState, result: &mut ChessemblyResult) {
     if !result.movement_squares.contains(&sq) {
         result.movement_squares.push(sq);
     }
+    record_effect(sq, state, result);
 }
 
-fn activate_attack(sq: Square, _state: &ChainState, result: &mut ChessemblyResult) {
+fn activate_attack(sq: Square, state: &ChainState, result: &mut ChessemblyResult) {
     if !result.attack_squares.contains(&sq) {
         result.attack_squares.push(sq);
+    }
+    record_effect(sq, state, result);
+}
+
+fn record_effect(sq: Square, state: &ChainState, result: &mut ChessemblyResult) {
+    if let Some((key, value)) = state.set_state_tag.as_ref() {
+        result.effects.insert(
+            sq.to_id(),
+            ChessemblyActionEffect {
+                set_state: Some(StateUpdate {
+                    key: key.clone(),
+                    value: *value,
+                }),
+            },
+        );
     }
 }
 

@@ -64,6 +64,7 @@ export interface PieceLabOptionsRequest {
   pieces: PieceLabPieceRequest[]
   selected_piece_id: string
   ability_id?: string
+  global_state?: Record<string, number>
 }
 
 export interface PieceLabAbilityOption {

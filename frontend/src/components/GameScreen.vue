@@ -461,6 +461,12 @@ function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
       movedPiece.type_id = action.promotion
     }
   }
+  if (action.set_state) {
+    next.global_state = {
+      ...(next.global_state ?? {}),
+      [action.set_state.key]: action.set_state.value,
+    }
+  }
 
   next.turn_state.actions.push(action)
 
@@ -614,7 +620,7 @@ watch(
 
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
-  amazon: 'A', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-knight': 'N', 'bouncing-bishop': 'B',
+  amazon: 'A', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-bishop': 'B', 'tempest-knight': 'N', 'bouncing-bishop': 'B', windmill: 'W',
   'pawn-white': '♙', 'pawn-black': '♟', 'tempest-pawn-white': '♙', 'tempest-pawn-black': '♟',
 }
 function pieceSymbol(typeId: string): string {
@@ -668,7 +674,7 @@ const PROMOTION_ORDER = [
   'knight',
   'tempest-queen',
   'tempest-rook',
-  'bouncing-bishop',
+  'tempest-bishop',
   'tempest-knight',
 ]
 
@@ -932,6 +938,7 @@ async function submitMove(pieceId: string, to: Square) {
       captured_piece_id: selectedMove?.captured_piece_id,
       promotion,
       ability_id: moveAbilityId ?? undefined,
+      set_state: selectedMove?.set_state,
     }
     const newState = await api.submitAction(props.state.id, action)
     emit('stateUpdate', newState)

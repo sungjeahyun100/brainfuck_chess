@@ -18,12 +18,16 @@ import rookBlack from './assets/pieces/rook-black.svg'
 import rookWhite from './assets/pieces/rook-white.svg'
 import tempestQueenBlack from './assets/pieces/tempest-queen-black.svg'
 import tempestQueenWhite from './assets/pieces/tempest-queen-white.svg'
+import tempestBishopBlack from './assets/pieces/tempest-bishop-black.svg'
+import tempestBishopWhite from './assets/pieces/tempest-bishop-white.svg'
 import tempestKnightBlack from './assets/pieces/tempest-knight-black.svg'
 import tempestKnightWhite from './assets/pieces/tempest-knight-white.svg'
 import tempestPawnBlack from './assets/pieces/tempest-pawn-black.svg'
 import tempestPawnWhite from './assets/pieces/tempest-pawn-white.svg'
 import tempestRookBlack from './assets/pieces/tempest-rook-black.svg'
 import tempestRookWhite from './assets/pieces/tempest-rook-white.svg'
+import windmillBlack from './assets/pieces/windmill-black.svg'
+import windmillWhite from './assets/pieces/windmill-white.svg'
 import type { PlayerId } from './types/game'
 
 const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
@@ -43,8 +47,10 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   // TODO: temporary placeholder art (rook flipped upside-down) to visually distinguish from the regular rook
   'cannon-rook': { white: cannonRookWhite, black: cannonRookBlack },
   'tempest-queen': { white: tempestQueenWhite, black: tempestQueenBlack },
+  'tempest-bishop': { white: tempestBishopWhite, black: tempestBishopBlack },
   'tempest-knight': { white: tempestKnightWhite, black: tempestKnightBlack },
   'tempest-rook': { white: tempestRookWhite, black: tempestRookBlack },
+  windmill: { white: windmillWhite, black: windmillBlack },
 }
 
 export function pieceAsset(typeId: string, owner: PlayerId): string | undefined {

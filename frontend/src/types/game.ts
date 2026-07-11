@@ -80,6 +80,10 @@ export interface MoveAction {
   captured_piece_id?: PieceId
   promotion?: PieceTypeId
   ability_id?: string
+  set_state?: {
+    key: string
+    value: number
+  }
 }
 
 export interface DropAction {
@@ -132,6 +136,7 @@ export interface GameState {
   phase: GamePhase
   en_passant_target?: Square | null
   en_passant_available_to?: PlayerId | null
+  global_state?: Record<string, number>
   turn_state: TurnState
   result?: GameResult
 }

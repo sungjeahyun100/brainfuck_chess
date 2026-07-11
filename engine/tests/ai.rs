@@ -45,6 +45,7 @@ fn make_state() -> GameState {
         phase: GamePhase::Playing,
         en_passant_target: None,
         en_passant_available_to: None,
+        global_state: HashMap::new(),
         turn_state: TurnState::new(),
         result: None,
     }
@@ -233,6 +234,7 @@ fn special_moves_are_exposed_through_ai_actions() {
             captured_piece_id: None,
             promotion: None,
             ability_id: None,
+            set_state: None,
         },
     );
     en_passant_state.current_player = "white".into();

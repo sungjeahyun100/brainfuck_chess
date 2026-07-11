@@ -115,7 +115,6 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
 
 /// Bishop: slides diagonally.
 pub fn bishop_definition() -> PieceDefinition {
-    let bounce_code = bouncing_bishop_definition().chessembly_code;
     PieceDefinition {
         id: "bishop".into(),
         name: "Bishop".into(),
@@ -126,6 +125,35 @@ take-move(1, -1) repeat(1);
 take-move(-1, 1) repeat(1);
 take-move(-1, -1) repeat(1);"
             .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
+    }
+}
+
+/// Windmill: alternates Bishop and Rook movement after each successful move.
+pub fn windmill_definition() -> PieceDefinition {
+    PieceDefinition {
+        id: "windmill".into(),
+        name: "Windmill".into(),
+        score: 4, // TODO: balance value
+        chessembly_code: "\
+        if-state(mode, 0) set-state(mode, 1)
+        { take-move(1, 1) repeat(1) }
+        { take-move(1, -1) repeat(1) }
+        { take-move(-1, 1) repeat(1) }
+        { take-move(-1, -1) repeat(1) };
+    
+        if-state(mode, 1) set-state(mode, 0)
+        { take-move(1, 0) repeat(1) }
+        { take-move(-1, 0) repeat(1) }
+        { take-move(0, 1) repeat(1) }
+        { take-move(0, -1) repeat(1) };"
+        .into(),
         chessembly_version: "1.0".into(),
         dialect: None,
         extensions: None,
@@ -241,7 +269,19 @@ pub fn bouncing_bishop_definition() -> PieceDefinition {
         id: "bouncing-bishop".into(),
         name: "Bouncing Bishop".into(),
         score: 7,
-        chessembly_code: "\
+        chessembly_code: bouncing_bishop_chessembly_code().into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
+    }
+}
+
+fn bouncing_bishop_chessembly_code() -> &'static str {
+    "\
 do
 take-move(1, 1)
 while
@@ -277,15 +317,6 @@ edge(-1, -1) {
 } {
   take-move(-1, 1) repeat(1)
 };"
-        .into(),
-        chessembly_version: "1.0".into(),
-        dialect: None,
-        extensions: None,
-        is_king: false,
-        promotion: None,
-        promotion_pool: Vec::new(),
-        abilities: Vec::new(),
-    }
 }
 
 /// White Pawn:
@@ -354,7 +385,7 @@ fn tempest_pawn_promotion_pool() -> Vec<String> {
     vec![
         "tempest-queen".into(),
         "tempest-rook".into(),
-        "bouncing-bishop".into(),
+        "tempest-bishop".into(),
         "tempest-knight".into(),
     ]
 }
@@ -461,6 +492,35 @@ pub fn tempest_knight_definition() -> PieceDefinition {
     }
 }
 
+pub fn tempest_bishop_definition() -> PieceDefinition {
+    PieceDefinition {
+        id: "tempest-bishop".into(),
+        name: "Tempest Bishop".into(),
+        score: 5,
+        chessembly_code: "\
+        take-move(0, 1) 
+        { take-move(-1, 1) repeat(1) }
+        { take-move(1, 1) repeat(1) };
+        take-move(0, -1) 
+        { take-move(-1, -1) repeat(1) }
+        { take-move(1, -1) repeat(1) };
+        take-move(1, 0) 
+        { take-move(1, 1) repeat(1) }
+        { take-move(1, -1) repeat(1) };
+        take-move(-1, 0) 
+        { take-move(-1, 1) repeat(1) }
+        { take-move(-1, -1) repeat(1) };"
+            .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        abilities: Vec::new(),
+    }
+}
+
 /// Return all standard piece definitions.
 pub fn all_default_definitions() -> Vec<PieceDefinition> {
     vec![
@@ -468,6 +528,7 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         queen_definition(),
         rook_definition(),
         bishop_definition(),
+        windmill_definition(),
         knight_definition(),
         amazon_definition(),
         cannon_rook_definition(),
@@ -479,5 +540,6 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         tempest_pawn_black_definition(),
         tempest_queen_definition(),
         tempest_knight_definition(),
+        tempest_bishop_definition(),
     ]
 }
