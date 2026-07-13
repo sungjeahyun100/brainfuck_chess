@@ -5,10 +5,8 @@ use axum::{
     extract::{Path, Query, State},
     Json, Router,
 };
-use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
@@ -1534,6 +1532,8 @@ async fn get_lab_piece_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dashmap::DashMap;
+    use std::sync::Arc;
 
     fn test_app_with_game() -> (AppState, String) {
         let game_id = "test-game".to_string();
