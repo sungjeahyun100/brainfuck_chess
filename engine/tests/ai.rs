@@ -47,6 +47,7 @@ fn make_state() -> GameState {
         en_passant_available_to: None,
         global_state: HashMap::new(),
         turn_state: TurnState::new(),
+        history: Vec::new(),
         result: None,
     }
 }
@@ -69,6 +70,8 @@ fn add_board_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, 
             has_moved: false,
             active_ability: None,
             ability_cooldowns: HashMap::new(),
+            state: HashMap::new(),
+            move_option_cooldowns: HashMap::new(),
         },
     );
     state
@@ -94,6 +97,8 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
             has_moved: false,
             active_ability: None,
             ability_cooldowns: HashMap::new(),
+            state: HashMap::new(),
+            move_option_cooldowns: HashMap::new(),
         },
     );
     state
@@ -110,7 +115,7 @@ fn empty_candidates_do_not_panic() {
     let state = make_state();
     assert!(generate_ai_actions(&state).is_empty());
     let decision = choose_bot_action(&state, &"white".into(), BotDifficulty::Easy);
-    assert_eq!(decision.action, AiAction::EndTurn);
+    assert!(decision.is_none());
 }
 
 #[test]
@@ -141,7 +146,7 @@ fn bot_always_selects_an_immediate_king_capture() {
         BotDifficulty::Normal,
         BotDifficulty::Hard,
     ] {
-        let decision = choose_bot_action(&state, &"white".into(), difficulty);
+        let decision = choose_bot_action(&state, &"white".into(), difficulty).unwrap();
         assert!(matches!(
             decision.action,
             AiAction::Move(MoveAction { captured_piece_id: Some(ref id), .. }) if id == "bk"
@@ -233,14 +238,44 @@ fn special_moves_are_exposed_through_ai_actions() {
             to: Square::new(5, 4),
             captured_piece_id: None,
             promotion: None,
-            ability_id: None,
-            set_state: None,
+            move_option_id: "normal".into(),
+            source_layer_ids: vec!["default".into()],
+            effects: ActionEffects::default(),
         },
     );
     en_passant_state.current_player = "white".into();
     en_passant_state.turn_state = TurnState::new();
     assert!(generate_ai_actions(&en_passant_state).iter().any(|action| {
         matches!(action, AiAction::Move(movement) if movement.piece_id == "wp" && movement.to == Square::new(5, 5))
+    }));
+}
+
+#[test]
+fn ai_includes_available_move_options_and_excludes_cooldowns() {
+    let mut state = make_state();
+    add_board_piece(&mut state, "wk", "white", "king", Square::new(0, 0));
+    add_board_piece(&mut state, "bk", "black", "king", Square::new(7, 7));
+    add_board_piece(&mut state, "cr", "white", "cannon-rook", Square::new(3, 3));
+    add_board_piece(
+        &mut state,
+        "screen",
+        "white",
+        "pawn-white",
+        Square::new(3, 4),
+    );
+
+    assert!(generate_ai_actions(&state).iter().any(|action| {
+        matches!(action, AiAction::Move(movement) if movement.piece_id == "cr" && movement.move_option_id == "cannon_move")
+    }));
+
+    state
+        .pieces
+        .get_mut("cr")
+        .unwrap()
+        .move_option_cooldowns
+        .insert("cannon_move".into(), CooldownState { remaining: 1 });
+    assert!(!generate_ai_actions(&state).iter().any(|action| {
+        matches!(action, AiAction::Move(movement) if movement.piece_id == "cr" && movement.move_option_id == "cannon_move")
     }));
 }
 

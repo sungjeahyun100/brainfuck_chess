@@ -72,20 +72,6 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
             .and_then(|p| game_state.piece_definitions.get(&p.type_id))
             .map(is_royal_piece)
     });
-    let used_ability_cooldown = action.ability_id.as_ref().and_then(|ability_id| {
-        game_state
-            .pieces
-            .get(&action.piece_id)
-            .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
-            .and_then(|definition| {
-                definition
-                    .abilities
-                    .iter()
-                    .find(|ability| ability.id == *ability_id)
-            })
-            .map(|ability| (ability_id.clone(), ability.cooldown_turns))
-    });
-
     // Move the piece
     game_state = move_piece_on_board(game_state, &action);
 
@@ -104,19 +90,21 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
             if can_promote {
                 piece.type_id = promotion_type.clone();
+                if let Some(promoted_definition) = game_state.piece_definitions.get(promotion_type)
+                {
+                    piece.initialize_from_definition(promoted_definition);
+                } else {
+                    piece.state.clear();
+                    piece.move_option_cooldowns.clear();
+                }
+                piece.active_ability = None;
+                piece.ability_cooldowns.clear();
             }
         }
     }
 
     if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
         piece.has_moved = true;
-        if let Some((ability_id, cooldown_turns)) = used_ability_cooldown {
-            if cooldown_turns > 0 {
-                piece
-                    .ability_cooldowns
-                    .insert(ability_id, game_state.turn_number + cooldown_turns + 1);
-            }
-        }
         if piece
             .active_ability
             .as_ref()
@@ -126,10 +114,54 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         }
     }
 
-    if let Some(update) = action.set_state.as_ref() {
+    for update in &action.effects.piece_state_updates {
+        let Some(piece) = game_state.pieces.get(&update.piece_id) else {
+            continue;
+        };
+        let key_is_valid = game_state
+            .piece_definitions
+            .get(&piece.type_id)
+            .is_some_and(|definition| {
+                definition
+                    .state_schema
+                    .iter()
+                    .any(|state| state.key == update.key)
+            });
+        if key_is_valid {
+            if let Some(piece) = game_state.pieces.get_mut(&update.piece_id) {
+                piece.state.insert(update.key.clone(), update.value.clone());
+            }
+        }
+    }
+
+    for update in &action.effects.global_state_updates {
         game_state
             .global_state
             .insert(update.key.clone(), update.value);
+    }
+
+    for update in &action.effects.cooldown_updates {
+        let option_is_valid = game_state
+            .pieces
+            .get(&update.piece_id)
+            .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+            .is_some_and(|definition| {
+                definition
+                    .move_options
+                    .iter()
+                    .any(|option| option.id == update.move_option_id && option.cooldown.is_some())
+            });
+        if option_is_valid {
+            let Some(piece) = game_state.pieces.get_mut(&update.piece_id) else {
+                continue;
+            };
+            piece.move_option_cooldowns.insert(
+                update.move_option_id.clone(),
+                CooldownState {
+                    remaining: update.remaining,
+                },
+            );
+        }
     }
 
     // A new pawn double-step replaces the previous right. Otherwise, only the
@@ -162,6 +194,94 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
     }
 
     game_state
+}
+
+/// Applies one canonical action and advances exactly one turn. Cooldowns count
+/// completed turns: an OwnerTurns cooldown set to N is not decremented on the
+/// action that creates it, then decreases after each later action by its owner.
+pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> GameState {
+    let turn_number = game_state.turn_number;
+    let player_id = match &action {
+        TurnAction::Move(action) => action.player_id.clone(),
+        TurnAction::Drop(action) => action.player_id.clone(),
+        TurnAction::ActivateAbility(action) => action.player_id.clone(),
+    };
+    let newly_set_cooldowns: std::collections::HashSet<(PieceId, String)> = match &action {
+        TurnAction::Move(action) => action
+            .effects
+            .cooldown_updates
+            .iter()
+            .map(|update| (update.piece_id.clone(), update.move_option_id.clone()))
+            .collect(),
+        _ => Default::default(),
+    };
+
+    game_state = match action.clone() {
+        TurnAction::Move(action) => apply_move_action(game_state, action),
+        TurnAction::Drop(action) => apply_drop_action(game_state, action),
+        // Kept only for deserializing old histories. New request paths reject it.
+        TurnAction::ActivateAbility(action) => apply_activate_ability_action(game_state, action),
+    };
+
+    game_state.history.push(ActionRecord {
+        turn_number,
+        player_id: player_id.clone(),
+        action,
+    });
+
+    tick_move_option_cooldowns(&mut game_state, &player_id, &newly_set_cooldowns);
+
+    if game_state.phase != GamePhase::Ended && game_state.result.is_none() {
+        game_state.current_player = if player_id == "white" {
+            "black".into()
+        } else {
+            "white".into()
+        };
+        game_state.turn_number += 1;
+    }
+    game_state.turn_state = TurnState::new();
+    game_state
+}
+
+fn tick_move_option_cooldowns(
+    game_state: &mut GameState,
+    acting_player: &PlayerId,
+    newly_set: &std::collections::HashSet<(PieceId, String)>,
+) {
+    for (piece_id, piece) in &mut game_state.pieces {
+        let option_clocks: std::collections::HashMap<String, CooldownClock> = game_state
+            .piece_definitions
+            .get(&piece.type_id)
+            .map(|definition| {
+                definition
+                    .move_options
+                    .iter()
+                    .filter_map(|option| {
+                        option
+                            .cooldown
+                            .as_ref()
+                            .map(|cooldown| (option.id.clone(), cooldown.clock))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (option_id, cooldown) in &mut piece.move_option_cooldowns {
+            if newly_set.contains(&(piece_id.clone(), option_id.clone())) {
+                continue;
+            }
+            let should_tick = match option_clocks.get(option_id).copied() {
+                Some(CooldownClock::GlobalTurns) => true,
+                Some(CooldownClock::OwnerTurns) => &piece.owner == acting_player,
+                None => false,
+            };
+            if should_tick {
+                cooldown.remaining = cooldown.remaining.saturating_sub(1);
+            }
+        }
+        piece
+            .move_option_cooldowns
+            .retain(|_, cooldown| cooldown.remaining > 0);
+    }
 }
 
 /// Apply a DropAction: move a pocket piece onto the board.

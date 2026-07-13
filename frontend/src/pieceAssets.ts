@@ -28,7 +28,11 @@ import tempestRookBlack from './assets/pieces/tempest-rook-black.svg'
 import tempestRookWhite from './assets/pieces/tempest-rook-white.svg'
 import windmillBlack from './assets/pieces/windmill-black.svg'
 import windmillWhite from './assets/pieces/windmill-white.svg'
-import type { PlayerId } from './types/game'
+import windmillRookBlack from './assets/pieces/windmill-rook-black.svg'
+import windmillRookWhite from './assets/pieces/windmill-rook-white.svg'
+import type { Piece, PieceDefinition, PlayerId } from './types/game'
+import { resolvePieceAssetKey } from './pieceVisual'
+export { resolvePieceAssetKey } from './pieceVisual'
 
 const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   amazon: { white: amazonWhite, black: amazonBlack },
@@ -51,8 +55,17 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   'tempest-knight': { white: tempestKnightWhite, black: tempestKnightBlack },
   'tempest-rook': { white: tempestRookWhite, black: tempestRookBlack },
   windmill: { white: windmillWhite, black: windmillBlack },
+  'windmill-bishop': { white: windmillWhite, black: windmillBlack },
+  'windmill-rook': { white: windmillRookWhite, black: windmillRookBlack },
 }
 
 export function pieceAsset(typeId: string, owner: PlayerId): string | undefined {
   return PIECE_ASSETS[typeId]?.[owner]
+}
+
+export function renderedPieceAsset(
+  piece: Piece,
+  definition: PieceDefinition | undefined,
+): string | undefined {
+  return pieceAsset(resolvePieceAssetKey(piece, definition), piece.owner)
 }

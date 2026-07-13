@@ -22,9 +22,10 @@
         <span v-if="legalMarker(sq)" class="legal-move-dot" :class="legalMarker(sq)" />
         <span v-if="sq.piece" class="piece" :class="`owner-${sq.piece.owner}`">
           <img
-            v-if="pieceAsset(sq.piece.type_id, sq.piece.owner)"
+            v-if="pieceImage(sq.piece)"
+            :key="pieceRenderKey(sq.piece)"
             class="piece-image"
-            :src="pieceAsset(sq.piece.type_id, sq.piece.owner)"
+            :src="pieceImage(sq.piece)"
             :alt="pieceAlt(sq.piece)"
             draggable="false"
           />
@@ -69,8 +70,8 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { Board, Piece, PlayerId, Square } from '../types/game'
-import { pieceAsset } from '../pieceAssets'
+import type { Board, Piece, PieceDefinition, PlayerId, Square } from '../types/game'
+import { renderedPieceAsset, resolvePieceAssetKey } from '../pieceAssets'
 
 interface SquareInfo {
   id: string
@@ -97,6 +98,7 @@ interface RenderedArrow extends BoardArrow {
 const props = defineProps<{
   board: Board
   pieces: Record<string, Piece>
+  definitions: Record<string, PieceDefinition>
   selectedPieceId: string | null
   movableSquares: Square[]
   attackSquares: Square[]
@@ -104,6 +106,14 @@ const props = defineProps<{
   orientation?: PlayerId
   abilityMode?: boolean
 }>()
+
+function pieceImage(piece: Piece): string | undefined {
+  return renderedPieceAsset(piece, props.definitions[piece.type_id])
+}
+
+function pieceRenderKey(piece: Piece): string {
+  return `${piece.id}:${resolvePieceAssetKey(piece, props.definitions[piece.type_id])}`
+}
 
 const emit = defineEmits<{
   squareClick: [square: Square]

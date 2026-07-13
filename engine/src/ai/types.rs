@@ -7,7 +7,6 @@ use crate::types::{DropAction, MoveAction};
 pub enum AiAction {
     Move(MoveAction),
     Drop(DropAction),
-    EndTurn,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,7 +24,6 @@ pub struct SearchLimits {
     pub max_nodes: u64,
     pub soft_time_ms: u64,
     pub hard_time_ms: u64,
-    pub max_actions_per_turn: u8,
 }
 
 impl BotDifficulty {
@@ -36,21 +34,18 @@ impl BotDifficulty {
                 max_nodes: 500,
                 soft_time_ms: 50,
                 hard_time_ms: 100,
-                max_actions_per_turn: 4,
             },
             Self::Normal => SearchLimits {
                 max_depth_actions: 2,
                 max_nodes: 3_000,
                 soft_time_ms: 150,
                 hard_time_ms: 300,
-                max_actions_per_turn: 6,
             },
             Self::Hard => SearchLimits {
                 max_depth_actions: 3,
                 max_nodes: 10_000,
                 soft_time_ms: 400,
                 hard_time_ms: 800,
-                max_actions_per_turn: 8,
             },
         }
     }

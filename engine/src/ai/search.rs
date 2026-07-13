@@ -5,55 +5,27 @@ use crate::ai::move_ordering::order_ai_actions;
 use crate::ai::types::{
     AiAction, BotDecision, BotDifficulty, BotTurnResult, SearchLimits, SearchStats,
 };
-use crate::endgame::{apply_drop_action, apply_move_action};
+use crate::endgame::apply_and_advance_turn;
 use crate::legal_moves::{generate_legal_drop_actions, generate_legal_move_actions};
-use crate::rules::{can_end_turn, end_turn};
-use crate::types::{GamePhase, GameState, PlayerId, TurnAction, TurnMode};
+use crate::types::{GamePhase, GameState, PlayerId, TurnAction};
 
 pub fn generate_ai_actions(state: &GameState) -> Vec<AiAction> {
     if state.phase == GamePhase::Ended || state.result.is_some() {
         return Vec::new();
     }
 
-    match state.turn_state.mode {
-        TurnMode::Undecided => generate_legal_move_actions(state)
-            .into_iter()
-            .map(AiAction::Move)
-            .chain(
-                generate_legal_drop_actions(state)
-                    .into_iter()
-                    .map(AiAction::Drop),
-            )
-            .collect(),
-        TurnMode::Move => {
-            let mut actions: Vec<_> = generate_legal_move_actions(state)
+    generate_legal_move_actions(state)
+        .into_iter()
+        .map(AiAction::Move)
+        .chain(
+            generate_legal_drop_actions(state)
                 .into_iter()
-                .map(AiAction::Move)
-                .collect();
-            if can_end_turn(state) {
-                actions.push(AiAction::EndTurn);
-            }
-            actions
-        }
-        TurnMode::Drop => {
-            let already_dropped = state
-                .turn_state
-                .actions
-                .iter()
-                .any(|action| matches!(action, TurnAction::Drop(_)));
-            if already_dropped {
-                vec![AiAction::EndTurn]
-            } else {
-                generate_legal_drop_actions(state)
-                    .into_iter()
-                    .map(AiAction::Drop)
-                    .collect()
-            }
-        }
-    }
+                .map(AiAction::Drop),
+        )
+        .collect()
 }
 
-pub fn apply_ai_action(mut state: GameState, action: &AiAction) -> Result<GameState, String> {
+pub fn apply_ai_action(state: GameState, action: &AiAction) -> Result<GameState, String> {
     if state.phase == GamePhase::Ended || state.result.is_some() {
         return Err("게임이 이미 종료되었습니다.".into());
     }
@@ -66,13 +38,10 @@ pub fn apply_ai_action(mut state: GameState, action: &AiAction) -> Result<GameSt
             if !legal {
                 return Err("AI가 합법적이지 않은 이동을 선택했습니다.".into());
             }
-            state.turn_state.mode = TurnMode::Move;
-            let state = apply_move_action(state, action.clone());
-            if state.phase == GamePhase::Ended || state.result.is_some() {
-                Ok(state)
-            } else {
-                Ok(end_turn(state))
-            }
+            Ok(apply_and_advance_turn(
+                state,
+                TurnAction::Move(action.clone()),
+            ))
         }
         AiAction::Drop(action) => {
             let legal = generate_legal_drop_actions(&state)
@@ -81,14 +50,10 @@ pub fn apply_ai_action(mut state: GameState, action: &AiAction) -> Result<GameSt
             if !legal {
                 return Err("AI가 합법적이지 않은 착수를 선택했습니다.".into());
             }
-            state.turn_state.mode = TurnMode::Drop;
-            Ok(end_turn(apply_drop_action(state, action.clone())))
-        }
-        AiAction::EndTurn => {
-            if !can_end_turn(&state) {
-                return Err("행동 없이 턴을 종료할 수 없습니다.".into());
-            }
-            Ok(end_turn(state))
+            Ok(apply_and_advance_turn(
+                state,
+                TurnAction::Drop(action.clone()),
+            ))
         }
     }
 }
@@ -174,19 +139,14 @@ pub fn choose_bot_action(
     state: &GameState,
     bot_player_id: &PlayerId,
     difficulty: BotDifficulty,
-) -> BotDecision {
+) -> Option<BotDecision> {
     let limits = difficulty.limits();
     let started = Instant::now();
     let mut actions = generate_ai_actions(state);
     order_ai_actions(state, &mut actions, bot_player_id);
 
     if actions.is_empty() {
-        return BotDecision {
-            action: AiAction::EndTurn,
-            score: evaluate(state, bot_player_id),
-            searched_nodes: 0,
-            depth_reached: 0,
-        };
+        return None;
     }
     let fallback_action = actions[0].clone();
 
@@ -228,12 +188,12 @@ pub fn choose_bot_action(
     }
 
     if scored.is_empty() {
-        return BotDecision {
+        return Some(BotDecision {
             action: fallback_action,
             score: evaluate(state, bot_player_id),
             searched_nodes: context.stats.searched_nodes,
             depth_reached: context.stats.depth_reached,
-        };
+        });
     }
 
     let maximizing = &state.current_player == bot_player_id;
@@ -252,12 +212,12 @@ pub fn choose_bot_action(
     };
     let (action, score) = scored.swap_remove(index.min(scored.len().saturating_sub(1)));
 
-    BotDecision {
+    Some(BotDecision {
         action,
         score,
         searched_nodes: context.stats.searched_nodes,
         depth_reached: context.stats.depth_reached,
-    }
+    })
 }
 
 pub fn play_bot_turn_detailed(
@@ -273,42 +233,12 @@ pub fn play_bot_turn_detailed(
     }
 
     let started = Instant::now();
-    let limits = difficulty.limits();
-    let mut actions = Vec::new();
-    let mut searched_nodes = 0_u64;
-    let mut depth_reached = 0_u8;
-
-    while &state.current_player == bot_player_id && state.phase != GamePhase::Ended {
-        if actions.len() >= usize::from(limits.max_actions_per_turn) {
-            return Err("봇 턴 행동 제한 안에 턴을 종료하지 못했습니다.".into());
-        }
-
-        let must_end = can_end_turn(&state)
-            && (matches!(state.turn_state.mode, TurnMode::Drop)
-                || actions.len() + 1 >= usize::from(limits.max_actions_per_turn));
-        let decision = if must_end {
-            BotDecision {
-                action: AiAction::EndTurn,
-                score: evaluate(&state, bot_player_id),
-                searched_nodes: 0,
-                depth_reached: 0,
-            }
-        } else {
-            choose_bot_action(&state, bot_player_id, difficulty)
-        };
-        searched_nodes = searched_nodes.saturating_add(decision.searched_nodes);
-        depth_reached = depth_reached.max(decision.depth_reached);
-
-        if matches!(decision.action, AiAction::EndTurn) && !can_end_turn(&state) {
-            return Err("봇이 수행할 합법 행동이 없어 턴을 종료할 수 없습니다.".into());
-        }
-        state = apply_ai_action(state, &decision.action)?;
-        let ended_turn = matches!(decision.action, AiAction::EndTurn);
-        actions.push(decision.action);
-        if ended_turn || state.phase == GamePhase::Ended || state.result.is_some() {
-            break;
-        }
-    }
+    let decision = choose_bot_action(&state, bot_player_id, difficulty)
+        .ok_or_else(|| "봇이 수행할 합법 행동이 없습니다.".to_string())?;
+    let searched_nodes = decision.searched_nodes;
+    let depth_reached = decision.depth_reached;
+    state = apply_ai_action(state, &decision.action)?;
+    let actions = vec![decision.action];
 
     Ok(BotTurnResult {
         state,

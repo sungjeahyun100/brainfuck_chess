@@ -178,8 +178,147 @@ pub struct PieceDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub promotion_pool: Vec<PieceTypeId>,
     /// Optional activated Chessembly move/attack programs for this piece type.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub abilities: Vec<PieceAbilityDefinition>,
+    /// Per-instance state schema. New pieces are initialized from these values.
+    #[serde(default)]
+    pub state_schema: Vec<PieceStateDefinition>,
+    /// Independent Chessembly programs used by move options.
+    #[serde(default)]
+    pub move_layers: Vec<MoveLayerDefinition>,
+    /// Player-selectable normal and special movement choices.
+    #[serde(default)]
+    pub move_options: Vec<MoveOptionDefinition>,
+    /// Logical asset selection derived from per-piece state.
+    #[serde(default)]
+    pub visual: PieceVisualDefinition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PieceStateValue {
+    Integer(i32),
+    Boolean(bool),
+    Text(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PieceStateDefinition {
+    pub key: String,
+    pub default_value: PieceStateValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PieceStatePredicate {
+    pub key: String,
+    pub condition: PieceStateCondition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PieceStateCondition {
+    Equals(PieceStateValue),
+    NotEquals(PieceStateValue),
+}
+
+impl PieceStatePredicate {
+    pub fn matches(&self, state: &HashMap<String, PieceStateValue>) -> bool {
+        let value = state.get(&self.key);
+        match &self.condition {
+            PieceStateCondition::Equals(expected) => value == Some(expected),
+            PieceStateCondition::NotEquals(expected) => {
+                value.is_some_and(|value| value != expected)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PieceStateUpdateDefinition {
+    pub key: String,
+    pub value: PieceStateValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveLayerDefinition {
+    pub id: String,
+    pub chessembly_code: String,
+    #[serde(default)]
+    pub enabled_when: Vec<PieceStatePredicate>,
+    #[serde(default)]
+    pub on_commit: Vec<PieceStateUpdateDefinition>,
+}
+
+impl MoveLayerDefinition {
+    pub fn is_enabled_for(&self, piece: &Piece) -> bool {
+        self.enabled_when
+            .iter()
+            .all(|predicate| predicate.matches(&piece.state))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveOptionKind {
+    Normal,
+    Ability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveOptionExecutionMode {
+    MoveModifier,
+    StandaloneAction,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CooldownClock {
+    #[default]
+    OwnerTurns,
+    GlobalTurns,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CooldownDefinition {
+    pub turns: u32,
+    #[serde(default)]
+    pub clock: CooldownClock,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveOptionDefinition {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub kind: MoveOptionKind,
+    pub layer_ids: Vec<String>,
+    pub execution_mode: MoveOptionExecutionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cooldown: Option<CooldownDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct CooldownState {
+    pub remaining: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PieceVisualDefinition {
+    pub default_asset_key: String,
+    #[serde(default)]
+    pub variants: Vec<PieceVisualVariantDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PieceVisualVariantDefinition {
+    pub id: String,
+    #[serde(default)]
+    pub enabled_when: Vec<PieceStatePredicate>,
+    pub asset_key: String,
+    #[serde(default)]
+    pub priority: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,6 +386,204 @@ impl PieceDefinition {
         }
         Some(self.promotion_pool.as_slice())
     }
+
+    /// Converts pre-layer definitions into the new model and validates every
+    /// string reference. This is the only compatibility boundary for legacy
+    /// `chessembly_code`/`abilities` data.
+    pub fn normalize_and_validate(mut self) -> Result<Self, String> {
+        if self.move_layers.is_empty() {
+            self.move_layers.push(MoveLayerDefinition {
+                id: "default".into(),
+                chessembly_code: self.chessembly_code.clone(),
+                enabled_when: Vec::new(),
+                on_commit: Vec::new(),
+            });
+        }
+        if self.move_options.is_empty() {
+            let default_layer_ids = if self.move_layers.iter().any(|layer| layer.id == "default") {
+                vec!["default".into()]
+            } else {
+                self.move_layers
+                    .iter()
+                    .map(|layer| layer.id.clone())
+                    .collect()
+            };
+            self.move_options.push(MoveOptionDefinition {
+                id: "normal".into(),
+                name: "Normal move".into(),
+                description: String::new(),
+                kind: MoveOptionKind::Normal,
+                layer_ids: default_layer_ids,
+                execution_mode: MoveOptionExecutionMode::MoveModifier,
+                cooldown: None,
+            });
+        }
+
+        // Read compatibility only: old ability definitions are promoted into
+        // layers/options and are not needed by canonical action generation.
+        for ability in self.abilities.clone() {
+            let layer_id = format!("ability::{}", ability.id);
+            if !self.move_layers.iter().any(|layer| layer.id == layer_id) {
+                self.move_layers.push(MoveLayerDefinition {
+                    id: layer_id.clone(),
+                    chessembly_code: ability.chessembly_code,
+                    enabled_when: Vec::new(),
+                    on_commit: Vec::new(),
+                });
+            }
+            if !self
+                .move_options
+                .iter()
+                .any(|option| option.id == ability.id)
+            {
+                self.move_options.push(MoveOptionDefinition {
+                    id: ability.id,
+                    name: ability.name,
+                    description: ability.description,
+                    kind: MoveOptionKind::Ability,
+                    layer_ids: vec![layer_id],
+                    execution_mode: MoveOptionExecutionMode::MoveModifier,
+                    cooldown: (ability.cooldown_turns > 0).then_some(CooldownDefinition {
+                        turns: ability.cooldown_turns,
+                        clock: CooldownClock::OwnerTurns,
+                    }),
+                });
+            }
+        }
+        if self.visual.default_asset_key.is_empty() {
+            self.visual.default_asset_key = self.id.clone();
+        }
+        self.validate()?;
+        Ok(self)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        fn duplicate(mut values: impl Iterator<Item = String>) -> Option<String> {
+            let mut seen = HashSet::new();
+            values.find(|value| !seen.insert(value.clone()))
+        }
+
+        if let Some(key) = duplicate(self.state_schema.iter().map(|state| state.key.clone())) {
+            return Err(format!("{}: duplicate state key `{key}`", self.id));
+        }
+        if let Some(id) = duplicate(self.move_layers.iter().map(|layer| layer.id.clone())) {
+            return Err(format!("{}: duplicate move layer id `{id}`", self.id));
+        }
+        if let Some(id) = duplicate(self.move_options.iter().map(|option| option.id.clone())) {
+            return Err(format!("{}: duplicate move option id `{id}`", self.id));
+        }
+        if let Some(id) = duplicate(
+            self.visual
+                .variants
+                .iter()
+                .map(|variant| variant.id.clone()),
+        ) {
+            return Err(format!("{}: duplicate visual variant id `{id}`", self.id));
+        }
+        if self.visual.default_asset_key.trim().is_empty() {
+            return Err(format!("{}: visual asset key is empty", self.id));
+        }
+
+        let state_keys: HashSet<_> = self
+            .state_schema
+            .iter()
+            .map(|state| state.key.as_str())
+            .collect();
+        let layer_ids: HashSet<_> = self
+            .move_layers
+            .iter()
+            .map(|layer| layer.id.as_str())
+            .collect();
+        let validate_predicates = |owner: &str, predicates: &[PieceStatePredicate]| {
+            predicates.iter().find_map(|predicate| {
+                (!state_keys.contains(predicate.key.as_str())).then(|| {
+                    format!(
+                        "{}: {owner} references unknown state key `{}`",
+                        self.id, predicate.key
+                    )
+                })
+            })
+        };
+
+        for layer in &self.move_layers {
+            if let Some(error) =
+                validate_predicates(&format!("layer `{}`", layer.id), &layer.enabled_when)
+            {
+                return Err(error);
+            }
+            if let Some(update) = layer
+                .on_commit
+                .iter()
+                .find(|update| !state_keys.contains(update.key.as_str()))
+            {
+                return Err(format!(
+                    "{}: layer `{}` updates unknown state key `{}`",
+                    self.id, layer.id, update.key
+                ));
+            }
+        }
+        for option in &self.move_options {
+            if option.layer_ids.is_empty() {
+                return Err(format!(
+                    "{}: move option `{}` has no layers",
+                    self.id, option.id
+                ));
+            }
+            if let Some(layer_id) = option
+                .layer_ids
+                .iter()
+                .find(|layer_id| !layer_ids.contains(layer_id.as_str()))
+            {
+                return Err(format!(
+                    "{}: move option `{}` references unknown layer `{layer_id}`",
+                    self.id, option.id
+                ));
+            }
+        }
+        for variant in &self.visual.variants {
+            if variant.asset_key.trim().is_empty() {
+                return Err(format!(
+                    "{}: visual variant `{}` has an empty asset key",
+                    self.id, variant.id
+                ));
+            }
+            if let Some(error) = validate_predicates(
+                &format!("visual variant `{}`", variant.id),
+                &variant.enabled_when,
+            ) {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn initial_state(&self) -> HashMap<String, PieceStateValue> {
+        self.state_schema
+            .iter()
+            .map(|definition| (definition.key.clone(), definition.default_value.clone()))
+            .collect()
+    }
+
+    pub fn normal_move_option(&self) -> Option<&MoveOptionDefinition> {
+        self.move_options
+            .iter()
+            .find(|option| option.kind == MoveOptionKind::Normal)
+    }
+
+    pub fn resolve_asset_key<'a>(&'a self, piece: &'a Piece) -> &'a str {
+        self.visual
+            .variants
+            .iter()
+            .filter(|variant| {
+                variant
+                    .enabled_when
+                    .iter()
+                    .all(|predicate| predicate.matches(&piece.state))
+            })
+            .max_by_key(|variant| variant.priority)
+            .map(|variant| variant.asset_key.as_str())
+            .unwrap_or(self.visual.default_asset_key.as_str())
+    }
 }
 
 impl PromotionCondition {
@@ -285,10 +622,19 @@ impl ChessemblyProgramCache {
         crate::profiling::record_cache_rebuild(1);
         let mut programs = HashMap::new();
         for (type_id, definition) in definitions {
-            programs.insert(
-                type_id.clone(),
-                Arc::new(parse(&definition.chessembly_code)),
-            );
+            if definition.move_layers.is_empty() {
+                programs.insert(
+                    Self::layer_key(type_id, "default"),
+                    Arc::new(parse(&definition.chessembly_code)),
+                );
+            } else {
+                for layer in &definition.move_layers {
+                    programs.insert(
+                        Self::layer_key(type_id, &layer.id),
+                        Arc::new(parse(&layer.chessembly_code)),
+                    );
+                }
+            }
             for ability in &definition.abilities {
                 programs.insert(
                     Self::ability_key(type_id, &ability.id),
@@ -303,19 +649,32 @@ impl ChessemblyProgramCache {
         let programs = self.read_programs();
         let expected_len: usize = definitions
             .values()
-            .map(|definition| 1 + definition.abilities.len())
+            .map(|definition| definition.move_layers.len().max(1) + definition.abilities.len())
             .sum();
         programs.len() == expected_len
             && definitions.iter().all(|(type_id, definition)| {
-                programs.contains_key(type_id)
-                    && definition.abilities.iter().all(|ability| {
-                        programs.contains_key(&Self::ability_key(type_id, &ability.id))
-                    })
+                (if definition.move_layers.is_empty() {
+                    programs.contains_key(&Self::layer_key(type_id, "default"))
+                } else {
+                    definition
+                        .move_layers
+                        .iter()
+                        .all(|layer| programs.contains_key(&Self::layer_key(type_id, &layer.id)))
+                }) && definition
+                    .abilities
+                    .iter()
+                    .all(|ability| programs.contains_key(&Self::ability_key(type_id, &ability.id)))
             })
     }
 
     pub fn get(&self, type_id: &PieceTypeId) -> Option<Arc<Program>> {
-        self.read_programs().get(type_id).cloned()
+        self.get_layer(type_id, "default")
+    }
+
+    pub fn get_layer(&self, type_id: &PieceTypeId, layer_id: &str) -> Option<Arc<Program>> {
+        self.read_programs()
+            .get(&Self::layer_key(type_id, layer_id))
+            .cloned()
     }
 
     pub fn get_ability(&self, type_id: &PieceTypeId, ability_id: &str) -> Option<Arc<Program>> {
@@ -336,7 +695,7 @@ impl ChessemblyProgramCache {
         let program = Arc::new(parse(&definition.chessembly_code));
         let mut programs = self.write_programs();
         programs
-            .entry(type_id.clone())
+            .entry(Self::layer_key(type_id, "default"))
             .or_insert_with(|| program.clone())
             .clone()
     }
@@ -368,7 +727,11 @@ impl ChessemblyProgramCache {
     }
 
     pub fn ability_key(type_id: &PieceTypeId, ability_id: &str) -> String {
-        format!("{type_id}::{ability_id}")
+        format!("{type_id}::legacy-ability::{ability_id}")
+    }
+
+    pub fn layer_key(type_id: &PieceTypeId, layer_id: &str) -> String {
+        format!("{type_id}::{layer_id}")
     }
 
     fn read_programs(&self) -> RwLockReadGuard<'_, HashMap<String, Arc<Program>>> {
@@ -405,16 +768,27 @@ pub struct Piece {
     /// Whether this piece has ever moved (used for Pawn 2-step rule)
     pub has_moved: bool,
     /// Currently active ability program, if any.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_ability: Option<ActiveAbilityState>,
     /// Ability id -> first global turn number when it may be used again.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub ability_cooldowns: HashMap<String, u32>,
+    /// State owned by this concrete piece instance.
+    #[serde(default)]
+    pub state: HashMap<String, PieceStateValue>,
+    /// Cooldowns owned by this concrete piece and move option.
+    #[serde(default)]
+    pub move_option_cooldowns: HashMap<String, CooldownState>,
 }
 
 impl Piece {
     pub fn is_on_board(&self) -> bool {
         self.current_square.is_some() && !self.in_pocket && !self.captured
+    }
+
+    pub fn initialize_from_definition(&mut self, definition: &PieceDefinition) {
+        self.state = definition.initial_state();
+        self.move_option_cooldowns.clear();
     }
 }
 
@@ -485,9 +859,36 @@ pub enum TurnAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StateUpdate {
+pub struct GlobalStateUpdate {
     pub key: String,
     pub value: i32,
+}
+
+/// Backward-compatible Rust name for Chessembly's global `set-state` output.
+pub type StateUpdate = GlobalStateUpdate;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PieceStateUpdate {
+    pub piece_id: PieceId,
+    pub key: String,
+    pub value: PieceStateValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CooldownUpdate {
+    pub piece_id: PieceId,
+    pub move_option_id: String,
+    pub remaining: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ActionEffects {
+    #[serde(default)]
+    pub global_state_updates: Vec<GlobalStateUpdate>,
+    #[serde(default)]
+    pub piece_state_updates: Vec<PieceStateUpdate>,
+    #[serde(default)]
+    pub cooldown_updates: Vec<CooldownUpdate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -506,12 +907,11 @@ pub struct MoveAction {
     /// Piece type to promote to when the moving piece's definition allows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promotion: Option<PieceTypeId>,
-    /// Optional selected ability used only for this submitted move.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ability_id: Option<String>,
-    /// Optional Chessembly state write attached to this activated square.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub set_state: Option<StateUpdate>,
+    pub move_option_id: String,
+    #[serde(default)]
+    pub source_layer_ids: Vec<String>,
+    #[serde(default)]
+    pub effects: ActionEffects,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -526,6 +926,13 @@ pub struct ActivateAbilityAction {
     pub player_id: PlayerId,
     pub piece_id: PieceId,
     pub ability_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionRecord {
+    pub turn_number: u32,
+    pub player_id: PlayerId,
+    pub action: TurnAction,
 }
 
 /// Search-oriented drop candidate. Identical pocket pieces are represented by
@@ -586,7 +993,12 @@ pub struct GameState {
     /// Chessembly global state variables read by `if-state` and written by `set-state`.
     #[serde(default)]
     pub global_state: HashMap<String, i32>,
+    /// Internal read-compatibility state for pre single-action saves. Canonical
+    /// server actions are atomic, so this is never part of the public payload.
+    #[serde(default, skip_serializing)]
     pub turn_state: TurnState,
+    #[serde(default)]
+    pub history: Vec<ActionRecord>,
     pub result: Option<GameResult>,
     #[serde(skip, default)]
     pub chessembly_program_cache: ChessemblyProgramCache,
@@ -618,6 +1030,25 @@ impl GameState {
             self.chessembly_program_cache
                 .get_or_parse(type_id, definition),
         )
+    }
+
+    pub fn chessembly_layer_program(
+        &self,
+        type_id: &PieceTypeId,
+        layer: &MoveLayerDefinition,
+    ) -> Arc<Program> {
+        if let Some(program) = self.chessembly_program_cache.get_layer(type_id, &layer.id) {
+            crate::profiling::record_cache_hit(1);
+            return program;
+        }
+
+        let key = ChessemblyProgramCache::layer_key(type_id, &layer.id);
+        let program = Arc::new(parse(&layer.chessembly_code));
+        let mut programs = self.chessembly_program_cache.write_programs();
+        programs
+            .entry(key)
+            .or_insert_with(|| program.clone())
+            .clone()
     }
 
     pub fn effective_chessembly_program(

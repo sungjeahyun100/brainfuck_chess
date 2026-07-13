@@ -27,16 +27,69 @@ export interface PieceDefinition {
   dialect?: ChessemblyDialect
   extensions?: string[]
   is_king: boolean
-  abilities?: PieceAbilityDefinition[]
+  state_schema: PieceStateDefinition[]
+  move_layers: MoveLayerDefinition[]
+  move_options: MoveOptionDefinition[]
+  visual: PieceVisualDefinition
 }
 
-export interface PieceAbilityDefinition {
+export type PieceStateValue = number | boolean | string
+
+export interface PieceStateDefinition {
+  key: string
+  default_value: PieceStateValue
+}
+
+export type PieceStateCondition =
+  | { equals: PieceStateValue }
+  | { not_equals: PieceStateValue }
+
+export interface PieceStatePredicate {
+  key: string
+  condition: PieceStateCondition
+}
+
+export interface PieceStateUpdateDefinition {
+  key: string
+  value: PieceStateValue
+}
+
+export interface MoveLayerDefinition {
+  id: string
+  chessembly_code: string
+  enabled_when: PieceStatePredicate[]
+  on_commit: PieceStateUpdateDefinition[]
+}
+
+export type MoveOptionKind = 'normal' | 'ability'
+export type MoveOptionExecutionMode = 'move_modifier' | 'standalone_action'
+export type CooldownClock = 'owner_turns' | 'global_turns'
+
+export interface CooldownDefinition {
+  turns: number
+  clock: CooldownClock
+}
+
+export interface MoveOptionDefinition {
   id: string
   name: string
   description: string
-  duration: 'until_turn_end' | 'until_piece_moves' | 'permanent' | { turns: number }
-  once_per_turn: boolean
-  cooldown_turns?: number
+  kind: MoveOptionKind
+  layer_ids: string[]
+  execution_mode: MoveOptionExecutionMode
+  cooldown?: CooldownDefinition
+}
+
+export interface PieceVisualVariantDefinition {
+  id: string
+  enabled_when: PieceStatePredicate[]
+  asset_key: string
+  priority: number
+}
+
+export interface PieceVisualDefinition {
+  default_asset_key: string
+  variants: PieceVisualVariantDefinition[]
 }
 
 export interface Piece {
@@ -47,7 +100,8 @@ export interface Piece {
   in_pocket: boolean
   captured: boolean
   has_moved: boolean
-  ability_cooldowns?: Record<string, number>
+  state: Record<string, PieceStateValue>
+  move_option_cooldowns: Record<string, { remaining: number }>
 }
 
 export interface Deck {
@@ -64,13 +118,6 @@ export interface Player {
   captured_pieces: PieceId[]
 }
 
-export type TurnMode = 'undecided' | 'move' | 'drop'
-
-export interface TurnState {
-  mode: TurnMode
-  actions: TurnAction[]
-}
-
 export interface MoveAction {
   type: 'move'
   player_id: PlayerId
@@ -79,11 +126,45 @@ export interface MoveAction {
   to: Square
   captured_piece_id?: PieceId
   promotion?: PieceTypeId
-  ability_id?: string
-  set_state?: {
+  move_option_id: string
+  source_layer_ids: string[]
+  effects: {
+    global_state_updates: Array<{
+      key: string
+      value: number
+    }>
+    piece_state_updates: Array<{
+      piece_id: PieceId
+      key: string
+      value: PieceStateValue
+    }>
+    cooldown_updates: Array<{
+      piece_id: PieceId
+      move_option_id: string
+      remaining: number
+    }>
+  }
+}
+
+export interface SubmitMoveAction {
+  type: 'move'
+  piece_id: PieceId
+  to: Square
+  promotion?: PieceTypeId
+  move_option_id?: string
+}
+
+export interface SubmitDropAction {
+  type: 'drop'
+  piece_id: PieceId
+  to: Square
+}
+
+export type SubmitAction = SubmitMoveAction | SubmitDropAction
+
+export interface GlobalStateUpdate {
     key: string
     value: number
-  }
 }
 
 export interface DropAction {
@@ -97,11 +178,7 @@ export type TurnAction = MoveAction | DropAction
 
 export type BotDifficulty = 'easy' | 'normal' | 'hard'
 
-export interface EndTurnAiAction {
-  type: 'end_turn'
-}
-
-export type AiAction = MoveAction | DropAction | EndTurnAiAction
+export type AiAction = MoveAction | DropAction
 
 export interface BotTurnStats {
   searched_nodes: number
@@ -137,7 +214,11 @@ export interface GameState {
   en_passant_target?: Square | null
   en_passant_available_to?: PlayerId | null
   global_state?: Record<string, number>
-  turn_state: TurnState
+  history: Array<{
+    turn_number: number
+    player_id: PlayerId
+    action: TurnAction
+  }>
   result?: GameResult
 }
 

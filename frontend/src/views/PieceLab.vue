@@ -136,9 +136,10 @@
               @dragend="clearDragState"
             >
               <img
-                v-if="displayPieceAsset(pieceAt(square.file, square.rank)!.pieceType, pieceAt(square.file, square.rank)!.owner)"
+                v-if="placedPieceAsset(pieceAt(square.file, square.rank)!)"
+                :key="placedPieceAsset(pieceAt(square.file, square.rank)!)"
                 class="piece-icon"
-                :src="displayPieceAsset(pieceAt(square.file, square.rank)!.pieceType, pieceAt(square.file, square.rank)!.owner)"
+                :src="placedPieceAsset(pieceAt(square.file, square.rank)!)"
                 :alt="pieceLabel(pieceAt(square.file, square.rank)!.pieceType)"
                 draggable="false"
               />
@@ -233,12 +234,11 @@
                   class="btn-start"
                   type="button"
                   :class="{ active: activeAbilityId === ability.id }"
-                  :disabled="!selectedLabPiece || !ability.connected || !ability.available"
+                  :disabled="!selectedLabPiece || !ability.available"
                   @click="toggleAbility(ability)"
                 >
                   {{ activeAbilityId === ability.id ? '해제' : '실행' }}
                 </button>
-                <small v-if="!ability.connected">이 기물의 특수능력 테스트는 아직 연결되지 않았습니다.</small>
               </div>
             </template>
             <p v-else class="muted-note">이 기물에는 등록된 특수능력이 없습니다.</p>
@@ -256,10 +256,10 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { api, type PieceLabAbilityOption } from '../api/gameApi'
-import { pieceAsset } from '../pieceAssets'
+import { api, type PieceLabMoveOption } from '../api/gameApi'
+import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import type { DeckPieceType } from '../types/deck'
-import type { MoveAction, PlayerId, Square } from '../types/game'
+import type { MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square } from '../types/game'
 import { boardSizes, pieceCatalog, pieceLabel } from '../composables/useDeckValidation'
 
 interface PieceLabPiece {
@@ -267,6 +267,8 @@ interface PieceLabPiece {
   pieceType: string
   owner: PlayerId
   square: Square
+  state: Record<string, PieceStateValue>
+  moveOptionCooldowns: Record<string, { remaining: number }>
 }
 
 interface LabSquare extends Square {
@@ -308,7 +310,8 @@ const legalMoves = ref<MoveAction[]>([])
 const attacks = ref<Square[]>([])
 const globalState = ref<Record<string, number>>({})
 const abilitySquares = ref<Square[]>([])
-const abilities = ref<PieceLabAbilityOption[]>([])
+const abilities = ref<PieceLabMoveOption[]>([])
+const labDefinitions = ref<Record<string, PieceDefinition>>({})
 const activeAbilityId = ref<string | null>(null)
 const optionsLoading = ref(false)
 const optionsError = ref<string | null>(null)
@@ -347,7 +350,7 @@ const selectedToolLabel = computed(() => {
   if (selectedTool.value === eraseTool) return '지우개'
   return selectedTool.value ? pieceLabel(selectedTool.value) : '없음'
 })
-const displayAbilities = computed<PieceLabAbilityOption[]>(() => {
+const displayAbilities = computed<PieceLabMoveOption[]>(() => {
   if (selectedLabPiece.value) return abilities.value
   return inspectedType.value ? staticAbilities(inspectedType.value) : []
 })
@@ -402,7 +405,7 @@ watch(selectedPieceId, () => {
 })
 
 watch(
-  () => [selectedPieceId.value, pieces.value.map(piece => `${piece.id}:${piece.pieceType}:${piece.owner}:${piece.square.file}_${piece.square.rank}`).join('|'), boardSize.value],
+  () => [selectedPieceId.value, pieces.value.map(piece => `${piece.id}:${piece.pieceType}:${piece.owner}:${piece.square.file}_${piece.square.rank}:${JSON.stringify(piece.state)}:${JSON.stringify(piece.moveOptionCooldowns)}`).join('|'), boardSize.value],
   () => {
     void loadSelectedPieceOptions()
   },
@@ -418,6 +421,28 @@ function fileLabel(file: number): string {
 
 function displayPieceAsset(pieceType: string, owner: PlayerId): string | undefined {
   return pieceAsset(pieceType, owner)
+}
+
+function placedPieceAsset(piece: PieceLabPiece): string | undefined {
+  const renderPiece: Piece = {
+    id: piece.id,
+    owner: piece.owner,
+    type_id: piece.pieceType,
+    current_square: piece.square,
+    in_pocket: false,
+    captured: false,
+    has_moved: false,
+    state: piece.state,
+    move_option_cooldowns: piece.moveOptionCooldowns,
+  }
+  return renderedPieceAsset(renderPiece, labDefinitions.value[piece.pieceType])
+}
+
+function initialPieceState(pieceType: string): Record<string, PieceStateValue> {
+  return Object.fromEntries(
+    (labDefinitions.value[pieceType]?.state_schema ?? [])
+      .map(definition => [definition.key, definition.default_value]),
+  )
 }
 
 function displayPieceSymbol(pieceType: string): string {
@@ -462,14 +487,16 @@ function movementDescription(pieceType: string): string {
   return descriptions[pieceType] ?? 'Custom Piece: 등록된 Chessembly 행마법을 따릅니다.'
 }
 
-function staticAbilities(pieceType: string): PieceLabAbilityOption[] {
+function staticAbilities(pieceType: string): PieceLabMoveOption[] {
   if (pieceType === 'cannon-rook') {
     return [{
       id: 'cannon_move',
       name: '포 이동',
       description: '이번 이동 동안 장기의 포처럼 정확히 하나의 기물을 뛰어넘어 이동합니다. 사용 후 3턴 동안 다시 사용할 수 없습니다.',
       available: false,
-      connected: true,
+      kind: 'ability',
+      execution_mode: 'move_modifier',
+      cooldown_remaining: 0,
     }]
   }
   return []
@@ -537,16 +564,38 @@ function applyLabMove(action: MoveAction) {
             ...piece,
             pieceType: action.promotion ?? piece.pieceType,
             square: action.to,
+            state: action.promotion ? initialPieceState(action.promotion) : piece.state,
+            moveOptionCooldowns: action.promotion ? {} : piece.moveOptionCooldowns,
           }
         : piece
     ))
-  if (action.set_state) {
+  for (const update of action.effects.piece_state_updates) {
+    const piece = pieces.value.find(piece => piece.id === update.piece_id)
+    if (!piece) continue
+    const definition = labDefinitions.value[piece.pieceType]
+    if (!definition?.state_schema.some(state => state.key === update.key)) continue
+    piece.state = { ...piece.state, [update.key]: update.value }
+  }
+  for (const update of action.effects.global_state_updates) {
     globalState.value = {
       ...globalState.value,
-      [action.set_state.key]: action.set_state.value,
+      [update.key]: update.value,
+    }
+  }
+  for (const update of action.effects.cooldown_updates) {
+    const piece = pieces.value.find(piece => piece.id === update.piece_id)
+    const option = piece
+      ? labDefinitions.value[piece.pieceType]?.move_options.find(option => option.id === update.move_option_id)
+      : undefined
+    if (!piece || !option?.cooldown) continue
+    piece.moveOptionCooldowns = {
+      ...piece.moveOptionCooldowns,
+      [update.move_option_id]: { remaining: update.remaining },
     }
   }
   selectedPieceId.value = action.piece_id
+  activeAbilityId.value = null
+  abilitySquares.value = []
   loadedOptionsPieceId.value = null
   optionsError.value = null
   promotionRequest.value = null
@@ -621,6 +670,8 @@ async function onSquareClick(file: number, rank: number) {
     pieceType: selectedTool.value,
     owner: selectedOwner.value,
     square: { file, rank },
+    state: initialPieceState(selectedTool.value),
+    moveOptionCooldowns: {},
   }
   pieces.value = [...pieces.value, piece]
   selectedPieceId.value = piece.id
@@ -851,6 +902,8 @@ async function onSquareDrop(event: DragEvent, file: number, rank: number) {
         pieceType: catalogPiece,
         owner: selectedOwner.value,
         square: { file, rank },
+        state: initialPieceState(catalogPiece),
+        moveOptionCooldowns: {},
       },
     ]
     selectedPieceId.value = pieces.value[pieces.value.length - 1]?.id ?? null
@@ -879,8 +932,8 @@ function isAttackSquare(square: Square): boolean {
   return attacks.value.some(attack => squareId(attack) === id)
 }
 
-async function toggleAbility(ability: PieceLabAbilityOption) {
-  if (!selectedLabPiece.value || !ability.connected || !ability.available) return
+async function toggleAbility(ability: PieceLabMoveOption) {
+  if (!selectedLabPiece.value || !ability.available) return
 
   activeAbilityId.value = activeAbilityId.value === ability.id ? null : ability.id
   loadedOptionsPieceId.value = null
@@ -912,9 +965,11 @@ async function loadSelectedPieceOptions() {
         piece_type: piece.pieceType,
         owner: piece.owner,
         square: piece.square,
+        state: piece.state,
+        move_option_cooldowns: piece.moveOptionCooldowns,
       })),
       selected_piece_id: selected.id,
-      ability_id: activeAbilityId.value ?? undefined,
+      move_option_id: activeAbilityId.value ?? undefined,
       global_state: globalState.value,
     })
     if (serial !== optionsSerial) return
@@ -922,7 +977,13 @@ async function loadSelectedPieceOptions() {
     legalMoves.value = response.legal_moves
     attacks.value = response.attacks
     abilitySquares.value = activeAbilityId.value ? response.moves : []
-    abilities.value = response.abilities
+    labDefinitions.value = response.piece_definitions
+    pieces.value = pieces.value.map(piece => ({
+      ...piece,
+      state: response.piece_states[piece.id] ?? piece.state,
+      moveOptionCooldowns: response.piece_cooldowns[piece.id] ?? piece.moveOptionCooldowns,
+    }))
+    abilities.value = response.move_options.filter(option => option.kind === 'ability')
     loadedOptionsPieceId.value = selected.id
   } catch (e: unknown) {
     if (serial !== optionsSerial) return

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use brainfuck_chess_engine::{
     ai::{play_bot_turn_detailed, AiAction, BotDifficulty},
-    endgame::{apply_activate_ability_action, apply_drop_action, apply_move_action},
+    endgame::apply_and_advance_turn,
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
@@ -22,8 +22,8 @@ use brainfuck_chess_engine::{
     },
     pieces::default_pieces::all_default_definitions,
     rules::{
-        calculate_deck_score, calculate_score_limit, can_end_turn, create_board, end_turn,
-        get_base_zone_squares, validate_deck,
+        calculate_deck_score, calculate_score_limit, create_board, get_base_zone_squares,
+        validate_deck,
     },
     types::*,
 };
@@ -121,7 +121,32 @@ struct GameResponse {
 
 #[derive(Deserialize)]
 struct SubmitActionRequest {
-    action: TurnAction,
+    action: SubmitAction,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum SubmitAction {
+    Move(SubmitMoveRequest),
+    Drop(SubmitDropRequest),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SubmitMoveRequest {
+    piece_id: PieceId,
+    to: Square,
+    #[serde(default)]
+    promotion: Option<PieceTypeId>,
+    #[serde(default)]
+    move_option_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SubmitDropRequest {
+    piece_id: PieceId,
+    to: Square,
 }
 
 #[derive(Deserialize)]
@@ -169,7 +194,8 @@ struct PieceOptionsResponse {
 
 #[derive(Default, Deserialize)]
 struct PieceOptionsQuery {
-    ability_id: Option<String>,
+    #[serde(alias = "ability_id")]
+    move_option_id: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -178,6 +204,10 @@ struct LabPieceSpec {
     piece_type: String,
     owner: PlayerId,
     square: Square,
+    #[serde(default)]
+    state: HashMap<String, PieceStateValue>,
+    #[serde(default)]
+    move_option_cooldowns: HashMap<String, CooldownState>,
 }
 
 #[derive(Deserialize)]
@@ -185,18 +215,21 @@ struct LabPieceOptionsRequest {
     board_size: i32,
     pieces: Vec<LabPieceSpec>,
     selected_piece_id: String,
-    ability_id: Option<String>,
+    #[serde(alias = "ability_id")]
+    move_option_id: Option<String>,
     #[serde(default)]
     global_state: HashMap<String, i32>,
 }
 
 #[derive(Serialize)]
-struct LabAbilityOption {
+struct LabMoveOption {
     id: String,
     name: String,
     description: String,
     available: bool,
-    connected: bool,
+    kind: MoveOptionKind,
+    execution_mode: MoveOptionExecutionMode,
+    cooldown_remaining: u32,
 }
 
 #[derive(Serialize)]
@@ -204,7 +237,10 @@ struct LabPieceOptionsResponse {
     moves: Vec<Square>,
     legal_moves: Vec<MoveAction>,
     attacks: Vec<Square>,
-    abilities: Vec<LabAbilityOption>,
+    move_options: Vec<LabMoveOption>,
+    piece_definitions: HashMap<PieceTypeId, PieceDefinition>,
+    piece_states: HashMap<PieceId, HashMap<String, PieceStateValue>>,
+    piece_cooldowns: HashMap<PieceId, HashMap<String, CooldownState>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -293,6 +329,11 @@ fn build_player_deck(
             has_moved: false,
             active_ability: None,
             ability_cooldowns: HashMap::new(),
+            state: definitions
+                .get(&type_id)
+                .map(PieceDefinition::initial_state)
+                .unwrap_or_default(),
+            move_option_cooldowns: HashMap::new(),
         };
 
         board
@@ -316,6 +357,11 @@ fn build_player_deck(
             has_moved: false,
             active_ability: None,
             ability_cooldowns: HashMap::new(),
+            state: definitions
+                .get(&type_id)
+                .map(PieceDefinition::initial_state)
+                .unwrap_or_default(),
+            move_option_cooldowns: HashMap::new(),
         };
 
         pieces.insert(piece_id.clone(), piece);
@@ -406,6 +452,7 @@ fn build_game_state(
         en_passant_available_to: None,
         global_state: HashMap::new(),
         turn_state: TurnState::new(),
+        history: Vec::new(),
         result: None,
         chessembly_program_cache,
     };
@@ -451,17 +498,50 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
 
         let type_id = resolve_piece_type(&lab_piece.owner, &lab_piece.piece_type)
             .ok_or_else(|| format!("알 수 없는 기물 타입입니다: {}", lab_piece.piece_type))?;
+        let definition = defs
+            .get(&type_id)
+            .ok_or_else(|| format!("기물 정의를 찾을 수 없습니다: {type_id}"))?;
+        let mut piece_state = definition.initial_state();
+        for (key, value) in &lab_piece.state {
+            let Some(state_definition) = definition
+                .state_schema
+                .iter()
+                .find(|state| state.key == *key)
+            else {
+                return Err(format!("{type_id}: 알 수 없는 기물 상태 키입니다: {key}"));
+            };
+            if std::mem::discriminant(&state_definition.default_value)
+                != std::mem::discriminant(value)
+            {
+                return Err(format!(
+                    "{type_id}: 기물 상태 `{key}`의 값 타입이 올바르지 않습니다."
+                ));
+            }
+            piece_state.insert(key.clone(), value.clone());
+        }
+        if let Some(option_id) = lab_piece.move_option_cooldowns.keys().find(|option_id| {
+            !definition
+                .move_options
+                .iter()
+                .any(|option| option.id.as_str() == option_id.as_str())
+        }) {
+            return Err(format!(
+                "{type_id}: 알 수 없는 이동 옵션 쿨타임입니다: {option_id}"
+            ));
+        }
         let piece_id = PieceId::from(lab_piece.id.clone());
         let piece = Piece {
             id: piece_id.clone(),
             owner: lab_piece.owner.clone(),
-            type_id,
+            type_id: type_id.clone(),
             current_square: Some(lab_piece.square),
             in_pocket: false,
             captured: false,
             has_moved: false,
             active_ability: None,
             ability_cooldowns: HashMap::new(),
+            state: piece_state,
+            move_option_cooldowns: lab_piece.move_option_cooldowns.clone(),
         };
 
         board
@@ -527,6 +607,7 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
         en_passant_available_to: None,
         global_state: req.global_state.clone(),
         turn_state: TurnState::new(),
+        history: Vec::new(),
         result: None,
         chessembly_program_cache,
     })
@@ -537,21 +618,6 @@ fn opponent_side(side: &PlayerId) -> PlayerId {
         "black".into()
     } else {
         "white".into()
-    }
-}
-
-fn has_move_or_drop_action(turn_state: &TurnState) -> bool {
-    turn_state
-        .actions
-        .iter()
-        .any(|action| matches!(action, TurnAction::Move(_) | TurnAction::Drop(_)))
-}
-
-fn end_turn_after_action(state: GameState) -> GameState {
-    if state.phase == GamePhase::Ended || state.result.is_some() {
-        state
-    } else {
-        end_turn(state)
     }
 }
 
@@ -664,7 +730,6 @@ async fn main() {
         .route("/games/:id", get(get_game))
         .route("/games/:id/actions", post(submit_action))
         .route("/games/:id/bot-turn", post(run_bot_turn))
-        .route("/games/:id/end-turn", post(end_game_turn))
         .route("/games/:id/resign", post(resign_game))
         .route("/games/:id/legal-moves", get(get_legal_moves))
         .route("/games/:id/piece-attacks/:piece_id", get(get_piece_attacks))
@@ -1129,36 +1194,9 @@ async fn submit_action(
         ));
     }
 
-    if has_move_or_drop_action(&state.turn_state) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "이번 턴에는 이미 행동했습니다. 턴을 종료하세요.".into(),
-            }),
-        ));
-    }
-
     match req.action {
-        TurnAction::Move(action) => {
-            if action.player_id != state.current_player {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: "현재 턴 플레이어만 행동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            // Validate turn mode
-            if state.turn_state.mode == TurnMode::Drop {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "착수 턴에는 이동할 수 없습니다.".into(),
-                    }),
-                ));
-            }
-            // Validate it's this player's piece
-            let piece = state.pieces.get(&action.piece_id).ok_or_else(|| {
+        SubmitAction::Move(request) => {
+            let piece = state.pieces.get(&request.piece_id).ok_or_else(|| {
                 (
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
@@ -1174,21 +1212,24 @@ async fn submit_action(
                     }),
                 ));
             }
-            // Validate against only the submitted piece's legal actions.
+            // The request contains selection data only. Capture and effects are
+            // regenerated from authoritative state and never trusted from JSON.
             let move_options = MoveGenerationOptions {
-                ability_id: action.ability_id.clone(),
+                move_option_id: request.move_option_id.clone(),
             };
             let legal_action = generate_piece_legal_move_actions_with_options(
                 state,
-                &action.piece_id,
+                &request.piece_id,
                 &move_options,
             )
             .into_iter()
             .find(|m| {
-                m.from == action.from
-                    && m.to == action.to
-                    && m.promotion == action.promotion
-                    && m.ability_id == action.ability_id
+                m.to == request.to
+                    && m.promotion == request.promotion
+                    && request
+                        .move_option_id
+                        .as_ref()
+                        .is_none_or(|option_id| m.move_option_id == *option_id)
             });
             let Some(legal_action) = legal_action else {
                 return Err((
@@ -1198,136 +1239,21 @@ async fn submit_action(
                     }),
                 ));
             };
-
-            state.turn_state.mode = TurnMode::Move;
-            let new_state = apply_move_action(state.clone(), legal_action);
-            *state = end_turn_after_action(new_state);
+            *state = apply_and_advance_turn(state.clone(), TurnAction::Move(legal_action));
         }
-        TurnAction::Drop(action) => {
-            if action.player_id != state.current_player {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: "현재 턴 플레이어만 행동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            if state.turn_state.mode == TurnMode::Move {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "이동 턴에는 착수할 수 없습니다.".into(),
-                    }),
-                ));
-            }
-            let is_legal = generate_piece_legal_drop_actions(state, &action.piece_id)
-                .iter()
-                .any(|d| d.player_id == action.player_id && d.to == action.to);
-            if !is_legal {
+        SubmitAction::Drop(request) => {
+            let legal_action = generate_piece_legal_drop_actions(state, &request.piece_id)
+                .into_iter()
+                .find(|action| action.to == request.to);
+            let Some(legal_action) = legal_action else {
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
                         error: "착수 가능한 칸이 아닙니다.".into(),
                     }),
                 ));
-            }
-
-            state.turn_state.mode = TurnMode::Drop;
-            let new_state = apply_drop_action(state.clone(), action);
-            *state = end_turn_after_action(new_state);
-        }
-        TurnAction::ActivateAbility(action) => {
-            if action.player_id != state.current_player {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: "현재 턴 플레이어만 행동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            if state.turn_state.mode == TurnMode::Drop {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "착수 턴에는 능력을 발동할 수 없습니다.".into(),
-                    }),
-                ));
-            }
-
-            let piece = state.pieces.get(&action.piece_id).ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "기물을 찾을 수 없습니다.".into(),
-                    }),
-                )
-            })?;
-            if piece.owner != state.current_player {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorResponse {
-                        error: "자신의 기물 능력만 발동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            if !piece.is_on_board() {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "보드 위의 기물만 능력을 발동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-            if piece.active_ability.is_some() {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "이미 활성화된 능력이 있습니다.".into(),
-                    }),
-                ));
-            }
-
-            let definition = state.piece_definitions.get(&piece.type_id).ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "기물 정의를 찾을 수 없습니다.".into(),
-                    }),
-                )
-            })?;
-            let ability = definition
-                .abilities
-                .iter()
-                .find(|ability| ability.id == action.ability_id)
-                .ok_or_else(|| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(ErrorResponse {
-                            error: "해당 기물에 없는 능력입니다.".into(),
-                        }),
-                    )
-                })?;
-            if ability.once_per_turn
-                && state.turn_state.actions.iter().any(|existing| {
-                    matches!(
-                        existing,
-                        TurnAction::ActivateAbility(previous)
-                            if previous.piece_id == action.piece_id
-                                && previous.ability_id == action.ability_id
-                    )
-                })
-            {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "이 능력은 같은 턴에 한 번만 발동할 수 있습니다.".into(),
-                    }),
-                ));
-            }
-
-            state.turn_state.mode = TurnMode::Move;
-            let new_state = apply_activate_ability_action(state.clone(), action);
-            *state = new_state;
+            };
+            *state = apply_and_advance_turn(state.clone(), TurnAction::Drop(legal_action));
         }
     }
 
@@ -1402,35 +1328,6 @@ async fn run_bot_turn(
     }))
 }
 
-async fn end_game_turn(
-    State(app): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
-    let mut entry = app.games.get_mut(&id).ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "게임을 찾을 수 없습니다.".into(),
-            }),
-        )
-    })?;
-
-    let state = entry.value_mut();
-
-    if !can_end_turn(state) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "턴을 종료하려면 최소 1개의 행동이 필요합니다.".into(),
-            }),
-        ));
-    }
-
-    let new_state = end_turn(state.clone());
-    *state = new_state;
-    Ok(Json(state.clone()))
-}
-
 async fn get_legal_moves(
     State(app): State<AppState>,
     Path(id): Path<String>,
@@ -1495,7 +1392,7 @@ async fn get_piece_options(
                 &state,
                 &piece_id,
                 &MoveGenerationOptions {
-                    ability_id: query.ability_id,
+                    move_option_id: query.move_option_id,
                 },
             );
             let attacks = generate_piece_attack_squares(&state, &piece_id);
@@ -1520,7 +1417,7 @@ async fn get_lab_piece_options(
         &state,
         &piece_id,
         &MoveGenerationOptions {
-            ability_id: req.ability_id.clone(),
+            move_option_id: req.move_option_id.clone(),
         },
     );
     let mut seen_moves = HashSet::new();
@@ -1534,20 +1431,34 @@ async fn get_lab_piece_options(
         .into_iter()
         .filter(|square| seen_attacks.insert(square.to_id()))
         .collect();
-    let abilities = state
+    let move_options = state
         .pieces
         .get(&piece_id)
-        .and_then(|piece| state.piece_definitions.get(&piece.type_id))
-        .map(|definition| {
+        .and_then(|piece| {
+            state
+                .piece_definitions
+                .get(&piece.type_id)
+                .map(|definition| (piece, definition))
+        })
+        .map(|(piece, definition)| {
             definition
-                .abilities
+                .move_options
                 .iter()
-                .map(|ability| LabAbilityOption {
-                    id: ability.id.clone(),
-                    name: ability.name.clone(),
-                    description: ability.description.clone(),
-                    available: true,
-                    connected: ability.id == "cannon_move",
+                .map(|option| {
+                    let cooldown_remaining = piece
+                        .move_option_cooldowns
+                        .get(&option.id)
+                        .map_or(0, |cooldown| cooldown.remaining);
+                    LabMoveOption {
+                        id: option.id.clone(),
+                        name: option.name.clone(),
+                        description: option.description.clone(),
+                        available: option.execution_mode == MoveOptionExecutionMode::MoveModifier
+                            && cooldown_remaining == 0,
+                        kind: option.kind,
+                        execution_mode: option.execution_mode,
+                        cooldown_remaining,
+                    }
                 })
                 .collect()
         })
@@ -1557,7 +1468,18 @@ async fn get_lab_piece_options(
         moves,
         legal_moves,
         attacks,
-        abilities,
+        move_options,
+        piece_definitions: state.piece_definitions.clone(),
+        piece_states: state
+            .pieces
+            .iter()
+            .map(|(piece_id, piece)| (piece_id.clone(), piece.state.clone()))
+            .collect(),
+        piece_cooldowns: state
+            .pieces
+            .iter()
+            .map(|(piece_id, piece)| (piece_id.clone(), piece.move_option_cooldowns.clone()))
+            .collect(),
     }))
 }
 
@@ -1625,7 +1547,7 @@ mod tests {
         let req = LabPieceOptionsRequest {
             board_size: 8,
             selected_piece_id: "lab_white_rook_1".into(),
-            ability_id: None,
+            move_option_id: None,
             global_state: HashMap::new(),
             pieces: vec![
                 LabPieceSpec {
@@ -1633,12 +1555,16 @@ mod tests {
                     piece_type: "rook".into(),
                     owner: "white".into(),
                     square: Square::new(3, 3),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
                 },
                 LabPieceSpec {
                     id: "lab_black_knight_1".into(),
                     piece_type: "knight".into(),
                     owner: "black".into(),
                     square: Square::new(3, 6),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
                 },
             ],
         };
@@ -1654,17 +1580,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lab_piece_options_respects_submitted_global_state() {
+    async fn lab_piece_options_respects_submitted_piece_state() {
         let req = LabPieceOptionsRequest {
             board_size: 8,
             selected_piece_id: "lab_white_windmill_1".into(),
-            ability_id: None,
-            global_state: HashMap::from([("mode".into(), 1)]),
+            move_option_id: None,
+            global_state: HashMap::new(),
             pieces: vec![LabPieceSpec {
                 id: "lab_white_windmill_1".into(),
                 piece_type: "windmill".into(),
                 owner: "white".into(),
                 square: Square::new(3, 3),
+                state: HashMap::from([("mode".into(), PieceStateValue::Text("rook".into()))]),
+                move_option_cooldowns: HashMap::new(),
             }],
         };
 
@@ -1685,15 +1613,11 @@ mod tests {
             State(app.clone()),
             Path(game_id.clone()),
             Json(SubmitActionRequest {
-                action: TurnAction::Move(MoveAction {
-                    player_id: "white".into(),
+                action: SubmitAction::Move(SubmitMoveRequest {
                     piece_id: "white_rook_1".into(),
-                    from: Square::new(0, 0),
                     to: Square::new(0, 1),
-                    captured_piece_id: None,
                     promotion: None,
-                    ability_id: None,
-                    set_state: None,
+                    move_option_id: None,
                 }),
             }),
         )
@@ -1708,6 +1632,43 @@ mod tests {
         assert!(response.turn_state.actions.is_empty());
         let stored = app.games.get(&game_id).unwrap();
         assert_eq!(stored.current_player, "black");
+    }
+
+    #[tokio::test]
+    async fn submit_move_rejects_unknown_option_and_noncanonical_destination() {
+        let (app, game_id) = test_app_with_game();
+        let unknown_option = submit_action(
+            State(app.clone()),
+            Path(game_id.clone()),
+            Json(SubmitActionRequest {
+                action: SubmitAction::Move(SubmitMoveRequest {
+                    piece_id: "white_rook_1".into(),
+                    to: Square::new(0, 1),
+                    promotion: None,
+                    move_option_id: Some("missing".into()),
+                }),
+            }),
+        )
+        .await;
+        assert!(matches!(unknown_option, Err((StatusCode::BAD_REQUEST, _))));
+
+        let illegal_destination = submit_action(
+            State(app),
+            Path(game_id),
+            Json(SubmitActionRequest {
+                action: SubmitAction::Move(SubmitMoveRequest {
+                    piece_id: "white_rook_1".into(),
+                    to: Square::new(1, 1),
+                    promotion: None,
+                    move_option_id: None,
+                }),
+            }),
+        )
+        .await;
+        assert!(matches!(
+            illegal_destination,
+            Err((StatusCode::BAD_REQUEST, _))
+        ));
     }
 
     #[tokio::test]
@@ -1740,7 +1701,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn submit_move_action_applies_canonical_set_state_effect() {
+    async fn submit_move_action_applies_canonical_piece_state_effect() {
         let game_id = "windmill-game".to_string();
         let white_deck = PlayerDeckSpec {
             starting: vec![
@@ -1773,15 +1734,11 @@ mod tests {
             State(app),
             Path(game_id),
             Json(SubmitActionRequest {
-                action: TurnAction::Move(MoveAction {
-                    player_id: "white".into(),
+                action: SubmitAction::Move(SubmitMoveRequest {
                     piece_id: "white_windmill_1".into(),
-                    from: Square::new(3, 1),
                     to: Square::new(4, 2),
-                    captured_piece_id: None,
                     promotion: None,
-                    ability_id: None,
-                    set_state: None,
+                    move_option_id: None,
                 }),
             }),
         )
@@ -1791,7 +1748,11 @@ mod tests {
             Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
         };
 
-        assert_eq!(response.global_state.get("mode"), Some(&1));
+        assert_eq!(
+            response.pieces["white_windmill_1"].state.get("mode"),
+            Some(&PieceStateValue::Text("rook".into()))
+        );
+        assert!(!response.global_state.contains_key("mode"));
     }
 
     #[tokio::test]

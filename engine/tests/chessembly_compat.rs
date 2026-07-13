@@ -24,6 +24,8 @@ fn make_piece(id: &str, owner: &str, type_id: &str, file: i32, rank: i32) -> Pie
         has_moved: false,
         active_ability: None,
         ability_cooldowns: HashMap::new(),
+        state: HashMap::new(),
+        move_option_cooldowns: HashMap::new(),
     }
 }
 
@@ -79,6 +81,10 @@ take-move(0, -1);"
         promotion: None,
         promotion_pool: Vec::new(),
         abilities: Vec::new(),
+        state_schema: Vec::new(),
+        move_layers: Vec::new(),
+        move_options: Vec::new(),
+        visual: PieceVisualDefinition::default(),
     };
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
@@ -202,6 +208,10 @@ take-move(-1, 2) repeat(1);"
         promotion: None,
         promotion_pool: Vec::new(),
         abilities: Vec::new(),
+        state_schema: Vec::new(),
+        move_layers: Vec::new(),
+        move_options: Vec::new(),
+        visual: PieceVisualDefinition::default(),
     };
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
@@ -460,6 +470,10 @@ fn test_scope_block_y_move() {
         promotion: None,
         promotion_pool: Vec::new(),
         abilities: Vec::new(),
+        state_schema: Vec::new(),
+        move_layers: Vec::new(),
+        move_options: Vec::new(),
+        visual: PieceVisualDefinition::default(),
     };
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
@@ -504,6 +518,10 @@ fn test_catch_scans_and_marks_threatened_squares() {
         promotion: None,
         promotion_pool: Vec::new(),
         abilities: Vec::new(),
+        state_schema: Vec::new(),
+        move_layers: Vec::new(),
+        move_options: Vec::new(),
+        visual: PieceVisualDefinition::default(),
     };
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);

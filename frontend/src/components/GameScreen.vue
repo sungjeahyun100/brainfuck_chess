@@ -12,9 +12,6 @@
         </span>
         <span v-if="botPlayer" class="bot-badge">🤖 {{ botDifficultyLabel }}</span>
         <span class="turn-badge">Turn {{ viewState.turn_number }}</span>
-        <span class="mode-badge" v-if="viewState.turn_state.mode !== 'undecided'">
-          {{ viewState.turn_state.mode === 'move' ? '🏃 이동' : '🎯 포켓 기물 놓기' }}
-        </span>
       </div>
     </div>
 
@@ -111,6 +108,7 @@
         <Board
           :board="viewState.board"
           :pieces="viewState.pieces"
+          :definitions="viewState.piece_definitions"
           :selected-piece-id="visibleSelectedPieceId"
           :movable-squares="visibleMovableSquares"
           :attack-squares="visibleAttackSquares"
@@ -210,12 +208,14 @@ import type {
   DropAction,
   GameState,
   MoveAction,
-  PieceAbilityDefinition,
+  MoveOptionDefinition,
   PlayerId,
   Square,
+  SubmitDropAction,
+  SubmitMoveAction,
 } from '../types/game'
 import { api } from '../api/gameApi'
-import { pieceAsset } from '../pieceAssets'
+import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import Board from './Board.vue'
 
 const props = defineProps<{
@@ -318,8 +318,8 @@ const selectedPiece = computed(() => (
 const selectedPieceDefinition = computed(() => (
   selectedPiece.value ? props.state.piece_definitions[selectedPiece.value.type_id] ?? null : null
 ))
-const selectedPieceAbilities = computed<PieceAbilityDefinition[]>(() => (
-  selectedPieceDefinition.value?.abilities ?? []
+const selectedPieceAbilities = computed<MoveOptionDefinition[]>(() => (
+  selectedPieceDefinition.value?.move_options?.filter(option => option.kind === 'ability') ?? []
 ))
 const selectedAbility = computed(() => (
   selectedPieceAbilities.value.find(ability => ability.id === activeAbilityId.value) ?? null
@@ -331,15 +331,14 @@ const selectedAbilityHelpText = computed(() => {
   return unavailable ?? ''
 })
 
-function abilityUnavailableReason(ability: PieceAbilityDefinition): string {
+function abilityUnavailableReason(ability: MoveOptionDefinition): string {
   if (!selectedPiece.value) return '선택한 기물이 없습니다.'
   if (selectedPieceAbilities.value.length === 0) return '선택한 기물은 특수 능력이 없습니다.'
   if (selectedPiece.value.owner !== props.state.current_player) return '현재 턴의 기물이 아닙니다.'
-  if (props.state.turn_state.mode === 'drop') return '착수 턴에는 사용할 수 없습니다.'
-  if (props.state.turn_state.actions.length > 0) return '이번 턴에는 사용할 수 없습니다.'
-  const usableTurn = selectedPiece.value.ability_cooldowns?.[ability.id]
-  if (usableTurn && usableTurn > props.state.turn_number) {
-    return `${usableTurn - props.state.turn_number}턴 후 다시 사용할 수 있습니다.`
+  if (ability.execution_mode !== 'move_modifier') return '독립 실행 옵션은 아직 지원되지 않습니다.'
+  const remaining = selectedPiece.value.move_option_cooldowns?.[ability.id]?.remaining ?? 0
+  if (remaining > 0) {
+    return `${remaining}번의 소유자 턴을 마친 뒤 다시 사용할 수 있습니다.`
   }
   return ''
 }
@@ -391,8 +390,6 @@ function clearBotReplay() {
 }
 
 function actionLabel(action: AiAction): string {
-  if (action.type === 'end_turn') return '턴 종료'
-
   const piece = props.state.pieces[action.piece_id]
   const pieceName = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? action.piece_id
   if (action.type === 'drop') {
@@ -411,7 +408,6 @@ function removePieceFromBoard(state: GameState, pieceId: string) {
 
 function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
   const next = cloneGameState(state)
-  next.turn_state.mode = 'move'
   const movedPiece = next.pieces[action.piece_id]
   const isCastling = movedPiece?.type_id === 'king'
     && Math.abs(action.to.file - action.from.file) === 2
@@ -459,16 +455,33 @@ function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
     movedPiece.has_moved = true
     if (action.promotion) {
       movedPiece.type_id = action.promotion
+      const promotedDefinition = next.piece_definitions[action.promotion]
+      movedPiece.state = Object.fromEntries(
+        (promotedDefinition?.state_schema ?? []).map(entry => [entry.key, entry.default_value]),
+      )
+      movedPiece.move_option_cooldowns = {}
     }
   }
-  if (action.set_state) {
-    next.global_state = {
-      ...(next.global_state ?? {}),
-      [action.set_state.key]: action.set_state.value,
+  for (const update of action.effects.piece_state_updates) {
+    const target = next.pieces[update.piece_id]
+    if (target) target.state = { ...(target.state ?? {}), [update.key]: update.value }
+  }
+  for (const update of action.effects.global_state_updates) {
+    next.global_state = { ...(next.global_state ?? {}), [update.key]: update.value }
+  }
+  for (const update of action.effects.cooldown_updates) {
+    const target = next.pieces[update.piece_id]
+    const option = target
+      ? next.piece_definitions[target.type_id]?.move_options.find(option => option.id === update.move_option_id)
+      : undefined
+    if (target && option?.cooldown) {
+      target.move_option_cooldowns = {
+        ...(target.move_option_cooldowns ?? {}),
+        [update.move_option_id]: { remaining: update.remaining },
+      }
     }
   }
 
-  next.turn_state.actions.push(action)
 
   const capturedTypeId = capturedPieceId ? next.pieces[capturedPieceId]?.type_id : undefined
   if (capturedTypeId && next.piece_definitions[capturedTypeId]?.is_king) {
@@ -481,7 +494,6 @@ function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
 
 function applyDropForReplay(state: GameState, action: DropAction): GameState {
   const next = cloneGameState(state)
-  next.turn_state.mode = 'drop'
 
   const player = next.players[action.player_id]
   if (player) {
@@ -494,29 +506,13 @@ function applyDropForReplay(state: GameState, action: DropAction): GameState {
     piece.current_square = action.to
   }
   next.board.squares[squareId(action.to)] = action.piece_id
-  next.turn_state.actions.push(action)
-
-  return next
-}
-
-function applyEndTurnForReplay(state: GameState): GameState {
-  if (state.turn_state.actions.length === 0) return state
-
-  const next = cloneGameState(state)
-  next.current_player = otherPlayer(next.current_player)
-  next.turn_number += 1
-  next.turn_state = {
-    mode: 'undecided',
-    actions: [],
-  }
 
   return next
 }
 
 function applyActionForReplay(state: GameState, action: AiAction): GameState {
   if (action.type === 'move') return applyMoveForReplay(state, action)
-  if (action.type === 'drop') return applyDropForReplay(state, action)
-  return applyEndTurnForReplay(state)
+  return applyDropForReplay(state, action)
 }
 
 function previewBotAction(action: AiAction) {
@@ -629,7 +625,9 @@ function pieceSymbol(typeId: string): string {
 
 function pieceImage(pieceId: string): string | undefined {
   const piece = viewState.value.pieces[pieceId]
-  return piece ? pieceAsset(piece.type_id, piece.owner) : undefined
+  return piece
+    ? renderedPieceAsset(piece, viewState.value.piece_definitions[piece.type_id])
+    : undefined
 }
 
 function pieceAlt(pieceId: string): string {
@@ -729,8 +727,6 @@ function actionCacheKey(pieceId?: string, abilityId?: string | null): string {
     props.state.id,
     props.state.current_player,
     props.state.turn_number,
-    props.state.turn_state.mode,
-    props.state.turn_state.actions.length,
     pieceId ?? '',
     abilityId ?? '',
   ].join(':')
@@ -774,7 +770,7 @@ async function loadPieceOptions(pieceId: string, abilityId: string | null = null
 
 async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | null> {
   const piece = props.state.pieces[pieceId]
-  if (!piece || piece.owner !== props.state.current_player || props.state.turn_state.actions.length > 0) {
+  if (!piece || piece.owner !== props.state.current_player) {
     clearSelection()
     return null
   }
@@ -861,7 +857,7 @@ async function loadDropOptions(): Promise<DropAction[]> {
 
 async function selectPocketPiece(pieceId: string): Promise<Square[]> {
   const piece = props.state.pieces[pieceId]
-  if (!piece || piece.owner !== props.state.current_player || props.state.turn_state.mode === 'move' || props.state.turn_state.actions.length > 0) {
+  if (!piece || piece.owner !== props.state.current_player) {
     clearSelection()
     return []
   }
@@ -922,23 +918,13 @@ async function submitMove(pieceId: string, to: Square) {
     promotion = chosen
   }
 
-  const selectedMove = options.moves.find(move =>
-    move.piece_id === pieceId
-    && sameSquare(move.to, to)
-    && (move.promotion ?? undefined) === promotion
-    && (move.ability_id ?? null) === (moveAbilityId ?? null)
-  )
   try {
-    const action: MoveAction = {
+    const action: SubmitMoveAction = {
       type: 'move',
-      player_id: props.state.current_player,
       piece_id: pieceId,
-      from: fromPiece.current_square,
       to,
-      captured_piece_id: selectedMove?.captured_piece_id,
       promotion,
-      ability_id: moveAbilityId ?? undefined,
-      set_state: selectedMove?.set_state,
+      move_option_id: moveAbilityId ?? undefined,
     }
     const newState = await api.submitAction(props.state.id, action)
     emit('stateUpdate', newState)
@@ -959,9 +945,8 @@ async function submitDrop(pieceId: string, to: Square) {
   }
 
   try {
-    const action: DropAction = {
+    const action: SubmitDropAction = {
       type: 'drop',
-      player_id: props.state.current_player,
       piece_id: pieceId,
       to,
     }
@@ -1005,7 +990,7 @@ async function onSquareClick(sq: Square) {
   }
 
   // ── Select own piece ──
-  if (pieceId && piece && piece.owner === currentPlayer && props.state.turn_state.actions.length === 0) {
+  if (pieceId && piece && piece.owner === currentPlayer) {
     await selectBoardPiece(pieceId)
   } else {
     clearSelection()
@@ -1022,7 +1007,6 @@ async function onPocketClick(pieceId: string) {
 
   const piece = props.state.pieces[pieceId]
   if (!piece || piece.owner !== props.state.current_player) return
-  if (props.state.turn_state.mode === 'move' || props.state.turn_state.actions.length > 0) return
 
   await selectPocketPiece(pieceId)
 }
@@ -1059,7 +1043,7 @@ async function onSquareDrop(sq: Square | null, pieceId: string) {
 
 function onPocketDragStart(event: DragEvent, pieceId: string) {
   error.value = null
-  if (!canUsePlayerControls.value || props.state.turn_state.mode === 'move' || props.state.turn_state.actions.length > 0) {
+  if (!canUsePlayerControls.value) {
     event.preventDefault()
     clearSelection()
     return

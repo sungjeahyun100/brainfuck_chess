@@ -4,9 +4,13 @@ import type {
   DropAction,
   GameState,
   MoveAction,
+  MoveOptionExecutionMode,
+  MoveOptionKind,
+  PieceDefinition,
+  PieceStateValue,
   PlayerId,
   Square,
-  TurnAction,
+  SubmitAction,
 } from '../types/game'
 
 const BASE = '/api/games'
@@ -57,29 +61,36 @@ export interface PieceLabPieceRequest {
   piece_type: string
   owner: PlayerId
   square: Square
+  state?: Record<string, PieceStateValue>
+  move_option_cooldowns?: Record<string, { remaining: number }>
 }
 
 export interface PieceLabOptionsRequest {
   board_size: number
   pieces: PieceLabPieceRequest[]
   selected_piece_id: string
-  ability_id?: string
+  move_option_id?: string
   global_state?: Record<string, number>
 }
 
-export interface PieceLabAbilityOption {
+export interface PieceLabMoveOption {
   id: string
   name: string
   description: string
   available: boolean
-  connected: boolean
+  kind: MoveOptionKind
+  execution_mode: MoveOptionExecutionMode
+  cooldown_remaining: number
 }
 
 export interface PieceLabOptionsResponse {
   moves: Square[]
   legal_moves: MoveAction[]
   attacks: Square[]
-  abilities: PieceLabAbilityOption[]
+  move_options: PieceLabMoveOption[]
+  piece_definitions: Record<string, PieceDefinition>
+  piece_states: Record<string, Record<string, PieceStateValue>>
+  piece_cooldowns: Record<string, Record<string, { remaining: number }>>
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -123,7 +134,7 @@ export const api = {
     return request(`${BASE}/${id}`)
   },
 
-  submitAction(id: string, action: TurnAction): Promise<GameState> {
+  submitAction(id: string, action: SubmitAction): Promise<GameState> {
     return request(`${BASE}/${id}/actions`, {
       method: 'POST',
       body: JSON.stringify({ action }),
@@ -156,8 +167,8 @@ export const api = {
     return request(`${BASE}/${id}/piece-attacks/${pieceId}`)
   },
 
-  getPieceOptions(id: string, pieceId: string, abilityId?: string | null): Promise<PieceOptionsResponse> {
-    const query = abilityId ? `?ability_id=${encodeURIComponent(abilityId)}` : ''
+  getPieceOptions(id: string, pieceId: string, moveOptionId?: string | null): Promise<PieceOptionsResponse> {
+    const query = moveOptionId ? `?move_option_id=${encodeURIComponent(moveOptionId)}` : ''
     return request(`${BASE}/${id}/pieces/${pieceId}/options${query}`)
   },
 

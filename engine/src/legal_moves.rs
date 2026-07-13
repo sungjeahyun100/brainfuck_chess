@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::attack_map::generate_attack_map;
-use crate::chessembly::run_effective_chessembly_for_piece;
+use crate::chessembly::run_chessembly_layer_for_piece;
 use crate::placement::get_placement_squares;
 use crate::types::*;
 
@@ -46,8 +46,9 @@ fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
         m.piece_id == action.piece_id
             && m.to == action.to
             && m.promotion == action.promotion
-            && m.ability_id == action.ability_id
-            && m.set_state == action.set_state
+            && m.move_option_id == action.move_option_id
+            && m.source_layer_ids == action.source_layer_ids
+            && m.effects == action.effects
     });
     if !exists {
         actions.push(action);
@@ -56,36 +57,46 @@ fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
 
 #[derive(Debug, Clone, Default)]
 pub struct MoveGenerationOptions {
-    pub ability_id: Option<String>,
+    pub move_option_id: Option<String>,
+}
+
+struct MoveBuildContext<'a> {
+    game_state: &'a GameState,
+    piece_id: &'a PieceId,
+    piece: &'a Piece,
+    definition: &'a PieceDefinition,
+    player_id: &'a PlayerId,
+    option: &'a MoveOptionDefinition,
+    layer: &'a MoveLayerDefinition,
 }
 
 /// Push a move action, expanding it into one action per promotion choice
 /// when the moving piece's definition has a matching promotion rule.
 fn push_move_or_promotions(
     actions: &mut Vec<MoveAction>,
-    definition: &PieceDefinition,
-    board_size: i32,
-    player_id: &PlayerId,
-    piece_id: &PieceId,
-    from: Square,
+    context: &MoveBuildContext<'_>,
     to: Square,
     captured_piece_id: Option<PieceId>,
-    ability_id: Option<&str>,
-    set_state: Option<StateUpdate>,
+    effects: &ActionEffects,
 ) {
-    if let Some(promotion_options) = definition.promotion_options_for_rank(to.rank, board_size) {
+    let from = context.piece.current_square.unwrap();
+    if let Some(promotion_options) = context
+        .definition
+        .promotion_options_for_rank(to.rank, context.game_state.board.size)
+    {
         for promo in promotion_options {
             push_action_if_unique(
                 actions,
                 MoveAction {
-                    player_id: player_id.clone(),
-                    piece_id: piece_id.clone(),
+                    player_id: context.player_id.clone(),
+                    piece_id: context.piece_id.clone(),
                     from,
                     to,
                     captured_piece_id: captured_piece_id.clone(),
                     promotion: Some(promo.clone()),
-                    ability_id: ability_id.map(str::to_string),
-                    set_state: set_state.clone(),
+                    move_option_id: context.option.id.clone(),
+                    source_layer_ids: vec![context.layer.id.clone()],
+                    effects: effects.clone(),
                 },
             );
         }
@@ -93,14 +104,15 @@ fn push_move_or_promotions(
         push_action_if_unique(
             actions,
             MoveAction {
-                player_id: player_id.clone(),
-                piece_id: piece_id.clone(),
+                player_id: context.player_id.clone(),
+                piece_id: context.piece_id.clone(),
                 from,
                 to,
                 captured_piece_id,
                 promotion: None,
-                ability_id: ability_id.map(str::to_string),
-                set_state,
+                move_option_id: context.option.id.clone(),
+                source_layer_ids: vec![context.layer.id.clone()],
+                effects: effects.clone(),
             },
         );
     }
@@ -108,151 +120,108 @@ fn push_move_or_promotions(
 
 fn append_actions_from_result(
     actions: &mut Vec<MoveAction>,
-    game_state: &GameState,
-    piece_id: &PieceId,
-    piece: &Piece,
-    definition: &PieceDefinition,
-    player_id: &PlayerId,
     result: &ChessemblyResult,
-    ability_id: Option<&str>,
+    context: &MoveBuildContext<'_>,
 ) {
-    let from = piece.current_square.unwrap();
-    let pawn_dir = pawn_forward_dir(&piece.type_id);
-    let pawn_start = pawn_start_rank(&piece.type_id, game_state.board.size);
+    let from = context.piece.current_square.unwrap();
+    let pawn_dir = pawn_forward_dir(&context.piece.type_id);
+    let pawn_start = pawn_start_rank(&context.piece.type_id, context.game_state.board.size);
 
     for to in result.movement_squares.iter().copied() {
-        if !game_state.board.is_in_bounds(&to) {
+        if !context.game_state.board.is_in_bounds(&to) {
             continue;
         }
 
         if let (Some(dir), Some(start_rank)) = (pawn_dir, pawn_start) {
             if to.file == from.file
                 && to.rank - from.rank == 2 * dir
-                && (from.rank != start_rank || piece.has_moved)
+                && (from.rank != start_rank || context.piece.has_moved)
             {
                 continue;
             }
         }
 
-        let captured_piece_id = game_state.board.get_piece_at(&to).cloned();
-        let set_state = result
-            .effects
-            .get(&to.to_id())
-            .and_then(|effect| effect.set_state.clone());
+        let captured_piece_id = context.game_state.board.get_piece_at(&to).cloned();
+        let effects =
+            effects_for_candidate(result, to, context.piece_id, context.option, context.layer);
         if let Some(ref cap_id) = captured_piece_id {
-            if let Some(cap_piece) = game_state.pieces.get(cap_id) {
-                if cap_piece.owner == *player_id {
+            if let Some(cap_piece) = context.game_state.pieces.get(cap_id) {
+                if cap_piece.owner == *context.player_id {
                     continue;
                 }
             }
         }
 
-        push_move_or_promotions(
-            actions,
-            definition,
-            game_state.board.size,
-            player_id,
-            piece_id,
-            from,
-            to,
-            captured_piece_id,
-            ability_id,
-            set_state,
-        );
+        push_move_or_promotions(actions, context, to, captured_piece_id, &effects);
     }
 
     for to in result.attack_squares.iter().copied() {
-        if !game_state.board.is_in_bounds(&to) {
+        if !context.game_state.board.is_in_bounds(&to) {
             continue;
         }
 
-        let Some(captured_piece_id) = game_state.board.get_piece_at(&to).cloned() else {
+        let Some(captured_piece_id) = context.game_state.board.get_piece_at(&to).cloned() else {
             continue;
         };
-        let Some(captured_piece) = game_state.pieces.get(&captured_piece_id) else {
+        let Some(captured_piece) = context.game_state.pieces.get(&captured_piece_id) else {
             continue;
         };
-        if captured_piece.owner == *player_id {
+        if captured_piece.owner == *context.player_id {
             continue;
         }
-        let set_state = result
-            .effects
-            .get(&to.to_id())
-            .and_then(|effect| effect.set_state.clone());
+        let effects =
+            effects_for_candidate(result, to, context.piece_id, context.option, context.layer);
 
-        push_move_or_promotions(
-            actions,
-            definition,
-            game_state.board.size,
-            player_id,
-            piece_id,
-            from,
-            to,
-            Some(captured_piece_id),
-            ability_id,
-            set_state,
-        );
+        push_move_or_promotions(actions, context, to, Some(captured_piece_id), &effects);
     }
 }
 
-fn can_use_selected_ability(
-    game_state: &GameState,
-    piece: &Piece,
-    definition: &PieceDefinition,
-    ability_id: &str,
-) -> Option<PieceAbilityDefinition> {
-    if piece
-        .ability_cooldowns
-        .get(ability_id)
-        .is_some_and(|usable_turn| *usable_turn > game_state.turn_number)
-    {
-        return None;
-    }
-
-    let ability = definition
-        .abilities
+fn effects_for_candidate(
+    result: &ChessemblyResult,
+    to: Square,
+    piece_id: &PieceId,
+    option: &MoveOptionDefinition,
+    layer: &MoveLayerDefinition,
+) -> ActionEffects {
+    let global_state_updates = result
+        .effects
+        .get(&to.to_id())
+        .and_then(|effect| effect.set_state.clone())
+        .into_iter()
+        .collect();
+    let piece_state_updates = layer
+        .on_commit
         .iter()
-        .find(|ability| ability.id == ability_id)?
-        .clone();
-
-    if ability.once_per_turn
-        && game_state.turn_state.actions.iter().any(|existing| {
-            matches!(
-                existing,
-                TurnAction::ActivateAbility(previous)
-                    if previous.piece_id == piece.id && previous.ability_id == ability_id
-            )
+        .map(|update| PieceStateUpdate {
+            piece_id: piece_id.clone(),
+            key: update.key.clone(),
+            value: update.value.clone(),
         })
-    {
-        return None;
+        .collect();
+    let cooldown_updates = option
+        .cooldown
+        .as_ref()
+        .filter(|cooldown| cooldown.turns > 0)
+        .map(|cooldown| CooldownUpdate {
+            piece_id: piece_id.clone(),
+            move_option_id: option.id.clone(),
+            remaining: cooldown.turns,
+        })
+        .into_iter()
+        .collect();
+    ActionEffects {
+        global_state_updates,
+        piece_state_updates,
+        cooldown_updates,
     }
-
-    Some(ability)
 }
 
-fn run_selected_ability_for_piece(
-    game_state: &GameState,
-    piece: &Piece,
-    definition: &PieceDefinition,
-    ability: &PieceAbilityDefinition,
-    player_id: &PlayerId,
-    empty_maps: &HashMap<PlayerId, std::collections::HashSet<SquareId>>,
-) -> ChessemblyResult {
-    let mut ability_piece = piece.clone();
-    ability_piece.active_ability = Some(ActiveAbilityState {
-        ability_id: ability.id.clone(),
-        activated_turn_number: game_state.turn_number,
-        activated_player: player_id.clone(),
-        duration: ability.duration.clone(),
-    });
-    run_effective_chessembly_for_piece(
-        game_state,
-        &ability_piece,
-        definition,
-        player_id.clone(),
-        &game_state.global_state,
-        empty_maps,
-    )
+fn can_use_move_option(piece: &Piece, option: &MoveOptionDefinition) -> bool {
+    option.execution_mode == MoveOptionExecutionMode::MoveModifier
+        && piece
+            .move_option_cooldowns
+            .get(&option.id)
+            .is_none_or(|cooldown| cooldown.remaining == 0)
 }
 
 /// Generate attack/threat squares for a specific piece.
@@ -270,21 +239,53 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
         return Vec::new();
     }
 
-    let Some(definition) = game_state.piece_definitions.get(&piece.type_id) else {
+    let Some(raw_definition) = game_state.piece_definitions.get(&piece.type_id) else {
+        return Vec::new();
+    };
+    let Ok(definition) = raw_definition.clone().normalize_and_validate() else {
         return Vec::new();
     };
 
     let empty_maps = HashMap::new();
-    let result = run_effective_chessembly_for_piece(
-        game_state,
-        piece,
-        definition,
-        game_state.current_player.clone(),
-        &game_state.global_state,
-        &empty_maps,
-    );
-    result
-        .attack_squares
+    let option = piece
+        .active_ability
+        .as_ref()
+        .and_then(|active| {
+            definition
+                .move_options
+                .iter()
+                .find(|option| option.id == active.ability_id)
+        })
+        .or_else(|| definition.normal_move_option());
+    let Some(option) = option else {
+        return Vec::new();
+    };
+    let mut attacked = Vec::new();
+    for layer_id in &option.layer_ids {
+        let Some(layer) = definition
+            .move_layers
+            .iter()
+            .find(|layer| &layer.id == layer_id)
+        else {
+            continue;
+        };
+        if !layer.is_enabled_for(piece) {
+            continue;
+        }
+        attacked.extend(
+            run_chessembly_layer_for_piece(
+                game_state,
+                piece,
+                &definition,
+                layer,
+                game_state.current_player.clone(),
+                &game_state.global_state,
+                &empty_maps,
+            )
+            .attack_squares,
+        );
+    }
+    attacked
         .into_iter()
         .filter(|sq| game_state.board.is_in_bounds(sq))
         .collect()
@@ -295,15 +296,20 @@ pub fn generate_piece_legal_move_actions(
     game_state: &GameState,
     piece_id: &PieceId,
 ) -> Vec<MoveAction> {
+    let move_option_id = game_state
+        .pieces
+        .get(piece_id)
+        .and_then(|piece| piece.active_ability.as_ref())
+        .map(|active| active.ability_id.clone());
     generate_piece_legal_move_actions_with_options(
         game_state,
         piece_id,
-        &MoveGenerationOptions::default(),
+        &MoveGenerationOptions { move_option_id },
     )
 }
 
-/// Generate legal move actions, optionally using one selected ability for this
-/// move only. Normal callers should use generate_piece_legal_move_actions.
+/// Generate legal move actions for a selected move option. Selecting the option
+/// is UI state only and never mutates the game or consumes a turn.
 pub fn generate_piece_legal_move_actions_with_options(
     game_state: &GameState,
     piece_id: &PieceId,
@@ -332,50 +338,71 @@ pub fn generate_piece_legal_move_actions_with_options(
         return Vec::new();
     }
 
-    let Some(definition) = game_state.piece_definitions.get(&piece.type_id) else {
+    let Some(raw_definition) = game_state.piece_definitions.get(&piece.type_id) else {
         return Vec::new();
     };
-
-    let selected_ability = options
-        .ability_id
-        .as_deref()
-        .and_then(|ability_id| can_use_selected_ability(game_state, piece, definition, ability_id));
-    if options.ability_id.is_some() && selected_ability.is_none() {
+    let Ok(definition) = raw_definition.clone().normalize_and_validate() else {
         return Vec::new();
-    }
-
-    let result = if let Some(ability) = selected_ability.as_ref() {
-        run_selected_ability_for_piece(
-            game_state,
-            piece,
-            definition,
-            ability,
-            player_id,
-            &empty_maps,
-        )
+    };
+    let selected_option = if let Some(option_id) = options.move_option_id.as_deref() {
+        definition
+            .move_options
+            .iter()
+            .find(|option| option.id == option_id)
     } else {
-        run_effective_chessembly_for_piece(
+        definition.normal_move_option()
+    };
+    let Some(selected_option) = selected_option.filter(|option| can_use_move_option(piece, option))
+    else {
+        return Vec::new();
+    };
+    let from = piece.current_square.unwrap();
+    let mut enabled_layers = Vec::new();
+    for layer_id in &selected_option.layer_ids {
+        let Some(layer) = definition
+            .move_layers
+            .iter()
+            .find(|layer| &layer.id == layer_id)
+        else {
+            continue;
+        };
+        if !layer.is_enabled_for(piece) {
+            continue;
+        }
+        enabled_layers.push(layer);
+        let result = run_chessembly_layer_for_piece(
             game_state,
             piece,
-            definition,
+            &definition,
+            layer,
             player_id.clone(),
             &game_state.global_state,
             &empty_maps,
-        )
-    };
-    let from = piece.current_square.unwrap();
-    let action_ability_id = selected_ability.as_ref().map(|ability| ability.id.as_str());
+        );
+        let context = MoveBuildContext {
+            game_state,
+            piece_id,
+            piece,
+            definition: &definition,
+            player_id,
+            option: selected_option,
+            layer,
+        };
+        append_actions_from_result(&mut actions, &result, &context);
+    }
 
-    append_actions_from_result(
-        &mut actions,
-        game_state,
+    if enabled_layers.is_empty() {
+        return Vec::new();
+    }
+    let special_layer = enabled_layers[0];
+    let special_effects = effects_for_candidate(
+        &ChessemblyResult::default(),
+        from,
         piece_id,
-        piece,
-        definition,
-        player_id,
-        &result,
-        action_ability_id,
+        selected_option,
+        special_layer,
     );
+    let special_source_layers = vec![special_layer.id.clone()];
 
     // En passant: pawn can capture onto target square even when destination is empty.
     if let Some(dir) = pawn_forward_dir(&piece.type_id) {
@@ -400,8 +427,9 @@ pub fn generate_piece_legal_move_actions_with_options(
                                         to: target,
                                         captured_piece_id: Some(captured_id.clone()),
                                         promotion: None,
-                                        ability_id: action_ability_id.map(str::to_string),
-                                        set_state: None,
+                                        move_option_id: selected_option.id.clone(),
+                                        source_layer_ids: special_source_layers.clone(),
+                                        effects: special_effects.clone(),
                                     },
                                 );
                             }
@@ -494,8 +522,9 @@ pub fn generate_piece_legal_move_actions_with_options(
                         to: king_to,
                         captured_piece_id: None,
                         promotion: None,
-                        ability_id: action_ability_id.map(str::to_string),
-                        set_state: None,
+                        move_option_id: selected_option.id.clone(),
+                        source_layer_ids: special_source_layers.clone(),
+                        effects: special_effects.clone(),
                     },
                 );
             }
@@ -532,7 +561,33 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
 
     let actions = piece_ids
         .into_iter()
-        .flat_map(|piece_id| generate_piece_legal_move_actions(game_state, &piece_id))
+        .flat_map(|piece_id| {
+            let option_ids = game_state
+                .pieces
+                .get(&piece_id)
+                .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+                .and_then(|definition| definition.clone().normalize_and_validate().ok())
+                .map(|definition| {
+                    definition
+                        .move_options
+                        .into_iter()
+                        .filter(|option| {
+                            option.execution_mode == MoveOptionExecutionMode::MoveModifier
+                        })
+                        .map(|option| option.id)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            option_ids.into_iter().flat_map(move |move_option_id| {
+                generate_piece_legal_move_actions_with_options(
+                    game_state,
+                    &piece_id,
+                    &MoveGenerationOptions {
+                        move_option_id: Some(move_option_id),
+                    },
+                )
+            })
+        })
         .collect::<Vec<_>>();
     #[cfg(feature = "profiling")]
     crate::profiling::record_legal_moves(started.elapsed(), actions.len());
