@@ -15,7 +15,6 @@ mod routes;
 mod stores;
 
 use app_state::AppState;
-use stores::{GameStore, RoomStore};
 
 use brainfuck_chess_engine::{
     actions::submit_action as submit_engine_action,
@@ -569,7 +568,7 @@ fn materialize_neutral_deck(
     }
 }
 
-fn generate_room_id(rooms: &RoomStore) -> String {
+fn generate_room_id(rooms: &stores::RoomStore) -> String {
     for _ in 0..16 {
         let id = Uuid::new_v4()
             .simple()
@@ -594,7 +593,7 @@ fn generate_room_id(rooms: &RoomStore) -> String {
 
 fn start_room_game(
     room: &mut MultiplayerRoom,
-    games: &GameStore,
+    games: &stores::GameStore,
 ) -> Result<Option<GameResponse>, String> {
     if let Some(game_id) = &room.game_id {
         let state = games
