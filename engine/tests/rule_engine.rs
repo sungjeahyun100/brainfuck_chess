@@ -1217,15 +1217,10 @@ fn test_until_piece_moves_ability_expires_after_move() {
 }
 
 #[test]
-fn test_bishop_bounce_mode_ability_is_registered() {
+fn test_standard_bishop_has_no_legacy_bounce_mode_ability() {
     let bishop = bishop_definition();
-    let ability = bishop
+    assert!(bishop
         .abilities
         .iter()
-        .find(|ability| ability.id == "bounce_mode")
-        .unwrap();
-
-    assert_eq!(ability.duration, AbilityDuration::UntilTurnEnd);
-    assert!(ability.once_per_turn);
-    assert!(ability.chessembly_code.contains("edge(1, 1)"));
+        .all(|ability| ability.id != "bounce_mode"));
 }
