@@ -89,7 +89,14 @@ export interface DropAction {
   to: Square
 }
 
-export type TurnAction = MoveAction | DropAction
+export interface ActivateAbilityAction {
+  type: 'activate_ability'
+  player_id: PlayerId
+  piece_id: PieceId
+  ability_id: string
+}
+
+export type TurnAction = MoveAction | DropAction | ActivateAbilityAction
 
 export type BotDifficulty = 'easy' | 'normal' | 'hard'
 
@@ -98,6 +105,12 @@ export interface EndTurnAiAction {
 }
 
 export type AiAction = MoveAction | DropAction | EndTurnAiAction
+
+export interface ActionTimelineFrame {
+  action: AiAction
+  /** Authoritative state after applying action. */
+  state: GameState
+}
 
 export interface BotTurnStats {
   searched_nodes: number
@@ -109,6 +122,7 @@ export interface BotTurnResponse {
   ok: boolean
   game_state: GameState
   actions: AiAction[]
+  timeline?: ActionTimelineFrame[]
   stats: BotTurnStats
 }
 

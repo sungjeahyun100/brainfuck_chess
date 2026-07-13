@@ -1,6 +1,6 @@
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{
     extract::{Path, Query, State},
     Json, Router,
@@ -12,9 +12,16 @@ use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
+mod app_state;
+mod routes;
+mod stores;
+
+use app_state::AppState;
+use stores::{GameStore, RoomStore};
+
 use brainfuck_chess_engine::{
+    actions::submit_action as submit_engine_action,
     ai::{play_bot_turn_detailed, AiAction, BotDifficulty},
-    endgame::{apply_activate_ability_action, apply_drop_action, apply_move_action},
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
@@ -27,17 +34,6 @@ use brainfuck_chess_engine::{
     },
     types::*,
 };
-
-// ─── App state ────────────────────────────────────────────────────────────────
-
-type GameStore = Arc<DashMap<String, GameState>>;
-type RoomStore = Arc<DashMap<String, MultiplayerRoom>>;
-
-#[derive(Clone)]
-struct AppState {
-    games: GameStore,
-    rooms: RoomStore,
-}
 
 // ─── API types ───────────────────────────────────────────────────────────────
 
@@ -143,6 +139,7 @@ struct BotTurnResponse {
     ok: bool,
     game_state: GameState,
     actions: Vec<AiAction>,
+    timeline: Vec<brainfuck_chess_engine::ai::ActionTimelineFrame>,
     stats: BotTurnStats,
 }
 
@@ -642,40 +639,14 @@ fn start_room_game(
 
 #[tokio::main]
 async fn main() {
-    let state = AppState {
-        games: Arc::new(DashMap::new()),
-        rooms: Arc::new(DashMap::new()),
-    };
+    let state = AppState::in_memory();
 
     // Static frontend directory — populated at Docker build time.
     // Falls back gracefully if the directory doesn't exist (dev mode).
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "/app/dist".into());
     let index_fallback = format!("{}/index.html", static_dir);
 
-    let api = Router::new()
-        .route("/health", get(health))
-        .route("/games", post(create_game))
-        .route("/games/:id", get(get_game))
-        .route("/games/:id/actions", post(submit_action))
-        .route("/games/:id/bot-turn", post(run_bot_turn))
-        .route("/games/:id/end-turn", post(end_game_turn))
-        .route("/games/:id/resign", post(resign_game))
-        .route("/games/:id/legal-moves", get(get_legal_moves))
-        .route("/games/:id/piece-attacks/:piece_id", get(get_piece_attacks))
-        .route(
-            "/games/:id/pieces/:piece_id/options",
-            get(get_piece_options),
-        )
-        .route("/lab/piece-options", post(get_lab_piece_options))
-        .route("/games/:id/legal-drops", get(get_legal_drops))
-        .route("/rooms", post(create_room))
-        .route("/rooms/:id", get(get_room))
-        .route("/rooms/:id/join", post(join_room))
-        .route("/rooms/:id/select-deck", post(select_room_deck))
-        .route("/rooms/:id/ready", post(ready_room))
-        .route("/rooms/:id/unready", post(unready_room))
-        .route("/rooms/:id/resign", post(resign_room))
-        .with_state(state);
+    let api = routes::api(state);
 
     // SPA fallback: unknown paths → index.html so Vue Router handles them.
     let spa = ServeDir::new(&static_dir).not_found_service(ServeFile::new(&index_fallback));
@@ -1177,13 +1148,13 @@ async fn submit_action(
                 &action.piece_id,
                 &move_options,
             )
-                .iter()
-                .any(|m| {
-                    m.from == action.from
-                        && m.to == action.to
-                        && m.promotion == action.promotion
-                        && m.ability_id == action.ability_id
-                });
+            .iter()
+            .any(|m| {
+                m.from == action.from
+                    && m.to == action.to
+                    && m.promotion == action.promotion
+                    && m.ability_id == action.ability_id
+            });
             if !is_legal {
                 return Err((
                     StatusCode::BAD_REQUEST,
@@ -1194,7 +1165,8 @@ async fn submit_action(
             }
 
             state.turn_state.mode = TurnMode::Move;
-            let new_state = apply_move_action(state.clone(), action);
+            let new_state = submit_engine_action(state.clone(), TurnAction::Move(action))
+                .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
             *state = end_turn_after_action(new_state);
         }
         TurnAction::Drop(action) => {
@@ -1227,7 +1199,8 @@ async fn submit_action(
             }
 
             state.turn_state.mode = TurnMode::Drop;
-            let new_state = apply_drop_action(state.clone(), action);
+            let new_state = submit_engine_action(state.clone(), TurnAction::Drop(action))
+                .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
             *state = end_turn_after_action(new_state);
         }
         TurnAction::ActivateAbility(action) => {
@@ -1320,7 +1293,9 @@ async fn submit_action(
             }
 
             state.turn_state.mode = TurnMode::Move;
-            let new_state = apply_activate_ability_action(state.clone(), action);
+            let new_state =
+                submit_engine_action(state.clone(), TurnAction::ActivateAbility(action))
+                    .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
             *state = new_state;
         }
     }
@@ -1388,6 +1363,7 @@ async fn run_bot_turn(
         ok: true,
         game_state: result.state,
         actions: result.actions,
+        timeline: result.timeline,
         stats: BotTurnStats {
             searched_nodes: result.searched_nodes,
             depth_reached: result.depth_reached,
@@ -1612,7 +1588,23 @@ mod tests {
             }],
             pocket: vec![],
         };
-        let state = build_game_state(game_id.clone(), 8, &white_deck, &black_deck).unwrap();
+        let mut state = build_game_state(game_id.clone(), 8, &white_deck, &black_deck).unwrap();
+        state
+            .piece_definitions
+            .get_mut("bishop")
+            .unwrap()
+            .abilities
+            .push(PieceAbilityDefinition {
+                id: "bounce_mode".into(),
+                name: "Bounce Mode".into(),
+                description: "Test-only game-specific ability".into(),
+                chessembly_code:
+                    brainfuck_chess_engine::pieces::default_pieces::bouncing_bishop_definition()
+                        .chessembly_code,
+                duration: AbilityDuration::UntilTurnEnd,
+                once_per_turn: true,
+                cooldown_turns: 0,
+            });
         let app = AppState {
             games: Arc::new(DashMap::new()),
             rooms: Arc::new(DashMap::new()),

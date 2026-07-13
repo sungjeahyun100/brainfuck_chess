@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use brainfuck_chess_engine::actions::submit_action;
 use brainfuck_chess_engine::attack_map::generate_attack_map;
 use brainfuck_chess_engine::endgame::{
     apply_activate_ability_action, apply_move_action, has_living_king,
@@ -15,6 +16,7 @@ use brainfuck_chess_engine::legal_moves::{
 use brainfuck_chess_engine::pieces::default_pieces::*;
 use brainfuck_chess_engine::rules::*;
 use brainfuck_chess_engine::types::*;
+use brainfuck_chess_engine::PieceCatalog;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -793,6 +795,63 @@ fn test_custom_piece_definition_can_generate_promotion_choices() {
 }
 
 #[test]
+fn test_game_catalog_overrides_a_builtin_definition() {
+    let mut state = make_game_state(8);
+    let mut bishop = bishop_definition();
+    bishop.name = "Game Bishop".into();
+    bishop.chessembly_code = "take-move(1, 0);".into();
+    state.piece_definitions.insert("bishop".into(), bishop);
+
+    let catalog = PieceCatalog::for_state(&state);
+    assert_eq!(catalog.get("bishop").unwrap().name, "Game Bishop");
+    assert_eq!(
+        catalog.get("bishop").unwrap().chessembly_code,
+        "take-move(1, 0);"
+    );
+}
+
+#[test]
+fn test_custom_piece_move_passes_shared_action_submit_boundary() {
+    let mut state = make_game_state(8);
+    state.piece_definitions.insert(
+        "custom-stepper".into(),
+        PieceDefinition {
+            id: "custom-stepper".into(),
+            name: "Custom Stepper".into(),
+            score: 1,
+            chessembly_code: "take-move(1, 0);".into(),
+            chessembly_version: "1.0".into(),
+            dialect: None,
+            extensions: None,
+            is_king: false,
+            promotion: None,
+            promotion_pool: Vec::new(),
+            abilities: Vec::new(),
+        },
+    );
+    add_piece(&mut state, "custom", "white", "custom-stepper", 3, 3);
+
+    let next = submit_action(
+        state,
+        TurnAction::Move(MoveAction {
+            player_id: "white".into(),
+            piece_id: "custom".into(),
+            from: Square::new(3, 3),
+            to: Square::new(4, 3),
+            captured_piece_id: None,
+            promotion: None,
+            ability_id: None,
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(
+        next.pieces.get("custom").unwrap().current_square,
+        Some(Square::new(4, 3))
+    );
+}
+
+#[test]
 fn test_chessembly_cache_preserves_legal_moves_and_attack_map() {
     let mut cached_state = make_game_state(8);
     add_piece(&mut cached_state, "wk", "white", "king", 4, 0);
@@ -1040,8 +1099,12 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
     add_piece(&mut state, "blocked", "white", "pawn-white", 6, 3);
 
     let base_moves = generate_piece_legal_move_actions(&state, &"cr".into());
-    assert!(base_moves.iter().any(|action| action.to == Square::new(4, 3)));
-    assert!(!base_moves.iter().any(|action| action.to == Square::new(3, 5)));
+    assert!(base_moves
+        .iter()
+        .any(|action| action.to == Square::new(4, 3)));
+    assert!(!base_moves
+        .iter()
+        .any(|action| action.to == Square::new(3, 5)));
 
     let cannon_moves = generate_piece_legal_move_actions_with_options(
         &state,
@@ -1059,10 +1122,18 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
             && action.captured_piece_id.as_ref().map(|id| id.as_str()) == Some("enemy")
             && action.ability_id.as_deref() == Some("cannon_move")
     }));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(4, 3)));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(5, 3)));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(6, 3)));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(7, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(4, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(5, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(6, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(7, 3)));
 
     let action = cannon_moves
         .iter()

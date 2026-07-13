@@ -115,7 +115,6 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
 
 /// Bishop: slides diagonally.
 pub fn bishop_definition() -> PieceDefinition {
-    let bounce_code = bouncing_bishop_definition().chessembly_code;
     PieceDefinition {
         id: "bishop".into(),
         name: "Bishop".into(),

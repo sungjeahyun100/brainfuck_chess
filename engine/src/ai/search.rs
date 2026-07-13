@@ -1,11 +1,12 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::actions::submit_action;
 use crate::ai::evaluate::{evaluate, WIN_SCORE};
 use crate::ai::move_ordering::order_ai_actions;
 use crate::ai::types::{
-    AiAction, BotDecision, BotDifficulty, BotTurnResult, SearchLimits, SearchStats,
+    ActionTimelineFrame, AiAction, BotDecision, BotDifficulty, BotTurnResult, SearchLimits,
+    SearchStats,
 };
-use crate::endgame::{apply_drop_action, apply_move_action};
 use crate::legal_moves::{generate_legal_drop_actions, generate_legal_move_actions};
 use crate::rules::{can_end_turn, end_turn};
 use crate::types::{GamePhase, GameState, PlayerId, TurnAction, TurnMode};
@@ -53,7 +54,7 @@ pub fn generate_ai_actions(state: &GameState) -> Vec<AiAction> {
     }
 }
 
-pub fn apply_ai_action(mut state: GameState, action: &AiAction) -> Result<GameState, String> {
+pub fn apply_ai_action(state: GameState, action: &AiAction) -> Result<GameState, String> {
     if state.phase == GamePhase::Ended || state.result.is_some() {
         return Err("게임이 이미 종료되었습니다.".into());
     }
@@ -66,8 +67,7 @@ pub fn apply_ai_action(mut state: GameState, action: &AiAction) -> Result<GameSt
             if !legal {
                 return Err("AI가 합법적이지 않은 이동을 선택했습니다.".into());
             }
-            state.turn_state.mode = TurnMode::Move;
-            let state = apply_move_action(state, action.clone());
+            let state = submit_action(state, TurnAction::Move(action.clone()))?;
             if state.phase == GamePhase::Ended || state.result.is_some() {
                 Ok(state)
             } else {
@@ -81,8 +81,10 @@ pub fn apply_ai_action(mut state: GameState, action: &AiAction) -> Result<GameSt
             if !legal {
                 return Err("AI가 합법적이지 않은 착수를 선택했습니다.".into());
             }
-            state.turn_state.mode = TurnMode::Drop;
-            Ok(end_turn(apply_drop_action(state, action.clone())))
+            Ok(end_turn(submit_action(
+                state,
+                TurnAction::Drop(action.clone()),
+            )?))
         }
         AiAction::EndTurn => {
             if !can_end_turn(&state) {
@@ -275,6 +277,7 @@ pub fn play_bot_turn_detailed(
     let started = Instant::now();
     let limits = difficulty.limits();
     let mut actions = Vec::new();
+    let mut timeline = Vec::new();
     let mut searched_nodes = 0_u64;
     let mut depth_reached = 0_u8;
 
@@ -304,6 +307,10 @@ pub fn play_bot_turn_detailed(
         }
         state = apply_ai_action(state, &decision.action)?;
         let ended_turn = matches!(decision.action, AiAction::EndTurn);
+        timeline.push(ActionTimelineFrame {
+            action: decision.action.clone(),
+            state: state.clone(),
+        });
         actions.push(decision.action);
         if ended_turn || state.phase == GamePhase::Ended || state.result.is_some() {
             break;
@@ -313,6 +320,7 @@ pub fn play_bot_turn_detailed(
     Ok(BotTurnResult {
         state,
         actions,
+        timeline,
         searched_nodes,
         depth_reached,
         elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use brainfuck_chess_engine::ai::{
-    apply_ai_action, choose_bot_action, generate_ai_actions, play_bot_turn, AiAction, BotDifficulty,
+    apply_ai_action, choose_bot_action, generate_ai_actions, play_bot_turn, play_bot_turn_detailed,
+    AiAction, BotDifficulty,
 };
 use brainfuck_chess_engine::endgame::apply_move_action;
 use brainfuck_chess_engine::pieces::default_pieces::all_default_definitions;
@@ -126,6 +127,20 @@ fn generated_actions_are_accepted_by_the_ai_apply_boundary() {
             "{action:?}"
         );
     }
+}
+
+#[test]
+fn bot_timeline_last_snapshot_matches_final_state() {
+    let mut state = make_state();
+    add_board_piece(&mut state, "wk", "white", "king", Square::new(4, 0));
+    add_board_piece(&mut state, "wr", "white", "rook", Square::new(0, 0));
+    add_board_piece(&mut state, "bk", "black", "king", Square::new(4, 7));
+    let result = play_bot_turn_detailed(state, &"white".to_string(), BotDifficulty::Easy).unwrap();
+
+    assert_eq!(result.timeline.len(), result.actions.len());
+    let timeline_state = serde_json::to_value(&result.timeline.last().unwrap().state).unwrap();
+    let final_state = serde_json::to_value(&result.state).unwrap();
+    assert_eq!(timeline_state, final_state);
 }
 
 #[test]

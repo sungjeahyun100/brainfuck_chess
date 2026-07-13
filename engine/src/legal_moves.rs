@@ -246,9 +246,10 @@ pub fn generate_piece_legal_move_actions_with_options(
         return Vec::new();
     };
 
-    let selected_ability = options.ability_id.as_deref().and_then(|ability_id| {
-        can_use_selected_ability(game_state, piece, definition, ability_id)
-    });
+    let selected_ability = options
+        .ability_id
+        .as_deref()
+        .and_then(|ability_id| can_use_selected_ability(game_state, piece, definition, ability_id));
     if options.ability_id.is_some() && selected_ability.is_none() {
         return Vec::new();
     }

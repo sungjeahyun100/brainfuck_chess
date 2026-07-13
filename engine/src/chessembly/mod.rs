@@ -18,13 +18,17 @@ pub fn run_effective_chessembly_for_piece_with_context(
     attack_maps: &HashMap<PlayerId, HashSet<SquareId>>,
 ) -> ChessemblyResult {
     let cache = &context.runtime.chessembly_programs;
-    let program = piece.active_ability.as_ref().and_then(|active| {
-        definition
-            .abilities
-            .iter()
-            .find(|ability| ability.id == active.ability_id)
-            .map(|ability| cache.get_or_parse_ability(&definition.id, ability))
-    }).unwrap_or_else(|| cache.get_or_parse(&definition.id, definition));
+    let program = piece
+        .active_ability
+        .as_ref()
+        .and_then(|active| {
+            definition
+                .abilities
+                .iter()
+                .find(|ability| ability.id == active.ability_id)
+                .map(|ability| cache.get_or_parse_ability(&definition.id, ability))
+        })
+        .unwrap_or_else(|| cache.get_or_parse(&definition.id, definition));
 
     let ctx = ExecutionContext {
         board: &context.state.board,

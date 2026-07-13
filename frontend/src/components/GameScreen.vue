@@ -205,6 +205,7 @@
 import { ref, computed, watch } from 'vue'
 import type {
   AiAction,
+  ActionTimelineFrame,
   BotDifficulty,
   BotTurnStats,
   DropAction,
@@ -217,6 +218,7 @@ import type {
 import { api } from '../api/gameApi'
 import { pieceAsset } from '../pieceAssets'
 import Board from './Board.vue'
+import { applyTimelineFrame } from '../composables/useActionTimeline'
 
 const props = defineProps<{
   state: GameState
@@ -527,7 +529,12 @@ function previewBotAction(action: AiAction) {
   }
 }
 
-async function replayBotTurn(actions: AiAction[], finalState: GameState, runId: number) {
+async function replayBotTurn(
+  actions: AiAction[],
+  finalState: GameState,
+  runId: number,
+  timeline?: ActionTimelineFrame[],
+) {
   if (actions.length === 0) {
     emit('stateUpdate', finalState)
     return
@@ -544,7 +551,11 @@ async function replayBotTurn(actions: AiAction[], finalState: GameState, runId: 
     await wait(BOT_ACTION_PREVIEW_MS)
     if (runId !== botRunSerial) return
 
-    nextReplayState = applyActionForReplay(nextReplayState, action)
+    // New servers provide authoritative snapshots. The local action applier is
+    // retained as a compatibility fallback for older responses.
+    nextReplayState = timeline?.[index]
+      ? applyTimelineFrame(nextReplayState, timeline[index])
+      : applyActionForReplay(nextReplayState, action)
     botReplayState.value = nextReplayState
     clearBotPreview()
     await wait(BOT_ACTION_SETTLE_MS)
@@ -573,7 +584,7 @@ async function runBotTurn() {
     )
     if (runId !== botRunSerial) return
     lastBotStats.value = response.stats
-    await replayBotTurn(response.actions, response.game_state, runId)
+    await replayBotTurn(response.actions, response.game_state, runId, response.timeline)
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e)
     if (message.includes('현재 턴 플레이어와 bot_player_id가 일치하지 않습니다.')) {
