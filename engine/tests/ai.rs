@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use brainfuck_chess_engine::ai::{
-    apply_ai_action, choose_bot_action, generate_ai_actions, play_bot_turn, AiAction, BotDifficulty,
+    apply_ai_action, choose_bot_action, generate_ai_actions, play_bot_turn, play_bot_turn_detailed,
+    AiAction, BotDifficulty,
 };
 use brainfuck_chess_engine::endgame::apply_move_action;
 use brainfuck_chess_engine::pieces::default_pieces::all_default_definitions;
@@ -46,7 +47,6 @@ fn make_state() -> GameState {
         en_passant_target: None,
         en_passant_available_to: None,
         global_state: HashMap::new(),
-        turn_state: TurnState::new(),
         history: Vec::new(),
         result: None,
     }
@@ -68,8 +68,6 @@ fn add_board_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, 
             in_pocket: false,
             captured: false,
             has_moved: false,
-            active_ability: None,
-            ability_cooldowns: HashMap::new(),
             state: HashMap::new(),
             move_option_cooldowns: HashMap::new(),
         },
@@ -95,8 +93,6 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
             in_pocket: true,
             captured: false,
             has_moved: false,
-            active_ability: None,
-            ability_cooldowns: HashMap::new(),
             state: HashMap::new(),
             move_option_cooldowns: HashMap::new(),
         },
@@ -135,6 +131,20 @@ fn generated_actions_are_accepted_by_the_ai_apply_boundary() {
 }
 
 #[test]
+fn bot_timeline_last_snapshot_matches_final_state() {
+    let mut state = make_state();
+    add_board_piece(&mut state, "wk", "white", "king", Square::new(4, 0));
+    add_board_piece(&mut state, "wr", "white", "rook", Square::new(0, 0));
+    add_board_piece(&mut state, "bk", "black", "king", Square::new(4, 7));
+    let result = play_bot_turn_detailed(state, &"white".to_string(), BotDifficulty::Easy).unwrap();
+
+    assert_eq!(result.timeline.len(), result.actions.len());
+    let timeline_state = serde_json::to_value(&result.timeline.last().unwrap().state).unwrap();
+    let final_state = serde_json::to_value(&result.state).unwrap();
+    assert_eq!(timeline_state, final_state);
+}
+
+#[test]
 fn bot_always_selects_an_immediate_king_capture() {
     let mut state = make_state();
     add_board_piece(&mut state, "wk", "white", "king", Square::new(0, 0));
@@ -167,7 +177,6 @@ fn drop_and_move_actions_end_the_turn() {
         .unwrap();
     let dropped = apply_ai_action(state.clone(), &drop).unwrap();
     assert_eq!(dropped.current_player, "black");
-    assert!(dropped.turn_state.actions.is_empty());
 
     let movement = generate_ai_actions(&state)
         .into_iter()
@@ -175,7 +184,6 @@ fn drop_and_move_actions_end_the_turn() {
         .unwrap();
     let moved = apply_ai_action(state, &movement).unwrap();
     assert_eq!(moved.current_player, "black");
-    assert!(moved.turn_state.actions.is_empty());
 }
 
 #[test]
@@ -244,7 +252,6 @@ fn special_moves_are_exposed_through_ai_actions() {
         },
     );
     en_passant_state.current_player = "white".into();
-    en_passant_state.turn_state = TurnState::new();
     assert!(generate_ai_actions(&en_passant_state).iter().any(|action| {
         matches!(action, AiAction::Move(movement) if movement.piece_id == "wp" && movement.to == Square::new(5, 5))
     }));

@@ -1,11 +1,12 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::actions::submit_action;
 use crate::ai::evaluate::{evaluate, WIN_SCORE};
 use crate::ai::move_ordering::order_ai_actions;
 use crate::ai::types::{
-    AiAction, BotDecision, BotDifficulty, BotTurnResult, SearchLimits, SearchStats,
+    ActionTimelineFrame, AiAction, BotDecision, BotDifficulty, BotTurnResult, SearchLimits,
+    SearchStats,
 };
-use crate::endgame::submit_action;
 use crate::legal_moves::{generate_legal_drop_actions, generate_legal_move_actions};
 use crate::types::{GamePhase, GameState, PlayerId, TurnAction};
 
@@ -231,12 +232,18 @@ pub fn play_bot_turn_detailed(
         .ok_or_else(|| "봇이 수행할 합법 행동이 없습니다.".to_string())?;
     let searched_nodes = decision.searched_nodes;
     let depth_reached = decision.depth_reached;
-    state = apply_ai_action(state, &decision.action)?;
-    let actions = vec![decision.action];
+    let action = decision.action;
+    state = apply_ai_action(state, &action)?;
+    let actions = vec![action.clone()];
+    let timeline = vec![ActionTimelineFrame {
+        action,
+        state: state.clone(),
+    }];
 
     Ok(BotTurnResult {
         state,
         actions,
+        timeline,
         searched_nodes,
         depth_reached,
         elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,

@@ -69,7 +69,16 @@ pub struct SearchStats {
 pub struct BotTurnResult {
     pub state: crate::types::GameState,
     pub actions: Vec<AiAction>,
+    /// Authoritative post-action snapshots. Replaying these frames yields the
+    /// exact server state, including turn metadata and non-visual rule state.
+    pub timeline: Vec<ActionTimelineFrame>,
     pub searched_nodes: u64,
     pub depth_reached: u8,
     pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionTimelineFrame {
+    pub action: AiAction,
+    pub state: crate::types::GameState,
 }

@@ -1,20 +1,25 @@
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{
     extract::{Path, Query, State},
     Json, Router,
 };
-use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
+mod app_state;
+mod routes;
+mod stores;
+
+use app_state::AppState;
+use stores::{GameStore, RoomStore};
+
 use brainfuck_chess_engine::{
+    actions::submit_action as submit_engine_action,
     ai::{play_bot_turn_detailed, AiAction, BotDifficulty},
-    endgame::submit_action as submit_engine_action,
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
@@ -27,17 +32,6 @@ use brainfuck_chess_engine::{
     },
     types::*,
 };
-
-// ─── App state ────────────────────────────────────────────────────────────────
-
-type GameStore = Arc<DashMap<String, GameState>>;
-type RoomStore = Arc<DashMap<String, MultiplayerRoom>>;
-
-#[derive(Clone)]
-struct AppState {
-    games: GameStore,
-    rooms: RoomStore,
-}
 
 // ─── API types ───────────────────────────────────────────────────────────────
 
@@ -168,6 +162,7 @@ struct BotTurnResponse {
     ok: bool,
     game_state: GameState,
     actions: Vec<AiAction>,
+    timeline: Vec<brainfuck_chess_engine::ai::ActionTimelineFrame>,
     stats: BotTurnStats,
 }
 
@@ -194,7 +189,6 @@ struct PieceOptionsResponse {
 
 #[derive(Default, Deserialize)]
 struct PieceOptionsQuery {
-    #[serde(alias = "ability_id")]
     move_option_id: Option<String>,
 }
 
@@ -215,7 +209,6 @@ struct LabPieceOptionsRequest {
     board_size: i32,
     pieces: Vec<LabPieceSpec>,
     selected_piece_id: String,
-    #[serde(alias = "ability_id")]
     move_option_id: Option<String>,
     #[serde(default)]
     global_state: HashMap<String, i32>,
@@ -327,8 +320,6 @@ fn build_player_deck(
             in_pocket: false,
             captured: false,
             has_moved: false,
-            active_ability: None,
-            ability_cooldowns: HashMap::new(),
             state: definitions
                 .get(&type_id)
                 .map(PieceDefinition::initial_state)
@@ -355,8 +346,6 @@ fn build_player_deck(
             in_pocket: true,
             captured: false,
             has_moved: false,
-            active_ability: None,
-            ability_cooldowns: HashMap::new(),
             state: definitions
                 .get(&type_id)
                 .map(PieceDefinition::initial_state)
@@ -451,7 +440,6 @@ fn build_game_state(
         en_passant_target: None,
         en_passant_available_to: None,
         global_state: HashMap::new(),
-        turn_state: TurnState::new(),
         history: Vec::new(),
         result: None,
         chessembly_program_cache,
@@ -538,8 +526,6 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
             in_pocket: false,
             captured: false,
             has_moved: false,
-            active_ability: None,
-            ability_cooldowns: HashMap::new(),
             state: piece_state,
             move_option_cooldowns: lab_piece.move_option_cooldowns.clone(),
         };
@@ -606,7 +592,6 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
         en_passant_target: None,
         en_passant_available_to: None,
         global_state: req.global_state.clone(),
-        turn_state: TurnState::new(),
         history: Vec::new(),
         result: None,
         chessembly_program_cache,
@@ -714,39 +699,14 @@ fn start_room_game(
 
 #[tokio::main]
 async fn main() {
-    let state = AppState {
-        games: Arc::new(DashMap::new()),
-        rooms: Arc::new(DashMap::new()),
-    };
+    let state = AppState::in_memory();
 
     // Static frontend directory — populated at Docker build time.
     // Falls back gracefully if the directory doesn't exist (dev mode).
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "/app/dist".into());
     let index_fallback = format!("{}/index.html", static_dir);
 
-    let api = Router::new()
-        .route("/health", get(health))
-        .route("/games", post(create_game))
-        .route("/games/:id", get(get_game))
-        .route("/games/:id/actions", post(submit_action))
-        .route("/games/:id/bot-turn", post(run_bot_turn))
-        .route("/games/:id/resign", post(resign_game))
-        .route("/games/:id/legal-moves", get(get_legal_moves))
-        .route("/games/:id/piece-attacks/:piece_id", get(get_piece_attacks))
-        .route(
-            "/games/:id/pieces/:piece_id/options",
-            get(get_piece_options),
-        )
-        .route("/lab/piece-options", post(get_lab_piece_options))
-        .route("/games/:id/legal-drops", get(get_legal_drops))
-        .route("/rooms", post(create_room))
-        .route("/rooms/:id", get(get_room))
-        .route("/rooms/:id/join", post(join_room))
-        .route("/rooms/:id/select-deck", post(select_room_deck))
-        .route("/rooms/:id/ready", post(ready_room))
-        .route("/rooms/:id/unready", post(unready_room))
-        .route("/rooms/:id/resign", post(resign_room))
-        .with_state(state);
+    let api = routes::api(state);
 
     // SPA fallback: unknown paths → index.html so Vue Router handles them.
     let spa = ServeDir::new(&static_dir).not_found_service(ServeFile::new(&index_fallback));
@@ -1328,6 +1288,7 @@ async fn run_bot_turn(
         ok: true,
         game_state: result.state,
         actions: result.actions,
+        timeline: result.timeline,
         stats: BotTurnStats {
             searched_nodes: result.searched_nodes,
             depth_reached: result.depth_reached,
@@ -1494,6 +1455,8 @@ async fn get_lab_piece_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dashmap::DashMap;
+    use std::sync::Arc;
 
     fn test_app_with_game() -> (AppState, String) {
         let game_id = "test-game".to_string();
@@ -1637,7 +1600,7 @@ mod tests {
 
         assert_eq!(response.current_player, "black");
         assert_eq!(response.turn_number, 2);
-        assert!(response.turn_state.actions.is_empty());
+        assert_eq!(response.history.len(), 1);
         let stored = app.games.get(&game_id).unwrap();
         assert_eq!(stored.current_player, "black");
     }

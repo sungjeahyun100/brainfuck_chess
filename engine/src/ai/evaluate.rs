@@ -1,5 +1,5 @@
 use crate::legal_moves::{generate_legal_drop_actions, generate_legal_move_actions};
-use crate::types::{GamePhase, GameState, PlayerId, TurnState};
+use crate::types::{GamePhase, GameState, PlayerId};
 
 pub const WIN_SCORE: i32 = 1_000_000;
 const KING_CAPTURE_THREAT: i32 = 100_000;
@@ -15,7 +15,6 @@ fn player_view(state: &GameState, player_id: &PlayerId) -> GameState {
 
     let mut view = state.clone();
     view.current_player = player_id.clone();
-    view.turn_state = TurnState::new();
     view
 }
 

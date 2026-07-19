@@ -97,21 +97,12 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
                     piece.state.clear();
                     piece.move_option_cooldowns.clear();
                 }
-                piece.active_ability = None;
-                piece.ability_cooldowns.clear();
             }
         }
     }
 
     if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
         piece.has_moved = true;
-        if piece
-            .active_ability
-            .as_ref()
-            .is_some_and(|active| active.duration == AbilityDuration::UntilPieceMoves)
-        {
-            piece.active_ability = None;
-        }
     }
 
     for update in &action.effects.piece_state_updates {
@@ -178,12 +169,6 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         game_state.en_passant_available_to = None;
     }
 
-    // Record action
-    game_state
-        .turn_state
-        .actions
-        .push(TurnAction::Move(action.clone()));
-
     // Check if a King was captured → end the game immediately
     if target_is_king == Some(true) {
         game_state.phase = GamePhase::Ended;
@@ -204,7 +189,6 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
     let player_id = match &action {
         TurnAction::Move(action) => action.player_id.clone(),
         TurnAction::Drop(action) => action.player_id.clone(),
-        TurnAction::ActivateAbility(action) => action.player_id.clone(),
     };
     let newly_set_cooldowns: std::collections::HashSet<(PieceId, String)> = match &action {
         TurnAction::Move(action) => action
@@ -219,8 +203,6 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
     game_state = match action.clone() {
         TurnAction::Move(action) => apply_move_action(game_state, action),
         TurnAction::Drop(action) => apply_drop_action(game_state, action),
-        // Kept only for deserializing old histories. New request paths reject it.
-        TurnAction::ActivateAbility(action) => apply_activate_ability_action(game_state, action),
     };
 
     game_state.history.push(ActionRecord {
@@ -239,30 +221,7 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         };
         game_state.turn_number += 1;
     }
-    game_state.turn_state = TurnState::new();
     game_state
-}
-
-/// Canonical public action boundary used by servers, bots, and search.
-pub fn submit_action(game_state: GameState, action: TurnAction) -> Result<GameState, String> {
-    if game_state.phase == GamePhase::Ended || game_state.result.is_some() {
-        return Err("게임이 이미 종료되었습니다.".into());
-    }
-    let legal = match &action {
-        TurnAction::Move(action) => {
-            action.player_id == game_state.current_player
-                && crate::legal_moves::generate_legal_move_actions(&game_state).contains(action)
-        }
-        TurnAction::Drop(action) => {
-            action.player_id == game_state.current_player
-                && crate::legal_moves::generate_legal_drop_actions(&game_state).contains(action)
-        }
-        TurnAction::ActivateAbility(_) => false,
-    };
-    if !legal {
-        return Err("canonical legal action이 아닙니다.".into());
-    }
-    Ok(apply_and_advance_turn(game_state, action))
 }
 
 fn tick_move_option_cooldowns(
@@ -328,49 +287,11 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
         .squares
         .insert(action.to.to_id(), Some(action.piece_id.clone()));
 
-    // Record action
-    game_state.turn_state.actions.push(TurnAction::Drop(action));
-
     // If the player who could claim en passant used this turn for a drop,
     // the en passant right expires.
     if game_state.en_passant_available_to.as_ref() == Some(&game_state.current_player) {
         game_state.en_passant_target = None;
         game_state.en_passant_available_to = None;
-    }
-
-    game_state
-}
-
-/// Apply an already validated ActivateAbilityAction to the game state.
-pub fn apply_activate_ability_action(
-    mut game_state: GameState,
-    action: ActivateAbilityAction,
-) -> GameState {
-    let ability = game_state
-        .pieces
-        .get(&action.piece_id)
-        .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
-        .and_then(|definition| {
-            definition
-                .abilities
-                .iter()
-                .find(|ability| ability.id == action.ability_id)
-        })
-        .cloned();
-
-    if let Some(ability) = ability {
-        if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
-            piece.active_ability = Some(ActiveAbilityState {
-                ability_id: action.ability_id.clone(),
-                activated_turn_number: game_state.turn_number,
-                activated_player: action.player_id.clone(),
-                duration: ability.duration,
-            });
-        }
-        game_state
-            .turn_state
-            .actions
-            .push(TurnAction::ActivateAbility(action));
     }
 
     game_state

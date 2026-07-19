@@ -181,6 +181,12 @@ export type BotDifficulty = 'easy' | 'normal' | 'hard'
 
 export type AiAction = MoveAction | DropAction
 
+export interface ActionTimelineFrame {
+  action: AiAction
+  /** Authoritative state after applying action. */
+  state: GameState
+}
+
 export interface BotTurnStats {
   searched_nodes: number
   depth_reached: number
@@ -191,6 +197,7 @@ export interface BotTurnResponse {
   ok: boolean
   game_state: GameState
   actions: AiAction[]
+  timeline: ActionTimelineFrame[]
   stats: BotTurnStats
 }
 

@@ -177,9 +177,6 @@ pub struct PieceDefinition {
     /// Piece types this piece may promote into when its promotion rule matches.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub promotion_pool: Vec<PieceTypeId>,
-    /// Optional activated Chessembly move/attack programs for this piece type.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub abilities: Vec<PieceAbilityDefinition>,
     /// Per-instance state schema. New pieces are initialized from these values.
     #[serde(default)]
     pub state_schema: Vec<PieceStateDefinition>,
@@ -367,36 +364,6 @@ pub enum PromotionCondition {
     Rank { rank: i32 },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PieceAbilityDefinition {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub chessembly_code: String,
-    pub duration: AbilityDuration,
-    #[serde(default)]
-    pub once_per_turn: bool,
-    #[serde(default)]
-    pub cooldown_turns: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AbilityDuration {
-    UntilTurnEnd,
-    Turns(u32),
-    UntilPieceMoves,
-    Permanent,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActiveAbilityState {
-    pub ability_id: String,
-    pub activated_turn_number: u32,
-    pub activated_player: PlayerId,
-    pub duration: AbilityDuration,
-}
-
 /// Move generation dispatch seam. Native implementations can be enabled per
 /// definition without changing callers; custom pieces remain Chessembly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -420,9 +387,7 @@ impl PieceDefinition {
         Some(self.promotion_pool.as_slice())
     }
 
-    /// Converts pre-layer definitions into the new model and validates every
-    /// string reference. This is the only compatibility boundary for legacy
-    /// `chessembly_code`/`abilities` data.
+    /// Canonicalizes definitions and validates every string reference.
     pub fn normalize_and_validate(mut self) -> Result<Self, String> {
         if self.move_layers.is_empty() {
             self.move_layers.push(MoveLayerDefinition {
@@ -453,38 +418,6 @@ impl PieceDefinition {
             });
         }
 
-        // Read compatibility only: old ability definitions are promoted into
-        // layers/options and are not needed by canonical action generation.
-        for ability in self.abilities.clone() {
-            let layer_id = format!("ability::{}", ability.id);
-            if !self.move_layers.iter().any(|layer| layer.id == layer_id) {
-                self.move_layers.push(MoveLayerDefinition {
-                    id: layer_id.clone(),
-                    chessembly_code: ability.chessembly_code,
-                    enabled_when: Vec::new(),
-                    on_commit: Vec::new(),
-                });
-            }
-            if !self
-                .move_options
-                .iter()
-                .any(|option| option.id == ability.id)
-            {
-                self.move_options.push(MoveOptionDefinition {
-                    id: ability.id,
-                    name: ability.name,
-                    description: ability.description,
-                    kind: MoveOptionKind::Ability,
-                    layer_ids: vec![layer_id],
-                    execution_mode: MoveOptionExecutionMode::MoveModifier,
-                    contributes_to_attack_map: true,
-                    cooldown: (ability.cooldown_turns > 0).then_some(CooldownDefinition {
-                        turns: ability.cooldown_turns,
-                        clock: CooldownClock::OwnerTurns,
-                    }),
-                });
-            }
-        }
         if self.visual.default_asset_key.is_empty() {
             self.visual.default_asset_key = self.id.clone();
         }
@@ -795,12 +728,6 @@ pub struct Piece {
     pub captured: bool,
     /// Whether this piece has ever moved (used for Pawn 2-step rule)
     pub has_moved: bool,
-    /// Currently active ability program, if any.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active_ability: Option<ActiveAbilityState>,
-    /// Ability id -> first global turn number when it may be used again.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub ability_cooldowns: HashMap<String, u32>,
     /// State owned by this concrete piece instance.
     #[serde(default)]
     pub state: HashMap<String, PieceStateValue>,
@@ -842,40 +769,6 @@ pub struct Player {
     pub captured_pieces: Vec<PieceId>,
 }
 
-// ─── Turn ───────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TurnMode {
-    /// Player hasn't chosen a mode yet this turn
-    Undecided,
-    /// Moving pieces
-    Move,
-    /// Dropping a pocket piece onto the board
-    Drop,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TurnState {
-    pub mode: TurnMode,
-    pub actions: Vec<TurnAction>,
-}
-
-impl TurnState {
-    pub fn new() -> Self {
-        Self {
-            mode: TurnMode::Undecided,
-            actions: Vec::new(),
-        }
-    }
-}
-
-impl Default for TurnState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ─── Actions ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -883,7 +776,6 @@ impl Default for TurnState {
 pub enum TurnAction {
     Move(MoveAction),
     Drop(DropAction),
-    ActivateAbility(ActivateAbilityAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -947,13 +839,6 @@ pub struct DropAction {
     pub player_id: PlayerId,
     pub piece_id: PieceId,
     pub to: Square,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActivateAbilityAction {
-    pub player_id: PlayerId,
-    pub piece_id: PieceId,
-    pub ability_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1021,10 +906,6 @@ pub struct GameState {
     /// Chessembly global state variables read by `if-state` and written by `set-state`.
     #[serde(default)]
     pub global_state: HashMap<String, i32>,
-    /// Internal read-compatibility state for pre single-action saves. Canonical
-    /// server actions are atomic, so this is never part of the public payload.
-    #[serde(default, skip_serializing)]
-    pub turn_state: TurnState,
     #[serde(default)]
     pub history: Vec<ActionRecord>,
     pub result: Option<GameResult>,

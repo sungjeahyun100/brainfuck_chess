@@ -43,7 +43,6 @@ take-move(-1, -1);"
         is_king: true,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -69,7 +68,6 @@ take-move(-1, -1) repeat(1);"
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -91,7 +89,6 @@ take-move(0, -1) repeat(1);"
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -116,7 +113,6 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
         state_schema: Vec::new(),
         move_layers: vec![
             MoveLayerDefinition {
@@ -184,7 +180,6 @@ take-move(-1, -1) repeat(1);"
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -203,7 +198,6 @@ pub fn windmill_definition() -> PieceDefinition {
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
         state_schema: vec![PieceStateDefinition {
             key: "mode".into(),
             default_value: PieceStateValue::Text("bishop".into()),
@@ -283,7 +277,6 @@ take-move(-1, 2);"
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -317,7 +310,6 @@ take-move(-1, 2);"
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -356,7 +348,6 @@ pub fn tempest_rook_definition() -> PieceDefinition {
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -373,7 +364,6 @@ pub fn bouncing_bishop_definition() -> PieceDefinition {
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -445,7 +435,6 @@ take(-1, 1);"
             "bishop".into(),
             "knight".into(),
         ],
-        abilities: Vec::new(),
     }
 }
 
@@ -474,7 +463,6 @@ take(-1, -1);"
             "bishop".into(),
             "knight".into(),
         ],
-        abilities: Vec::new(),
     }
 }
 
@@ -546,7 +534,6 @@ pub fn tempest_queen_definition() -> PieceDefinition {
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -587,7 +574,6 @@ pub fn tempest_knight_definition() -> PieceDefinition {
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
@@ -616,7 +602,6 @@ pub fn tempest_bishop_definition() -> PieceDefinition {
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 
