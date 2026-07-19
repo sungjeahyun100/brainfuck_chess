@@ -1178,12 +1178,12 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .piece-lab-view {
-  width: min(1500px, 100%);
+  width: min(1600px, 100%);
 }
 
 .piece-lab-grid {
   display: grid;
-  grid-template-columns: minmax(240px, 0.8fr) minmax(450px, 1.5fr) minmax(210px, 0.65fr) minmax(280px, 0.9fr);
+  grid-template-columns: minmax(230px, 0.75fr) minmax(500px, 1.7fr) minmax(200px, 0.6fr) minmax(270px, 0.85fr);
   gap: 16px;
   align-items: start;
 }
