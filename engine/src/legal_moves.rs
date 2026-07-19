@@ -34,13 +34,6 @@ fn is_rook_piece(piece: &Piece) -> bool {
     piece.type_id == "rook"
 }
 
-fn has_move_or_drop_action(turn_state: &TurnState) -> bool {
-    turn_state
-        .actions
-        .iter()
-        .any(|action| matches!(action, TurnAction::Move(_) | TurnAction::Drop(_)))
-}
-
 fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
     let exists = actions.iter().any(|m| {
         m.piece_id == action.piece_id
@@ -239,29 +232,18 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
         return Vec::new();
     }
 
-    let Some(raw_definition) = game_state.piece_definitions.get(&piece.type_id) else {
-        return Vec::new();
-    };
-    let Ok(definition) = raw_definition.clone().normalize_and_validate() else {
+    let Some(definition) = game_state.piece_definitions.get(&piece.type_id) else {
         return Vec::new();
     };
 
     let empty_maps = HashMap::new();
-    let option = piece
-        .active_ability
-        .as_ref()
-        .and_then(|active| {
-            definition
-                .move_options
-                .iter()
-                .find(|option| option.id == active.ability_id)
-        })
-        .or_else(|| definition.normal_move_option());
-    let Some(option) = option else {
-        return Vec::new();
-    };
     let mut attacked = Vec::new();
-    for layer_id in &option.layer_ids {
+    for layer_id in definition
+        .move_options
+        .iter()
+        .filter(|option| option.contributes_to_attack_map && can_use_move_option(piece, option))
+        .flat_map(|option| &option.layer_ids)
+    {
         let Some(layer) = definition
             .move_layers
             .iter()
@@ -276,7 +258,7 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
             run_chessembly_layer_for_piece(
                 game_state,
                 piece,
-                &definition,
+                definition,
                 layer,
                 game_state.current_player.clone(),
                 &game_state.global_state,
@@ -296,15 +278,10 @@ pub fn generate_piece_legal_move_actions(
     game_state: &GameState,
     piece_id: &PieceId,
 ) -> Vec<MoveAction> {
-    let move_option_id = game_state
-        .pieces
-        .get(piece_id)
-        .and_then(|piece| piece.active_ability.as_ref())
-        .map(|active| active.ability_id.clone());
     generate_piece_legal_move_actions_with_options(
         game_state,
         piece_id,
-        &MoveGenerationOptions { move_option_id },
+        &MoveGenerationOptions::default(),
     )
 }
 
@@ -320,12 +297,6 @@ pub fn generate_piece_legal_move_actions_with_options(
     let player_id = &game_state.current_player;
 
     // A turn allows exactly one action: either one move or one pocket drop.
-    if game_state.turn_state.mode == TurnMode::Drop
-        || has_move_or_drop_action(&game_state.turn_state)
-    {
-        return Vec::new();
-    }
-
     let mut actions = Vec::new();
     let empty_maps = HashMap::new();
 
@@ -338,10 +309,7 @@ pub fn generate_piece_legal_move_actions_with_options(
         return Vec::new();
     }
 
-    let Some(raw_definition) = game_state.piece_definitions.get(&piece.type_id) else {
-        return Vec::new();
-    };
-    let Ok(definition) = raw_definition.clone().normalize_and_validate() else {
+    let Some(definition) = game_state.piece_definitions.get(&piece.type_id) else {
         return Vec::new();
     };
     let selected_option = if let Some(option_id) = options.move_option_id.as_deref() {
@@ -373,7 +341,7 @@ pub fn generate_piece_legal_move_actions_with_options(
         let result = run_chessembly_layer_for_piece(
             game_state,
             piece,
-            &definition,
+            definition,
             layer,
             player_id.clone(),
             &game_state.global_state,
@@ -383,7 +351,7 @@ pub fn generate_piece_legal_move_actions_with_options(
             game_state,
             piece_id,
             piece,
-            definition: &definition,
+            definition,
             player_id,
             option: selected_option,
             layer,
@@ -540,12 +508,6 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
     let started = Instant::now();
     let player_id = &game_state.current_player;
 
-    if game_state.turn_state.mode == TurnMode::Drop
-        || has_move_or_drop_action(&game_state.turn_state)
-    {
-        return Vec::new();
-    }
-
     let mut piece_ids = game_state
         .pieces
         .iter()
@@ -566,15 +528,14 @@ pub fn generate_legal_move_actions(game_state: &GameState) -> Vec<MoveAction> {
                 .pieces
                 .get(&piece_id)
                 .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
-                .and_then(|definition| definition.clone().normalize_and_validate().ok())
                 .map(|definition| {
                     definition
                         .move_options
-                        .into_iter()
+                        .iter()
                         .filter(|option| {
                             option.execution_mode == MoveOptionExecutionMode::MoveModifier
                         })
-                        .map(|option| option.id)
+                        .map(|option| option.id.clone())
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -602,12 +563,6 @@ pub fn generate_piece_legal_drop_actions(
     let player_id = &game_state.current_player;
 
     // A turn allows exactly one action: either one move or one pocket drop.
-    if game_state.turn_state.mode == TurnMode::Move
-        || has_move_or_drop_action(&game_state.turn_state)
-    {
-        return Vec::new();
-    }
-
     let Some(player) = game_state.players.get(player_id) else {
         return Vec::new();
     };
@@ -644,12 +599,6 @@ pub fn generate_legal_drop_actions(game_state: &GameState) -> Vec<DropAction> {
     let player_id = &game_state.current_player;
 
     // A turn allows exactly one action: either one move or one pocket drop.
-    if game_state.turn_state.mode == TurnMode::Move
-        || has_move_or_drop_action(&game_state.turn_state)
-    {
-        return Vec::new();
-    }
-
     let player = match game_state.players.get(player_id) {
         Some(p) => p,
         None => return Vec::new(),
@@ -672,10 +621,7 @@ pub fn generate_drop_candidates_by_type(
     game_state: &GameState,
     player_id: &PlayerId,
 ) -> Vec<DropCandidateByType> {
-    if &game_state.current_player != player_id
-        || game_state.turn_state.mode == TurnMode::Move
-        || has_move_or_drop_action(&game_state.turn_state)
-    {
+    if &game_state.current_player != player_id {
         return Vec::new();
     }
 

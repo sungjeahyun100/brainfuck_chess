@@ -21,28 +21,18 @@ pub fn generate_attack_map(
         if piece.owner != *player_id || !piece.is_on_board() {
             continue;
         }
-        let definition = match game_state
-            .piece_definitions
-            .get(&piece.type_id)
-            .and_then(|definition| definition.clone().normalize_and_validate().ok())
-        {
-            Some(definition) => definition,
-            None => continue,
-        };
-        let option = piece
-            .active_ability
-            .as_ref()
-            .and_then(|active| {
-                definition
-                    .move_options
-                    .iter()
-                    .find(|option| option.id == active.ability_id)
-            })
-            .or_else(|| definition.normal_move_option());
-        let Some(option) = option else {
+        let Some(definition) = game_state.piece_definitions.get(&piece.type_id) else {
             continue;
         };
-        for layer_id in &option.layer_ids {
+        let options = definition.move_options.iter().filter(|option| {
+            option.execution_mode == MoveOptionExecutionMode::MoveModifier
+                && option.contributes_to_attack_map
+                && piece
+                    .move_option_cooldowns
+                    .get(&option.id)
+                    .is_none_or(|cooldown| cooldown.remaining == 0)
+        });
+        for layer_id in options.flat_map(|option| &option.layer_ids) {
             let Some(layer) = definition
                 .move_layers
                 .iter()
@@ -56,7 +46,7 @@ pub fn generate_attack_map(
             let chessembly_result = run_chessembly_layer_for_piece(
                 game_state,
                 piece,
-                &definition,
+                definition,
                 layer,
                 player_id.clone(),
                 &game_state.global_state,

@@ -202,6 +202,33 @@ pub enum PieceStateValue {
     Text(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PieceStateValueType {
+    Integer,
+    Boolean,
+    Text,
+}
+
+impl PieceStateValue {
+    pub const fn value_type(&self) -> PieceStateValueType {
+        match self {
+            Self::Integer(_) => PieceStateValueType::Integer,
+            Self::Boolean(_) => PieceStateValueType::Boolean,
+            Self::Text(_) => PieceStateValueType::Text,
+        }
+    }
+}
+
+impl fmt::Display for PieceStateValueType {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Integer => "integer",
+            Self::Boolean => "boolean",
+            Self::Text => "text",
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PieceStateDefinition {
     pub key: String,
@@ -295,8 +322,14 @@ pub struct MoveOptionDefinition {
     pub kind: MoveOptionKind,
     pub layer_ids: Vec<String>,
     pub execution_mode: MoveOptionExecutionMode,
+    #[serde(default = "default_true")]
+    pub contributes_to_attack_map: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cooldown: Option<CooldownDefinition>,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -415,6 +448,7 @@ impl PieceDefinition {
                 kind: MoveOptionKind::Normal,
                 layer_ids: default_layer_ids,
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
+                contributes_to_attack_map: true,
                 cooldown: None,
             });
         }
@@ -443,6 +477,7 @@ impl PieceDefinition {
                     kind: MoveOptionKind::Ability,
                     layer_ids: vec![layer_id],
                     execution_mode: MoveOptionExecutionMode::MoveModifier,
+                    contributes_to_attack_map: true,
                     cooldown: (ability.cooldown_turns > 0).then_some(CooldownDefinition {
                         turns: ability.cooldown_turns,
                         clock: CooldownClock::OwnerTurns,
@@ -494,12 +529,28 @@ impl PieceDefinition {
             .iter()
             .map(|layer| layer.id.as_str())
             .collect();
+        let schema = self
+            .state_schema
+            .iter()
+            .map(|state| (state.key.as_str(), state.default_value.value_type()))
+            .collect::<HashMap<_, _>>();
         let validate_predicates = |owner: &str, predicates: &[PieceStatePredicate]| {
             predicates.iter().find_map(|predicate| {
-                (!state_keys.contains(predicate.key.as_str())).then(|| {
-                    format!(
+                let Some(expected) = schema.get(predicate.key.as_str()) else {
+                    return Some(format!(
                         "{}: {owner} references unknown state key `{}`",
                         self.id, predicate.key
+                    ));
+                };
+                let actual = match &predicate.condition {
+                    PieceStateCondition::Equals(value) | PieceStateCondition::NotEquals(value) => {
+                        value.value_type()
+                    }
+                };
+                (*expected != actual).then(|| {
+                    format!(
+                        "{}: {owner} predicate for state `{}` expects {} but received {}",
+                        self.id, predicate.key, expected, actual
                     )
                 })
             })
@@ -519,6 +570,20 @@ impl PieceDefinition {
                 return Err(format!(
                     "{}: layer `{}` updates unknown state key `{}`",
                     self.id, layer.id, update.key
+                ));
+            }
+            if let Some(update) = layer.on_commit.iter().find(|update| {
+                schema
+                    .get(update.key.as_str())
+                    .is_some_and(|expected| *expected != update.value.value_type())
+            }) {
+                return Err(format!(
+                    "{}: layer `{}` update for state `{}` expects {} but received {}",
+                    self.id,
+                    layer.id,
+                    update.key,
+                    schema[update.key.as_str()],
+                    update.value.value_type()
                 ));
             }
         }
@@ -553,6 +618,17 @@ impl PieceDefinition {
             ) {
                 return Err(error);
             }
+        }
+        if let Some(priority) = duplicate(
+            self.visual
+                .variants
+                .iter()
+                .map(|variant| variant.priority.to_string()),
+        ) {
+            return Err(format!(
+                "{}: duplicate visual variant priority `{priority}`",
+                self.id
+            ));
         }
         Ok(())
     }
@@ -622,23 +698,10 @@ impl ChessemblyProgramCache {
         crate::profiling::record_cache_rebuild(1);
         let mut programs = HashMap::new();
         for (type_id, definition) in definitions {
-            if definition.move_layers.is_empty() {
+            for layer in &definition.move_layers {
                 programs.insert(
-                    Self::layer_key(type_id, "default"),
-                    Arc::new(parse(&definition.chessembly_code)),
-                );
-            } else {
-                for layer in &definition.move_layers {
-                    programs.insert(
-                        Self::layer_key(type_id, &layer.id),
-                        Arc::new(parse(&layer.chessembly_code)),
-                    );
-                }
-            }
-            for ability in &definition.abilities {
-                programs.insert(
-                    Self::ability_key(type_id, &ability.id),
-                    Arc::new(parse(&ability.chessembly_code)),
+                    Self::layer_key(type_id, &layer.id),
+                    Arc::new(parse(&layer.chessembly_code)),
                 );
             }
         }
@@ -649,21 +712,14 @@ impl ChessemblyProgramCache {
         let programs = self.read_programs();
         let expected_len: usize = definitions
             .values()
-            .map(|definition| definition.move_layers.len().max(1) + definition.abilities.len())
+            .map(|definition| definition.move_layers.len())
             .sum();
         programs.len() == expected_len
             && definitions.iter().all(|(type_id, definition)| {
-                (if definition.move_layers.is_empty() {
-                    programs.contains_key(&Self::layer_key(type_id, "default"))
-                } else {
-                    definition
-                        .move_layers
-                        .iter()
-                        .all(|layer| programs.contains_key(&Self::layer_key(type_id, &layer.id)))
-                }) && definition
-                    .abilities
+                definition
+                    .move_layers
                     .iter()
-                    .all(|ability| programs.contains_key(&Self::ability_key(type_id, &ability.id)))
+                    .all(|layer| programs.contains_key(&Self::layer_key(type_id, &layer.id)))
             })
     }
 
@@ -674,12 +730,6 @@ impl ChessemblyProgramCache {
     pub fn get_layer(&self, type_id: &PieceTypeId, layer_id: &str) -> Option<Arc<Program>> {
         self.read_programs()
             .get(&Self::layer_key(type_id, layer_id))
-            .cloned()
-    }
-
-    pub fn get_ability(&self, type_id: &PieceTypeId, ability_id: &str) -> Option<Arc<Program>> {
-        self.read_programs()
-            .get(&Self::ability_key(type_id, ability_id))
             .cloned()
     }
 
@@ -700,34 +750,12 @@ impl ChessemblyProgramCache {
             .clone()
     }
 
-    pub fn get_or_parse_ability(
-        &self,
-        type_id: &PieceTypeId,
-        ability: &PieceAbilityDefinition,
-    ) -> Arc<Program> {
-        if let Some(program) = self.get_ability(type_id, &ability.id) {
-            return program;
-        }
-
-        let key = Self::ability_key(type_id, &ability.id);
-        let program = Arc::new(parse(&ability.chessembly_code));
-        let mut programs = self.write_programs();
-        programs
-            .entry(key)
-            .or_insert_with(|| program.clone())
-            .clone()
-    }
-
     pub fn len(&self) -> usize {
         self.read_programs().len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.read_programs().is_empty()
-    }
-
-    pub fn ability_key(type_id: &PieceTypeId, ability_id: &str) -> String {
-        format!("{type_id}::legacy-ability::{ability_id}")
     }
 
     pub fn layer_key(type_id: &PieceTypeId, layer_id: &str) -> String {
@@ -1049,34 +1077,6 @@ impl GameState {
             .entry(key)
             .or_insert_with(|| program.clone())
             .clone()
-    }
-
-    pub fn effective_chessembly_program(
-        &self,
-        piece: &Piece,
-        definition: &PieceDefinition,
-    ) -> Option<Arc<Program>> {
-        if let Some(active) = &piece.active_ability {
-            if let Some(ability) = definition
-                .abilities
-                .iter()
-                .find(|ability| ability.id == active.ability_id)
-            {
-                if let Some(program) = self
-                    .chessembly_program_cache
-                    .get_ability(&definition.id, &ability.id)
-                {
-                    crate::profiling::record_cache_hit(1);
-                    return Some(program);
-                }
-                return Some(
-                    self.chessembly_program_cache
-                        .get_or_parse_ability(&definition.id, ability),
-                );
-            }
-        }
-
-        self.chessembly_program(&piece.type_id)
     }
 
     pub fn cached_chessembly_program_count(&self) -> usize {

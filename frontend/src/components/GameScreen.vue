@@ -338,7 +338,10 @@ function abilityUnavailableReason(ability: MoveOptionDefinition): string {
   if (ability.execution_mode !== 'move_modifier') return '독립 실행 옵션은 아직 지원되지 않습니다.'
   const remaining = selectedPiece.value.move_option_cooldowns?.[ability.id]?.remaining ?? 0
   if (remaining > 0) {
-    return `${remaining}번의 소유자 턴을 마친 뒤 다시 사용할 수 있습니다.`
+    const clockLabel = ability.cooldown?.clock === 'global_turns'
+      ? '전체 행동/턴'
+      : '소유자 턴'
+    return `${remaining}번의 ${clockLabel}을 마친 뒤 다시 사용할 수 있습니다.`
   }
   return ''
 }

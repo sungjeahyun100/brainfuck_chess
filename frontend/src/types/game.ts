@@ -77,6 +77,7 @@ export interface MoveOptionDefinition {
   kind: MoveOptionKind
   layer_ids: string[]
   execution_mode: MoveOptionExecutionMode
+  contributes_to_attack_map: boolean
   cooldown?: CooldownDefinition
 }
 

@@ -140,6 +140,7 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
                 kind: MoveOptionKind::Normal,
                 layer_ids: vec!["rook_move".into()],
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
+                contributes_to_attack_map: true,
                 cooldown: None,
             },
             MoveOptionDefinition {
@@ -149,6 +150,7 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
                 kind: MoveOptionKind::Ability,
                 layer_ids: vec!["cannon_move".into()],
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
+                contributes_to_attack_map: true,
                 cooldown: Some(CooldownDefinition {
                     turns: 3,
                     clock: CooldownClock::OwnerTurns,
@@ -239,6 +241,7 @@ pub fn windmill_definition() -> PieceDefinition {
             kind: MoveOptionKind::Normal,
             layer_ids: vec!["bishop_mode".into(), "rook_mode".into()],
             execution_mode: MoveOptionExecutionMode::MoveModifier,
+            contributes_to_attack_map: true,
             cooldown: None,
         }],
         visual: PieceVisualDefinition {

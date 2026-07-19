@@ -5,7 +5,7 @@ use crate::ai::move_ordering::order_ai_actions;
 use crate::ai::types::{
     AiAction, BotDecision, BotDifficulty, BotTurnResult, SearchLimits, SearchStats,
 };
-use crate::endgame::apply_and_advance_turn;
+use crate::endgame::submit_action;
 use crate::legal_moves::{generate_legal_drop_actions, generate_legal_move_actions};
 use crate::types::{GamePhase, GameState, PlayerId, TurnAction};
 
@@ -38,10 +38,7 @@ pub fn apply_ai_action(state: GameState, action: &AiAction) -> Result<GameState,
             if !legal {
                 return Err("AI가 합법적이지 않은 이동을 선택했습니다.".into());
             }
-            Ok(apply_and_advance_turn(
-                state,
-                TurnAction::Move(action.clone()),
-            ))
+            submit_action(state, TurnAction::Move(action.clone()))
         }
         AiAction::Drop(action) => {
             let legal = generate_legal_drop_actions(&state)
@@ -50,10 +47,7 @@ pub fn apply_ai_action(state: GameState, action: &AiAction) -> Result<GameState,
             if !legal {
                 return Err("AI가 합법적이지 않은 착수를 선택했습니다.".into());
             }
-            Ok(apply_and_advance_turn(
-                state,
-                TurnAction::Drop(action.clone()),
-            ))
+            submit_action(state, TurnAction::Drop(action.clone()))
         }
     }
 }

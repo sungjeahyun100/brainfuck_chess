@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use brainfuck_chess_engine::{
     ai::{play_bot_turn_detailed, AiAction, BotDifficulty},
-    endgame::apply_and_advance_turn,
+    endgame::submit_action as submit_engine_action,
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
@@ -1217,29 +1217,36 @@ async fn submit_action(
             let move_options = MoveGenerationOptions {
                 move_option_id: request.move_option_id.clone(),
             };
-            let legal_action = generate_piece_legal_move_actions_with_options(
+            let matching_actions = generate_piece_legal_move_actions_with_options(
                 state,
                 &request.piece_id,
                 &move_options,
             )
             .into_iter()
-            .find(|m| {
+            .filter(|m| {
                 m.to == request.to
                     && m.promotion == request.promotion
                     && request
                         .move_option_id
                         .as_ref()
                         .is_none_or(|option_id| m.move_option_id == *option_id)
-            });
-            let Some(legal_action) = legal_action else {
+            })
+            .collect::<Vec<_>>();
+            let [legal_action] = matching_actions.as_slice() else {
+                let error = if matching_actions.len() > 1 {
+                    "동일 조건의 이동이 여러 개여서 선택이 모호합니다."
+                } else {
+                    "합법적이지 않은 이동입니다."
+                };
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
-                        error: "합법적이지 않은 이동입니다.".into(),
+                        error: error.into(),
                     }),
                 ));
             };
-            *state = apply_and_advance_turn(state.clone(), TurnAction::Move(legal_action));
+            *state = submit_engine_action(state.clone(), TurnAction::Move(legal_action.clone()))
+                .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
         }
         SubmitAction::Drop(request) => {
             let legal_action = generate_piece_legal_drop_actions(state, &request.piece_id)
@@ -1253,7 +1260,8 @@ async fn submit_action(
                     }),
                 ));
             };
-            *state = apply_and_advance_turn(state.clone(), TurnAction::Drop(legal_action));
+            *state = submit_engine_action(state.clone(), TurnAction::Drop(legal_action))
+                .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
         }
     }
 

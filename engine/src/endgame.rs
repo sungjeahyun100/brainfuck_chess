@@ -118,16 +118,16 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         let Some(piece) = game_state.pieces.get(&update.piece_id) else {
             continue;
         };
-        let key_is_valid = game_state
+        let value_is_valid = game_state
             .piece_definitions
             .get(&piece.type_id)
             .is_some_and(|definition| {
-                definition
-                    .state_schema
-                    .iter()
-                    .any(|state| state.key == update.key)
+                definition.state_schema.iter().any(|state| {
+                    state.key == update.key
+                        && state.default_value.value_type() == update.value.value_type()
+                })
             });
-        if key_is_valid {
+        if value_is_valid {
             if let Some(piece) = game_state.pieces.get_mut(&update.piece_id) {
                 piece.state.insert(update.key.clone(), update.value.clone());
             }
@@ -241,6 +241,28 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
     }
     game_state.turn_state = TurnState::new();
     game_state
+}
+
+/// Canonical public action boundary used by servers, bots, and search.
+pub fn submit_action(game_state: GameState, action: TurnAction) -> Result<GameState, String> {
+    if game_state.phase == GamePhase::Ended || game_state.result.is_some() {
+        return Err("게임이 이미 종료되었습니다.".into());
+    }
+    let legal = match &action {
+        TurnAction::Move(action) => {
+            action.player_id == game_state.current_player
+                && crate::legal_moves::generate_legal_move_actions(&game_state).contains(action)
+        }
+        TurnAction::Drop(action) => {
+            action.player_id == game_state.current_player
+                && crate::legal_moves::generate_legal_drop_actions(&game_state).contains(action)
+        }
+        TurnAction::ActivateAbility(_) => false,
+    };
+    if !legal {
+        return Err("canonical legal action이 아닙니다.".into());
+    }
+    Ok(apply_and_advance_turn(game_state, action))
 }
 
 fn tick_move_option_cooldowns(

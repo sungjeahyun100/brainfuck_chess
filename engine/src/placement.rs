@@ -49,22 +49,6 @@ pub fn get_placement_squares(game_state: &GameState, player_id: &PlayerId) -> Ve
 
 /// Validate a drop action.
 pub fn validate_drop_action(game_state: &GameState, action: &DropAction) -> Result<(), String> {
-    // Must be drop turn mode
-    if game_state.turn_state.mode == crate::types::TurnMode::Move {
-        return Err("이동 턴에는 착수할 수 없습니다.".into());
-    }
-
-    // Only one drop per turn
-    let drop_count = game_state
-        .turn_state
-        .actions
-        .iter()
-        .filter(|a| matches!(a, TurnAction::Drop(_)))
-        .count();
-    if drop_count > 0 {
-        return Err("착수 턴에는 포켓 기물 1개만 착수할 수 있습니다.".into());
-    }
-
     // Piece must exist in the player's pocket
     let player = game_state
         .players

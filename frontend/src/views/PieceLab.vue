@@ -582,6 +582,9 @@ function applyLabMove(action: MoveAction) {
       [update.key]: update.value,
     }
   }
+  const newlySetCooldowns = new Set(
+    action.effects.cooldown_updates.map(update => `${update.piece_id}\u0000${update.move_option_id}`),
+  )
   for (const update of action.effects.cooldown_updates) {
     const piece = pieces.value.find(piece => piece.id === update.piece_id)
     const option = piece
@@ -592,6 +595,24 @@ function applyLabMove(action: MoveAction) {
       ...piece.moveOptionCooldowns,
       [update.move_option_id]: { remaining: update.remaining },
     }
+  }
+  // The lab has no server-side turn loop, so advance cooldown clocks locally
+  // after every committed move. This mirrors the engine and deliberately skips
+  // cooldowns created by the move that just happened.
+  for (const piece of pieces.value) {
+    const definition = labDefinitions.value[piece.pieceType]
+    const nextCooldowns = { ...piece.moveOptionCooldowns }
+    for (const [optionId, cooldown] of Object.entries(nextCooldowns)) {
+      if (newlySetCooldowns.has(`${piece.id}\u0000${optionId}`)) continue
+      const clock = definition?.move_options.find(option => option.id === optionId)?.cooldown?.clock
+      const shouldTick = clock === 'global_turns'
+        || (clock === 'owner_turns' && piece.owner === action.player_id)
+      if (!shouldTick) continue
+      const remaining = Math.max(0, cooldown.remaining - 1)
+      if (remaining === 0) delete nextCooldowns[optionId]
+      else nextCooldowns[optionId] = { remaining }
+    }
+    piece.moveOptionCooldowns = nextCooldowns
   }
   selectedPieceId.value = action.piece_id
   activeAbilityId.value = null
