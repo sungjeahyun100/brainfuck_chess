@@ -26,6 +26,7 @@ export const pieceCatalog: PieceCatalogItem[] = [
   { id: 'rook', name: 'Rook', score: 5, category: 'major', canPocket: true },
   { id: 'bishop', name: 'Bishop', score: 3, category: 'minor', canPocket: true },
   { id: 'knight', name: 'Knight', score: 3, category: 'minor', canPocket: true },
+  { id: 'paratrooper', name: '공수부대 대원', score: 3, category: 'variant', canPocket: true, aliases: ['Paratrooper', '공수부대'] },
   { id: 'pawn', name: 'Pawn', score: 1, category: 'pawn', canPocket: true },
 ]
 

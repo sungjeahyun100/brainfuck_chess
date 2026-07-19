@@ -267,6 +267,22 @@ fn tick_move_option_cooldowns(
 
 /// Apply a DropAction: move a pocket piece onto the board.
 pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameState {
+    let captured_is_king = action.captured_piece_id.as_ref().is_some_and(|id| {
+        game_state
+            .pieces
+            .get(id)
+            .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+            .is_some_and(is_royal_piece)
+    });
+    if let Some(captured_id) = &action.captured_piece_id {
+        if let Some(captured) = game_state.pieces.get_mut(captured_id) {
+            captured.captured = true;
+            captured.current_square = None;
+        }
+        if let Some(player) = game_state.players.get_mut(&action.player_id) {
+            player.captured_pieces.push(captured_id.clone());
+        }
+    }
     // Remove from pocket list
     if let Some(player) = game_state.players.get_mut(&action.player_id) {
         player
@@ -292,6 +308,14 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
     if game_state.en_passant_available_to.as_ref() == Some(&game_state.current_player) {
         game_state.en_passant_target = None;
         game_state.en_passant_available_to = None;
+    }
+
+    if captured_is_king {
+        game_state.phase = GamePhase::Ended;
+        game_state.result = Some(GameResult {
+            winner: Some(action.player_id),
+            reason: GameEndReason::KingCapture,
+        });
     }
 
     game_state

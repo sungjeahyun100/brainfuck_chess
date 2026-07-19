@@ -12,6 +12,8 @@ import knightBlack from './assets/pieces/knight-black.svg'
 import knightWhite from './assets/pieces/knight-white.svg'
 import pawnBlack from './assets/pieces/pawn-black.svg'
 import pawnWhite from './assets/pieces/pawn-white.svg'
+import paratrooperBlack from './assets/pieces/paratrooper-black.svg'
+import paratrooperWhite from './assets/pieces/paratrooper-white.svg'
 import queenBlack from './assets/pieces/queen-black.svg'
 import queenWhite from './assets/pieces/queen-white.svg'
 import rookBlack from './assets/pieces/rook-black.svg'
@@ -41,6 +43,7 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   king: { white: kingWhite, black: kingBlack },
   knight: { white: knightWhite, black: knightBlack },
   pawn: { white: pawnWhite, black: pawnBlack },
+  paratrooper: { white: paratrooperWhite, black: paratrooperBlack },
   'pawn-white': { white: pawnWhite, black: pawnBlack },
   'pawn-black': { white: pawnWhite, black: pawnBlack },
   'tempest-pawn': { white: tempestPawnWhite, black: tempestPawnBlack },

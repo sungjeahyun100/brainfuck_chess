@@ -215,7 +215,7 @@ function squareClasses(sq: SquareInfo) {
 function legalMarker(sq: SquareInfo): string | null {
   if (attackSquareIds.value.has(sq.id)) return props.abilityMode ? 'ability capture' : 'capture'
   if (movableSquareIds.value.has(sq.id)) return props.abilityMode ? 'ability move' : 'move'
-  if (dropSquareIds.value.has(sq.id)) return 'drop'
+  if (dropSquareIds.value.has(sq.id)) return sq.piece ? 'drop capture' : 'drop'
   return null
 }
 
@@ -597,6 +597,11 @@ function pieceAlt(piece: Piece): string {
 
 .legal-move-dot.drop {
   background: rgba(74, 143, 255, 0.78);
+}
+
+.legal-move-dot.drop.capture {
+  background: rgba(220, 50, 50, 0.88);
+  box-shadow: 0 0 0 3px rgba(74, 143, 255, 0.4);
 }
 
 .board-arrow-overlay {

@@ -8,8 +8,9 @@ use std::time::Instant;
 
 /// Compute the set of squares where a player can drop a pocket piece.
 ///
-/// placementSquares = baseZoneSquares ∪ playerAttackMap   (minus occupied squares)
-pub fn get_placement_squares(game_state: &GameState, player_id: &PlayerId) -> Vec<Square> {
+/// placementSquares = baseZoneSquares ∪ playerAttackMap.
+/// Occupancy is handled by the selected pocket piece's drop capability.
+fn get_placement_candidates(game_state: &GameState, player_id: &PlayerId) -> Vec<Square> {
     #[cfg(feature = "profiling")]
     let started = Instant::now();
     let attack_map = generate_attack_map(game_state, player_id, &HashMap::new());
@@ -30,12 +31,12 @@ pub fn get_placement_squares(game_state: &GameState, player_id: &PlayerId) -> Ve
         candidates.insert(*sq_id);
     }
 
-    // Filter: must be empty and in bounds
+    // Filter only by bounds. Drop-specific occupancy rules are applied below.
     let squares = candidates
         .into_iter()
         .filter_map(|sq_id| {
             let sq = sq_id.to_square();
-            if game_state.board.is_in_bounds(&sq) && game_state.board.is_empty(&sq) {
+            if game_state.board.is_in_bounds(&sq) {
                 Some(sq)
             } else {
                 None
@@ -45,6 +46,35 @@ pub fn get_placement_squares(game_state: &GameState, player_id: &PlayerId) -> Ve
     #[cfg(feature = "profiling")]
     crate::profiling::record_placement(started.elapsed());
     squares
+}
+
+pub fn get_placement_squares(game_state: &GameState, player_id: &PlayerId) -> Vec<Square> {
+    get_placement_candidates(game_state, player_id)
+        .into_iter()
+        .filter(|square| game_state.board.is_empty(square))
+        .collect()
+}
+
+pub fn get_piece_placement_squares(
+    game_state: &GameState,
+    player_id: &PlayerId,
+    piece: &Piece,
+) -> Vec<Square> {
+    let captures_on_drop = game_state
+        .piece_definitions
+        .get(&piece.type_id)
+        .is_some_and(|definition| definition.can_capture_on_drop);
+    get_placement_candidates(game_state, player_id)
+        .into_iter()
+        .filter(|square| match game_state.board.get_piece_at(square) {
+            None => true,
+            Some(target_id) if captures_on_drop => game_state
+                .pieces
+                .get(target_id)
+                .is_some_and(|target| target.owner != *player_id),
+            Some(_) => false,
+        })
+        .collect()
 }
 
 /// Validate a drop action.
@@ -69,16 +99,11 @@ pub fn validate_drop_action(game_state: &GameState, action: &DropAction) -> Resu
         }
     }
 
-    // Target square must be in bounds and empty
+    // Target square must be in bounds and legal for this piece's drop capability.
     if !game_state.board.is_in_bounds(&action.to) {
         return Err("보드 밖에는 착수할 수 없습니다.".into());
     }
-    if !game_state.board.is_empty(&action.to) {
-        return Err("이미 기물이 있는 칸에는 착수할 수 없습니다.".into());
-    }
-
-    // Target must be in placement squares
-    let placement_squares = get_placement_squares(game_state, &action.player_id);
+    let placement_squares = get_piece_placement_squares(game_state, &action.player_id, piece);
     if !placement_squares.contains(&action.to) {
         return Err("착수 가능한 칸이 아닙니다.".into());
     }

@@ -65,9 +65,17 @@ export interface PieceLabPieceRequest {
   move_option_cooldowns?: Record<string, { remaining: number }>
 }
 
+export interface PieceLabPocketPieceRequest {
+  id: string
+  piece_type: string
+  owner: PlayerId
+  state?: Record<string, PieceStateValue>
+}
+
 export interface PieceLabOptionsRequest {
   board_size: number
   pieces: PieceLabPieceRequest[]
+  pocket_pieces: PieceLabPocketPieceRequest[]
   selected_piece_id: string
   move_option_id?: string
   global_state?: Record<string, number>
@@ -86,6 +94,7 @@ export interface PieceLabMoveOption {
 export interface PieceLabOptionsResponse {
   moves: Square[]
   legal_moves: MoveAction[]
+  legal_drops: DropAction[]
   attacks: Square[]
   move_options: PieceLabMoveOption[]
   piece_definitions: Record<string, PieceDefinition>

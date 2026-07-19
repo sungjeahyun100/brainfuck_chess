@@ -204,10 +204,21 @@ struct LabPieceSpec {
     move_option_cooldowns: HashMap<String, CooldownState>,
 }
 
+#[derive(Clone, Deserialize)]
+struct LabPocketPieceSpec {
+    id: String,
+    piece_type: String,
+    owner: PlayerId,
+    #[serde(default)]
+    state: HashMap<String, PieceStateValue>,
+}
+
 #[derive(Deserialize)]
 struct LabPieceOptionsRequest {
     board_size: i32,
     pieces: Vec<LabPieceSpec>,
+    #[serde(default)]
+    pocket_pieces: Vec<LabPocketPieceSpec>,
     selected_piece_id: String,
     move_option_id: Option<String>,
     #[serde(default)]
@@ -229,6 +240,7 @@ struct LabMoveOption {
 struct LabPieceOptionsResponse {
     moves: Vec<Square>,
     legal_moves: Vec<MoveAction>,
+    legal_drops: Vec<DropAction>,
     attacks: Vec<Square>,
     move_options: Vec<LabMoveOption>,
     piece_definitions: HashMap<PieceTypeId, PieceDefinition>,
@@ -245,7 +257,7 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
         "king" | "queen" | "rook" | "bishop" | "knight" | "amazon" | "cannon-rook"
         | "cannon_rook" | "tempest-rook" | "tempest-queen" | "tempest-knight"
-        | "bouncing-bishop" | "tempest-bishop" | "windmill" => {
+        | "bouncing-bishop" | "tempest-bishop" | "windmill" | "paratrooper" => {
             Some(raw_piece_type.replace('_', "-"))
         }
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
@@ -462,6 +474,8 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
     let mut pieces = HashMap::new();
     let mut white_starting = Vec::new();
     let mut black_starting = Vec::new();
+    let mut white_pocket = Vec::new();
+    let mut black_pocket = Vec::new();
     let mut seen_piece_ids = HashSet::new();
 
     for lab_piece in &req.pieces {
@@ -541,6 +555,56 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
         pieces.insert(piece_id, piece);
     }
 
+    for lab_piece in &req.pocket_pieces {
+        if lab_piece.owner != "white" && lab_piece.owner != "black" {
+            return Err("포켓 기물 owner는 white 또는 black이어야 합니다.".into());
+        }
+        if !seen_piece_ids.insert(lab_piece.id.clone()) {
+            return Err(format!("중복된 테스트 기물 id입니다: {}", lab_piece.id));
+        }
+        let type_id = resolve_piece_type(&lab_piece.owner, &lab_piece.piece_type)
+            .ok_or_else(|| format!("알 수 없는 포켓 기물 타입입니다: {}", lab_piece.piece_type))?;
+        let definition = defs
+            .get(&type_id)
+            .ok_or_else(|| format!("기물 정의를 찾을 수 없습니다: {type_id}"))?;
+        let mut piece_state = definition.initial_state();
+        for (key, value) in &lab_piece.state {
+            let state_definition = definition
+                .state_schema
+                .iter()
+                .find(|state| state.key == *key)
+                .ok_or_else(|| format!("{type_id}: 알 수 없는 기물 상태 키입니다: {key}"))?;
+            if std::mem::discriminant(&state_definition.default_value)
+                != std::mem::discriminant(value)
+            {
+                return Err(format!(
+                    "{type_id}: 기물 상태 `{key}`의 값 타입이 올바르지 않습니다."
+                ));
+            }
+            piece_state.insert(key.clone(), value.clone());
+        }
+        let piece_id = PieceId::from(lab_piece.id.clone());
+        pieces.insert(
+            piece_id.clone(),
+            Piece {
+                id: piece_id.clone(),
+                owner: lab_piece.owner.clone(),
+                type_id,
+                current_square: None,
+                in_pocket: true,
+                captured: false,
+                has_moved: false,
+                state: piece_state,
+                move_option_cooldowns: HashMap::new(),
+            },
+        );
+        if lab_piece.owner == "white" {
+            white_pocket.push(piece_id);
+        } else {
+            black_pocket.push(piece_id);
+        }
+    }
+
     let selected_piece_id = PieceId::from(req.selected_piece_id.clone());
     let selected_piece = pieces
         .get(&selected_piece_id)
@@ -550,14 +614,14 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
     let white_deck = Deck {
         player_id: "white".into(),
         starting_pieces: white_starting,
-        pocket_pieces: Vec::new(),
+        pocket_pieces: white_pocket,
         score_limit: calculate_score_limit(req.board_size),
         total_score: 0,
     };
     let black_deck = Deck {
         player_id: "black".into(),
         starting_pieces: black_starting,
-        pocket_pieces: Vec::new(),
+        pocket_pieces: black_pocket,
         score_limit: calculate_score_limit(req.board_size),
         total_score: 0,
     };
@@ -1382,24 +1446,42 @@ async fn get_lab_piece_options(
     let state = build_lab_game_state(&req)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let piece_id = PieceId::from(req.selected_piece_id.clone());
-    let legal_moves = generate_piece_legal_move_actions_with_options(
-        &state,
-        &piece_id,
-        &MoveGenerationOptions {
-            move_option_id: req.move_option_id.clone(),
-        },
-    );
+    let selected_in_pocket = state
+        .pieces
+        .get(&piece_id)
+        .is_some_and(|piece| piece.in_pocket);
+    let legal_moves = if selected_in_pocket {
+        Vec::new()
+    } else {
+        generate_piece_legal_move_actions_with_options(
+            &state,
+            &piece_id,
+            &MoveGenerationOptions {
+                move_option_id: req.move_option_id.clone(),
+            },
+        )
+    };
+    let legal_drops = if selected_in_pocket {
+        generate_piece_legal_drop_actions(&state, &piece_id)
+    } else {
+        Vec::new()
+    };
     let mut seen_moves = HashSet::new();
     let moves = legal_moves
         .iter()
         .map(|action| action.to)
+        .chain(legal_drops.iter().map(|action| action.to))
         .filter(|square| seen_moves.insert(square.to_id()))
         .collect();
     let mut seen_attacks = HashSet::new();
-    let attacks = generate_piece_attack_squares(&state, &piece_id)
-        .into_iter()
-        .filter(|square| seen_attacks.insert(square.to_id()))
-        .collect();
+    let attacks = if selected_in_pocket {
+        Vec::new()
+    } else {
+        generate_piece_attack_squares(&state, &piece_id)
+    }
+    .into_iter()
+    .filter(|square| seen_attacks.insert(square.to_id()))
+    .collect();
     let move_options = state
         .pieces
         .get(&piece_id)
@@ -1436,6 +1518,7 @@ async fn get_lab_piece_options(
     Ok(Json(LabPieceOptionsResponse {
         moves,
         legal_moves,
+        legal_drops,
         attacks,
         move_options,
         piece_definitions: state.piece_definitions.clone(),
@@ -1520,6 +1603,7 @@ mod tests {
             selected_piece_id: "lab_white_rook_1".into(),
             move_option_id: None,
             global_state: HashMap::new(),
+            pocket_pieces: vec![],
             pieces: vec![
                 LabPieceSpec {
                     id: "lab_white_rook_1".into(),
@@ -1557,6 +1641,7 @@ mod tests {
             selected_piece_id: "lab_white_windmill_1".into(),
             move_option_id: None,
             global_state: HashMap::new(),
+            pocket_pieces: vec![],
             pieces: vec![LabPieceSpec {
                 id: "lab_white_windmill_1".into(),
                 piece_type: "windmill".into(),
@@ -1574,6 +1659,33 @@ mod tests {
 
         assert!(response.moves.contains(&Square::new(4, 3)));
         assert!(!response.moves.contains(&Square::new(4, 4)));
+    }
+
+    #[tokio::test]
+    async fn lab_piece_options_returns_real_pocket_drop_actions() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_white_pocket_paratrooper_1".into(),
+            move_option_id: None,
+            global_state: HashMap::new(),
+            pieces: vec![],
+            pocket_pieces: vec![LabPocketPieceSpec {
+                id: "lab_white_pocket_paratrooper_1".into(),
+                piece_type: "paratrooper".into(),
+                owner: "white".into(),
+                state: HashMap::new(),
+            }],
+        };
+
+        let response = match get_lab_piece_options(Json(req)).await {
+            Ok(Json(response)) => response,
+            Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+        };
+
+        assert!(response.legal_moves.is_empty());
+        assert!(!response.legal_drops.is_empty());
+        assert!(response.moves.iter().all(|square| square.rank < 2));
+        assert_eq!(response.moves.len(), response.legal_drops.len());
     }
 
     #[tokio::test]

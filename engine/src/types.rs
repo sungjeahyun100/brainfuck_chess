@@ -171,6 +171,9 @@ pub struct PieceDefinition {
     pub extensions: Option<Vec<String>>,
     /// If true, capturing this piece ends the game immediately
     pub is_king: bool,
+    /// Whether this piece may capture an enemy by dropping onto its square.
+    #[serde(default)]
+    pub can_capture_on_drop: bool,
     /// Optional rule that decides when this piece may promote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promotion: Option<PromotionRule>,
@@ -839,6 +842,8 @@ pub struct DropAction {
     pub player_id: PlayerId,
     pub piece_id: PieceId,
     pub to: Square,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_piece_id: Option<PieceId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

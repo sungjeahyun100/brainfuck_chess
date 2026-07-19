@@ -27,6 +27,7 @@ export interface PieceDefinition {
   dialect?: ChessemblyDialect
   extensions?: string[]
   is_king: boolean
+  can_capture_on_drop: boolean
   state_schema: PieceStateDefinition[]
   move_layers: MoveLayerDefinition[]
   move_options: MoveOptionDefinition[]
@@ -173,6 +174,7 @@ export interface DropAction {
   player_id: PlayerId
   piece_id: PieceId
   to: Square
+  captured_piece_id?: PieceId
 }
 
 export type TurnAction = MoveAction | DropAction

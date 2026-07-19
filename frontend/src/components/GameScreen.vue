@@ -506,6 +506,14 @@ function applyDropForReplay(state: GameState, action: DropAction): GameState {
   }
 
   const piece = next.pieces[action.piece_id]
+  if (action.captured_piece_id) {
+    const captured = next.pieces[action.captured_piece_id]
+    if (captured) {
+      captured.captured = true
+      captured.current_square = undefined
+    }
+    if (player) player.captured_pieces.push(action.captured_piece_id)
+  }
   if (piece) {
     piece.in_pocket = false
     piece.current_square = action.to

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">공수부대 대원</title>
+  <desc id="desc">투명 배경에 흰색 내부와 검은 윤곽선으로 그린, 귀를 더 작게 조정한 방탄모 쓴 군인 머리 픽토그램</desc>
+
+  <g stroke="#000" stroke-width="18" stroke-linejoin="round" stroke-linecap="round">
+    <!-- 귀: 더 작게 조정 -->
+    <ellipse cx="150" cy="317" rx="24" ry="40" fill="#fff"/>
+    <ellipse cx="362" cy="317" rx="24" ry="40" fill="#fff"/>
+
+    <!-- 얼굴 -->
+    <path fill="#fff" d="M158 268
+      C160 360 198 424 256 424
+      C314 424 352 360 354 268
+      C319 258 193 258 158 268 Z"/>
+
+    <!-- 방탄모 -->
+    <path fill="#fff" d="M108 282
+      C108 258 119 239 133 222
+      L133 202
+      C133 118 186 64 256 64
+      C326 64 379 118 379 202
+      L379 222
+      C393 239 404 258 404 282
+      C404 295 394 303 381 303
+      C359 281 327 270 256 270
+      C185 270 153 281 131 303
+      C118 303 108 295 108 282 Z"/>
+
+    <!-- 헬멧 아래 테두리 -->
+    <path d="M132 302 C168 265 344 265 380 302" fill="none"/>
+  </g>
+
+  <!-- 상병 표시: 검은 줄 3개 -->
+  <g fill="#000">
+    <rect x="206" y="130" width="100" height="18" rx="9"/>
+    <rect x="206" y="164" width="100" height="18" rx="9"/>
+    <rect x="206" y="198" width="100" height="18" rx="9"/>
+  </g>
+
+  <!-- 눈 -->
+  <g fill="#000">
+    <circle cx="215" cy="323" r="10"/>
+    <circle cx="297" cy="323" r="10"/>
+  </g>
+</svg>

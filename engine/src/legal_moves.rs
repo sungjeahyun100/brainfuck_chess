@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use crate::attack_map::generate_attack_map;
 use crate::chessembly::run_chessembly_layer_for_piece;
-use crate::placement::get_placement_squares;
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -584,12 +583,13 @@ pub fn generate_piece_legal_drop_actions(
         return Vec::new();
     }
 
-    get_placement_squares(game_state, player_id)
+    crate::placement::get_piece_placement_squares(game_state, player_id, piece)
         .into_iter()
         .map(|sq| DropAction {
             player_id: player_id.clone(),
             piece_id: piece_id.clone(),
             to: sq,
+            captured_piece_id: game_state.board.get_piece_at(&sq).cloned(),
         })
         .collect()
 }
@@ -649,13 +649,20 @@ pub fn generate_drop_candidates_by_type(
 
     let mut type_counts: Vec<_> = counts.into_iter().collect();
     type_counts.sort_by(|left, right| left.0.cmp(&right.0));
-    let mut squares = get_placement_squares(game_state, player_id);
-    squares.sort_by_key(|square| (square.rank, square.file));
-
     type_counts
         .into_iter()
         .flat_map(|(piece_type_id, count)| {
-            squares.iter().map(move |square| DropCandidateByType {
+            let squares = player
+                .deck
+                .pocket_pieces
+                .iter()
+                .filter_map(|id| game_state.pieces.get(id))
+                .find(|piece| piece.type_id == piece_type_id)
+                .map(|piece| {
+                    crate::placement::get_piece_placement_squares(game_state, player_id, piece)
+                })
+                .unwrap_or_default();
+            squares.into_iter().map(move |square| DropCandidateByType {
                 player_id: player_id.clone(),
                 piece_type_id: piece_type_id.clone(),
                 count,

@@ -131,6 +131,88 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         .push(id.into());
 }
 
+#[test]
+fn paratrooper_drops_on_empty_square_and_cannot_move_afterward() {
+    let mut state = make_game_state(8);
+    add_pocket_piece(&mut state, "para", "white", "paratrooper");
+    let action = generate_piece_legal_drop_actions(&state, &"para".into())
+        .into_iter()
+        .find(|action| action.to == Square::new(3, 0))
+        .unwrap();
+    assert_eq!(action.captured_piece_id, None);
+
+    let state = submit_action(state, TurnAction::Drop(action)).unwrap();
+    assert_eq!(
+        state
+            .board
+            .get_piece_at(&Square::new(3, 0))
+            .map(PieceId::as_str),
+        Some("para")
+    );
+    assert!(state.players["white"].deck.pocket_pieces.is_empty());
+    assert_eq!(state.current_player, "black");
+    assert_eq!(state.turn_number, 2);
+    assert_eq!(state.history.len(), 1);
+    assert!(generate_piece_legal_move_actions(&state, &"para".into()).is_empty());
+}
+
+#[test]
+fn paratrooper_captures_enemy_on_drop_and_records_capture() {
+    let mut state = make_game_state(8);
+    add_pocket_piece(&mut state, "para", "white", "paratrooper");
+    add_piece(&mut state, "enemy", "black", "knight", 3, 0);
+    let action = generate_piece_legal_drop_actions(&state, &"para".into())
+        .into_iter()
+        .find(|action| action.to == Square::new(3, 0))
+        .unwrap();
+    assert_eq!(
+        action.captured_piece_id.as_ref().map(PieceId::as_str),
+        Some("enemy")
+    );
+
+    let state = submit_action(state, TurnAction::Drop(action)).unwrap();
+    assert!(state.pieces["enemy"].captured);
+    assert_eq!(
+        state
+            .board
+            .get_piece_at(&Square::new(3, 0))
+            .map(PieceId::as_str),
+        Some("para")
+    );
+    assert_eq!(state.players["white"].captured_pieces, vec!["enemy"]);
+    let TurnAction::Drop(recorded) = &state.history[0].action else {
+        panic!()
+    };
+    assert_eq!(
+        recorded.captured_piece_id.as_ref().map(PieceId::as_str),
+        Some("enemy")
+    );
+}
+
+#[test]
+fn illegal_paratrooper_drop_is_atomic_and_regular_piece_cannot_capture_on_drop() {
+    let mut state = make_game_state(8);
+    add_pocket_piece(&mut state, "para", "white", "paratrooper");
+    add_pocket_piece(&mut state, "knight", "white", "knight");
+    add_piece(&mut state, "friend", "white", "bishop", 2, 0);
+    add_piece(&mut state, "enemy", "black", "bishop", 3, 0);
+    let before = serde_json::to_value(&state).unwrap();
+    let illegal = DropAction {
+        player_id: "white".into(),
+        piece_id: "para".into(),
+        to: Square::new(2, 0),
+        captured_piece_id: Some("friend".into()),
+    };
+    assert!(submit_action(state.clone(), TurnAction::Drop(illegal)).is_err());
+    assert_eq!(serde_json::to_value(&state).unwrap(), before);
+    assert!(!generate_piece_legal_drop_actions(&state, &"knight".into())
+        .iter()
+        .any(|action| action.to == Square::new(3, 0)));
+    assert!(generate_piece_legal_drop_actions(&state, &"para".into())
+        .iter()
+        .any(|action| action.to == Square::new(3, 0)));
+}
+
 // ─── Board creation ───────────────────────────────────────────────────────────
 
 #[test]
@@ -239,6 +321,7 @@ fn layers_with_same_destination_and_different_effects_stay_distinct() {
         dialect: None,
         extensions: None,
         is_king: false,
+        can_capture_on_drop: false,
         promotion: None,
         promotion_pool: Vec::new(),
         state_schema: vec![
@@ -312,6 +395,7 @@ fn chessembly_set_state_remains_global_and_separate_from_piece_state() {
         dialect: None,
         extensions: None,
         is_king: false,
+        can_capture_on_drop: false,
         promotion: None,
         promotion_pool: Vec::new(),
         state_schema: Vec::new(),
@@ -866,6 +950,7 @@ fn test_custom_piece_definition_can_generate_promotion_choices() {
         dialect: None,
         extensions: None,
         is_king: false,
+        can_capture_on_drop: false,
         promotion: Some(PromotionRule {
             condition: PromotionCondition::LastRank,
         }),

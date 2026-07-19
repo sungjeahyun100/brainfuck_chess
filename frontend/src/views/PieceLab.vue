@@ -97,12 +97,14 @@
             </span>
           </button>
         </div>
+
       </section>
 
       <section class="lab-board-wrap">
         <div class="lab-status">
           <span>선택 도구: <strong>{{ selectedToolLabel }}</strong></span>
           <span>배치 기물: <strong>{{ pieces.length }}</strong></span>
+          <span>포켓: <strong>{{ pocketPieces.length }}</strong></span>
           <span v-if="optionsLoading">행마 계산 중...</span>
           <span v-else-if="optionsError" class="error">{{ optionsError }}</span>
         </div>
@@ -178,6 +180,41 @@
               :marker-end="`url(#${arrowMarkerId})`"
             />
           </svg>
+        </div>
+      </section>
+
+      <section class="card lab-panel lab-pocket-panel">
+        <div class="section-header compact">
+          <div>
+            <p class="section-kicker">Pocket</p>
+            <h3>착수 테스트 포켓</h3>
+          </div>
+          <button
+            class="btn-secondary pocket-add"
+            type="button"
+            :disabled="!canAddSelectedToolToPocket"
+            @click="addSelectedToolToPocket"
+          >+ 추가</button>
+        </div>
+        <p v-if="pocketPieces.length === 0" class="muted-note">포켓 사용 가능 기물을 선택하고 추가하세요.</p>
+        <div v-else class="lab-pocket-list">
+          <button
+            v-for="piece in pocketPieces"
+            :key="piece.id"
+            type="button"
+            class="lab-pocket-piece"
+            :class="{ selected: selectedPieceId === piece.id }"
+            draggable="true"
+            @click="selectPocketPiece(piece.id)"
+            @dragstart="onPocketPieceDragStart($event, piece.id)"
+            @dragend="clearDragState"
+          >
+            <img v-if="displayPieceAsset(piece.pieceType, piece.owner)" class="piece-icon" :src="displayPieceAsset(piece.pieceType, piece.owner)" :alt="pieceLabel(piece.pieceType)" draggable="false" />
+            <span v-else>{{ displayPieceSymbol(piece.pieceType) }}</span>
+            <strong>{{ pieceLabel(piece.pieceType) }}</strong>
+            <small>{{ piece.owner === 'white' ? 'White' : 'Black' }}</small>
+            <span class="pocket-remove" title="포켓에서 제거" @click.stop="removePocketPiece(piece.id)">×</span>
+          </button>
         </div>
       </section>
 
@@ -259,8 +296,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, type PieceLabMoveOption } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import type { DeckPieceType } from '../types/deck'
-import type { MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square } from '../types/game'
-import { boardSizes, pieceCatalog, pieceLabel } from '../composables/useDeckValidation'
+import type { DropAction, MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square } from '../types/game'
+import { boardSizes, pieceCatalog, pieceLabel, pocketCatalog } from '../composables/useDeckValidation'
 
 interface PieceLabPiece {
   id: string
@@ -269,6 +306,13 @@ interface PieceLabPiece {
   square: Square
   state: Record<string, PieceStateValue>
   moveOptionCooldowns: Record<string, { remaining: number }>
+}
+
+interface PieceLabPocketPiece {
+  id: string
+  pieceType: string
+  owner: PlayerId
+  state: Record<string, PieceStateValue>
 }
 
 interface LabSquare extends Square {
@@ -304,9 +348,11 @@ const selectedOwner = ref<PlayerId>('white')
 const selectedTool = ref<string | null>(props.initialPieceType ?? 'king')
 const selectedPieceId = ref<string | null>(null)
 const pieces = ref<PieceLabPiece[]>([])
+const pocketPieces = ref<PieceLabPocketPiece[]>([])
 const pieceSearch = ref('')
 const moves = ref<Square[]>([])
 const legalMoves = ref<MoveAction[]>([])
+const legalDrops = ref<DropAction[]>([])
 const attacks = ref<Square[]>([])
 const globalState = ref<Record<string, number>>({})
 const abilitySquares = ref<Square[]>([])
@@ -317,6 +363,7 @@ const optionsLoading = ref(false)
 const optionsError = ref<string | null>(null)
 const draggedCatalogPiece = ref<string | null>(null)
 const draggedPieceId = ref<string | null>(null)
+const draggedPocketPieceId = ref<string | null>(null)
 const loadedOptionsPieceId = ref<string | null>(null)
 const labBoardElement = ref<HTMLElement | null>(null)
 const arrows = ref<LabArrow[]>([])
@@ -343,15 +390,19 @@ const filteredPieceCatalog = computed(() => {
 })
 
 const selectedLabPiece = computed(() => pieces.value.find(piece => piece.id === selectedPieceId.value) ?? null)
-const inspectedType = computed(() => selectedLabPiece.value?.pieceType ?? (selectedTool.value && selectedTool.value !== eraseTool ? selectedTool.value : null))
-const inspectedOwner = computed(() => selectedLabPiece.value?.owner ?? selectedOwner.value)
+const selectedPocketPiece = computed(() => pocketPieces.value.find(piece => piece.id === selectedPieceId.value) ?? null)
+const inspectedType = computed(() => selectedLabPiece.value?.pieceType ?? selectedPocketPiece.value?.pieceType ?? (selectedTool.value && selectedTool.value !== eraseTool ? selectedTool.value : null))
+const inspectedOwner = computed(() => selectedLabPiece.value?.owner ?? selectedPocketPiece.value?.owner ?? selectedOwner.value)
 const inspectedCatalogItem = computed(() => pieceCatalog.find(piece => piece.id === inspectedType.value) ?? null)
 const selectedToolLabel = computed(() => {
   if (selectedTool.value === eraseTool) return '지우개'
   return selectedTool.value ? pieceLabel(selectedTool.value) : '없음'
 })
+const canAddSelectedToolToPocket = computed(() => Boolean(
+  selectedTool.value && pocketCatalog.some(piece => piece.id === selectedTool.value),
+))
 const displayAbilities = computed<PieceLabMoveOption[]>(() => {
-  if (selectedLabPiece.value) return abilities.value
+  if (selectedLabPiece.value || selectedPocketPiece.value) return abilities.value
   return inspectedType.value ? staticAbilities(inspectedType.value) : []
 })
 const abilitySummary = computed(() => {
@@ -405,7 +456,7 @@ watch(selectedPieceId, () => {
 })
 
 watch(
-  () => [selectedPieceId.value, pieces.value.map(piece => `${piece.id}:${piece.pieceType}:${piece.owner}:${piece.square.file}_${piece.square.rank}:${JSON.stringify(piece.state)}:${JSON.stringify(piece.moveOptionCooldowns)}`).join('|'), boardSize.value],
+  () => [selectedPieceId.value, pieces.value.map(piece => `${piece.id}:${piece.pieceType}:${piece.owner}:${piece.square.file}_${piece.square.rank}:${JSON.stringify(piece.state)}:${JSON.stringify(piece.moveOptionCooldowns)}`).join('|'), pocketPieces.value.map(piece => `${piece.id}:${piece.pieceType}:${piece.owner}:${JSON.stringify(piece.state)}`).join('|'), boardSize.value],
   () => {
     void loadSelectedPieceOptions()
   },
@@ -462,6 +513,7 @@ function displayPieceSymbol(pieceType: string): string {
     knight: 'N',
     pawn: 'P',
     'tempest-pawn': 'P',
+    paratrooper: 'P',
   }
   return symbols[pieceType] ?? pieceLabel(pieceType).slice(0, 1).toUpperCase()
 }
@@ -483,6 +535,7 @@ function movementDescription(pieceType: string): string {
     'tempest-queen': '대각선 진입 후 가로, 세로, 대각선으로 폭풍처럼 뻗어 나갑니다.',
     'tempest-knight': '대각선 진입 후 확장된 Knight 계열 도약과 3칸 직선 도약을 사용합니다.',
     windmill: '성공적으로 이동할 때마다 Bishop 계열 대각선 행마와 Rook 계열 직선 행마가 번갈아 전환됩니다.',
+    paratrooper: '이동할 수 없습니다. 빈 착수 가능 칸에 착수하거나, 착수 가능 칸의 적 기물을 잡으면서 착수할 수 있습니다.',
   }
   return descriptions[pieceType] ?? 'Custom Piece: 등록된 Chessembly 행마법을 따릅니다.'
 }
@@ -510,12 +563,14 @@ function resetLab() {
 
 function resetLabPieces() {
   pieces.value = []
+  pocketPieces.value = []
   arrows.value = []
   globalState.value = {}
   cleanupRightDrag()
   selectedPieceId.value = null
   moves.value = []
   legalMoves.value = []
+  legalDrops.value = []
   attacks.value = []
   abilitySquares.value = []
   abilities.value = []
@@ -529,6 +584,7 @@ function clearSelection() {
   selectedPieceId.value = null
   moves.value = []
   legalMoves.value = []
+  legalDrops.value = []
   attacks.value = []
   abilitySquares.value = []
   abilities.value = []
@@ -541,6 +597,28 @@ function clearSelection() {
 function selectCatalogPiece(pieceType: DeckPieceType) {
   selectedTool.value = pieceType
   clearSelection()
+}
+
+function addSelectedToolToPocket() {
+  const pieceType = selectedTool.value
+  if (!pieceType || !pocketCatalog.some(piece => piece.id === pieceType)) return
+  const piece: PieceLabPocketPiece = {
+    id: `lab_${selectedOwner.value}_pocket_${pieceType.replace(/[^a-z0-9]+/gi, '_')}_${nextPieceSerial++}`,
+    pieceType,
+    owner: selectedOwner.value,
+    state: initialPieceState(pieceType),
+  }
+  pocketPieces.value = [...pocketPieces.value, piece]
+  selectedPieceId.value = piece.id
+}
+
+function selectPocketPiece(pieceId: string) {
+  selectedPieceId.value = pieceId
+}
+
+function removePocketPiece(pieceId: string) {
+  pocketPieces.value = pocketPieces.value.filter(piece => piece.id !== pieceId)
+  if (selectedPieceId.value === pieceId) clearSelection()
 }
 
 function pieceAt(file: number, rank: number): PieceLabPiece | null {
@@ -622,6 +700,30 @@ function applyLabMove(action: MoveAction) {
   promotionRequest.value = null
 }
 
+function applyLabDrop(action: DropAction) {
+  const pocketPiece = pocketPieces.value.find(piece => piece.id === action.piece_id)
+  if (!pocketPiece) return
+  pieces.value = pieces.value.filter(piece => piece.id !== action.captured_piece_id)
+  pieces.value = [...pieces.value, {
+    ...pocketPiece,
+    square: action.to,
+    moveOptionCooldowns: {},
+  }]
+  pocketPieces.value = pocketPieces.value.filter(piece => piece.id !== action.piece_id)
+  selectedPieceId.value = action.piece_id
+  moves.value = []
+  legalDrops.value = []
+  loadedOptionsPieceId.value = null
+  optionsError.value = null
+}
+
+function tryDropPocketPiece(pieceId: string, file: number, rank: number): boolean {
+  const action = legalDrops.value.find(drop => drop.piece_id === pieceId && sameSquare(drop.to, { file, rank }))
+  if (!action) return false
+  applyLabDrop(action)
+  return true
+}
+
 function choosePromotion(action: MoveAction) {
   applyLabMove(action)
 }
@@ -667,6 +769,13 @@ async function onSquareClick(file: number, rank: number) {
     return
   }
 
+  if (selectedPocketPiece.value) {
+    if (!tryDropPocketPiece(selectedPocketPiece.value.id, file, rank)) {
+      optionsError.value = '선택한 포켓 기물을 착수할 수 없는 칸입니다.'
+    }
+    return
+  }
+
   if (existing) {
     if (selectedPieceId.value && existing.id !== selectedPieceId.value) {
       const selected = selectedLabPiece.value
@@ -701,6 +810,7 @@ async function onSquareClick(file: number, rank: number) {
 function onCatalogDragStart(event: DragEvent, pieceType: DeckPieceType) {
   draggedCatalogPiece.value = pieceType
   draggedPieceId.value = null
+  draggedPocketPieceId.value = null
   selectedTool.value = pieceType
   event.dataTransfer?.setData('application/x-piece-lab-catalog-piece', pieceType)
   event.dataTransfer?.setData('text/plain', pieceType)
@@ -712,6 +822,7 @@ function onCatalogDragStart(event: DragEvent, pieceType: DeckPieceType) {
 function onPlacedPieceDragStart(event: DragEvent, pieceId: string) {
   draggedPieceId.value = pieceId
   draggedCatalogPiece.value = null
+  draggedPocketPieceId.value = null
   selectedPieceId.value = pieceId
   event.dataTransfer?.setData('application/x-piece-lab-board-piece', pieceId)
   event.dataTransfer?.setData('text/plain', pieceId)
@@ -720,9 +831,19 @@ function onPlacedPieceDragStart(event: DragEvent, pieceId: string) {
   }
 }
 
+function onPocketPieceDragStart(event: DragEvent, pieceId: string) {
+  draggedPocketPieceId.value = pieceId
+  draggedPieceId.value = null
+  draggedCatalogPiece.value = null
+  selectedPieceId.value = pieceId
+  event.dataTransfer?.setData('application/x-piece-lab-pocket-piece', pieceId)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
 function clearDragState() {
   draggedCatalogPiece.value = null
   draggedPieceId.value = null
+  draggedPocketPieceId.value = null
 }
 
 function onLabBoardPointerDown(event: PointerEvent) {
@@ -883,6 +1004,11 @@ function squareCenterFromId(id: string): { x: number; y: number } | null {
 
 function onSquareDragOver(event: DragEvent, file: number, rank: number) {
   if (!event.dataTransfer) return
+  const pocketPieceId = draggedPocketPieceId.value || event.dataTransfer.getData('application/x-piece-lab-pocket-piece')
+  if (pocketPieceId) {
+    event.dataTransfer.dropEffect = legalDrops.value.some(action => action.piece_id === pocketPieceId && sameSquare(action.to, { file, rank })) ? 'move' : 'none'
+    return
+  }
   const existing = pieceAt(file, rank)
   if (draggedCatalogPiece.value || Array.from(event.dataTransfer.types).includes('application/x-piece-lab-catalog-piece')) {
     event.dataTransfer.dropEffect = selectedTool.value === eraseTool ? 'none' : 'copy'
@@ -893,11 +1019,18 @@ function onSquareDragOver(event: DragEvent, file: number, rank: number) {
 }
 
 async function onSquareDrop(event: DragEvent, file: number, rank: number) {
+  const pocketPieceId = draggedPocketPieceId.value || event.dataTransfer?.getData('application/x-piece-lab-pocket-piece') || null
   const boardPieceId = draggedPieceId.value || event.dataTransfer?.getData('application/x-piece-lab-board-piece') || null
   const catalogPiece = draggedCatalogPiece.value || event.dataTransfer?.getData('application/x-piece-lab-catalog-piece') || null
   clearDragState()
 
   const existing = pieceAt(file, rank)
+  if (pocketPieceId) {
+    if (!tryDropPocketPiece(pocketPieceId, file, rank)) {
+      optionsError.value = '선택한 포켓 기물을 착수할 수 없는 칸입니다.'
+    }
+    return
+  }
   if (boardPieceId) {
     const movingPiece = pieces.value.find(piece => piece.id === boardPieceId)
     if (existing && existing.id !== boardPieceId && movingPiece?.owner === existing.owner) {
@@ -967,7 +1100,7 @@ function isAbilitySquare(square: Square): boolean {
 }
 
 async function loadSelectedPieceOptions() {
-  const selected = selectedLabPiece.value
+  const selected = selectedLabPiece.value ?? selectedPocketPiece.value
   const serial = ++optionsSerial
   if (!selected) {
     optionsLoading.value = false
@@ -989,6 +1122,12 @@ async function loadSelectedPieceOptions() {
         state: piece.state,
         move_option_cooldowns: piece.moveOptionCooldowns,
       })),
+      pocket_pieces: pocketPieces.value.map(piece => ({
+        id: piece.id,
+        piece_type: piece.pieceType,
+        owner: piece.owner,
+        state: piece.state,
+      })),
       selected_piece_id: selected.id,
       move_option_id: activeAbilityId.value ?? undefined,
       global_state: globalState.value,
@@ -996,6 +1135,7 @@ async function loadSelectedPieceOptions() {
     if (serial !== optionsSerial) return
     moves.value = response.moves
     legalMoves.value = response.legal_moves
+    legalDrops.value = response.legal_drops
     attacks.value = response.attacks
     abilitySquares.value = activeAbilityId.value ? response.moves : []
     labDefinitions.value = response.piece_definitions
@@ -1004,12 +1144,17 @@ async function loadSelectedPieceOptions() {
       state: response.piece_states[piece.id] ?? piece.state,
       moveOptionCooldowns: response.piece_cooldowns[piece.id] ?? piece.moveOptionCooldowns,
     }))
+    pocketPieces.value = pocketPieces.value.map(piece => ({
+      ...piece,
+      state: response.piece_states[piece.id] ?? piece.state,
+    }))
     abilities.value = response.move_options.filter(option => option.kind === 'ability')
     loadedOptionsPieceId.value = selected.id
   } catch (e: unknown) {
     if (serial !== optionsSerial) return
     moves.value = []
     legalMoves.value = []
+    legalDrops.value = []
     attacks.value = []
     abilitySquares.value = []
     abilities.value = []
@@ -1038,7 +1183,7 @@ onBeforeUnmount(() => {
 
 .piece-lab-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 0.85fr) minmax(480px, 1.5fr) minmax(300px, 0.9fr);
+  grid-template-columns: minmax(240px, 0.8fr) minmax(450px, 1.5fr) minmax(210px, 0.65fr) minmax(280px, 0.9fr);
   gap: 16px;
   align-items: start;
 }
@@ -1143,6 +1288,53 @@ onBeforeUnmount(() => {
 .lab-catalog {
   max-height: 580px;
 }
+
+.lab-pocket-panel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.section-header.compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pocket-add {
+  width: auto;
+  padding: 7px 10px;
+}
+
+.lab-pocket-list {
+  display: grid;
+  gap: 7px;
+}
+
+.lab-pocket-piece {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto 22px;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  text-align: left;
+  cursor: grab;
+}
+
+.lab-pocket-piece.selected {
+  border-color: #d9a441;
+  background: rgba(217, 164, 65, 0.14);
+}
+
+.lab-pocket-piece .piece-icon { width: 32px; height: 32px; }
+.lab-pocket-piece small { color: var(--muted); }
+.pocket-remove { color: #e78b8b; font-size: 20px; text-align: center; cursor: pointer; }
 
 .lab-board-wrap {
   display: flex;

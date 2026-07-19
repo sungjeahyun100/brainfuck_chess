@@ -15,6 +15,7 @@ macro_rules! legacy_piece_definition {
             move_layers: Vec::new(),
             move_options: Vec::new(),
             visual: PieceVisualDefinition::default(),
+            can_capture_on_drop: false,
         }
         .normalize_and_validate()
         .expect("built-in piece definition must be valid")
@@ -111,6 +112,7 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
         dialect: None,
         extensions: None,
         is_king: false,
+        can_capture_on_drop: false,
         promotion: None,
         promotion_pool: Vec::new(),
         state_schema: Vec::new(),
@@ -196,6 +198,7 @@ pub fn windmill_definition() -> PieceDefinition {
         dialect: None,
         extensions: None,
         is_king: false,
+        can_capture_on_drop: false,
         promotion: None,
         promotion_pool: Vec::new(),
         state_schema: vec![PieceStateDefinition {
@@ -278,6 +281,32 @@ take-move(-1, 2);"
         promotion: None,
         promotion_pool: Vec::new(),
     }
+}
+
+/// Paratrooper: cannot move on the board and may capture only while dropping.
+pub fn paratrooper_definition() -> PieceDefinition {
+    PieceDefinition {
+        id: "paratrooper".into(),
+        name: "공수부대 대원".into(),
+        score: 3,
+        chessembly_code: String::new(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        can_capture_on_drop: true,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        state_schema: Vec::new(),
+        move_layers: Vec::new(),
+        move_options: Vec::new(),
+        visual: PieceVisualDefinition {
+            default_asset_key: "paratrooper".into(),
+            variants: Vec::new(),
+        },
+    }
+    .normalize_and_validate()
+    .expect("paratrooper definition must be valid")
 }
 
 /// Amazon: combines Queen sliding moves with Knight jumps.
@@ -614,6 +643,7 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bishop_definition(),
         windmill_definition(),
         knight_definition(),
+        paratrooper_definition(),
         amazon_definition(),
         cannon_rook_definition(),
         tempest_rook_definition(),
