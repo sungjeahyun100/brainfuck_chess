@@ -348,7 +348,7 @@ pub fn tempest_rook_definition() -> PieceDefinition {
     legacy_piece_definition! {
         id: "tempest-rook".into(),
         name: "Tempest Rook".into(),
-        score: 8,
+        score: 7,
         chessembly_code: "\
 {
     take-move(1, 1)
@@ -530,7 +530,7 @@ pub fn tempest_queen_definition() -> PieceDefinition {
     legacy_piece_definition! {
         id: "tempest-queen".into(),
         name: "Tempest Queen".into(),
-        score: 12,
+        score: 10,
         chessembly_code: "\
     {
         take-move(1, 1)
@@ -570,7 +570,7 @@ pub fn tempest_knight_definition() -> PieceDefinition {
     legacy_piece_definition! {
         id: "tempest-knight".into(),
         name: "Tempest Knight".into(),
-        score: 7,
+        score: 5,
         chessembly_code: "\
         {
             take-move(1, 1)
