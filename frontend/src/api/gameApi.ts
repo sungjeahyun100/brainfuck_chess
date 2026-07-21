@@ -124,6 +124,10 @@ function getClientId(): string {
 }
 
 export const api = {
+  getPieceScores(): Promise<Record<string, number>> {
+    return request('/api/piece-scores')
+  },
+
   createGame(
     boardSize: number,
     whiteDeck: PlayerDeckRequest,

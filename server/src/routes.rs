@@ -9,6 +9,7 @@ use crate::*;
 pub(crate) fn api(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/piece-scores", get(get_piece_scores))
         .route("/games", post(create_game))
         .route("/games/:id", get(get_game))
         .route("/games/:id/actions", post(submit_action))

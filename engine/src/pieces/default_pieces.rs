@@ -348,7 +348,7 @@ pub fn tempest_rook_definition() -> PieceDefinition {
     legacy_piece_definition! {
         id: "tempest-rook".into(),
         name: "Tempest Rook".into(),
-        score: 7,
+        score: 8,
         chessembly_code: "\
 {
     take-move(1, 1)

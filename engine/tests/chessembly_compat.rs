@@ -229,9 +229,10 @@ fn test_variant_piece_definitions_are_registered() {
     let find = |id: &str| definitions.iter().find(|def| def.id == id).unwrap();
 
     assert_eq!(find("amazon").score, 13);
-    assert_eq!(find("tempest-queen").score, 12);
+    assert_eq!(find("tempest-queen").score, 10);
     assert_eq!(find("tempest-rook").score, 8);
-    assert_eq!(find("tempest-knight").score, 7);
+    assert_eq!(find("tempest-bishop").score, 5);
+    assert_eq!(find("tempest-knight").score, 5);
     assert_eq!(find("bouncing-bishop").score, 7);
     assert_eq!(find("tempest-pawn-white").score, 1);
     assert_eq!(find("tempest-pawn-black").score, 1);

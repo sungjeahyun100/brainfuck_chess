@@ -13,22 +13,32 @@ export const boardSizes = [8, 9, 10, 11, 12] as const
 
 export const pieceCatalog: PieceCatalogItem[] = [
   { id: 'king', name: 'King', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
-  { id: 'queen', name: 'Queen', score: 9, category: 'major', canPocket: true },
-  { id: 'cannon-rook', name: 'Cannon Rook', score: 7, category: 'variant', canPocket: true, aliases: ['cannon', 'po rook', '포 룩'] },
-  { id: 'amazon', name: 'Amazon', score: 13, category: 'variant', canPocket: true },
-  { id: 'tempest-queen', name: 'Tempest Queen', score: 12, category: 'variant', canPocket: true, aliases: ['storm queen'] },
-  { id: 'tempest-rook', name: 'Tempest Rook', score: 8, category: 'variant', canPocket: true, aliases: ['storm rook'] },
-  { id: 'tempest-bishop', name: 'Tempest Bishop', score: 5, category: 'variant', canPocket: true, aliases: ['storm bishop'] },
-  { id: 'tempest-knight', name: 'Tempest Knight', score: 7, category: 'variant', canPocket: true, aliases: ['storm knight'] },
-  { id: 'bouncing-bishop', name: 'Bouncing Bishop', score: 7, category: 'variant', canPocket: true, aliases: ['bounce bishop'] },
-  { id: 'windmill', name: 'Windmill', score: 4, category: 'variant', canPocket: true, aliases: ['풍차'] },
-  { id: 'tempest-pawn', name: 'Tempest Pawn', score: 1, category: 'pawn', canPocket: true, aliases: ['storm pawn'] },
-  { id: 'rook', name: 'Rook', score: 5, category: 'major', canPocket: true },
-  { id: 'bishop', name: 'Bishop', score: 3, category: 'minor', canPocket: true },
-  { id: 'knight', name: 'Knight', score: 3, category: 'minor', canPocket: true },
-  { id: 'paratrooper', name: '공수부대 대원', score: 3, category: 'variant', canPocket: true, aliases: ['Paratrooper', '공수부대'] },
-  { id: 'pawn', name: 'Pawn', score: 1, category: 'pawn', canPocket: true },
+  { id: 'queen', name: 'Queen', score: 0, category: 'major', canPocket: true },
+  { id: 'cannon-rook', name: 'Cannon Rook', score: 0, category: 'variant', canPocket: true, aliases: ['cannon', 'po rook', '포 룩'] },
+  { id: 'amazon', name: 'Amazon', score: 0, category: 'variant', canPocket: true },
+  { id: 'tempest-queen', name: 'Tempest Queen', score: 0, category: 'variant', canPocket: true, aliases: ['storm queen'] },
+  { id: 'tempest-rook', name: 'Tempest Rook', score: 0, category: 'variant', canPocket: true, aliases: ['storm rook'] },
+  { id: 'tempest-bishop', name: 'Tempest Bishop', score: 0, category: 'variant', canPocket: true, aliases: ['storm bishop'] },
+  { id: 'tempest-knight', name: 'Tempest Knight', score: 0, category: 'variant', canPocket: true, aliases: ['storm knight'] },
+  { id: 'bouncing-bishop', name: 'Bouncing Bishop', score: 0, category: 'variant', canPocket: true, aliases: ['bounce bishop'] },
+  { id: 'windmill', name: 'Windmill', score: 0, category: 'variant', canPocket: true, aliases: ['풍차'] },
+  { id: 'tempest-pawn', name: 'Tempest Pawn', score: 0, category: 'pawn', canPocket: true, aliases: ['storm pawn'] },
+  { id: 'rook', name: 'Rook', score: 0, category: 'major', canPocket: true },
+  { id: 'bishop', name: 'Bishop', score: 0, category: 'minor', canPocket: true },
+  { id: 'knight', name: 'Knight', score: 0, category: 'minor', canPocket: true },
+  { id: 'paratrooper', name: '공수부대 대원', score: 0, category: 'variant', canPocket: true, aliases: ['Paratrooper', '공수부대'] },
+  { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
 ]
+
+export function applyPieceScores(scores: Record<string, number>): void {
+  for (const piece of pieceCatalog) {
+    const score = scores[piece.id]
+    if (!Number.isInteger(score) || score < 0) {
+      throw new Error(`엔진 기물 점수가 누락되었거나 잘못되었습니다: ${piece.id}`)
+    }
+    piece.score = score
+  }
+}
 
 export const pocketCatalog = pieceCatalog.filter(piece => piece.canPocket)
 

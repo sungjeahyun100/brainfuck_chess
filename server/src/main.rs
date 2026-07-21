@@ -798,6 +798,24 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok" }))
 }
 
+async fn get_piece_scores() -> Json<HashMap<PieceTypeId, u32>> {
+    let mut scores: HashMap<PieceTypeId, u32> = all_default_definitions()
+        .into_iter()
+        .map(|definition| (definition.id, definition.score))
+        .collect();
+
+    // The deck builder uses color-neutral pawn IDs while the engine keeps
+    // direction-specific definitions.
+    if let Some(score) = scores.get("pawn-white").copied() {
+        scores.insert("pawn".into(), score);
+    }
+    if let Some(score) = scores.get("tempest-pawn-white").copied() {
+        scores.insert("tempest-pawn".into(), score);
+    }
+
+    Json(scores)
+}
+
 fn app_env() -> &'static str {
     match std::env::var("APP_ENV").as_deref() {
         Ok("local") => "local",
@@ -1570,6 +1588,18 @@ mod tests {
         };
         app.games.insert(game_id.clone(), state);
         (app, game_id)
+    }
+
+    #[tokio::test]
+    async fn piece_scores_are_served_from_engine_definitions() {
+        let Json(scores) = get_piece_scores().await;
+
+        assert_eq!(scores.get("tempest-queen"), Some(&10));
+        assert_eq!(scores.get("tempest-rook"), Some(&8));
+        assert_eq!(scores.get("tempest-bishop"), Some(&5));
+        assert_eq!(scores.get("tempest-knight"), Some(&5));
+        assert_eq!(scores.get("pawn"), scores.get("pawn-white"));
+        assert_eq!(scores.get("tempest-pawn"), scores.get("tempest-pawn-white"));
     }
 
     #[tokio::test]
