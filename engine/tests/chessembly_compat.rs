@@ -342,7 +342,33 @@ fn test_bouncing_bishop_reflects_from_edges() {
     let mut pieces = HashMap::new();
     pieces.insert("bb1".into(), piece.clone());
 
-    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+    let normal = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+    assert!(normal.movement_squares.contains(&Square::new(7, 6)));
+    assert!(
+        !normal.movement_squares.contains(&Square::new(6, 7)),
+        "normal movement must not reflect from the board edge"
+    );
+
+    let ability = def
+        .move_options
+        .iter()
+        .find(|option| option.id == "bounce_move")
+        .expect("bounce ability");
+    assert_eq!(ability.kind, MoveOptionKind::Ability);
+    assert_eq!(
+        ability.cooldown.as_ref().map(|cooldown| cooldown.turns),
+        Some(2)
+    );
+    assert_eq!(
+        ability.cooldown.as_ref().map(|cooldown| cooldown.clock),
+        Some(CooldownClock::OwnerTurns)
+    );
+    let bounce_layer = def
+        .move_layers
+        .iter()
+        .find(|layer| layer.id == "bounce_move")
+        .expect("bounce movement layer");
+    let result = run_code(&bounce_layer.chessembly_code, &piece, &board, &pieces, &def);
 
     assert!(
         result.movement_squares.contains(&Square::new(7, 6)),

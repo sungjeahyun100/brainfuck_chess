@@ -1278,6 +1278,50 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
 }
 
 #[test]
+fn bouncing_bishop_uses_reflection_only_as_two_owner_turn_cooldown_ability() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 0, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "bb", "white", "bouncing-bishop", 3, 2);
+
+    let normal_moves = generate_piece_legal_move_actions(&state, &"bb".into());
+    assert!(normal_moves
+        .iter()
+        .any(|action| action.to == Square::new(7, 6)));
+    assert!(!normal_moves
+        .iter()
+        .any(|action| action.to == Square::new(6, 7)));
+
+    let bounce_moves = generate_piece_legal_move_actions_with_options(
+        &state,
+        &"bb".into(),
+        &MoveGenerationOptions {
+            move_option_id: Some("bounce_move".into()),
+        },
+    );
+    let bounce_action = bounce_moves
+        .into_iter()
+        .find(|action| action.to == Square::new(6, 7))
+        .expect("reflected destination must be available through the ability");
+    assert_eq!(bounce_action.move_option_id, "bounce_move");
+
+    state = apply_move_action(state, bounce_action);
+    assert_eq!(
+        state.pieces["bb"].move_option_cooldowns["bounce_move"].remaining,
+        2
+    );
+    state.current_player = "white".into();
+    assert!(generate_piece_legal_move_actions_with_options(
+        &state,
+        &"bb".into(),
+        &MoveGenerationOptions {
+            move_option_id: Some("bounce_move".into()),
+        },
+    )
+    .is_empty());
+}
+
+#[test]
 fn owner_turn_cooldown_is_set_on_commit_and_ticks_only_after_later_owner_actions() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 0, 0);

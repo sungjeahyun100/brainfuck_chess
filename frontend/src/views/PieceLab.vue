@@ -530,7 +530,7 @@ function movementDescription(pieceType: string): string {
     amazon: 'Queen의 장거리 행마와 Knight의 도약 행마를 모두 사용합니다.',
     'tempest-rook': '대각선으로 한 칸 진입한 뒤 그 지점에서 가로 또는 세로 방향으로 뻗어 나갑니다.',
     'tempest-bishop': '가로 또는 세로로 한 칸 진입한 뒤 그 지점에서 대각선으로 뻗어 나갑니다.',
-    'bouncing-bishop': '대각선으로 이동하며 보드 가장자리에서 반사되는 경로를 가집니다.',
+    'bouncing-bishop': '평소에는 비숍처럼 이동하며, 능력 사용 시 보드 가장자리에서 반사됩니다.',
     'tempest-pawn': 'Pawn과 같은 기본 행마를 사용하되, 승격 후보가 Tempest 계열 기물입니다.',
     'tempest-queen': '대각선 진입 후 가로, 세로, 대각선으로 폭풍처럼 뻗어 나갑니다.',
     'tempest-knight': '대각선 진입 후 확장된 Knight 계열 도약과 3칸 직선 도약을 사용합니다.',
