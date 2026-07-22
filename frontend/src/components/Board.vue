@@ -111,6 +111,7 @@ const props = defineProps<{
   movableSquares: Square[]
   attackSquares: Square[]
   dropSquares: Square[]
+  lastMove?: { from: Square; to: Square } | null
   orientation?: PlayerId
   abilityMode?: boolean
 }>()
@@ -163,6 +164,10 @@ const allSquares = computed((): SquareInfo[] => {
 const movableSquareIds = computed(() => new Set(props.movableSquares.map(squareIdFromSquare)))
 const attackSquareIds = computed(() => new Set(props.attackSquares.map(squareIdFromSquare)))
 const dropSquareIds = computed(() => new Set(props.dropSquares.map(squareIdFromSquare)))
+const lastMoveSquareIds = computed(() => {
+  if (!props.lastMove) return new Set<string>()
+  return new Set([squareIdFromSquare(props.lastMove.from), squareIdFromSquare(props.lastMove.to)])
+})
 const boardElement = ref<HTMLElement | null>(null)
 const arrows = ref<BoardArrow[]>([])
 const highlightedSquares = ref<string[]>([])
@@ -212,6 +217,9 @@ function squareIdFromSquare(square: Square) {
 function squareClasses(sq: SquareInfo) {
   const classes: string[] = [sq.isLight ? 'light' : 'dark']
 
+  if (lastMoveSquareIds.value.has(sq.id)) {
+    classes.push('last-move')
+  }
   if (sq.piece && sq.piece.id === props.selectedPieceId) {
     classes.push('selected')
     if (props.abilityMode) classes.push('ability-selected')
@@ -575,6 +583,7 @@ function pieceAlt(piece: Piece): string {
 
 .square.light { background: #f0d9b5; }
 .square.dark  { background: #b58863; }
+.square.last-move { background: #f2d34f; }
 
 .square.selected::before,
 .square.drag-over::before {

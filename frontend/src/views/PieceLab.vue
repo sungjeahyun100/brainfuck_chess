@@ -376,6 +376,7 @@ const loadedOptionsPieceId = ref<string | null>(null)
 const labBoardElement = ref<HTMLElement | null>(null)
 const arrows = ref<LabArrow[]>([])
 const highlightedSquares = ref<string[]>([])
+const lastMove = ref<{ from: Square; to: Square } | null>(null)
 const rightDrag = ref<{
   pointerId: number
   from: string
@@ -579,6 +580,7 @@ function resetLabPieces() {
   pocketPieces.value = []
   arrows.value = []
   highlightedSquares.value = []
+  lastMove.value = null
   globalState.value = {}
   cleanupRightDrag()
   selectedPieceId.value = null
@@ -648,6 +650,7 @@ function legalActionsForTarget(pieceId: string, to: Square): MoveAction[] {
 }
 
 function applyLabMove(action: MoveAction) {
+  lastMove.value = { from: action.from, to: action.to }
   pieces.value = pieces.value
     .filter(piece => piece.id !== action.captured_piece_id)
     .map(piece => (
@@ -717,6 +720,7 @@ function applyLabMove(action: MoveAction) {
 function applyLabDrop(action: DropAction) {
   const pocketPiece = pocketPieces.value.find(piece => piece.id === action.piece_id)
   if (!pocketPiece) return
+  lastMove.value = null
   pieces.value = pieces.value.filter(piece => piece.id !== action.captured_piece_id)
   pieces.value = [...pieces.value, {
     ...pocketPiece,
@@ -1103,6 +1107,7 @@ function squareClasses(square: LabSquare): string[] {
     isMoveSquare(square) ? 'can-move' : '',
     isAttackSquare(square) ? 'can-attack' : '',
     isAbilitySquare(square) ? 'can-ability' : '',
+    lastMove.value && (sameSquare(square, lastMove.value.from) || sameSquare(square, lastMove.value.to)) ? 'last-move' : '',
   ].filter(Boolean)
 }
 
@@ -1449,6 +1454,7 @@ onBeforeUnmount(() => {
 
 .lab-square.light { background: #f1dfbf; color: #232a38; }
 .lab-square.dark { background: #b7844d; color: #fff8ef; }
+.lab-square.last-move { background: #f2d34f; color: #232a38; }
 
 .lab-square.selected::before {
   content: '';

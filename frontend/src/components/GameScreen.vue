@@ -113,6 +113,7 @@
           :movable-squares="visibleMovableSquares"
           :attack-squares="visibleAttackSquares"
           :drop-squares="visibleDropSquares"
+          :last-move="lastMove"
           :orientation="boardOrientation"
           :ability-mode="visibleAbilityMode"
           @square-click="onSquareClick"
@@ -313,6 +314,11 @@ const visibleDropSquares = computed(() => (
   botReplaying.value ? botPreviewDropSquares.value : dropSquares.value
 ))
 const visibleAbilityMode = computed(() => !botReplaying.value && abilityMode.value)
+const lastMove = computed(() => {
+  const history = viewState.value.history
+  const action = history[history.length - 1]?.action
+  return action?.type === 'move' ? { from: action.from, to: action.to } : null
+})
 const boardOrientation = computed(() => props.localPlayer ?? viewState.value.current_player)
 const selectedPiece = computed(() => (
   selectedPieceId.value ? props.state.pieces[selectedPieceId.value] ?? null : null
