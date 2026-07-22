@@ -149,7 +149,7 @@
             </span>
           </button>
           <svg
-            v-if="renderedArrows.length"
+            v-if="renderedArrows.length || highlightedSquares.length"
             class="lab-arrow-overlay"
             :viewBox="arrowViewBox"
             preserveAspectRatio="none"
@@ -168,6 +168,14 @@
                 <path d="M 0 0 L 4 2 L 0 4 z" class="lab-arrow-head" />
               </marker>
             </defs>
+            <circle
+              v-for="highlight in renderedHighlights"
+              :key="highlight.key"
+              class="lab-square-highlight"
+              :cx="highlight.x"
+              :cy="highlight.y"
+              r="0.36"
+            />
             <line
               v-for="arrow in renderedArrows"
               :key="arrow.key"
@@ -367,6 +375,7 @@ const draggedPocketPieceId = ref<string | null>(null)
 const loadedOptionsPieceId = ref<string | null>(null)
 const labBoardElement = ref<HTMLElement | null>(null)
 const arrows = ref<LabArrow[]>([])
+const highlightedSquares = ref<string[]>([])
 const rightDrag = ref<{
   pointerId: number
   from: string
@@ -426,6 +435,10 @@ const renderedArrows = computed(() => {
 
   return rendered
 })
+const renderedHighlights = computed(() => highlightedSquares.value.flatMap((squareId) => {
+  const center = squareCenterFromId(squareId)
+  return center ? [{ key: `highlight-${squareId}`, ...center }] : []
+}))
 
 const boardSquares = computed(() => {
   const squares: LabSquare[] = []
@@ -565,6 +578,7 @@ function resetLabPieces() {
   pieces.value = []
   pocketPieces.value = []
   arrows.value = []
+  highlightedSquares.value = []
   globalState.value = {}
   cleanupRightDrag()
   selectedPieceId.value = null
@@ -852,7 +866,7 @@ function onLabBoardPointerDown(event: PointerEvent) {
     if (squareId) {
       const square = squareFromId(squareId)
       if (square && !pieceAt(square.file, square.rank)) {
-        clearArrows()
+        clearAnnotations()
       }
     }
     return
@@ -891,7 +905,12 @@ function onWindowRightPointerUp(event: PointerEvent) {
   const to = squareIdFromClientPoint(event.clientX, event.clientY)
   cleanupRightDrag()
 
-  if (!to || to === drag.from) return
+  if (!to) return
+
+  if (to === drag.from) {
+    toggleHighlight(to)
+    return
+  }
 
   toggleArrow({ from: drag.from, to })
 }
@@ -916,11 +935,12 @@ function onDocumentPointerDown(event: PointerEvent) {
   if (event.button !== 0 || !labBoardElement.value) return
   if (labBoardElement.value.contains(event.target as Node | null)) return
 
-  clearArrows()
+  clearAnnotations()
 }
 
-function clearArrows() {
+function clearAnnotations() {
   arrows.value = []
+  highlightedSquares.value = []
 }
 
 function preventRightDragContextMenu(event: MouseEvent) {
@@ -940,6 +960,16 @@ function toggleArrow(nextArrow: LabArrow) {
   }
 
   arrows.value.push(nextArrow)
+}
+
+function toggleHighlight(squareId: string) {
+  const existingIndex = highlightedSquares.value.indexOf(squareId)
+  if (existingIndex >= 0) {
+    highlightedSquares.value.splice(existingIndex, 1)
+    return
+  }
+
+  highlightedSquares.value.push(squareId)
 }
 
 function squareIdFromClientPoint(clientX: number, clientY: number): string | null {
@@ -1383,7 +1413,7 @@ onBeforeUnmount(() => {
 }
 
 .lab-arrow {
-  stroke: rgba(236, 126, 30, 0.86);
+  stroke: rgba(34, 139, 72, 0.86);
   stroke-width: 0.16;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1395,7 +1425,13 @@ onBeforeUnmount(() => {
 }
 
 .lab-arrow-head {
-  fill: rgba(236, 126, 30, 0.86);
+  fill: rgba(34, 139, 72, 0.86);
+}
+
+.lab-square-highlight {
+  fill: rgba(34, 139, 72, 0.18);
+  stroke: rgba(34, 139, 72, 0.9);
+  stroke-width: 0.1;
 }
 
 .lab-square {
