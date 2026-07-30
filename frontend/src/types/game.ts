@@ -28,10 +28,19 @@ export interface PieceDefinition {
   extensions?: string[]
   is_king: boolean
   can_capture_on_drop: boolean
+  promotion?: PromotionRule
+  promotion_pool?: PieceTypeId[]
   state_schema: PieceStateDefinition[]
   move_layers: MoveLayerDefinition[]
   move_options: MoveOptionDefinition[]
   visual: PieceVisualDefinition
+}
+
+export interface PromotionRule {
+  condition:
+    | { type: 'first_rank' }
+    | { type: 'last_rank' }
+    | { type: 'rank'; rank: number }
 }
 
 export type PieceStateValue = number | boolean | string
@@ -217,6 +226,14 @@ export interface GameState {
   board: Board
   pieces: Record<PieceId, Piece>
   piece_definitions: Record<PieceTypeId, PieceDefinition>
+  custom_piece_manifest: Array<{
+    package_id: string
+    version: number
+    content_hash: string
+    definition_snapshot_hash: string
+    exposed_type_id: PieceTypeId
+    runtime_type_ids: PieceTypeId[]
+  }>
   players: Record<PlayerId, Player>
   current_player: PlayerId
   turn_number: number

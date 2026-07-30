@@ -64,6 +64,7 @@ fn make_game_state(board_size: i32) -> GameState {
         board,
         pieces: HashMap::new(),
         piece_definitions: defs,
+        custom_piece_manifest: Vec::new(),
         players,
         current_player: "white".into(),
         turn_number: 1,

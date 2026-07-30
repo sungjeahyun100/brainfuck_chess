@@ -1,8 +1,9 @@
 import type { BotDifficulty, Square } from './game'
+import type { CustomPieceImage } from './customPiece'
 
 export type LobbyPlayer = 'white' | 'black'
 export type DeckPieceType = string
-export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'multiplayer' | 'piece-lab'
+export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop'
 
 export interface PieceCatalogItem {
   id: DeckPieceType
@@ -12,6 +13,14 @@ export interface PieceCatalogItem {
   canPocket: boolean
   uniqueStarting?: boolean
   aliases?: string[]
+  custom?: {
+    id: string
+    version: number
+    contentHash: string
+    exposedPieceKey: string
+    image: CustomPieceImage
+    active: boolean
+  }
 }
 
 export interface LobbyPlacement {
@@ -22,6 +31,7 @@ export interface LobbyPlacement {
 export interface LobbyDeck {
   starting: LobbyPlacement[]
   pocket: Record<DeckPieceType, number>
+  customPieces?: CustomDeckPieceRef[]
 }
 
 export interface SavedDeck extends LobbyDeck {
@@ -30,6 +40,14 @@ export interface SavedDeck extends LobbyDeck {
   boardSize: number
   createdAt: number
   updatedAt: number
+  customPieces: CustomDeckPieceRef[]
+}
+
+export interface CustomDeckPieceRef {
+  id: string
+  version: number
+  contentHash: string
+  exposedPieceKey: string
 }
 
 export interface DeckSummary {

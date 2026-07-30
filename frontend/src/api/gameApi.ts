@@ -17,17 +17,30 @@ const BASE = '/api/games'
 const ROOM_BASE = '/api/rooms'
 const CLIENT_ID_KEY = 'brainfuck_chess_tab_client_id'
 
+export interface CustomDeckPieceRequest {
+  custom_piece_id: string
+  version: number
+  content_hash: string
+  exposed_piece_key: string
+}
+
+export type DeckPieceRequest = { piece_type: string } | CustomDeckPieceRequest
+
 export interface DeckPlacementRequest {
-  piece_type: string
   square: {
     file: number
     rank: number
   }
+  piece_type?: string
+  custom_piece_id?: string
+  version?: number
+  content_hash?: string
+  exposed_piece_key?: string
 }
 
 export interface PlayerDeckRequest {
   starting: DeckPlacementRequest[]
-  pocket: string[]
+  pocket: DeckPieceRequest[]
 }
 
 export interface MultiplayerRoom {
@@ -104,7 +117,10 @@ export interface PieceLabOptionsResponse {
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Id': 'browser-prototype-user',
+    },
     ...options,
   })
   if (!res.ok) {

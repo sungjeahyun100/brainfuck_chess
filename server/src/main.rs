@@ -1,4 +1,4 @@
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{
@@ -11,15 +11,17 @@ use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
 mod app_state;
+mod custom_piece;
 mod routes;
 mod stores;
 
 use app_state::AppState;
-use stores::{GameStore, RoomStore};
+use stores::RoomStore;
 
 use brainfuck_chess_engine::{
     actions::submit_action as submit_engine_action,
     ai::{play_bot_turn_detailed, AiAction, BotDifficulty},
+    custom_pieces::{install_runtime_catalog, CustomPiecePackage},
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
@@ -52,6 +54,10 @@ struct MultiplayerRoom {
     host_client_id: String,
     #[serde(skip_serializing)]
     guest_client_id: Option<String>,
+    #[serde(skip_serializing)]
+    host_owner_id: String,
+    #[serde(skip_serializing)]
+    guest_owner_id: Option<String>,
     host_deck: Option<PlayerDeckSpec>,
     guest_deck: Option<PlayerDeckSpec>,
     host_ready: bool,
@@ -98,13 +104,28 @@ struct ResignGameRequest {
 #[derive(Clone, Deserialize, Serialize)]
 struct PlayerDeckSpec {
     starting: Vec<StartingPieceSpec>,
-    pocket: Vec<String>,
+    pocket: Vec<DeckPieceRef>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 struct StartingPieceSpec {
-    piece_type: String,
+    #[serde(flatten)]
+    piece: DeckPieceRef,
     square: Square,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+enum DeckPieceRef {
+    BuiltIn {
+        piece_type: String,
+    },
+    Custom {
+        custom_piece_id: String,
+        version: u32,
+        content_hash: String,
+        exposed_piece_key: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -276,6 +297,33 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     }
 }
 
+fn resolve_deck_piece_type(
+    player_id: &str,
+    piece: &DeckPieceRef,
+    packages: &HashMap<(String, u32), CustomPiecePackage>,
+) -> Result<String, String> {
+    match piece {
+        DeckPieceRef::BuiltIn { piece_type } => resolve_piece_type(player_id, piece_type)
+            .ok_or_else(|| format!("알 수 없는 기물 타입입니다: {piece_type}")),
+        DeckPieceRef::Custom {
+            custom_piece_id,
+            version,
+            content_hash,
+            exposed_piece_key,
+        } => {
+            let package = packages
+                .get(&(custom_piece_id.clone(), *version))
+                .ok_or_else(|| "승인되지 않은 커스텀 기물 참조입니다.".to_string())?;
+            if package.content_hash != *content_hash
+                || package.exposed_piece_key != *exposed_piece_key
+            {
+                return Err("커스텀 기물 버전 정보가 일치하지 않습니다.".into());
+            }
+            Ok(package.exposed_type_id.clone())
+        }
+    }
+}
+
 fn make_piece_id(
     player_id: &str,
     piece_type: &str,
@@ -293,6 +341,7 @@ fn build_player_deck(
     board: &mut Board,
     pieces: &mut HashMap<PieceId, Piece>,
     definitions: &HashMap<PieceTypeId, PieceDefinition>,
+    packages: &HashMap<(String, u32), CustomPiecePackage>,
 ) -> Result<Deck, String> {
     let base_zone: HashSet<SquareId> = get_base_zone_squares(&player_id.to_string(), board_size)
         .into_iter()
@@ -320,8 +369,7 @@ fn build_player_deck(
             ));
         }
 
-        let type_id = resolve_piece_type(player_id, &placement.piece_type)
-            .ok_or_else(|| format!("알 수 없는 기물 타입입니다: {}", placement.piece_type))?;
+        let type_id = resolve_deck_piece_type(player_id, &placement.piece, packages)?;
         let piece_id = make_piece_id(player_id, &type_id, &mut counters);
 
         let piece = Piece {
@@ -347,8 +395,7 @@ fn build_player_deck(
     }
 
     for pocket_piece in &spec.pocket {
-        let type_id = resolve_piece_type(player_id, pocket_piece)
-            .ok_or_else(|| format!("알 수 없는 포켓 기물 타입입니다: {}", pocket_piece))?;
+        let type_id = resolve_deck_piece_type(player_id, pocket_piece, packages)?;
         let piece_id = make_piece_id(player_id, &type_id, &mut counters);
         let piece = Piece {
             id: piece_id.clone(),
@@ -392,34 +439,60 @@ fn build_game_state(
     board_size: i32,
     white_spec: &PlayerDeckSpec,
     black_spec: &PlayerDeckSpec,
+    packages: Vec<CustomPiecePackage>,
 ) -> Result<GameState, String> {
     if board_size < 8 {
         return Err("보드 크기는 최소 8이어야 합니다.".into());
     }
 
-    let mut board = create_board(board_size);
+    let board = create_board(board_size);
     let defs: HashMap<String, PieceDefinition> = all_default_definitions()
         .into_iter()
         .map(|d| (d.id.clone(), d))
         .collect();
     let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&defs);
-    let mut pieces = HashMap::new();
+    let pieces = HashMap::new();
+
+    let mut state = GameState {
+        id,
+        board,
+        pieces,
+        piece_definitions: defs,
+        custom_piece_manifest: Vec::new(),
+        players: HashMap::new(),
+        current_player: "white".into(),
+        turn_number: 1,
+        phase: GamePhase::Playing,
+        en_passant_target: None,
+        en_passant_available_to: None,
+        global_state: HashMap::new(),
+        history: Vec::new(),
+        result: None,
+        chessembly_program_cache,
+    };
+    install_runtime_catalog(&mut state, &packages).map_err(|error| error.to_string())?;
+    let package_index = packages
+        .into_iter()
+        .map(|package| ((package.package_id.clone(), package.version), package))
+        .collect::<HashMap<_, _>>();
 
     let white_deck = build_player_deck(
         "white",
         white_spec,
         board_size,
-        &mut board,
-        &mut pieces,
-        &defs,
+        &mut state.board,
+        &mut state.pieces,
+        &state.piece_definitions,
+        &package_index,
     )?;
     let black_deck = build_player_deck(
         "black",
         black_spec,
         board_size,
-        &mut board,
-        &mut pieces,
-        &defs,
+        &mut state.board,
+        &mut state.pieces,
+        &state.piece_definitions,
+        &package_index,
     )?;
 
     let mut players = HashMap::new();
@@ -440,23 +513,7 @@ fn build_game_state(
         },
     );
 
-    let state = GameState {
-        id,
-        board,
-        pieces,
-        piece_definitions: defs,
-        players,
-        current_player: "white".into(),
-        turn_number: 1,
-        phase: GamePhase::Playing,
-        en_passant_target: None,
-        en_passant_available_to: None,
-        global_state: HashMap::new(),
-        history: Vec::new(),
-        result: None,
-        chessembly_program_cache,
-    };
-
+    state.players = players;
     Ok(state)
 }
 
@@ -649,6 +706,7 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
         board,
         pieces,
         piece_definitions: defs,
+        custom_piece_manifest: Vec::new(),
         players,
         current_player,
         turn_number: 1,
@@ -684,7 +742,7 @@ fn materialize_neutral_deck(
             .starting
             .iter()
             .map(|piece| StartingPieceSpec {
-                piece_type: piece.piece_type.clone(),
+                piece: piece.piece.clone(),
                 square: Square {
                     file: piece.square.file,
                     rank: board_size - 1 - piece.square.rank,
@@ -693,6 +751,51 @@ fn materialize_neutral_deck(
             .collect(),
         pocket: spec.pocket.clone(),
     }
+}
+
+fn resolve_custom_packages(
+    app: &AppState,
+    decks: &[(&str, &PlayerDeckSpec)],
+) -> Result<Vec<CustomPiecePackage>, String> {
+    let mut packages = HashMap::<(String, u32), CustomPiecePackage>::new();
+    for (owner, deck) in decks {
+        let refs = deck
+            .starting
+            .iter()
+            .map(|placement| &placement.piece)
+            .chain(deck.pocket.iter());
+        for piece in refs {
+            let DeckPieceRef::Custom {
+                custom_piece_id,
+                version,
+                content_hash,
+                exposed_piece_key,
+            } = piece
+            else {
+                continue;
+            };
+            let key = (custom_piece_id.clone(), *version);
+            if let Some(existing) = packages.get(&key) {
+                if existing.content_hash != *content_hash
+                    || existing.exposed_piece_key != *exposed_piece_key
+                {
+                    return Err("서로 다른 커스텀 기물 버전 정보가 충돌합니다.".into());
+                }
+                continue;
+            }
+            let package = app
+                .custom_pieces
+                .runtime_package(owner, custom_piece_id, *version)
+                .ok_or_else(|| "커스텀 기물이 없거나 사용할 권한이 없습니다.".to_string())?;
+            if package.content_hash != *content_hash
+                || package.exposed_piece_key != *exposed_piece_key
+            {
+                return Err("커스텀 기물 버전 정보가 일치하지 않습니다.".into());
+            }
+            packages.insert(key, package);
+        }
+    }
+    Ok(packages.into_values().collect())
 }
 
 fn generate_room_id(rooms: &RoomStore) -> String {
@@ -720,10 +823,11 @@ fn generate_room_id(rooms: &RoomStore) -> String {
 
 fn start_room_game(
     room: &mut MultiplayerRoom,
-    games: &GameStore,
+    app: &AppState,
 ) -> Result<Option<GameResponse>, String> {
     if let Some(game_id) = &room.game_id {
-        let state = games
+        let state = app
+            .games
             .get(game_id)
             .ok_or_else(|| "방의 게임을 찾을 수 없습니다.".to_string())?;
         return Ok(Some(GameResponse {
@@ -752,10 +856,23 @@ fn start_room_game(
     } else {
         (&guest_deck, &host_deck)
     };
-    let state = build_game_state(game_id.clone(), room.board_size, white_deck, black_deck)?;
+    let host_owner = room.host_owner_id.as_str();
+    let guest_owner = room
+        .guest_owner_id
+        .as_deref()
+        .ok_or_else(|| "참가자 인증 정보가 없습니다.".to_string())?;
+    let packages =
+        resolve_custom_packages(app, &[(host_owner, host_spec), (guest_owner, guest_spec)])?;
+    let state = build_game_state(
+        game_id.clone(),
+        room.board_size,
+        white_deck,
+        black_deck,
+        packages,
+    )?;
 
     room.game_id = Some(game_id.clone());
-    games.insert(game_id.clone(), state.clone());
+    app.games.insert(game_id.clone(), state.clone());
     Ok(Some(GameResponse { id: game_id, state }))
 }
 
@@ -840,19 +957,39 @@ async fn config_js() -> impl IntoResponse {
 
 async fn create_game(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateGameRequest>,
 ) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let owner = custom_piece::authenticated_owner(&headers).unwrap_or_default();
+    let packages = resolve_custom_packages(
+        &app,
+        &[(&owner, &req.white_deck), (&owner, &req.black_deck)],
+    )
+    .map_err(|error| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(ErrorResponse { error }),
+        )
+    })?;
     let id = Uuid::new_v4().to_string();
-    let state = build_game_state(id.clone(), req.board_size, &req.white_deck, &req.black_deck)
-        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    let state = build_game_state(
+        id.clone(),
+        req.board_size,
+        &req.white_deck,
+        &req.black_deck,
+        packages,
+    )
+    .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     app.games.insert(id.clone(), state.clone());
     Ok(Json(GameResponse { id, state }))
 }
 
 async fn create_room(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateRoomRequest>,
 ) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
+    let owner = custom_piece::authenticated_owner(&headers).unwrap_or_default();
     if req.board_size < 8 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -877,6 +1014,8 @@ async fn create_room(
         guest_side: opponent_side(&req.host_side),
         host_client_id: req.client_id,
         guest_client_id: None,
+        host_owner_id: owner,
+        guest_owner_id: None,
         host_side: req.host_side,
         host_deck: Some(req.deck),
         guest_deck: None,
@@ -908,9 +1047,11 @@ async fn get_room(
 
 async fn join_room(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(req): Json<JoinRoomRequest>,
 ) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let owner = custom_piece::authenticated_owner(&headers).unwrap_or_default();
     let room_id = id.to_uppercase();
     let mut room = app.rooms.get_mut(&room_id).ok_or_else(|| {
         (
@@ -947,8 +1088,9 @@ async fn join_room(
 
     room.guest_deck = Some(req.deck);
     room.guest_client_id = Some(req.client_id);
+    room.guest_owner_id = Some(owner);
     room.guest_ready = true;
-    let response = start_room_game(room.value_mut(), &app.games)
+    let response = start_room_game(room.value_mut(), &app)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
         .ok_or_else(|| {
             (
@@ -963,9 +1105,11 @@ async fn join_room(
 
 async fn select_room_deck(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(req): Json<SelectDeckRequest>,
 ) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
+    let owner = custom_piece::authenticated_owner(&headers).unwrap_or_default();
     let room_id = id.to_uppercase();
     let mut room = app.rooms.get_mut(&room_id).ok_or_else(|| {
         (
@@ -986,6 +1130,14 @@ async fn select_room_deck(
     }
 
     if req.client_id == room.host_client_id {
+        if owner != room.host_owner_id {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "방장 덱을 변경할 권한이 없습니다.".into(),
+                }),
+            ));
+        }
         room.host_deck = Some(req.deck);
         room.host_ready = false;
         return Ok(Json(room.clone()));
@@ -997,6 +1149,7 @@ async fn select_room_deck(
 
     if room.guest_client_id.as_deref() == Some(req.client_id.as_str()) {
         room.guest_deck = Some(req.deck);
+        room.guest_owner_id = Some(owner);
         room.guest_ready = false;
         return Ok(Json(room.clone()));
     }
@@ -1057,7 +1210,7 @@ async fn ready_room(
         ));
     }
 
-    start_room_game(room.value_mut(), &app.games)
+    start_room_game(room.value_mut(), &app)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     Ok(Json(room.clone()))
 }
@@ -1559,16 +1712,22 @@ mod tests {
     use dashmap::DashMap;
     use std::sync::Arc;
 
+    fn built_in(piece_type: &str) -> DeckPieceRef {
+        DeckPieceRef::BuiltIn {
+            piece_type: piece_type.into(),
+        }
+    }
+
     fn test_app_with_game() -> (AppState, String) {
         let game_id = "test-game".to_string();
         let white_deck = PlayerDeckSpec {
             starting: vec![
                 StartingPieceSpec {
-                    piece_type: "king".into(),
+                    piece: built_in("king"),
                     square: Square::new(4, 0),
                 },
                 StartingPieceSpec {
-                    piece_type: "rook".into(),
+                    piece: built_in("rook"),
                     square: Square::new(0, 0),
                 },
             ],
@@ -1576,15 +1735,16 @@ mod tests {
         };
         let black_deck = PlayerDeckSpec {
             starting: vec![StartingPieceSpec {
-                piece_type: "king".into(),
+                piece: built_in("king"),
                 square: Square::new(4, 7),
             }],
             pocket: vec![],
         };
-        let state = build_game_state(game_id.clone(), 8, &white_deck, &black_deck).unwrap();
+        let state = build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
         let app = AppState {
             games: Arc::new(DashMap::new()),
             rooms: Arc::new(DashMap::new()),
+            custom_pieces: Default::default(),
         };
         app.games.insert(game_id.clone(), state);
         (app, game_id)
@@ -1627,6 +1787,7 @@ mod tests {
         let app = AppState {
             games: Arc::new(DashMap::new()),
             rooms: Arc::new(DashMap::new()),
+            custom_pieces: Default::default(),
         };
         let req = LabPieceOptionsRequest {
             board_size: 8,
@@ -1819,11 +1980,11 @@ mod tests {
         let white_deck = PlayerDeckSpec {
             starting: vec![
                 StartingPieceSpec {
-                    piece_type: "king".into(),
+                    piece: built_in("king"),
                     square: Square::new(4, 0),
                 },
                 StartingPieceSpec {
-                    piece_type: "windmill".into(),
+                    piece: built_in("windmill"),
                     square: Square::new(3, 1),
                 },
             ],
@@ -1831,15 +1992,16 @@ mod tests {
         };
         let black_deck = PlayerDeckSpec {
             starting: vec![StartingPieceSpec {
-                piece_type: "king".into(),
+                piece: built_in("king"),
                 square: Square::new(4, 7),
             }],
             pocket: vec![],
         };
-        let state = build_game_state(game_id.clone(), 8, &white_deck, &black_deck).unwrap();
+        let state = build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
         let app = AppState {
             games: Arc::new(DashMap::new()),
             rooms: Arc::new(DashMap::new()),
+            custom_pieces: Default::default(),
         };
         app.games.insert(game_id.clone(), state);
 

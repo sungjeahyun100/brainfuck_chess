@@ -24,6 +24,7 @@
       </label>
     </section>
     <p v-if="saveError" class="error">{{ saveError }}</p>
+    <p v-if="catalogLoadError" class="error">{{ catalogLoadError }}</p>
 
     <section class="card preset-panel">
       <div class="section-header">
@@ -94,8 +95,19 @@
                   <span class="meta">
                     <strong>{{ piece.name }}</strong>
                     <small>{{ piece.score === 0 ? '점수 제외' : `${piece.score}점` }}</small>
+                    <small v-if="piece.custom">
+                      커스텀 · v{{ piece.custom.version }} · 버전 고정
+                      <template v-if="!piece.custom.active"> · 비활성화됨</template>
+                    </small>
                   </span>
                   <span class="piece-count">{{ pieceCount(piece.id) }}</span>
+                </button>
+                <button
+                  v-if="piece.custom && latestCustomVersion(piece.custom.id, piece.custom.version)"
+                  class="piece-test-button"
+                  @click="updatePinnedVersion(piece.id, piece.custom.id)"
+                >
+                  최신 버전으로 업데이트
                 </button>
                 <button class="piece-test-button" @click="emitTestPiece(piece.id)">테스트</button>
               </div>
@@ -196,7 +208,9 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { onMounted } from 'vue'
 import { pieceAsset } from '../pieceAssets'
+import { customPieceApi } from '../api/customPieceApi'
 import type { DeckPieceType, SavedDeck } from '../types/deck'
 import {
   boardSizes,
@@ -208,10 +222,10 @@ import {
   pieceCatalog,
   pieceLabel,
   pieceScore,
-  pocketCatalog,
   presetLayoutForBoard,
   scoreLimit,
   validateSavedDeck,
+  replaceCustomPieceCatalog,
 } from '../composables/useDeckValidation'
 import { createNewSavedDeck, useSavedDecks } from '../composables/useSavedDecks'
 
@@ -232,6 +246,25 @@ const placementTool = ref<DeckPieceType>('king')
 const draggedPiece = ref<DeckPieceType | null>(null)
 const saveError = ref<string | null>(null)
 const deck = ref<SavedDeck>(loadDeck())
+const catalogLoadError = ref<string | null>(null)
+const catalogRevision = ref(0)
+const latestCustomPieces = ref<Awaited<ReturnType<typeof customPieceApi.list>>['items']>([])
+
+onMounted(async () => {
+  try {
+    const { items } = await customPieceApi.list()
+    latestCustomPieces.value = items
+    const pinned = await Promise.all(
+      (deck.value.customPieces ?? [])
+        .filter(reference => !items.some(item => item.id === reference.id && item.version === reference.version))
+        .map(reference => customPieceApi.getVersion(reference.id, reference.version).catch(() => null)),
+    )
+    replaceCustomPieceCatalog([...items, ...pinned.filter(item => item !== null)])
+    catalogRevision.value += 1
+  } catch (error) {
+    catalogLoadError.value = error instanceof Error ? error.message : String(error)
+  }
+})
 
 function loadDeck(): SavedDeck {
   if (props.deckId) {
@@ -256,6 +289,7 @@ function cloneSavedDeck(source: SavedDeck): SavedDeck {
     pocket: { ...source.pocket },
     createdAt: source.createdAt,
     updatedAt: source.updatedAt,
+    customPieces: [...(source.customPieces ?? [])],
   }
 }
 
@@ -263,14 +297,26 @@ watch(() => props.deckId, () => {
   deck.value = loadDeck()
 })
 
-const deckSummary = computed(() => validateSavedDeck(deck.value))
+const deckSummary = computed(() => {
+  catalogRevision.value
+  return validateSavedDeck(deck.value)
+})
 const canSaveDeck = computed(() => deck.value.name.trim().length > 0)
 const activePresets = computed(() => deckPresets.filter(preset => presetLayoutForBoard(preset, deck.value.boardSize)))
 const selectedToolLabel = computed(() => placementTool.value === eraseTool ? '지우개' : pieceLabel(placementTool.value))
 const scoreFillWidth = computed(() => `${Math.min(100, Math.round((deckSummary.value.totalScore / deckSummary.value.scoreLimit) * 100))}%`)
-const frontlineScore = computed(() => deck.value.starting.reduce((sum, piece) => sum + pieceScore(piece.pieceType), 0))
-const pocketScore = computed(() => Object.entries(deck.value.pocket).reduce((sum, [pieceType, count]) => sum + pieceScore(pieceType) * count, 0))
-const activePocketCatalog = computed(() => pocketCatalog.filter(piece => (deck.value.pocket[piece.id] ?? 0) > 0))
+const frontlineScore = computed(() => {
+  catalogRevision.value
+  return deck.value.starting.reduce((sum, piece) => sum + pieceScore(piece.pieceType), 0)
+})
+const pocketScore = computed(() => {
+  catalogRevision.value
+  return Object.entries(deck.value.pocket).reduce((sum, [pieceType, count]) => sum + pieceScore(pieceType) * count, 0)
+})
+const activePocketCatalog = computed(() => {
+  catalogRevision.value
+  return pieceCatalog.filter(piece => piece.canPocket && (deck.value.pocket[piece.id] ?? 0) > 0)
+})
 const maxPocketCount = computed(() => Math.max(1, ...activePocketCatalog.value.map(piece => deck.value.pocket[piece.id] ?? 0)))
 const pocketDropMessage = computed(() => {
   if (!draggedPiece.value) return '여기에 드롭해서 포켓에 추가'
@@ -278,6 +324,7 @@ const pocketDropMessage = computed(() => {
   return `${pieceLabel(draggedPiece.value)} 포켓에 추가`
 })
 const filteredPieceCatalog = computed(() => {
+  catalogRevision.value
   const query = pieceSearch.value.toLowerCase()
   if (!query) return pieceCatalog
   return pieceCatalog.filter(piece => [piece.id, piece.name, piece.category, ...(piece.aliases ?? [])].join(' ').toLowerCase().includes(query))
@@ -300,7 +347,37 @@ function fileLabel(file: number): string {
 }
 
 function displayPieceAsset(pieceType: DeckPieceType): string | undefined {
+  const custom = pieceCatalog.find(piece => piece.id === pieceType)?.custom
+  if (custom?.image.kind === 'built_in') return pieceAsset(custom.image.asset_key, 'white')
   return pieceAsset(pieceType, 'white')
+}
+
+function latestCustomVersion(id: string, version: number): number | null {
+  const latest = latestCustomPieces.value.find(piece => piece.id === id)
+  return latest && latest.version > version ? latest.version : null
+}
+
+function updatePinnedVersion(oldPieceType: string, id: string) {
+  const latest = latestCustomPieces.value.find(piece => piece.id === id)
+  if (!latest) return
+  const nextPieceType = `custom:${latest.id}:v${latest.version}:${latest.exposed_piece_key}`
+  deck.value.starting = deck.value.starting.map(piece => (
+    piece.pieceType === oldPieceType ? { ...piece, pieceType: nextPieceType } : piece
+  ))
+  const count = deck.value.pocket[oldPieceType] ?? 0
+  if (count > 0) {
+    deck.value.pocket[nextPieceType] = (deck.value.pocket[nextPieceType] ?? 0) + count
+    delete deck.value.pocket[oldPieceType]
+  }
+  deck.value.customPieces = [
+    ...(deck.value.customPieces ?? []).filter(piece => piece.id !== id),
+    {
+      id: latest.id,
+      version: latest.version,
+      contentHash: latest.content_hash,
+      exposedPieceKey: latest.exposed_piece_key,
+    },
+  ]
 }
 
 function displayPieceSymbol(pieceType: DeckPieceType): string {
@@ -442,6 +519,18 @@ function save() {
     return
   }
   try {
+    const usedTypes = new Set([
+      ...deck.value.starting.map(piece => piece.pieceType),
+      ...Object.entries(deck.value.pocket).filter(([, count]) => count > 0).map(([pieceType]) => pieceType),
+    ])
+    deck.value.customPieces = pieceCatalog
+      .filter(piece => piece.custom && usedTypes.has(piece.id))
+      .map(piece => ({
+        id: piece.custom!.id,
+        version: piece.custom!.version,
+        contentHash: piece.custom!.contentHash,
+        exposedPieceKey: piece.custom!.exposedPieceKey,
+      }))
     savedDecks.saveDeck(cloneSavedDeck(deck.value))
     emit('saved')
   } catch (e: unknown) {

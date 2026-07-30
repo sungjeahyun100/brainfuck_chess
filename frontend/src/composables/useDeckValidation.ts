@@ -8,6 +8,7 @@ import type {
   PieceCatalogItem,
   SavedDeck,
 } from '../types/deck'
+import type { CustomPieceRecord } from '../types/customPiece'
 
 export const boardSizes = [8, 9, 10, 11, 12] as const
 
@@ -30,6 +31,34 @@ export const pieceCatalog: PieceCatalogItem[] = [
   { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
 ]
 
+export function customDeckPieceType(piece: Pick<CustomPieceRecord, 'id' | 'version' | 'exposed_piece_key'>): string {
+  return `custom:${piece.id}:v${piece.version}:${piece.exposed_piece_key}`
+}
+
+export function replaceCustomPieceCatalog(records: CustomPieceRecord[]): void {
+  for (let index = pieceCatalog.length - 1; index >= 0; index -= 1) {
+    if (pieceCatalog[index].custom) pieceCatalog.splice(index, 1)
+  }
+  pieceCatalog.push(
+    ...records.map(record => ({
+      id: customDeckPieceType(record),
+      name: record.name,
+      score: record.score,
+      category: 'custom',
+      canPocket: true,
+      aliases: [record.description, record.exposed_piece_key],
+      custom: {
+        id: record.id,
+        version: record.version,
+        contentHash: record.content_hash,
+        exposedPieceKey: record.exposed_piece_key,
+        image: record.image,
+        active: record.active,
+      },
+    })),
+  )
+}
+
 export function applyPieceScores(scores: Record<string, number>): void {
   for (const piece of pieceCatalog) {
     const score = scores[piece.id]
@@ -43,6 +72,7 @@ export function applyPieceScores(scores: Record<string, number>): void {
 export const pocketCatalog = pieceCatalog.filter(piece => piece.canPocket)
 
 export const catalogCategoryLabels: Record<string, string> = {
+  custom: '내 커스텀 기물',
   royal: 'Royal',
   major: 'Major',
   variant: 'Variant',
@@ -209,6 +239,18 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
 
   if (deck.starting.some(piece => !isInBaseZone(piece, boardSize))) {
     errors.push('시작 기물은 해당 보드 크기의 기본 진영 안에만 배치할 수 있습니다.')
+  }
+  const usedTypes = [
+    ...deck.starting.map(piece => piece.pieceType),
+    ...Object.entries(deck.pocket).filter(([, count]) => count > 0).map(([pieceType]) => pieceType),
+  ]
+  for (const pieceType of new Set(usedTypes)) {
+    const catalogPiece = pieceCatalog.find(piece => piece.id === pieceType)
+    if (!catalogPiece) {
+      errors.push(`사용할 수 없는 기물 버전입니다: ${pieceType}`)
+    } else if (catalogPiece.custom && !catalogPiece.custom.active) {
+      errors.push(`${catalogPiece.name} v${catalogPiece.custom.version}은 비활성화되어 새 게임에 사용할 수 없습니다.`)
+    }
   }
 
   return {

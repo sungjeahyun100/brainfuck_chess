@@ -201,10 +201,19 @@ fn effects_for_candidate(
         })
         .into_iter()
         .collect();
+    let piece_type_transition = result
+        .effects
+        .get(&to.to_id())
+        .and_then(|effect| effect.transition_to.clone())
+        .map(|target_type_id| PieceTypeTransition {
+            piece_id: piece_id.clone(),
+            target_type_id,
+        });
     ActionEffects {
         global_state_updates,
         piece_state_updates,
         cooldown_updates,
+        piece_type_transition,
     }
 }
 

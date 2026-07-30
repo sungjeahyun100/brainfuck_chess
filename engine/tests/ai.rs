@@ -40,6 +40,7 @@ fn make_state() -> GameState {
         pieces: HashMap::new(),
         chessembly_program_cache: ChessemblyProgramCache::from_definitions(&definitions),
         piece_definitions: definitions,
+        custom_piece_manifest: Vec::new(),
         players,
         current_player: "white".into(),
         turn_number: 1,

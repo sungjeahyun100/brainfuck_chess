@@ -9,6 +9,7 @@ use crate::types::{
 };
 
 use self::interpreter::{run, ExecutionContext};
+use crate::custom_pieces::CustomPieceError;
 
 pub fn run_chessembly_layer_for_piece(
     game_state: &GameState,
@@ -31,4 +32,30 @@ pub fn run_chessembly_layer_for_piece(
         attack_maps,
     };
     run(program.as_ref(), &ctx)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_chessembly_layer_for_piece_checked(
+    game_state: &GameState,
+    piece: &Piece,
+    definition: &PieceDefinition,
+    layer: &MoveLayerDefinition,
+    player: PlayerId,
+    global_state: &HashMap<String, i32>,
+    attack_maps: &HashMap<PlayerId, HashSet<SquareId>>,
+    max_execution_steps: u64,
+) -> Result<ChessemblyResult, CustomPieceError> {
+    let program = game_state.chessembly_layer_program(&piece.type_id, layer);
+    let ctx = ExecutionContext {
+        board: &game_state.board,
+        piece,
+        piece_definition: definition,
+        all_definitions: &game_state.piece_definitions,
+        all_pieces: &game_state.pieces,
+        player,
+        global_state,
+        attack_maps,
+    };
+    interpreter::run_checked(program.as_ref(), &ctx, max_execution_steps)
+        .map_err(|_| CustomPieceError::ExecutionLimitExceeded("execution_steps"))
 }

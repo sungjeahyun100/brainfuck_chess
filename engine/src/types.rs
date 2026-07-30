@@ -6,6 +6,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::chessembly::ast::Program;
 use crate::chessembly::parser::parse;
+use crate::custom_pieces::CustomPieceManifestEntry;
 
 // ─── Primitive ID types ─────────────────────────────────────────────────────
 
@@ -812,12 +813,22 @@ pub struct ActionEffects {
     pub piece_state_updates: Vec<PieceStateUpdate>,
     #[serde(default)]
     pub cooldown_updates: Vec<CooldownUpdate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub piece_type_transition: Option<PieceTypeTransition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PieceTypeTransition {
+    pub piece_id: PieceId,
+    pub target_type_id: PieceTypeId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ChessemblyActionEffect {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub set_state: Option<StateUpdate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_to: Option<PieceTypeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -900,6 +911,9 @@ pub struct GameState {
     pub pieces: HashMap<PieceId, Piece>,
     /// All piece definitions, keyed by PieceTypeId
     pub piece_definitions: HashMap<PieceTypeId, PieceDefinition>,
+    /// Immutable provenance for custom definitions embedded in this game.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_piece_manifest: Vec<CustomPieceManifestEntry>,
     pub players: HashMap<PlayerId, Player>,
     pub current_player: PlayerId,
     pub turn_number: u32,

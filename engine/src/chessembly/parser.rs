@@ -118,7 +118,10 @@ fn read_int(chars: &[char], mut i: usize) -> (i32, usize) {
 fn read_ident(chars: &[char], mut i: usize) -> (String, usize) {
     let mut s = String::new();
     while i < chars.len()
-        && (chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '-')
+        && (chars[i].is_ascii_alphanumeric()
+            || chars[i] == '_'
+            || chars[i] == '-'
+            || chars[i] == ':')
     {
         s.push(chars[i]);
         i += 1;

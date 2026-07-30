@@ -22,6 +22,30 @@ pub(crate) fn api(state: AppState) -> Router {
             get(get_piece_options),
         )
         .route("/lab/piece-options", post(get_lab_piece_options))
+        .route(
+            "/custom-pieces",
+            get(custom_piece::list).post(custom_piece::create),
+        )
+        .route("/custom-pieces/validate", post(custom_piece::validate))
+        .route(
+            "/custom-pieces/:id",
+            get(custom_piece::get)
+                .put(custom_piece::update)
+                .delete(custom_piece::deactivate),
+        )
+        .route(
+            "/custom-pieces/:id/versions/:version",
+            get(custom_piece::get_version),
+        )
+        .route("/custom-piece-images", post(custom_piece::upload_image))
+        .route(
+            "/custom-pieces/test/options",
+            post(custom_piece::test_options),
+        )
+        .route(
+            "/custom-pieces/test/actions",
+            post(custom_piece::test_action),
+        )
         .route("/games/:id/legal-drops", get(get_legal_drops))
         .route("/rooms", post(create_room))
         .route("/rooms/:id", get(get_room))

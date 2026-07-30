@@ -42,19 +42,33 @@ pub struct ExecutionContext<'a> {
 // ─── Interpreter ─────────────────────────────────────────────────────────────
 
 pub fn run(program: &Program, ctx: &ExecutionContext) -> ChessemblyResult {
+    run_checked(program, ctx, 100_000).unwrap_or_default()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionLimitExceeded;
+
+/// Executes with a hard expression budget. Custom-piece validation and future
+/// fallible gameplay boundaries can surface this error without a panic.
+pub fn run_checked(
+    program: &Program,
+    ctx: &ExecutionContext,
+    max_execution_steps: u64,
+) -> Result<ChessemblyResult, ExecutionLimitExceeded> {
     crate::profiling::record_chessembly_run(1);
     let piece_pos = ctx.piece.current_square.unwrap_or(Square::new(0, 0));
     let mut result = ChessemblyResult::default();
+    let mut remaining_steps = max_execution_steps;
 
     for chain in program {
         let mut state = ChainState::new(piece_pos);
-        run_chain(chain, 0, ctx, &mut state, &mut result);
+        run_chain(chain, 0, ctx, &mut state, &mut result, &mut remaining_steps)?;
     }
 
     // Deduplicate
     result.movement_squares.dedup();
     result.attack_squares.dedup();
-    result
+    Ok(result)
 }
 
 // ─── Internal state ──────────────────────────────────────────────────────────
@@ -117,11 +131,15 @@ fn run_chain(
     ctx: &ExecutionContext,
     state: &mut ChainState,
     result: &mut ChessemblyResult,
-) -> bool {
+    remaining_steps: &mut u64,
+) -> Result<bool, ExecutionLimitExceeded> {
     let mut i = start_idx;
     while i < chain.len() {
         let expr = &chain[i];
-        let (res, consumed) = eval_expr(expr, chain, i, ctx, state, result);
+        *remaining_steps = remaining_steps
+            .checked_sub(1)
+            .ok_or(ExecutionLimitExceeded)?;
+        let (res, consumed) = eval_expr(expr, chain, i, ctx, state, result, remaining_steps)?;
         i += consumed;
         state.last_value = res.is_true();
 
@@ -136,11 +154,11 @@ fn run_chain(
         if !res.is_true() {
             // Flush pending take that was never paired with jump
             flush_pending_take(state, result);
-            return false;
+            return Ok(false);
         }
     }
     flush_pending_take(state, result);
-    true
+    Ok(true)
 }
 
 /// Evaluate one expression. Returns (result, tokens_consumed_beyond_the_expression_itself).
@@ -152,7 +170,8 @@ fn eval_expr(
     ctx: &ExecutionContext,
     state: &mut ChainState,
     result: &mut ChessemblyResult,
-) -> (ExprResult, usize) {
+    remaining_steps: &mut u64,
+) -> Result<(ExprResult, usize), ExecutionLimitExceeded> {
     // Clear take pending state before processing a non-take/jump expression
     // (unless the current expr is `jump`)
     match expr {
@@ -164,12 +183,12 @@ fn eval_expr(
         }
     }
 
-    match expr {
+    Ok(match expr {
         // ── Movement expressions ─────────────────────────────────────────────
         Expr::Move(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) || !ctx.board.is_empty(&target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             // Empty square: activate as movement, advance anchor
             activate_movement(target, state, result);
@@ -180,7 +199,7 @@ fn eval_expr(
         Expr::Take(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             let occupant = ctx.board.get_piece_at(&target);
             match occupant {
@@ -213,7 +232,7 @@ fn eval_expr(
         Expr::TakeMove(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             let occupant = ctx.board.get_piece_at(&target);
             match occupant {
@@ -242,7 +261,7 @@ fn eval_expr(
         Expr::Catch(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             let occupant = ctx.board.get_piece_at(&target);
             match occupant {
@@ -272,7 +291,7 @@ fn eval_expr(
             let jump_target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !state.last_was_take || state.pending_take_square.is_none() {
                 // No preceding take: jump alone is false
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             // Clear pending take (it should NOT be activated on its own)
             state.pending_take_square = None;
@@ -280,7 +299,7 @@ fn eval_expr(
 
             // Jump is like `move`: only activates empty squares
             if !ctx.board.is_in_bounds(&jump_target) || !ctx.board.is_empty(&jump_target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             activate_movement(jump_target, state, result);
             state.anchor = jump_target;
@@ -290,7 +309,7 @@ fn eval_expr(
         Expr::Shift(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             let occupant = ctx.board.get_piece_at(&target);
             match occupant {
@@ -320,7 +339,7 @@ fn eval_expr(
         Expr::Anchor(dx, dy) => {
             let new_anchor = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&new_anchor) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             state.anchor = new_anchor;
             (ExprResult::True, 1)
@@ -329,7 +348,7 @@ fn eval_expr(
         Expr::AbsoluteX(n) => {
             state.anchor = Square::new(*n, state.anchor.rank);
             if !ctx.board.is_in_bounds(&state.anchor) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             (ExprResult::True, 1)
         }
@@ -337,7 +356,7 @@ fn eval_expr(
         Expr::AbsoluteY(n) => {
             state.anchor = Square::new(state.anchor.file, *n);
             if !ctx.board.is_in_bounds(&state.anchor) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             (ExprResult::True, 1)
         }
@@ -356,7 +375,7 @@ fn eval_expr(
         Expr::Peek(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
 
             state.anchor = target;
@@ -370,7 +389,7 @@ fn eval_expr(
         Expr::Enemy(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             match ctx.board.get_piece_at(&target) {
                 Some(pid) if is_enemy_piece(pid, &ctx.player, ctx.all_pieces) => {
@@ -383,7 +402,7 @@ fn eval_expr(
         Expr::Friendly(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             match ctx.board.get_piece_at(&target) {
                 Some(pid) if !is_enemy_piece(pid, &ctx.player, ctx.all_pieces) => {
@@ -396,7 +415,7 @@ fn eval_expr(
         Expr::PieceOn(piece_name, dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             if !ctx.board.is_in_bounds(&target) {
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             let found = ctx
                 .board
@@ -502,7 +521,7 @@ fn eval_expr(
             // `repeat(n)`: if last value is true, jump back n expressions in the chain
             if !state.last_value {
                 // repeat propagates last value (which is false here) but doesn't terminate chain
-                return (ExprResult::False, 1);
+                return Ok((ExprResult::False, 1));
             }
             // Jump back n positions from the current position
             // `i` is the index of `repeat` itself, so the last expression is at `i - 1`.
@@ -517,7 +536,7 @@ fn eval_expr(
             // Run the sub-chain repeatedly until it returns false
             loop {
                 let prev_anchor = state.anchor;
-                let continued = run_chain(sub_chain, 0, ctx, state, result);
+                let continued = run_chain(sub_chain, 0, ctx, state, result, remaining_steps)?;
                 if !continued {
                     break;
                 }
@@ -549,7 +568,7 @@ fn eval_expr(
                     loop {
                         let prev_anchor = state.anchor;
                         let prev_bits = state.bits;
-                        let continued = run_chain(body, 0, ctx, state, result);
+                        let continued = run_chain(body, 0, ctx, state, result, remaining_steps)?;
                         if !continued {
                             break;
                         }
@@ -577,7 +596,7 @@ fn eval_expr(
                 if let Some(label_idx) = find_label(chain, *n) {
                     // Skip to label position (labels are handled inline)
                     let skip = label_idx.saturating_sub(i);
-                    return (ExprResult::True, skip + 1);
+                    return Ok((ExprResult::True, skip + 1));
                 }
             }
             (ExprResult::True, 1)
@@ -588,7 +607,7 @@ fn eval_expr(
             if !state.last_value {
                 if let Some(label_idx) = find_label(chain, *n) {
                     let skip = label_idx.saturating_sub(i);
-                    return (ExprResult::True, skip + 1);
+                    return Ok((ExprResult::True, skip + 1));
                 }
             }
             (ExprResult::True, 1)
@@ -649,7 +668,7 @@ fn eval_expr(
         Expr::Block(inner) => {
             let saved_anchor = state.anchor;
             // Run inner expressions; ignore false termination (isolated)
-            run_chain(inner, 0, ctx, state, result);
+            run_chain(inner, 0, ctx, state, result, remaining_steps)?;
             // Restore anchor regardless of outcome
             state.anchor = saved_anchor;
             // Block itself returns the last value of its interior (as per spec)
@@ -657,7 +676,7 @@ fn eval_expr(
         }
 
         Expr::End => (ExprResult::False, 1),
-    }
+    })
 }
 
 // ─── Activation helpers ──────────────────────────────────────────────────────
@@ -685,6 +704,15 @@ fn record_effect(sq: Square, state: &ChainState, result: &mut ChessemblyResult) 
                     key: key.clone(),
                     value: *value,
                 }),
+                transition_to: state.transition_tag.clone(),
+            },
+        );
+    } else if let Some(target_type_id) = state.transition_tag.as_ref() {
+        result.effects.insert(
+            sq.to_id(),
+            ChessemblyActionEffect {
+                set_state: None,
+                transition_to: Some(target_type_id.clone()),
             },
         );
     }

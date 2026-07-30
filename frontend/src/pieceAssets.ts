@@ -63,6 +63,7 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
 }
 
 export function pieceAsset(typeId: string, owner: PlayerId): string | undefined {
+  if (typeId.startsWith('data:image/')) return typeId
   return PIECE_ASSETS[typeId]?.[owner]
 }
 

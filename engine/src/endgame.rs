@@ -155,6 +155,22 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         }
     }
 
+    if let Some(transition) = &action.effects.piece_type_transition {
+        let target_definition = game_state
+            .piece_definitions
+            .get(&transition.target_type_id)
+            .cloned();
+        if transition.piece_id == action.piece_id {
+            if let (Some(piece), Some(definition)) = (
+                game_state.pieces.get_mut(&transition.piece_id),
+                target_definition.as_ref(),
+            ) {
+                piece.type_id = transition.target_type_id.clone();
+                piece.initialize_from_definition(definition);
+            }
+        }
+    }
+
     // A new pawn double-step replaces the previous right. Otherwise, only the
     // player who can claim en passant consumes that right by taking another action.
     if let Some(target) = en_passant_target_for_action(&game_state, &action) {

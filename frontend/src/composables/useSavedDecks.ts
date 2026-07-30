@@ -11,7 +11,10 @@ function readStorage(): SavedDeck[] {
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(isSavedDeck)
+    return parsed.filter(isSavedDeck).map(deck => ({
+      ...deck,
+      customPieces: Array.isArray(deck.customPieces) ? deck.customPieces : [],
+    }))
   } catch {
     return []
   }
@@ -61,6 +64,7 @@ export function createNewSavedDeck(boardSize = 8): SavedDeck {
     pocket: baseDeck.pocket,
     createdAt: now,
     updatedAt: now,
+    customPieces: [],
   }
 }
 

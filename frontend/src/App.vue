@@ -41,6 +41,10 @@
       :initial-board-size="pieceLabInitial.boardSize"
       @back="closePieceLab"
     />
+    <CustomPieceWorkshop
+      v-else-if="view === 'custom-piece-workshop'"
+      @back="navigate('home')"
+    />
     <DeckSelect
       v-else-if="view === 'single-select'"
       mode="single"
@@ -83,6 +87,7 @@ import DeckEditor from './views/DeckEditor.vue'
 import DeckSelect from './views/DeckSelect.vue'
 import MultiplayerLobby from './views/MultiplayerLobby.vue'
 import PieceLab from './views/PieceLab.vue'
+import CustomPieceWorkshop from './views/CustomPieceWorkshop.vue'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
 import { useSavedDecks } from './composables/useSavedDecks'
 import { serializeNeutralDeck } from './composables/useDeckSerialization'
