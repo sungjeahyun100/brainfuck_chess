@@ -2,23 +2,26 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildCustomPieceInput,
   customPieceDraftSnapshot,
+  newSimpleCustomPieceDraft,
   newCustomPieceScript,
   parseCustomPiecePackage,
   serializeCustomPiecePackage,
+  simpleDraftFromInput,
   testPiecesFromServerState,
   validateCustomPieceDraft,
 } from './useCustomPieceDraft.ts'
-import type { CustomPieceInput } from '../types/customPiece.ts'
+import type { CustomPieceInput, SimpleCustomPieceDraft } from '../types/customPiece.ts'
 import type { GameState } from '../types/game.ts'
 
-const draft = (): CustomPieceInput => ({
+const draft = (): SimpleCustomPieceDraft => ({
   name: 'Hero',
   description: '',
   score: 5,
   image: { kind: 'built_in', asset_key: 'knight' },
-  raw_script: '{}',
-  exposed_piece_key: 'hero',
+  movementCode: 'move(1, 0);',
+  abilities: [],
 })
 
 test('required fields and score boundaries are validated locally', () => {
@@ -26,15 +29,31 @@ test('required fields and score boundaries are validated locally', () => {
   assert.match(validateCustomPieceDraft({ ...draft(), name: '' }), /이름/)
   assert.match(validateCustomPieceDraft({ ...draft(), score: 0 }), /1–30/)
   assert.match(validateCustomPieceDraft({ ...draft(), score: 31 }), /1–30/)
-  assert.match(validateCustomPieceDraft({ ...draft(), raw_script: '' }), /패키지 JSON/)
-  assert.match(validateCustomPieceDraft({ ...draft(), raw_script: 'move(1, 0);' }), /JSON/)
+  assert.match(validateCustomPieceDraft({ ...draft(), movementCode: '' }), /움직임 코드/)
 })
 
-test('new custom piece script is a valid package with a matching exposed definition', () => {
-  const script = JSON.parse(newCustomPieceScript())
+test('a simple draft builds the existing package protocol with system-owned fields', () => {
+  const source = draft()
+  const input = buildCustomPieceInput(source)
+  const script = JSON.parse(input.raw_script)
   assert.equal(script.format, 'brainfuck-chess-piece-set-v1')
-  assert.equal(script.definitions[0].id, 'hero')
-  assert.equal(validateCustomPieceDraft({ ...draft(), raw_script: newCustomPieceScript() }), '')
+  assert.equal(script.definitions[0].id, 'main')
+  assert.equal(script.definitions[0].name, 'Hero')
+  assert.equal(script.definitions[0].score, 5)
+  assert.equal(script.definitions[0].chessembly_code, 'move(1, 0);')
+  assert.equal(input.exposed_piece_key, 'main')
+  assert.equal(validateCustomPieceDraft(draft()), '')
+  assert.deepEqual(simpleDraftFromInput(input), source)
+  assert.equal(JSON.stringify(input).includes('movementCode'), false)
+  assert.notEqual(input.image, source.image)
+})
+
+test('new custom piece defaults only ask for user-facing fields', () => {
+  const simple = newSimpleCustomPieceDraft()
+  assert.equal(simple.name, '')
+  assert.equal(simple.abilities.length, 0)
+  assert.match(simple.movementCode, /move/)
+  assert.equal(JSON.parse(newCustomPieceScript()).definitions[0].id, 'main')
 })
 
 test('the structured editor package round-trips without changing the server envelope', () => {
@@ -67,7 +86,7 @@ test('draft snapshots make validation and dirty state invalidation explicit', ()
   const original = draft()
   const validatedSnapshot = customPieceDraftSnapshot(original)
   assert.equal(customPieceDraftSnapshot(original), validatedSnapshot)
-  original.raw_script = '{"changed":true}'
+  original.movementCode = 'move(0, 2);'
   assert.notEqual(customPieceDraftSnapshot(original), validatedSnapshot)
 })
 

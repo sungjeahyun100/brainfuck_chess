@@ -1,4 +1,8 @@
-import type { CustomPieceInput, CustomPieceTestPiece } from '../types/customPiece'
+import type {
+  CustomPieceInput,
+  CustomPieceTestPiece,
+  SimpleCustomPieceDraft,
+} from '../types/customPiece'
 import type { GameState, PieceDefinition } from '../types/game'
 
 export interface CustomPiecePackageDocument {
@@ -6,15 +10,13 @@ export interface CustomPiecePackageDocument {
   definitions: PieceDefinition[]
 }
 
-export function newCustomPieceDefinition(id = 'hero'): PieceDefinition {
+export function newCustomPieceDefinition(id = 'main'): PieceDefinition {
   return {
     id,
-    name: id === 'hero' ? 'Hero' : id,
+    name: id === 'main' ? '' : id,
     score: 1,
-    chessembly_code: 'move(1, 0);',
+    chessembly_code: 'move(0, 1);\ntake(1, 1);\ntake(-1, 1);',
     chessembly_version: '1.0',
-    dialect: 'classic',
-    extensions: [],
     is_king: false,
     can_capture_on_drop: false,
     promotion_pool: [],
@@ -30,6 +32,82 @@ export function newCustomPieceScript(): string {
     format: 'brainfuck-chess-piece-set-v1',
     definitions: [newCustomPieceDefinition()],
   })
+}
+
+export function newSimpleCustomPieceDraft(): SimpleCustomPieceDraft {
+  return {
+    name: '',
+    description: '',
+    score: 1,
+    image: { kind: 'built_in', asset_key: 'knight' },
+    movementCode: 'move(0, 1);\ntake(1, 1);\ntake(-1, 1);',
+    abilities: [],
+  }
+}
+
+/** Converts user-facing fields into the existing immutable package protocol. */
+export function buildCustomPieceInput(draft: SimpleCustomPieceDraft): CustomPieceInput {
+  const definition = newCustomPieceDefinition('main')
+  definition.name = draft.name.trim()
+  definition.score = draft.score
+  definition.chessembly_code = draft.movementCode
+  definition.state_schema = draft.abilities.map((ability, index) => ({
+    key: safeStateKey(ability.name, index),
+    default_value: ability.initialValue,
+  }))
+  return {
+    name: draft.name,
+    description: draft.description,
+    score: draft.score,
+    image: { ...draft.image },
+    raw_script: serializeCustomPiecePackage({
+      format: 'brainfuck-chess-piece-set-v1',
+      definitions: [definition],
+    }),
+    exposed_piece_key: 'main',
+  }
+}
+
+/**
+ * Existing advanced packages are deliberately not reinterpreted. Callers can
+ * open them read-only instead of silently changing their meaning.
+ */
+export function simpleDraftFromInput(input: CustomPieceInput): SimpleCustomPieceDraft | null {
+  let document: CustomPiecePackageDocument
+  try {
+    document = parseCustomPiecePackage(input.raw_script)
+  } catch {
+    return null
+  }
+  if (document.definitions.length !== 1) return null
+  const definition = document.definitions[0]
+  if (
+    definition.id !== input.exposed_piece_key
+    || definition.move_layers.length > 0
+    || definition.move_options.length > 0
+    || (definition.promotion_pool?.length ?? 0) > 0
+    || definition.promotion
+    || (definition.extensions?.length ?? 0) > 0
+    || definition.visual.variants.length > 0
+    || definition.state_schema.some(state => typeof state.default_value !== 'number')
+  ) return null
+  return {
+    name: input.name,
+    description: input.description,
+    score: input.score,
+    image: input.image,
+    movementCode: definition.chessembly_code,
+    abilities: definition.state_schema.map(state => ({
+      kind: 'remember_value',
+      name: state.key,
+      initialValue: state.default_value as number,
+    })),
+  }
+}
+
+function safeStateKey(name: string, index: number): string {
+  const normalized = name.trim().replace(/[^A-Za-z0-9_-]/g, '-').replace(/-+/g, '-')
+  return normalized && /^[A-Za-z_]/.test(normalized) ? normalized : `memory-${index + 1}`
 }
 
 export function parseCustomPiecePackage(rawScript: string): CustomPiecePackageDocument {
@@ -77,20 +155,15 @@ function normalizeCustomPieceDefinition(value: PieceDefinition, index: number): 
   }
 }
 
-export function customPieceDraftSnapshot(draft: CustomPieceInput): string {
+export function customPieceDraftSnapshot(draft: SimpleCustomPieceDraft | CustomPieceInput): string {
   return JSON.stringify(draft)
 }
 
-export function validateCustomPieceDraft(draft: CustomPieceInput): string {
+export function validateCustomPieceDraft(draft: SimpleCustomPieceDraft): string {
   if (!draft.name.trim() || draft.name.trim().length > 80) return '이름은 1–80자여야 합니다.'
   if (!Number.isInteger(draft.score) || draft.score < 1 || draft.score > 30) return '점수는 1–30 사이의 정수여야 합니다.'
-  if (!draft.raw_script.trim()) return '커스텀 기물 패키지 JSON을 입력해 주세요.'
-  try {
-    JSON.parse(draft.raw_script)
-  } catch {
-    return '코드는 JSON 패키지 형식이어야 합니다. 체섬블리 코드는 definitions[].chessembly_code에 입력해 주세요.'
-  }
-  if (!/^[A-Za-z0-9_-]+$/.test(draft.exposed_piece_key)) return '대표 기물 식별자를 입력해 주세요.'
+  if (!draft.movementCode.trim()) return '움직임 코드를 입력해 주세요.'
+  if (draft.abilities.some(ability => !ability.name.trim())) return '기억할 값의 이름을 입력해 주세요.'
   return ''
 }
 

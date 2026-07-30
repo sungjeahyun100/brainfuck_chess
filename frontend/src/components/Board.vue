@@ -19,6 +19,12 @@
         @dragover.prevent
         @drop.prevent="onNativeDrop($event, sq)"
       >
+        <span v-if="showCoordinates && isFileLabelSquare(sq)" class="board-coordinate file-coordinate">
+          {{ fileLabel(sq.file) }}
+        </span>
+        <span v-if="showCoordinates && isRankLabelSquare(sq)" class="board-coordinate rank-coordinate">
+          {{ sq.rank + 1 }}
+        </span>
         <span v-if="legalMarker(sq)" class="legal-move-dot" :class="legalMarker(sq)" />
         <span v-if="sq.piece" class="piece" :class="`owner-${sq.piece.owner}`">
           <img
@@ -114,6 +120,7 @@ const props = defineProps<{
   lastMove?: { from: Square; to: Square } | null
   orientation?: PlayerId
   abilityMode?: boolean
+  showCoordinates?: boolean
 }>()
 
 function pieceImage(piece: Piece): string | undefined {
@@ -212,6 +219,22 @@ const renderedHighlights = computed(() => highlightedSquares.value.flatMap((squa
 
 function squareIdFromSquare(square: Square) {
   return squareId(square.file, square.rank)
+}
+
+function isFileLabelSquare(square: SquareInfo) {
+  return props.orientation === 'black'
+    ? square.rank === props.board.size - 1
+    : square.rank === 0
+}
+
+function isRankLabelSquare(square: SquareInfo) {
+  return props.orientation === 'black'
+    ? square.file === props.board.size - 1
+    : square.file === 0
+}
+
+function fileLabel(file: number) {
+  return String.fromCharCode('a'.charCodeAt(0) + file)
 }
 
 function squareClasses(sq: SquareInfo) {
@@ -584,6 +607,29 @@ function pieceAlt(piece: Piece): string {
 .square.light { background: #f0d9b5; }
 .square.dark  { background: #b58863; }
 .square.last-move { background: #f2d34f; }
+
+.board-coordinate {
+  position: absolute;
+  z-index: 1;
+  font-size: clamp(8px, 1.2vw, 13px);
+  font-weight: 750;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0.78;
+}
+
+.file-coordinate {
+  right: 3px;
+  bottom: 2px;
+}
+
+.rank-coordinate {
+  left: 3px;
+  top: 2px;
+}
+
+.square.light .board-coordinate { color: #8b6545; }
+.square.dark .board-coordinate { color: #f0d9b5; }
 
 .square.selected::before,
 .square.drag-over::before {

@@ -135,6 +135,13 @@ export const customPieceApi = {
     action: TurnAction,
   ) => request<CustomPieceTestResult>(`${BASE}/test/actions`, {
     method: 'POST',
-    body: JSON.stringify({ definition, board, action }),
+    body: JSON.stringify({
+      definition,
+      board,
+      action: {
+        ...action,
+        type: 'from' in action ? 'move' : 'drop',
+      },
+    }),
   }),
 }

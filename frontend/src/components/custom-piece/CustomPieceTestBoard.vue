@@ -6,6 +6,7 @@
         <p class="cp-muted">배치는 로컬 초안이며, 행마와 행동 적용은 서버 엔진 결과만 사용합니다.</p>
       </div>
       <div class="cp-actions">
+        <button type="button" class="btn-secondary" @click="flipBoard">보드 돌리기</button>
         <button type="button" class="btn-secondary" @click="clearSelection">선택 해제</button>
         <button type="button" class="btn-secondary" @click="reset">초기화</button>
       </div>
@@ -41,50 +42,53 @@
       <div><dt>현재 차례</dt><dd>{{ result?.state.current_player === 'white' ? '백' : '흑' }}</dd></div>
     </dl>
 
-    <div class="cp-board" :style="{ '--board-size': boardSize }" aria-label="커스텀 기물 테스트 보드">
-      <button
-        v-for="square in squares"
-        :key="`${square.file}-${square.rank}`"
-        type="button"
-        class="cp-square"
-        :class="{
-          selected: pieceAt(square)?.id === selectedPieceId,
-          legal: isLegal(square),
-          attacked: isAttacked(square),
-        }"
-        :aria-label="`${square.file + 1}, ${square.rank + 1}`"
-        @click="selectSquare(square)"
-      >
-        <span v-if="pieceAt(square)" class="cp-board-piece">
-          {{ pieceAt(square)!.owner === 'white' ? '○' : '●' }}{{ shortKey(pieceAt(square)!.piece_key) }}
-        </span>
-      </button>
-    </div>
-    <p class="cp-muted">가능 행동은 테두리, 공격 범위는 점선으로 표시됩니다. 가능한 행동 조회만으로 보드 상태는 바뀌지 않습니다.</p>
+    <PlayBoard
+      :board="displayBoard"
+      :pieces="displayPieces"
+      :definitions="displayDefinitions"
+      :selected-piece-id="selectedPieceId"
+      :movable-squares="movableSquares"
+      :attack-squares="attackSquares"
+      :drop-squares="dropSquares"
+      :orientation="orientation"
+      show-coordinates
+      @square-click="selectSquare"
+      @piece-drag-start="selectPiece"
+      @square-drop="dropPiece"
+    />
+    <p class="cp-muted">실제 플레이 보드와 같은 표시를 사용합니다. 가능한 행동 조회만으로 보드 상태는 바뀌지 않습니다.</p>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { customPieceApi } from '../../api/customPieceApi'
-import { testPiecesFromServerState } from '../../composables/useCustomPieceDraft'
+import PlayBoard from '../Board.vue'
+import { parseCustomPiecePackage, testPiecesFromServerState } from '../../composables/useCustomPieceDraft'
 import type {
   CustomPieceInput,
   CustomPieceTestBoard,
   CustomPieceTestPiece,
   CustomPieceTestResult,
 } from '../../types/customPiece'
-import type { PlayerId, Square, TurnAction } from '../../types/game'
+import type {
+  Board,
+  Piece,
+  PieceDefinition,
+  PlayerId,
+  Square,
+  TurnAction,
+} from '../../types/game'
 
 const props = defineProps<{
   draft: CustomPieceInput
   pieceKeys: string[]
-  enabled: boolean
 }>()
 
 const builtIns = ['pawn', 'rook', 'bishop', 'knight', 'queen', 'king']
 const boardSize = ref(8)
 const currentPlayer = ref<PlayerId>('white')
+const orientation = ref<PlayerId>('white')
 const placementKey = ref('')
 const placementOwner = ref<PlayerId>('white')
 const pieces = ref<CustomPieceTestPiece[]>([])
@@ -93,14 +97,50 @@ const result = ref<CustomPieceTestResult | null>(null)
 const status = ref('')
 const error = ref('')
 let nextId = 1
+let pendingOptions: Promise<boolean> | null = null
+let pendingOptionsPieceId: string | null = null
 
-const squares = computed(() => Array.from({ length: boardSize.value ** 2 }, (_, index) => ({
-  file: index % boardSize.value,
-  rank: Math.floor(index / boardSize.value),
-})))
 const selectedServerPiece = computed(() =>
   selectedPieceId.value ? result.value?.state.pieces[selectedPieceId.value] : undefined,
 )
+const displayBoard = computed<Board>(() => {
+  if (result.value) return result.value.state.board
+  const squares: Record<string, string | null> = {}
+  for (let rank = 0; rank < boardSize.value; rank += 1) {
+    for (let file = 0; file < boardSize.value; file += 1) {
+      squares[`${file}_${rank}`] = null
+    }
+  }
+  for (const piece of pieces.value) squares[`${piece.square.file}_${piece.square.rank}`] = piece.id
+  return { size: boardSize.value, squares }
+})
+const displayPieces = computed<Record<string, Piece>>(() => {
+  if (result.value) return result.value.state.pieces
+  return Object.fromEntries(pieces.value.map(piece => [piece.id, {
+    id: piece.id,
+    owner: piece.owner,
+    type_id: piece.piece_key,
+    current_square: piece.square,
+    in_pocket: false,
+    captured: false,
+    has_moved: false,
+    state: piece.state ?? {},
+    move_option_cooldowns: {},
+  }]))
+})
+const displayDefinitions = computed<Record<string, PieceDefinition>>(() => {
+  if (result.value) return result.value.state.piece_definitions
+  try {
+    return Object.fromEntries(parseCustomPiecePackage(props.draft.raw_script).definitions.map(
+      definition => [definition.id, definition],
+    ))
+  } catch {
+    return {}
+  }
+})
+const movableSquares = computed(() => result.value?.legal_moves.map(move => move.to) ?? [])
+const attackSquares = computed(() => result.value?.attacks ?? [])
+const dropSquares = computed(() => result.value?.legal_drops.map(drop => drop.to) ?? [])
 
 watch(() => props.pieceKeys, (keys) => {
   if (!placementKey.value || (!keys.includes(placementKey.value) && !builtIns.includes(placementKey.value))) {
@@ -119,10 +159,6 @@ function sameSquare(left: Square, right: Square) {
 function isLegal(square: Square) {
   return Boolean(result.value?.legal_moves.some(move => sameSquare(move.to, square))
     || result.value?.legal_drops.some(drop => sameSquare(drop.to, square)))
-}
-
-function isAttacked(square: Square) {
-  return Boolean(result.value?.attacks.some(attack => sameSquare(attack, square)))
 }
 
 async function selectSquare(square: Square) {
@@ -154,6 +190,24 @@ async function selectSquare(square: Square) {
   status.value = `${placementKey.value} 배치됨`
 }
 
+async function selectPiece(pieceId: string) {
+  const piece = pieces.value.find(candidate => candidate.id === pieceId)
+  if (!piece) return
+  selectedPieceId.value = pieceId
+  await loadOptions(pieceId)
+}
+
+async function dropPiece(square: Square | null, pieceId: string) {
+  if (!square) return
+  selectedPieceId.value = pieceId
+  if (!isLegal(square) && !await loadOptions(pieceId)) return
+  if (!isLegal(square)) {
+    error.value = '선택한 기물이 행마법상 이동할 수 없는 칸입니다.'
+    return
+  }
+  await selectSquare(square)
+}
+
 function board(): CustomPieceTestBoard {
   return {
     board_size: boardSize.value,
@@ -162,19 +216,30 @@ function board(): CustomPieceTestBoard {
   }
 }
 
-async function loadOptions(pieceId: string) {
-  if (!props.enabled) {
-    error.value = '현재 코드 검증을 먼저 완료하세요.'
-    return
-  }
-  status.value = '서버에서 가능한 행동을 계산하는 중…'
-  try {
-    result.value = await customPieceApi.testOptions(props.draft, board(), pieceId)
-    status.value = `가능한 이동 ${result.value.legal_moves.length}개 · 공격 칸 ${result.value.attacks.length}개`
-  } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : '행마 계산에 실패했습니다.'
-    status.value = ''
-  }
+function loadOptions(pieceId: string): Promise<boolean> {
+  if (pendingOptions && pendingOptionsPieceId === pieceId) return pendingOptions
+
+  pendingOptionsPieceId = pieceId
+  const request = (async () => {
+    status.value = '서버에서 가능한 행동을 계산하는 중…'
+    try {
+      result.value = await customPieceApi.testOptions(props.draft, board(), pieceId)
+      status.value = `가능한 이동 ${result.value.legal_moves.length}개 · 공격 칸 ${result.value.attacks.length}개`
+      return true
+    } catch (caught) {
+      error.value = caught instanceof Error ? caught.message : '행마 계산에 실패했습니다.'
+      status.value = ''
+      return false
+    }
+  })()
+  pendingOptions = request
+  void request.finally(() => {
+    if (pendingOptions === request) {
+      pendingOptions = null
+      pendingOptionsPieceId = null
+    }
+  })
+  return request
 }
 
 async function applyAction(action: TurnAction) {
@@ -217,7 +282,8 @@ function clearSelection() {
   status.value = '선택을 해제했습니다.'
 }
 
-function shortKey(key: string) {
-  return key.slice(0, 3)
+function flipBoard() {
+  orientation.value = orientation.value === 'white' ? 'black' : 'white'
 }
+
 </script>

@@ -43,30 +43,40 @@
       <div class="cp-editor-heading">
         <button class="btn-secondary" type="button" @click="closeEditor">← 목록</button>
         <div><h2>{{ editingId ? '기물 편집' : duplicateSource ? '기물 복제' : '새 기물' }}</h2><p v-if="dirty" class="cp-stale">저장되지 않은 변경이 있습니다.</p></div>
-        <button class="btn-start" type="button" :disabled="saving" @click="save">
+        <button class="btn-start" type="button" :disabled="saving || Boolean(advancedInput)" @click="save">
           {{ saving ? '저장 중…' : '저장' }}
         </button>
       </div>
 
       <p v-if="editorError" class="error cp-banner" role="alert">{{ editorError }}</p>
+      <section v-if="advancedInput" class="cp-card">
+        <h3>고급 기물 · 읽기 전용</h3>
+        <p>
+          이 기물은 여러 형태 또는 고급 내부 설정을 사용하여 단순 제작 화면에서 의미를
+          보존하며 편집할 수 없습니다. 기존 저장 데이터와 게임 참조는 그대로 유지됩니다.
+        </p>
+        <p class="cp-muted">이름: {{ advancedInput.name }} · 점수: {{ advancedInput.score }}</p>
+      </section>
+
+      <template v-else>
       <div class="cp-editor-grid">
         <section class="cp-card cp-form">
           <h3>기본 정보</h3>
-          <label>이름
+          <label>기물 이름
             <input v-model="draft.name" maxlength="80" required />
-            <small class="cp-muted">목록과 덱에 표시되며 대표 기물 정의의 이름에도 자동 반영됩니다.</small>
+            <small class="cp-muted">목록, 덱, 게임 보드에 표시되는 이름입니다.</small>
           </label>
-          <label>설명
+          <label>기물 설명 <span class="cp-optional">선택</span>
             <textarea v-model="draft.description" maxlength="2000" rows="3" />
             <small class="cp-muted">기물의 특징과 사용 방법을 설명합니다. 게임 동작에는 영향을 주지 않습니다.</small>
           </label>
-          <label>기물 점수 (1–30)
+          <label>점수 (1–30)
             <input v-model.number="draft.score" type="number" min="1" max="30" required />
-            <small class="cp-muted">덱 구성 비용이며 대표 기물 정의의 점수에도 자동 반영됩니다.</small>
+            <small class="cp-muted">덱에 이 기물을 넣을 때 사용하는 점수입니다.</small>
           </label>
 
           <fieldset>
-            <legend>기본 제공 이미지</legend>
+            <legend>기물 이미지 · 기본 이미지 선택</legend>
             <div class="cp-image-options">
               <button v-for="asset in builtInAssets" :key="asset" type="button" :class="{ active: isBuiltIn(asset) }" @click="selectBuiltIn(asset)">
                 <img :src="pieceAsset(asset, 'white')" :alt="asset" /><span>{{ asset }}</span>
@@ -75,7 +85,7 @@
           </fieldset>
           <label>이미지 업로드 (SVG, PNG, JPG/JPEG · 최대 512KiB)
             <input type="file" accept=".svg,.png,.jpg,.jpeg,image/svg+xml,image/png,image/jpeg" :disabled="uploading" @change="uploadFile" />
-            <small class="cp-muted">기본 이미지 대신 목록과 게임 보드에서 사용할 그림입니다.</small>
+            <small class="cp-muted">게임 보드와 덱 편집기에 표시될 기물 이미지입니다.</small>
           </label>
           <p v-if="uploading" class="cp-status">서버에서 이미지를 검사하는 중…</p>
           <div class="cp-preview">
@@ -105,10 +115,10 @@
       <CustomPiecePackageEditor :draft="draft" />
 
       <CustomPieceTestBoard
-        :draft="draft"
+        :draft="engineDraft"
         :piece-keys="definitionKeys"
-        :enabled="Boolean(validation?.valid && validationCurrent)"
       />
+      </template>
     </template>
   </main>
 </template>
@@ -119,25 +129,26 @@ import { customPieceApi, CustomPieceApiError } from '../api/customPieceApi'
 import CustomPiecePackageEditor from '../components/custom-piece/CustomPiecePackageEditor.vue'
 import CustomPieceTestBoard from '../components/custom-piece/CustomPieceTestBoard.vue'
 import { pieceAsset } from '../pieceAssets'
-import { customPieceDraftSnapshot, newCustomPieceScript, validateCustomPieceDraft } from '../composables/useCustomPieceDraft'
+import {
+  buildCustomPieceInput,
+  customPieceDraftSnapshot,
+  newSimpleCustomPieceDraft,
+  parseCustomPiecePackage,
+  simpleDraftFromInput,
+  validateCustomPieceDraft,
+} from '../composables/useCustomPieceDraft'
 import type {
   BuiltInPieceAsset,
   CustomPieceImage,
   CustomPieceInput,
   CustomPieceRecord,
   CustomPieceValidation,
+  SimpleCustomPieceDraft,
 } from '../types/customPiece'
 
 const emit = defineEmits<{ back: [] }>()
 const builtInAssets: BuiltInPieceAsset[] = ['pawn', 'rook', 'bishop', 'knight', 'queen', 'king']
-const emptyDraft = (): CustomPieceInput => ({
-  name: '',
-  description: '',
-  score: 1,
-  image: { kind: 'built_in', asset_key: 'knight' },
-  raw_script: newCustomPieceScript(),
-  exposed_piece_key: 'hero',
-})
+const emptyDraft = newSimpleCustomPieceDraft
 
 const mode = ref<'library' | 'editor'>('library')
 const items = ref<CustomPieceRecord[]>([])
@@ -155,17 +166,23 @@ const validationSnapshot = ref('')
 const validation = ref<CustomPieceValidation | null>(null)
 const validationTime = ref('')
 const uploadedPreview = ref('')
-const draft = reactive<CustomPieceInput>(emptyDraft())
+const advancedInput = ref<CustomPieceInput | null>(null)
+const draft = reactive<SimpleCustomPieceDraft>(emptyDraft())
 
 const snapshot = computed(() => customPieceDraftSnapshot(draft))
+const engineDraft = computed(() => buildCustomPieceInput(draft))
 const dirty = computed(() => mode.value === 'editor' && snapshot.value !== savedSnapshot.value)
 const validationCurrent = computed(() => validationSnapshot.value === snapshot.value)
-const definitionKeys = computed(() => validation.value?.preview_definitions.map(definition =>
-  definition.id.includes(':') ? definition.id.slice(definition.id.lastIndexOf(':') + 1) : definition.id,
-) ?? [])
+const definitionKeys = computed(() => {
+  const definitions = validation.value?.preview_definitions
+    ?? parseCustomPiecePackage(engineDraft.value.raw_script).definitions
+  return definitions.map(definition =>
+    definition.id.includes(':') ? definition.id.slice(definition.id.lastIndexOf(':') + 1) : definition.id,
+  )
+})
 const previewUrl = computed(() => uploadedPreview.value || imageUrl(draft.image))
 
-watch(() => draft.raw_script, () => { editorError.value = '' })
+watch(() => draft.movementCode, () => { editorError.value = '' })
 
 onMounted(() => {
   window.addEventListener('beforeunload', warnBeforeUnload)
@@ -195,18 +212,24 @@ async function loadList() {
 }
 
 function openDraft(input: CustomPieceInput, id: string | null, version: number | null, duplicated = false) {
-  Object.assign(draft, structuredClone(input))
+  const simple = simpleDraftFromInput(input)
+  advancedInput.value = simple ? null : structuredClone(input)
+  Object.assign(draft, structuredClone(simple ?? emptyDraft()))
   editingId.value = id
   expectedVersion.value = version
   duplicateSource.value = duplicated
   validation.value = null
   validationSnapshot.value = ''
   editorError.value = ''
-  savedSnapshot.value = duplicated ? '' : JSON.stringify(draft)
+  savedSnapshot.value = duplicated && simple ? '' : snapshot.value
   mode.value = 'editor'
 }
 
-function newPiece() { openDraft(emptyDraft(), null, null) }
+function newPiece() {
+  advancedInput.value = null
+  Object.assign(draft, emptyDraft())
+  openDraft(buildCustomPieceInput(draft), null, null)
+}
 function duplicatePiece(piece: CustomPieceRecord) { openDraft(toInput(piece), null, null, true) }
 async function editPiece(id: string) {
   editorError.value = ''
@@ -223,7 +246,7 @@ async function validateCode() {
   if (editorError.value) return
   validating.value = true
   try {
-    validation.value = await customPieceApi.validate({ ...draft })
+    validation.value = await customPieceApi.validate(engineDraft.value)
     validationSnapshot.value = snapshot.value
     validationTime.value = new Date().toLocaleTimeString('ko-KR')
     if (!validation.value.valid) editorError.value = '코드 검증 오류를 확인해 주세요.'
@@ -235,19 +258,19 @@ async function validateCode() {
 }
 
 async function save() {
-  if (saving.value) return
+  if (saving.value || advancedInput.value) return
   editorError.value = validateCustomPieceDraft(draft)
   if (editorError.value) return
   saving.value = true
   try {
     const saved = editingId.value && expectedVersion.value
-      ? await customPieceApi.update(editingId.value, { ...draft }, expectedVersion.value)
-      : await customPieceApi.create({ ...draft })
+      ? await customPieceApi.update(editingId.value, engineDraft.value, expectedVersion.value)
+      : await customPieceApi.create(engineDraft.value)
     editingId.value = saved.id
     expectedVersion.value = saved.version
     duplicateSource.value = false
-    Object.assign(draft, toInput(saved))
-    savedSnapshot.value = JSON.stringify(draft)
+    Object.assign(draft, simpleDraftFromInput(toInput(saved)) ?? draft)
+    savedSnapshot.value = snapshot.value
     await loadList()
     mode.value = 'library'
   } catch (caught) {
@@ -346,6 +369,11 @@ function goBack() {
 .cp-form input, .cp-form textarea, .cp-package input:not([type="checkbox"]), .cp-package select, .cp-package textarea, .cp-test-controls select { width: 100%; }
 .cp-package { display: grid; gap: 16px; }
 .cp-package textarea { font: 14px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 2; resize: vertical; }
+.cp-optional { color: var(--muted); font-size: .8em; font-weight: 500; }
+.cp-ability-options { display: flex; flex-wrap: wrap; gap: 10px; }
+.cp-ability-options button:disabled { opacity: .55; cursor: not-allowed; }
+.cp-help-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-top: 12px; }
+.cp-help-grid p { display: grid; gap: 4px; margin: 0; }
 .cp-definition-tabs { display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
 .cp-definition-tabs button { border: 1px solid var(--line); border-radius: 999px; padding: 8px 13px; background: #111927; color: var(--text); }
 .cp-definition-tabs button.active { border-color: var(--accent); background: rgba(73, 209, 125, .12); }
@@ -370,13 +398,6 @@ function goBack() {
 .cp-banner { padding: 12px; border: 1px solid rgba(255,125,125,.4); border-radius: 8px; }
 .cp-validation { padding: 12px; border-radius: 8px; background: rgba(255,255,255,.04); }
 .cp-test-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0; }
-.cp-board { display: grid; grid-template-columns: repeat(var(--board-size), minmax(28px, 1fr)); width: min(100%, 650px); aspect-ratio: 1; border: 2px solid #667085; }
-.cp-square { min-width: 0; border: 0; color: #111; background: #d7c6a5; font-size: clamp(8px, 1.5vw, 14px); }
-.cp-square:nth-child(2n) { background: #879b78; }
-.cp-square.legal { box-shadow: inset 0 0 0 4px #49d17d; }
-.cp-square.attacked { outline: 2px dashed #e25454; outline-offset: -5px; }
-.cp-square.selected { box-shadow: inset 0 0 0 4px #f7c948; }
-.cp-board-piece { font-weight: 800; text-transform: uppercase; }
 .cp-test-state { display: flex; flex-wrap: wrap; gap: 10px 24px; padding: 10px 12px; background: rgba(255,255,255,.04); }
 .cp-test-state div { display: flex; gap: 8px; }
 .cp-test-state dt { color: var(--muted); }

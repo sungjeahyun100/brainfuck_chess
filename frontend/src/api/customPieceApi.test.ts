@@ -7,6 +7,7 @@ import {
   CustomPieceApiError,
 } from './customPieceApi.ts'
 import type { CustomPieceInput, CustomPieceTestBoard } from '../types/customPiece.ts'
+import type { TurnAction } from '../types/game.ts'
 
 const draft: CustomPieceInput = {
   name: 'Hero',
@@ -77,6 +78,29 @@ test('validation and option preview use separate server endpoints without mutati
   assert.deepEqual(board, original)
 })
 
+test('test actions add the discriminator omitted by legal move responses', async () => {
+  const calls = mockJson({ state: {}, legal_moves: [], legal_drops: [], attacks: [] })
+  const legalMoveResponse = {
+    player_id: 'white',
+    piece_id: 'hero-1',
+    from: { file: 1, rank: 1 },
+    to: { file: 1, rank: 2 },
+    move_option_id: 'normal',
+    source_layer_ids: ['default'],
+    effects: {
+      global_state_updates: [],
+      piece_state_updates: [],
+      cooldown_updates: [],
+    },
+  } as unknown as TurnAction
+
+  await customPieceApi.testAction(draft, board, legalMoveResponse)
+
+  const request = JSON.parse(String(calls[0]?.init?.body))
+  assert.equal(request.action.type, 'move')
+  assert.equal(request.action.piece_id, 'hero-1')
+})
+
 test('structured API failures are mapped to a safe typed error', async () => {
   mockJson({ code: 'version_conflict', error: '최신 버전이 아닙니다.' }, 409)
   await assert.rejects(
@@ -86,4 +110,3 @@ test('structured API failures are mapped to a safe typed error', async () => {
       && error.status === 409,
   )
 })
-

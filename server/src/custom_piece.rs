@@ -362,6 +362,10 @@ struct Diagnostic {
     code: &'static str,
     message: String,
     limit_exceeded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    column: Option<usize>,
 }
 
 pub(crate) async fn list(
@@ -612,7 +616,9 @@ fn validation_response(result: Result<CustomPiecePackage, CustomPieceError>) -> 
 
 fn diagnostic(error: &CustomPieceError) -> Diagnostic {
     let (code, limit_exceeded) = match error {
-        CustomPieceError::ParseFailure(_) => ("chessembly_parse_error", false),
+        CustomPieceError::ParseFailure(_) | CustomPieceError::ChessemblySyntax { .. } => {
+            ("chessembly_parse_error", false)
+        }
         CustomPieceError::MissingExposedPiece(_) => ("exposed_piece_missing", false),
         CustomPieceError::MissingInternalReference { .. } => ("internal_reference_missing", false),
         CustomPieceError::IdentifierCollision(_) => ("identifier_collision", false),
@@ -625,6 +631,14 @@ fn diagnostic(error: &CustomPieceError) -> Diagnostic {
         code,
         message: error.to_string(),
         limit_exceeded,
+        line: match error {
+            CustomPieceError::ChessemblySyntax { line, .. } => Some(*line),
+            _ => None,
+        },
+        column: match error {
+            CustomPieceError::ChessemblySyntax { column, .. } => Some(*column),
+            _ => None,
+        },
     }
 }
 
@@ -1447,6 +1461,16 @@ mod tests {
         let Json(response) = validate(headers("alice"), Json(invalid)).await.unwrap();
         assert!(!response.valid);
         assert_eq!(response.diagnostics[0].code, "chessembly_parse_error");
+
+        let Json(response) = validate(
+            headers("alice"),
+            Json(input("move(1, 0);\nunsupported-command;")),
+        )
+        .await
+        .unwrap();
+        assert!(!response.valid);
+        assert_eq!(response.diagnostics[0].line, Some(2));
+        assert_eq!(response.diagnostics[0].column, Some(1));
 
         let mut missing = input("move(1, 0);");
         missing.exposed_piece_key = "missing".into();

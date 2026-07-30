@@ -162,7 +162,11 @@ fn rejects_missing_exposed_reference_and_invalid_program() {
     ));
     assert!(matches!(
         validate_and_build_custom_piece_package(input("only")),
-        Err(CustomPieceError::ParseFailure(_))
+        Err(CustomPieceError::ChessemblySyntax {
+            line: 1,
+            column: 1,
+            ..
+        })
     ));
 }
 

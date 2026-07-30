@@ -6,6 +6,18 @@ export type CustomPieceImage =
 
 export type BuiltInPieceAsset = 'pawn' | 'rook' | 'bishop' | 'knight' | 'queen' | 'king'
 
+export interface SimpleCustomPieceDraft {
+  name: string
+  description: string
+  score: number
+  image: CustomPieceImage
+  movementCode: string
+  abilities: CustomPieceAbilityDraft[]
+}
+
+export type CustomPieceAbilityDraft =
+  | { kind: 'remember_value'; name: string; initialValue: number }
+
 export interface CustomPieceInput {
   name: string
   description: string
@@ -77,4 +89,3 @@ export interface CustomPieceTestResult {
   legal_drops: DropAction[]
   attacks: Square[]
 }
-

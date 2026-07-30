@@ -59,20 +59,43 @@ struct PieceSetDocument {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CustomPieceError {
     ParseFailure(String),
+    ChessemblySyntax {
+        piece: String,
+        layer: String,
+        message: String,
+        line: usize,
+        column: usize,
+    },
     SemanticValidation(String),
     MissingExposedPiece(String),
-    MissingInternalReference { piece: String, target: String },
+    MissingInternalReference {
+        piece: String,
+        target: String,
+    },
     IdentifierCollision(String),
     ExecutionLimitExceeded(&'static str),
     UnsupportedFeature(String),
     CorruptSnapshot(String),
-    DefinitionVersionMismatch { expected: String, actual: String },
+    DefinitionVersionMismatch {
+        expected: String,
+        actual: String,
+    },
 }
 
 impl fmt::Display for CustomPieceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ParseFailure(message) => write!(f, "custom piece parse failure: {message}"),
+            Self::ChessemblySyntax {
+                piece,
+                layer,
+                message,
+                line,
+                column,
+            } => write!(
+                f,
+                "piece `{piece}` layer `{layer}`: {message} ({line}행 {column}열)"
+            ),
             Self::SemanticValidation(message) => {
                 write!(f, "custom piece semantic validation failed: {message}")
             }
@@ -297,14 +320,14 @@ fn validate_supported_tokens(
             ')' => {
                 parentheses -= 1;
                 if parentheses < 0 {
-                    return syntax_error(piece_id, layer, "unmatched `)`");
+                    return syntax_error(piece_id, layer, source, index, "unmatched `)`");
                 }
             }
             '{' => braces += 1,
             '}' => {
                 braces -= 1;
                 if braces < 0 {
-                    return syntax_error(piece_id, layer, "unmatched `}`");
+                    return syntax_error(piece_id, layer, source, index, "unmatched `}`");
                 }
             }
             character if character.is_ascii_alphabetic() || character == '_' => {
@@ -326,7 +349,12 @@ fn validate_supported_tokens(
                     return syntax_error(
                         piece_id,
                         layer,
-                        &format!("unsupported identifier `{identifier}`"),
+                        source,
+                        start,
+                        &format!(
+                            "현재 덱체스 인터프리터에서 지원하지 않는 체섬블리 명령입니다. \
+                             지원하지 않는 명령: {identifier}"
+                        ),
                     );
                 }
                 continue;
@@ -339,22 +367,52 @@ fn validate_supported_tokens(
                 return syntax_error(
                     piece_id,
                     layer,
-                    &format!("unsupported character `{character}`"),
+                    source,
+                    index,
+                    &format!(
+                        "현재 덱체스 인터프리터에서 지원하지 않는 문자입니다. \
+                         지원하지 않는 문자: {character}"
+                    ),
                 );
             }
         }
         index += 1;
     }
     if parentheses != 0 || braces != 0 {
-        return syntax_error(piece_id, layer, "unclosed delimiter");
+        return syntax_error(
+            piece_id,
+            layer,
+            source,
+            source.len().saturating_sub(1),
+            "unclosed delimiter",
+        );
     }
     Ok(())
 }
 
-fn syntax_error<T>(piece_id: &str, layer: &str, message: &str) -> Result<T, CustomPieceError> {
-    Err(CustomPieceError::ParseFailure(format!(
-        "piece `{piece_id}` layer `{layer}`: {message}"
-    )))
+fn syntax_error<T>(
+    piece_id: &str,
+    layer: &str,
+    source: &str,
+    byte_index: usize,
+    message: &str,
+) -> Result<T, CustomPieceError> {
+    let prefix = &source[..byte_index.min(source.len())];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix
+        .rsplit('\n')
+        .next()
+        .map(str::chars)
+        .map(Iterator::count)
+        .unwrap_or(0)
+        + 1;
+    Err(CustomPieceError::ChessemblySyntax {
+        piece: piece_id.to_owned(),
+        layer: layer.to_owned(),
+        message: message.to_owned(),
+        line,
+        column,
+    })
 }
 
 pub fn install_runtime_catalog(
