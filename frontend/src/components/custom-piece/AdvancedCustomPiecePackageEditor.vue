@@ -3,9 +3,7 @@
     <div class="cp-section-heading">
       <div>
         <h3>특수 능력 구성</h3>
-        <p class="cp-muted">
-          상태와 행마를 카드로 조합하면 저장할 때 엔진용 JSON 정의로 자동 변환됩니다.
-        </p>
+        <p class="cp-muted">상태와 행마를 카드로 조합하면 저장할 때 엔진용 JSON 정의로 자동 변환됩니다.</p>
       </div>
       <button type="button" class="btn-secondary" @click="emit('request-simple')">간단 편집 시도</button>
     </div>
@@ -35,52 +33,33 @@
     <template v-if="session && !expertMode">
       <section class="builder-section">
         <div class="cp-section-heading">
-          <div>
-            <h4>기본 표시와 일반 이동</h4>
-            <p class="cp-muted">게임에서 항상 표시되는 이미지와 일반 이동 버튼의 설명입니다.</p>
-          </div>
+          <div><h4>기본 표시와 일반 이동</h4><p class="cp-muted">기본 이미지와 일반 이동 버튼의 설명입니다.</p></div>
         </div>
         <div class="cp-fields">
-          <label>기본 이미지 키
-            <input v-model="session.model.defaultAssetKey" placeholder="bishop" />
-          </label>
-          <label>일반 이동 이름
-            <input v-model="session.model.normalOptionName" placeholder="일반 이동" />
-          </label>
-          <label class="cp-wide">일반 이동 설명
-            <input v-model="session.model.normalOptionDescription" placeholder="이 기물의 기본 이동입니다." />
-          </label>
+          <label>기본 이미지 키<input v-model="session.model.defaultAssetKey" placeholder="bishop" /></label>
+          <label>일반 이동 이름<input v-model="session.model.normalOptionName" placeholder="일반 이동" /></label>
+          <label class="cp-wide">일반 이동 설명<input v-model="session.model.normalOptionDescription" placeholder="이 기물의 기본 이동입니다." /></label>
         </div>
       </section>
 
       <section class="builder-section">
         <div class="cp-section-heading">
-          <div>
-            <h4>기물이 기억할 값</h4>
-            <p class="cp-muted">현재 형태, 방향, 충전 여부처럼 기물마다 따로 저장되는 값입니다.</p>
-          </div>
+          <div><h4>기물이 기억할 값</h4><p class="cp-muted">현재 형태, 방향, 충전 여부처럼 기물마다 따로 저장되는 값입니다.</p></div>
           <button type="button" class="btn-secondary" @click="addState">+ 기억할 값</button>
         </div>
         <p v-if="session.model.states.length === 0" class="cp-muted">상태를 쓰지 않는 기물은 비워 두어도 됩니다.</p>
         <article v-for="(state, index) in session.model.states" :key="index" class="cp-subcard value-card">
           <div class="cp-fields">
-            <label>값 이름
-              <input v-model="state.key" placeholder="mode" />
-            </label>
+            <label>값 이름<input v-model="state.key" placeholder="mode" /></label>
             <label>종류
               <select v-model="state.initialValue.type">
-                <option value="text">문자</option>
-                <option value="number">숫자</option>
-                <option value="boolean">참/거짓</option>
+                <option value="text">문자</option><option value="number">숫자</option><option value="boolean">참/거짓</option>
               </select>
             </label>
             <label>처음 값
               <input v-if="state.initialValue.type === 'text'" v-model="state.initialValue.textValue" placeholder="bishop" />
               <input v-else-if="state.initialValue.type === 'number'" v-model.number="state.initialValue.numberValue" type="number" />
-              <select v-else v-model="state.initialValue.booleanValue">
-                <option :value="true">참</option>
-                <option :value="false">거짓</option>
-              </select>
+              <select v-else v-model="state.initialValue.booleanValue"><option :value="true">참</option><option :value="false">거짓</option></select>
             </label>
           </div>
           <button type="button" class="btn-secondary danger compact" @click="session.model.states.splice(index, 1)">삭제</button>
@@ -91,9 +70,7 @@
         <div class="cp-section-heading">
           <div>
             <h4>일반 이동 형태</h4>
-            <p class="cp-muted">
-              상태에 따라 활성화되는 이동 형태를 만듭니다. 이동 후 다른 상태로 바꾸면 윈드밀처럼 형태가 교대합니다.
-            </p>
+            <p class="cp-muted">상태에 따라 활성화되는 형태를 만듭니다. 이동 후 상태를 바꾸면 윈드밀처럼 형태가 교대합니다.</p>
           </div>
           <button type="button" class="btn-secondary" @click="addNormalForm">+ 이동 형태</button>
         </div>
@@ -104,27 +81,12 @@
             <button v-if="session.model.normalForms.length > 1" type="button" class="btn-secondary danger" @click="session.model.normalForms.splice(formIndex, 1)">삭제</button>
           </div>
           <div class="cp-fields">
-            <label>형태 키
-              <input v-model="form.id" placeholder="bishop-mode" />
-            </label>
-            <label>이 형태의 이미지 키 <span class="cp-optional">선택</span>
-              <input v-model="form.assetKey" placeholder="rook" />
-            </label>
-            <label class="cp-wide">행마 코드
-              <textarea v-model="form.movementCode" rows="8" spellcheck="false" />
-            </label>
+            <label>형태 키<input v-model="form.id" placeholder="bishop-mode" /></label>
+            <label>이 형태의 이미지 키 <span class="cp-optional">선택</span><input v-model="form.assetKey" placeholder="rook" /></label>
+            <label class="cp-wide">행마 코드<textarea v-model="form.movementCode" rows="8" spellcheck="false" /></label>
           </div>
-
-          <ConditionEditor
-            title="이 형태가 활성화되는 조건"
-            :conditions="form.enabledWhen"
-            @add="form.enabledWhen.push(newStateCondition())"
-          />
-          <UpdateEditor
-            title="이동을 마친 뒤 바꿀 값"
-            :updates="form.onCommit"
-            @add="form.onCommit.push(newStateUpdate())"
-          />
+          <CustomPieceStateConditionEditor title="이 형태가 활성화되는 조건" :conditions="form.enabledWhen" />
+          <CustomPieceStateUpdateEditor title="이동을 마친 뒤 바꿀 값" :updates="form.onCommit" />
         </article>
       </section>
 
@@ -144,52 +106,28 @@
             <button type="button" class="btn-secondary danger" @click="session.model.abilities.splice(abilityIndex, 1)">삭제</button>
           </div>
           <div class="cp-fields">
-            <label>능력 키
-              <input v-model="ability.id" placeholder="bounce-move" />
-            </label>
-            <label>능력 이름
-              <input v-model="ability.name" placeholder="반사 이동" />
-            </label>
-            <label class="cp-wide">설명
-              <input v-model="ability.description" placeholder="가장자리에서 반사되는 이동입니다." />
-            </label>
-            <label class="cp-wide">능력 행마 코드
-              <textarea v-model="ability.movementCode" rows="8" spellcheck="false" />
-            </label>
+            <label>능력 키<input v-model="ability.id" placeholder="bounce-move" /></label>
+            <label>능력 이름<input v-model="ability.name" placeholder="반사 이동" /></label>
+            <label class="cp-wide">설명<input v-model="ability.description" placeholder="가장자리에서 반사되는 이동입니다." /></label>
+            <label class="cp-wide">능력 행마 코드<textarea v-model="ability.movementCode" rows="8" spellcheck="false" /></label>
           </div>
 
           <div class="ability-settings">
             <label class="cp-check"><input v-model="ability.cooldownEnabled" type="checkbox" /> 사용 후 쿨다운</label>
             <template v-if="ability.cooldownEnabled">
-              <label>대기 턴
-                <input v-model.number="ability.cooldownTurns" type="number" min="1" />
-              </label>
+              <label>대기 턴<input v-model.number="ability.cooldownTurns" type="number" min="1" /></label>
               <label>턴 계산 기준
-                <select v-model="ability.cooldownClock">
-                  <option value="owner_turns">이 기물 소유자의 턴</option>
-                  <option value="global_turns">양쪽 전체 턴</option>
-                </select>
+                <select v-model="ability.cooldownClock"><option value="owner_turns">소유자의 턴</option><option value="global_turns">양쪽 전체 턴</option></select>
               </label>
             </template>
             <label class="cp-check"><input v-model="ability.contributesToAttackMap" type="checkbox" /> 공격 범위에 포함</label>
             <label>실행 방식
-              <select v-model="ability.executionMode">
-                <option value="move_modifier">기물을 이동</option>
-                <option value="standalone_action">제자리 행동</option>
-              </select>
+              <select v-model="ability.executionMode"><option value="move_modifier">기물을 이동</option><option value="standalone_action">제자리 행동</option></select>
             </label>
           </div>
 
-          <ConditionEditor
-            title="이 능력을 사용할 수 있는 상태 조건"
-            :conditions="ability.enabledWhen"
-            @add="ability.enabledWhen.push(newStateCondition())"
-          />
-          <UpdateEditor
-            title="능력 사용 뒤 바꿀 값"
-            :updates="ability.onCommit"
-            @add="ability.onCommit.push(newStateUpdate())"
-          />
+          <CustomPieceStateConditionEditor title="이 능력을 사용할 수 있는 상태 조건" :conditions="ability.enabledWhen" />
+          <CustomPieceStateUpdateEditor title="능력 사용 뒤 바꿀 값" :updates="ability.onCommit" />
         </article>
       </section>
 
@@ -213,19 +151,14 @@
 </template>
 
 <script setup lang="ts">
-import { defineComponent, h, nextTick, ref, watch, type PropType } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import {
   loadAbilityBuilder,
   newNormalForm,
   newSelectableAbility,
-  newStateCondition,
-  newStateUpdate,
   newStateVariable,
   serializeAbilityBuilder,
   type AbilityBuilderSession,
-  type EditableValue,
-  type StateConditionEditor,
-  type StateUpdateEditor,
 } from '../../composables/customPieceAbilityBuilder'
 import {
   customPieceTemplate,
@@ -233,6 +166,8 @@ import {
   type AdvancedTemplateKind,
 } from '../../composables/useCustomPieceDraft'
 import type { AdvancedCustomPieceDraft } from '../../types/customPiece'
+import CustomPieceStateConditionEditor from './CustomPieceStateConditionEditor.vue'
+import CustomPieceStateUpdateEditor from './CustomPieceStateUpdateEditor.vue'
 
 const props = defineProps<{ draft: AdvancedCustomPieceDraft }>()
 const emit = defineEmits<{ 'request-simple': [] }>()
@@ -241,66 +176,6 @@ const unsupportedReason = ref('')
 const expertMode = ref(false)
 const expertText = ref('')
 const lastSerialized = ref('')
-
-const ValueInput = defineComponent({
-  props: { value: { type: Object as PropType<EditableValue>, required: true } },
-  setup(componentProps) {
-    return () => h('div', { class: 'inline-value-editor' }, [
-      h('select', {
-        value: componentProps.value.type,
-        onChange: (event: Event) => { componentProps.value.type = (event.target as HTMLSelectElement).value as EditableValue['type'] },
-      }, [h('option', { value: 'text' }, '문자'), h('option', { value: 'number' }, '숫자'), h('option', { value: 'boolean' }, '참/거짓')]),
-      componentProps.value.type === 'text'
-        ? h('input', { value: componentProps.value.textValue, onInput: (event: Event) => { componentProps.value.textValue = (event.target as HTMLInputElement).value } })
-        : componentProps.value.type === 'number'
-          ? h('input', { type: 'number', value: componentProps.value.numberValue, onInput: (event: Event) => { componentProps.value.numberValue = Number((event.target as HTMLInputElement).value) } })
-          : h('select', { value: String(componentProps.value.booleanValue), onChange: (event: Event) => { componentProps.value.booleanValue = (event.target as HTMLSelectElement).value === 'true' } }, [h('option', { value: 'true' }, '참'), h('option', { value: 'false' }, '거짓')]),
-    ])
-  },
-})
-
-const ConditionEditor = defineComponent({
-  components: { ValueInput },
-  props: {
-    title: { type: String, required: true },
-    conditions: { type: Array as PropType<StateConditionEditor[]>, required: true },
-  },
-  emits: ['add'],
-  template: `
-    <details class="rule-editor">
-      <summary>{{ title }} <span class="cp-optional">{{ conditions.length ? conditions.length + '개' : '선택' }}</span></summary>
-      <div class="rule-list">
-        <div v-for="(condition, index) in conditions" :key="index" class="rule-row">
-          <input v-model="condition.key" placeholder="상태 이름 (예: mode)" />
-          <select v-model="condition.operator"><option value="equals">값이 같을 때</option><option value="not_equals">값이 다를 때</option></select>
-          <ValueInput :value="condition.expectedValue" />
-          <button type="button" class="btn-secondary danger" @click="conditions.splice(index, 1)">삭제</button>
-        </div>
-        <button type="button" class="btn-secondary" @click="$emit('add')">+ 조건 추가</button>
-      </div>
-    </details>`,
-})
-
-const UpdateEditor = defineComponent({
-  components: { ValueInput },
-  props: {
-    title: { type: String, required: true },
-    updates: { type: Array as PropType<StateUpdateEditor[]>, required: true },
-  },
-  emits: ['add'],
-  template: `
-    <details class="rule-editor">
-      <summary>{{ title }} <span class="cp-optional">{{ updates.length ? updates.length + '개' : '선택' }}</span></summary>
-      <div class="rule-list">
-        <div v-for="(update, index) in updates" :key="index" class="rule-row update-row">
-          <input v-model="update.key" placeholder="바꿀 상태 이름" />
-          <ValueInput :value="update.value" />
-          <button type="button" class="btn-secondary danger" @click="updates.splice(index, 1)">삭제</button>
-        </div>
-        <button type="button" class="btn-secondary" @click="$emit('add')">+ 변경 추가</button>
-      </div>
-    </details>`,
-})
 
 watch(() => props.draft.rawScript, rawScript => {
   if (rawScript === lastSerialized.value) return
@@ -342,23 +217,12 @@ function applyTemplate(kind: AdvancedTemplateKind) {
   loadRawScript(rawScript)
 }
 
-function openExpertMode() {
-  expertText.value = props.draft.rawScript
-  expertMode.value = true
-}
-
-function applyExpertJson() {
-  props.draft.rawScript = expertText.value
-  lastSerialized.value = ''
-  loadRawScript(expertText.value)
-}
+function openExpertMode() { expertText.value = props.draft.rawScript; expertMode.value = true }
+function applyExpertJson() { props.draft.rawScript = expertText.value; lastSerialized.value = ''; loadRawScript(expertText.value) }
 
 async function tryReturnToCards() {
   const loaded = loadAbilityBuilder(expertText.value, props.draft.exposedPieceKey)
-  if (!loaded.session) {
-    unsupportedReason.value = loaded.unsupportedReason
-    return
-  }
+  if (!loaded.session) { unsupportedReason.value = loaded.unsupportedReason; return }
   session.value = loaded.session
   unsupportedReason.value = ''
   expertMode.value = false
@@ -376,16 +240,7 @@ async function tryReturnToCards() {
 .compact { align-self: end; }
 .ability-settings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: end; gap: 12px; }
 .ability-settings label:not(.cp-check) { display: grid; gap: 6px; }
-.rule-editor { background: rgba(255,255,255,.02); }
-.rule-list { display: grid; gap: 10px; margin-top: 12px; }
-.rule-row { display: grid; grid-template-columns: 1fr 1fr 1.3fr auto; gap: 8px; align-items: end; }
-.update-row { grid-template-columns: 1fr 1.3fr auto; }
-.inline-value-editor { display: grid; grid-template-columns: .8fr 1.2fr; gap: 6px; }
 .json-preview textarea, .expert-editor textarea { width: 100%; font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .expert-editor { display: grid; gap: 14px; border-top: 1px solid var(--line); padding-top: 18px; }
-@media (max-width: 900px) {
-  .ability-settings { grid-template-columns: 1fr 1fr; }
-  .rule-row, .update-row { grid-template-columns: 1fr; }
-  .inline-value-editor { grid-template-columns: 1fr 1fr; }
-}
+@media (max-width: 900px) { .ability-settings { grid-template-columns: 1fr 1fr; } }
 </style>
