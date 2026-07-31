@@ -6,8 +6,8 @@
 //!
 //! Key concepts:
 //! - **Anchor**: the current reference position that move expressions act relative to.
-//!   It starts at the piece's position and advances as expressions execute.
-//! - **Chain**: resets the anchor to the piece's position at the start.
+//!   It starts at the supplied initial square and advances as expressions execute.
+//! - **Chain**: resets the anchor to the initial square at the start.
 //! - **Termination**: a non-exceptional `false` return stops the chain.
 //! - **Block `{ }`**: isolates `false` and restores the anchor on exit.
 //! - **`do…while`**: loops while the expression inside returns `true`.
@@ -25,8 +25,9 @@ use super::ast::{Expr, Program};
 
 pub struct ExecutionContext<'a> {
     pub board: &'a Board,
-    pub piece: &'a Piece,
-    pub piece_definition: &'a PieceDefinition,
+    /// Square supplied when interpretation starts. Every chain resets to this
+    /// square, and `piece(...)` resolves the board piece located here.
+    pub initial_square: Square,
     /// All piece definitions keyed by type_id.
     pub all_definitions: &'a HashMap<String, PieceDefinition>,
     /// All pieces keyed by piece_id.
@@ -56,12 +57,11 @@ pub fn run_checked(
     max_execution_steps: u64,
 ) -> Result<ChessemblyResult, ExecutionLimitExceeded> {
     crate::profiling::record_chessembly_run(1);
-    let piece_pos = ctx.piece.current_square.unwrap_or(Square::new(0, 0));
     let mut result = ChessemblyResult::default();
     let mut remaining_steps = max_execution_steps;
 
     for chain in program {
-        let mut state = ChainState::new(piece_pos);
+        let mut state = ChainState::new(ctx.initial_square);
         run_chain(chain, 0, ctx, &mut state, &mut result, &mut remaining_steps)?;
     }
 
@@ -75,7 +75,7 @@ pub fn run_checked(
 
 /// Mutable state during a single chain execution.
 struct ChainState {
-    /// Reference position: resets to piece position at start of each chain.
+    /// Reference position: resets to the initial square at the start of each chain.
     anchor: Square,
     /// Bit registers (0..15) for `read`/`write` instructions.
     bits: [bool; 16],
@@ -417,16 +417,13 @@ fn eval_expr(
             if !ctx.board.is_in_bounds(&target) {
                 return Ok((ExprResult::False, 1));
             }
-            let found = ctx
-                .board
-                .get_piece_at(&target)
-                .and_then(|pid| ctx.all_pieces.get(pid))
-                .and_then(|p| ctx.all_definitions.get(&p.type_id))
-                .map(|def| {
-                    &def.id == piece_name || def.name.to_lowercase() == *piece_name.to_lowercase()
-                })
-                .unwrap_or(false);
-            if found {
+            if piece_matches_at(
+                &target,
+                piece_name,
+                ctx.board,
+                ctx.all_pieces,
+                ctx.all_definitions,
+            ) {
                 (ExprResult::True, 1)
             } else {
                 (ExprResult::False, 1)
@@ -488,9 +485,13 @@ fn eval_expr(
 
         // ── State expressions ────────────────────────────────────────────────
         Expr::Piece(name) => {
-            let matches = ctx.piece_definition.id == *name
-                || ctx.piece_definition.name.to_lowercase() == name.to_lowercase();
-            if matches {
+            if piece_matches_at(
+                &ctx.initial_square,
+                name,
+                ctx.board,
+                ctx.all_pieces,
+                ctx.all_definitions,
+            ) {
                 (ExprResult::True, 1)
             } else {
                 (ExprResult::False, 1)
@@ -729,6 +730,30 @@ fn flush_pending_take(state: &mut ChainState, result: &mut ChessemblyResult) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+fn piece_matches_at(
+    square: &Square,
+    expected: &str,
+    board: &Board,
+    all_pieces: &HashMap<PieceId, Piece>,
+    all_definitions: &HashMap<String, PieceDefinition>,
+) -> bool {
+    let Some(piece_id) = board.get_piece_at(square) else {
+        return false;
+    };
+    let Some(piece) = all_pieces.get(piece_id) else {
+        return false;
+    };
+    if piece.type_id == expected {
+        return true;
+    }
+    all_definitions
+        .get(&piece.type_id)
+        .map(|definition| {
+            definition.id == expected || definition.name.eq_ignore_ascii_case(expected)
+        })
+        .unwrap_or(false)
+}
 
 fn is_enemy_piece(
     piece_id: &PieceId,
