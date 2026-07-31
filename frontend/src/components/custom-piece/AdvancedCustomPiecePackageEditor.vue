@@ -85,8 +85,8 @@
             <label>이 형태의 이미지 키 <span class="cp-optional">선택</span><input v-model="form.assetKey" placeholder="rook" /></label>
             <label class="cp-wide">행마 코드<textarea v-model="form.movementCode" rows="8" spellcheck="false" /></label>
           </div>
-          <CustomPieceStateConditionEditor title="이 형태가 활성화되는 조건" :conditions="form.enabledWhen" />
-          <CustomPieceStateUpdateEditor title="이동을 마친 뒤 바꿀 값" :updates="form.onCommit" />
+          <CustomPieceStateConditionEditor title="이 형태가 활성화되는 조건" :conditions="form.enabledWhen" :states="session.model.states" />
+          <CustomPieceStateUpdateEditor title="이동을 마친 뒤 바꿀 값" :updates="form.onCommit" :states="session.model.states" />
         </article>
       </section>
 
@@ -126,8 +126,8 @@
             </label>
           </div>
 
-          <CustomPieceStateConditionEditor title="이 능력을 사용할 수 있는 상태 조건" :conditions="ability.enabledWhen" />
-          <CustomPieceStateUpdateEditor title="능력 사용 뒤 바꿀 값" :updates="ability.onCommit" />
+          <CustomPieceStateConditionEditor title="이 능력을 사용할 수 있는 상태 조건" :conditions="ability.enabledWhen" :states="session.model.states" />
+          <CustomPieceStateUpdateEditor title="능력 사용 뒤 바꿀 값" :updates="ability.onCommit" :states="session.model.states" />
         </article>
       </section>
 
