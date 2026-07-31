@@ -15,6 +15,15 @@ export interface SimpleCustomPieceDraft {
   abilities: CustomPieceAbilityDraft[]
 }
 
+export interface AdvancedCustomPieceDraft {
+  name: string
+  description: string
+  score: number
+  image: CustomPieceImage
+  rawScript: string
+  exposedPieceKey: string
+}
+
 export type CustomPieceAbilityDraft =
   | { kind: 'remember_value'; name: string; initialValue: number }
 
