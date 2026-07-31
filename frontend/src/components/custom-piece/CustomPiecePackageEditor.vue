@@ -1,11 +1,16 @@
 <template>
   <section class="cp-card cp-package">
-    <div>
-      <h3>움직임</h3>
-      <p class="cp-muted">
-        체섬블리로 이 기물의 이동과 공격 방식을 작성합니다.
-        테스트 보드와 실제 게임은 동일한 방식으로 이 코드를 실행합니다.
-      </p>
+    <div class="cp-section-heading">
+      <div>
+        <h3>움직임</h3>
+        <p class="cp-muted">
+          체섬블리로 이 기물의 이동과 공격 방식을 작성합니다.
+          테스트 보드와 실제 게임은 동일한 방식으로 이 코드를 실행합니다.
+        </p>
+      </div>
+      <button type="button" class="btn-secondary" @click="emit('request-advanced')">
+        고급 편집
+      </button>
     </div>
 
     <label>움직임 코드
@@ -32,15 +37,14 @@
   <section class="cp-card cp-package">
     <div>
       <h3>특수 능력 <span class="cp-optional">선택</span></h3>
-      <p class="cp-muted">변신, 상태 기억, 선택형 움직임 같은 기능을 추가합니다.</p>
+      <p class="cp-muted">간단한 값 기억은 여기서, 상태 전환·선택형 행마·쿨다운은 고급 편집에서 설정합니다.</p>
     </div>
 
     <div class="cp-ability-options">
       <button type="button" class="btn-secondary" @click="addMemory">방향이나 횟수를 기억</button>
-      <button type="button" class="btn-secondary" disabled title="고급 기물 편집에서 제공 예정">이동 후 다른 형태로 변신</button>
-      <button type="button" class="btn-secondary" disabled title="고급 기물 편집에서 제공 예정">여러 움직임 중 하나를 선택</button>
-      <button type="button" class="btn-secondary" disabled title="고급 기물 편집에서 제공 예정">특정 조건에서만 움직임</button>
-      <button type="button" class="btn-secondary" disabled title="고급 기물 편집에서 제공 예정">승격 형태 설정</button>
+      <button type="button" class="btn-secondary" @click="emit('request-advanced')">이동 후 다른 형태로 전환</button>
+      <button type="button" class="btn-secondary" @click="emit('request-advanced')">여러 움직임 중 하나를 선택</button>
+      <button type="button" class="btn-secondary" @click="emit('request-advanced')">상태 조건과 쿨다운 설정</button>
     </div>
 
     <article v-for="(ability, index) in draft.abilities" :key="index" class="cp-subcard">
@@ -67,6 +71,7 @@
 import type { SimpleCustomPieceDraft } from '../../types/customPiece'
 
 const props = defineProps<{ draft: SimpleCustomPieceDraft }>()
+const emit = defineEmits<{ 'request-advanced': [] }>()
 
 function addMemory() {
   props.draft.abilities.push({
