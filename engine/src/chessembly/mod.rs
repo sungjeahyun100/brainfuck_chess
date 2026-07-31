@@ -5,7 +5,8 @@ pub mod parser;
 use std::collections::{HashMap, HashSet};
 
 use crate::types::{
-    ChessemblyResult, GameState, MoveLayerDefinition, Piece, PieceDefinition, PlayerId, SquareId,
+    ChessemblyResult, GameState, MoveLayerDefinition, Piece, PieceDefinition, PlayerId, Square,
+    SquareId,
 };
 
 use self::interpreter::{run, ExecutionContext};
@@ -23,14 +24,14 @@ pub fn run_chessembly_layer_for_piece(
     let program = game_state.chessembly_layer_program(&piece.type_id, layer);
     let ctx = ExecutionContext {
         board: &game_state.board,
-        piece,
-        piece_definition: definition,
+        initial_square: piece.current_square.unwrap_or(Square::new(0, 0)),
         all_definitions: &game_state.piece_definitions,
         all_pieces: &game_state.pieces,
         player,
         global_state,
         attack_maps,
     };
+    let _ = definition;
     run(program.as_ref(), &ctx)
 }
 
@@ -48,14 +49,14 @@ pub fn run_chessembly_layer_for_piece_checked(
     let program = game_state.chessembly_layer_program(&piece.type_id, layer);
     let ctx = ExecutionContext {
         board: &game_state.board,
-        piece,
-        piece_definition: definition,
+        initial_square: piece.current_square.unwrap_or(Square::new(0, 0)),
         all_definitions: &game_state.piece_definitions,
         all_pieces: &game_state.pieces,
         player,
         global_state,
         attack_maps,
     };
+    let _ = definition;
     interpreter::run_checked(program.as_ref(), &ctx, max_execution_steps)
         .map_err(|_| CustomPieceError::ExecutionLimitExceeded("execution_steps"))
 }
