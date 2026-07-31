@@ -1,4 +1,5 @@
 import type {
+  AdvancedCustomPieceDraft,
   CustomPieceInput,
   CustomPieceTestPiece,
   SimpleCustomPieceDraft,
@@ -9,6 +10,59 @@ export interface CustomPiecePackageDocument {
   format: 'brainfuck-chess-piece-set-v1'
   definitions: PieceDefinition[]
 }
+
+export type AdvancedTemplateKind = 'windmill' | 'cannon-rook' | 'bouncing-bishop'
+
+const BISHOP_CODE = `take-move(1, 1) repeat(1);
+take-move(1, -1) repeat(1);
+take-move(-1, 1) repeat(1);
+take-move(-1, -1) repeat(1);`
+
+const ROOK_CODE = `take-move(1, 0) repeat(1);
+take-move(-1, 0) repeat(1);
+take-move(0, 1) repeat(1);
+take-move(0, -1) repeat(1);`
+
+const CANNON_CODE = `do peek(0, 1) while take-move(0, 1) repeat(1);
+do peek(1, 0) while take-move(1, 0) repeat(1);
+do peek(0, -1) while take-move(0, -1) repeat(1);
+do peek(-1, 0) while take-move(-1, 0) repeat(1);`
+
+const BOUNCING_BISHOP_CODE = `do
+take-move(1, 1)
+while
+edge(1, 1) {
+  take-move(-1, 1) repeat(1)
+} {
+  take-move(1, -1) repeat(1)
+};
+
+do
+take-move(-1, 1)
+while
+edge(-1, 1) {
+  take-move(1, 1) repeat(1)
+} {
+  take-move(-1, -1) repeat(1)
+};
+
+do
+take-move(1, -1)
+while
+edge(1, -1) {
+  take-move(1, 1) repeat(1)
+} {
+  take-move(-1, -1) repeat(1)
+};
+
+do
+take-move(-1, -1)
+while
+edge(-1, -1) {
+  take-move(1, -1) repeat(1)
+} {
+  take-move(-1, 1) repeat(1)
+};`
 
 export function newCustomPieceDefinition(id = 'main'): PieceDefinition {
   return {
@@ -45,6 +99,20 @@ export function newSimpleCustomPieceDraft(): SimpleCustomPieceDraft {
   }
 }
 
+export function newAdvancedCustomPieceDraft(
+  source: SimpleCustomPieceDraft = newSimpleCustomPieceDraft(),
+): AdvancedCustomPieceDraft {
+  const input = buildCustomPieceInput(source)
+  return {
+    name: source.name,
+    description: source.description,
+    score: source.score,
+    image: { ...source.image },
+    rawScript: input.raw_script,
+    exposedPieceKey: input.exposed_piece_key,
+  }
+}
+
 /** Converts user-facing fields into the existing immutable package protocol. */
 export function buildCustomPieceInput(draft: SimpleCustomPieceDraft): CustomPieceInput {
   const definition = newCustomPieceDefinition('main')
@@ -68,10 +136,42 @@ export function buildCustomPieceInput(draft: SimpleCustomPieceDraft): CustomPiec
   }
 }
 
-/**
- * Existing advanced packages are deliberately not reinterpreted. Callers can
- * open them read-only instead of silently changing their meaning.
- */
+/** Preserves state, layer, option, visual-variant and internal-definition fields. */
+export function buildAdvancedCustomPieceInput(draft: AdvancedCustomPieceDraft): CustomPieceInput {
+  const document = parseCustomPiecePackage(draft.rawScript)
+  const exposed = document.definitions.find(definition => definition.id === draft.exposedPieceKey)
+  if (!exposed) throw new Error(`대표 기물 \`${draft.exposedPieceKey}\` 정의를 찾을 수 없습니다.`)
+
+  exposed.name = draft.name.trim()
+  exposed.score = draft.score
+  for (const definition of document.definitions) {
+    definition.is_king = false
+    definition.can_capture_on_drop = false
+  }
+
+  return {
+    name: draft.name,
+    description: draft.description,
+    score: draft.score,
+    image: { ...draft.image },
+    raw_script: serializeCustomPiecePackage(document),
+    exposed_piece_key: draft.exposedPieceKey,
+  }
+}
+
+export function advancedDraftFromInput(input: CustomPieceInput): AdvancedCustomPieceDraft {
+  parseCustomPiecePackage(input.raw_script)
+  return {
+    name: input.name,
+    description: input.description,
+    score: input.score,
+    image: { ...input.image },
+    rawScript: input.raw_script,
+    exposedPieceKey: input.exposed_piece_key,
+  }
+}
+
+/** Converts only definitions representable without losing meaning. */
 export function simpleDraftFromInput(input: CustomPieceInput): SimpleCustomPieceDraft | null {
   let document: CustomPiecePackageDocument
   try {
@@ -95,7 +195,7 @@ export function simpleDraftFromInput(input: CustomPieceInput): SimpleCustomPiece
     name: input.name,
     description: input.description,
     score: input.score,
-    image: input.image,
+    image: { ...input.image },
     movementCode: definition.chessembly_code,
     abilities: definition.state_schema.map(state => ({
       kind: 'remember_value',
@@ -155,7 +255,80 @@ function normalizeCustomPieceDefinition(value: PieceDefinition, index: number): 
   }
 }
 
-export function customPieceDraftSnapshot(draft: SimpleCustomPieceDraft | CustomPieceInput): string {
+export function customPieceTemplate(kind: AdvancedTemplateKind): CustomPiecePackageDocument {
+  const definition = newCustomPieceDefinition('main')
+  definition.name = kind === 'windmill' ? 'Windmill' : kind === 'cannon-rook' ? 'Cannon Rook' : 'Bouncing Bishop'
+  definition.score = kind === 'windmill' ? 4 : 7
+
+  if (kind === 'windmill') {
+    definition.chessembly_code = BISHOP_CODE
+    definition.state_schema = [{ key: 'mode', default_value: 'bishop' }]
+    definition.move_layers = [
+      {
+        id: 'bishop_mode', chessembly_code: BISHOP_CODE,
+        enabled_when: [{ key: 'mode', condition: { equals: 'bishop' } }],
+        on_commit: [{ key: 'mode', value: 'rook' }],
+      },
+      {
+        id: 'rook_mode', chessembly_code: ROOK_CODE,
+        enabled_when: [{ key: 'mode', condition: { equals: 'rook' } }],
+        on_commit: [{ key: 'mode', value: 'bishop' }],
+      },
+    ]
+    definition.move_options = [{
+      id: 'normal', name: '일반 이동', description: '이동할 때마다 비숍/룩 모드를 전환합니다.',
+      kind: 'normal', layer_ids: ['bishop_mode', 'rook_mode'], execution_mode: 'move_modifier',
+      contributes_to_attack_map: true,
+    }]
+    definition.visual = {
+      default_asset_key: 'bishop',
+      variants: [{
+        id: 'rook_mode', enabled_when: [{ key: 'mode', condition: { equals: 'rook' } }],
+        asset_key: 'rook', priority: 10,
+      }],
+    }
+  } else if (kind === 'cannon-rook') {
+    definition.chessembly_code = ROOK_CODE
+    definition.move_layers = [
+      { id: 'rook_move', chessembly_code: ROOK_CODE, enabled_when: [], on_commit: [] },
+      { id: 'cannon_move', chessembly_code: CANNON_CODE, enabled_when: [], on_commit: [] },
+    ]
+    definition.move_options = [
+      {
+        id: 'normal', name: '일반 이동', description: '', kind: 'normal',
+        layer_ids: ['rook_move'], execution_mode: 'move_modifier', contributes_to_attack_map: true,
+      },
+      {
+        id: 'cannon_move', name: '포 이동', description: '기물 하나를 뛰어넘는 이동입니다.', kind: 'ability',
+        layer_ids: ['cannon_move'], execution_mode: 'move_modifier', contributes_to_attack_map: true,
+        cooldown: { turns: 3, clock: 'owner_turns' },
+      },
+    ]
+    definition.visual.default_asset_key = 'rook'
+  } else {
+    definition.chessembly_code = BISHOP_CODE
+    definition.move_layers = [
+      { id: 'bishop_move', chessembly_code: BISHOP_CODE, enabled_when: [], on_commit: [] },
+      { id: 'bounce_move', chessembly_code: BOUNCING_BISHOP_CODE, enabled_when: [], on_commit: [] },
+    ]
+    definition.move_options = [
+      {
+        id: 'normal', name: '일반 이동', description: '', kind: 'normal',
+        layer_ids: ['bishop_move'], execution_mode: 'move_modifier', contributes_to_attack_map: true,
+      },
+      {
+        id: 'bounce_move', name: '반사 이동', description: '가장자리에서 반사되는 이동입니다.', kind: 'ability',
+        layer_ids: ['bounce_move'], execution_mode: 'move_modifier', contributes_to_attack_map: true,
+        cooldown: { turns: 2, clock: 'owner_turns' },
+      },
+    ]
+    definition.visual.default_asset_key = 'bishop'
+  }
+
+  return { format: 'brainfuck-chess-piece-set-v1', definitions: [definition] }
+}
+
+export function customPieceDraftSnapshot(draft: SimpleCustomPieceDraft | AdvancedCustomPieceDraft | CustomPieceInput): string {
   return JSON.stringify(draft)
 }
 
@@ -164,6 +337,18 @@ export function validateCustomPieceDraft(draft: SimpleCustomPieceDraft): string 
   if (!Number.isInteger(draft.score) || draft.score < 1 || draft.score > 30) return '점수는 1–30 사이의 정수여야 합니다.'
   if (!draft.movementCode.trim()) return '움직임 코드를 입력해 주세요.'
   if (draft.abilities.some(ability => !ability.name.trim())) return '기억할 값의 이름을 입력해 주세요.'
+  return ''
+}
+
+export function validateAdvancedCustomPieceDraft(draft: AdvancedCustomPieceDraft): string {
+  if (!draft.name.trim() || draft.name.trim().length > 80) return '이름은 1–80자여야 합니다.'
+  if (!Number.isInteger(draft.score) || draft.score < 1 || draft.score > 30) return '점수는 1–30 사이의 정수여야 합니다.'
+  if (!draft.exposedPieceKey.trim()) return '대표 기물 키를 입력해 주세요.'
+  try {
+    buildAdvancedCustomPieceInput(draft)
+  } catch (error) {
+    return error instanceof Error ? error.message : '고급 기물 정의가 올바르지 않습니다.'
+  }
   return ''
 }
 
