@@ -6,6 +6,7 @@ import {
   customDeckPieceType,
   deactivateCustomPieceCatalog,
   pieceCatalog,
+  pocketCatalog,
   replaceCustomPieceCatalog,
   upsertCustomPieceCatalog,
   validateSavedDeck,
@@ -86,7 +87,7 @@ test('missing or inactive pinned versions are explicit deck validation failures'
   assert.match(validateSavedDeck(deck(customDeckPieceType(record))).errors.join(' '), /비활성화/)
 })
 
-test('saved custom piece changes are published to the live deck catalog', () => {
+test('saved custom piece changes are published to the live deck and pocket catalogs', () => {
   replaceCustomPieceCatalog([record])
   const updated = {
     ...record,
@@ -105,6 +106,10 @@ test('saved custom piece changes are published to the live deck catalog', () => 
   assert.deepEqual(versions.map(piece => piece.custom!.version), [3, 4])
   assert.equal(versions[1].name, 'Hero Plus')
   assert.equal(versions[1].score, 9)
+  assert.equal(
+    pocketCatalog.some(piece => piece.id === customDeckPieceType(updated)),
+    true,
+  )
 
   deactivateCustomPieceCatalog(record.id)
   assert.equal(versions.every(piece => piece.custom?.active === false), true)
