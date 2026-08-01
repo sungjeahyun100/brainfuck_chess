@@ -1,3 +1,4 @@
+import { reactive } from 'vue'
 import type {
   DeckPreset,
   DeckPresetLayout,
@@ -12,7 +13,7 @@ import type { CustomPieceRecord } from '../types/customPiece'
 
 export const boardSizes = [8, 9, 10, 11, 12] as const
 
-export const pieceCatalog: PieceCatalogItem[] = [
+export const pieceCatalog = reactive<PieceCatalogItem[]>([
   { id: 'king', name: 'King', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
   { id: 'queen', name: 'Queen', score: 0, category: 'major', canPocket: true },
   { id: 'cannon-rook', name: 'Cannon Rook', score: 0, category: 'variant', canPocket: true, aliases: ['cannon', 'po rook', '포 룩'] },
@@ -29,34 +30,49 @@ export const pieceCatalog: PieceCatalogItem[] = [
   { id: 'knight', name: 'Knight', score: 0, category: 'minor', canPocket: true },
   { id: 'paratrooper', name: '공수부대 대원', score: 0, category: 'variant', canPocket: true, aliases: ['Paratrooper', '공수부대'] },
   { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
-]
+])
 
 export function customDeckPieceType(piece: Pick<CustomPieceRecord, 'id' | 'version' | 'exposed_piece_key'>): string {
   return `custom:${piece.id}:v${piece.version}:${piece.exposed_piece_key}`
+}
+
+function customCatalogItem(record: CustomPieceRecord): PieceCatalogItem {
+  return {
+    id: customDeckPieceType(record),
+    name: record.name,
+    score: record.score,
+    category: 'custom',
+    canPocket: true,
+    aliases: [record.description, record.exposed_piece_key],
+    custom: {
+      id: record.id,
+      version: record.version,
+      contentHash: record.content_hash,
+      exposedPieceKey: record.exposed_piece_key,
+      image: record.image,
+      active: record.active,
+    },
+  }
 }
 
 export function replaceCustomPieceCatalog(records: CustomPieceRecord[]): void {
   for (let index = pieceCatalog.length - 1; index >= 0; index -= 1) {
     if (pieceCatalog[index].custom) pieceCatalog.splice(index, 1)
   }
-  pieceCatalog.push(
-    ...records.map(record => ({
-      id: customDeckPieceType(record),
-      name: record.name,
-      score: record.score,
-      category: 'custom',
-      canPocket: true,
-      aliases: [record.description, record.exposed_piece_key],
-      custom: {
-        id: record.id,
-        version: record.version,
-        contentHash: record.content_hash,
-        exposedPieceKey: record.exposed_piece_key,
-        image: record.image,
-        active: record.active,
-      },
-    })),
-  )
+  pieceCatalog.push(...records.map(customCatalogItem))
+}
+
+export function upsertCustomPieceCatalog(record: CustomPieceRecord): void {
+  const item = customCatalogItem(record)
+  const index = pieceCatalog.findIndex(piece => piece.id === item.id)
+  if (index >= 0) pieceCatalog.splice(index, 1, item)
+  else pieceCatalog.push(item)
+}
+
+export function deactivateCustomPieceCatalog(id: string): void {
+  for (const piece of pieceCatalog) {
+    if (piece.custom?.id === id) piece.custom.active = false
+  }
 }
 
 export function applyPieceScores(scores: Record<string, number>): void {
