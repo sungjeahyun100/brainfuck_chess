@@ -283,7 +283,7 @@ function board(): CustomPieceTestBoard {
 function loadOptions(pieceId: string): Promise<boolean> {
   if (pendingOptions && pendingOptionsPieceId === pieceId) return pendingOptions
 
-  const revision = requestRevision
+  const revision = ++requestRevision
   pendingOptionsPieceId = pieceId
   const request = (async () => {
     status.value = '서버에서 가능한 행동을 계산하는 중…'
