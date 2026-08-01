@@ -485,7 +485,7 @@ function fileLabel(file: number): string {
 }
 
 function displayPieceAsset(pieceType: string, owner: PlayerId): string | undefined {
-  return pieceAsset(pieceType, owner)
+  return pieceAsset(labDefinitions.value[pieceType]?.visual?.default_asset_key ?? pieceType, owner)
 }
 
 function placedPieceAsset(piece: PieceLabPiece): string | undefined {
@@ -1163,6 +1163,17 @@ async function loadSelectedPieceOptions() {
         owner: piece.owner,
         state: piece.state,
       })),
+      custom_pieces: pieceCatalog
+        .filter(piece => piece.custom && (
+          pieces.value.some(placed => placed.pieceType === piece.id)
+          || pocketPieces.value.some(pocket => pocket.pieceType === piece.id)
+        ))
+        .map(piece => ({
+          custom_piece_id: piece.custom!.id,
+          version: piece.custom!.version,
+          content_hash: piece.custom!.contentHash,
+          exposed_piece_key: piece.custom!.exposedPieceKey,
+        })),
       selected_piece_id: selected.id,
       move_option_id: activeAbilityId.value ?? undefined,
       global_state: globalState.value,

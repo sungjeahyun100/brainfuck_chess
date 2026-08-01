@@ -240,10 +240,20 @@ struct LabPieceOptionsRequest {
     pieces: Vec<LabPieceSpec>,
     #[serde(default)]
     pocket_pieces: Vec<LabPocketPieceSpec>,
+    #[serde(default)]
+    custom_pieces: Vec<LabCustomPieceRef>,
     selected_piece_id: String,
     move_option_id: Option<String>,
     #[serde(default)]
     global_state: HashMap<String, i32>,
+}
+
+#[derive(Clone, Deserialize)]
+struct LabCustomPieceRef {
+    custom_piece_id: String,
+    version: u32,
+    content_hash: String,
+    exposed_piece_key: String,
 }
 
 #[derive(Serialize)]
@@ -517,17 +527,42 @@ fn build_game_state(
     Ok(state)
 }
 
-fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, String> {
+fn build_lab_game_state(
+    req: &LabPieceOptionsRequest,
+    packages: &[CustomPiecePackage],
+) -> Result<GameState, String> {
     if !(8..=12).contains(&req.board_size) {
         return Err("보드 크기는 8부터 12까지 선택할 수 있습니다.".into());
     }
 
-    let mut board = create_board(req.board_size);
+    let board = create_board(req.board_size);
     let defs: HashMap<String, PieceDefinition> = all_default_definitions()
         .into_iter()
         .map(|d| (d.id.clone(), d))
         .collect();
     let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&defs);
+    let mut catalog_state = GameState {
+        id: "piece-lab-catalog".into(),
+        board,
+        pieces: HashMap::new(),
+        piece_definitions: defs,
+        custom_piece_manifest: Vec::new(),
+        players: HashMap::new(),
+        current_player: "white".into(),
+        turn_number: 1,
+        phase: GamePhase::Playing,
+        en_passant_target: None,
+        en_passant_available_to: None,
+        global_state: HashMap::new(),
+        history: Vec::new(),
+        result: None,
+        chessembly_program_cache,
+    };
+    install_runtime_catalog(&mut catalog_state, packages).map_err(|error| error.to_string())?;
+    let mut board = catalog_state.board;
+    let defs = catalog_state.piece_definitions;
+    let chessembly_program_cache = catalog_state.chessembly_program_cache;
+    let custom_piece_manifest = catalog_state.custom_piece_manifest;
     let mut pieces = HashMap::new();
     let mut white_starting = Vec::new();
     let mut black_starting = Vec::new();
@@ -556,6 +591,10 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
         }
 
         let type_id = resolve_piece_type(&lab_piece.owner, &lab_piece.piece_type)
+            .or_else(|| {
+                defs.contains_key(&lab_piece.piece_type)
+                    .then(|| lab_piece.piece_type.clone())
+            })
             .ok_or_else(|| format!("알 수 없는 기물 타입입니다: {}", lab_piece.piece_type))?;
         let definition = defs
             .get(&type_id)
@@ -620,6 +659,10 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
             return Err(format!("중복된 테스트 기물 id입니다: {}", lab_piece.id));
         }
         let type_id = resolve_piece_type(&lab_piece.owner, &lab_piece.piece_type)
+            .or_else(|| {
+                defs.contains_key(&lab_piece.piece_type)
+                    .then(|| lab_piece.piece_type.clone())
+            })
             .ok_or_else(|| format!("알 수 없는 포켓 기물 타입입니다: {}", lab_piece.piece_type))?;
         let definition = defs
             .get(&type_id)
@@ -706,7 +749,7 @@ fn build_lab_game_state(req: &LabPieceOptionsRequest) -> Result<GameState, Strin
         board,
         pieces,
         piece_definitions: defs,
-        custom_piece_manifest: Vec::new(),
+        custom_piece_manifest,
         players,
         current_player,
         turn_number: 1,
@@ -1612,9 +1655,35 @@ async fn get_piece_options(
 }
 
 async fn get_lab_piece_options(
+    State(app): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<LabPieceOptionsRequest>,
 ) -> Result<Json<LabPieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let state = build_lab_game_state(&req)
+    let packages = if req.custom_pieces.is_empty() {
+        Vec::new()
+    } else {
+        let owner = custom_piece::authenticated_owner(&headers)
+            .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
+        let deck = PlayerDeckSpec {
+            starting: req
+                .custom_pieces
+                .iter()
+                .map(|piece| StartingPieceSpec {
+                    piece: DeckPieceRef::Custom {
+                        custom_piece_id: piece.custom_piece_id.clone(),
+                        version: piece.version,
+                        content_hash: piece.content_hash.clone(),
+                        exposed_piece_key: piece.exposed_piece_key.clone(),
+                    },
+                    square: Square::new(0, 0),
+                })
+                .collect(),
+            pocket: Vec::new(),
+        };
+        resolve_custom_packages(&app, &[(owner.as_str(), &deck)])
+            .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
+    };
+    let state = build_lab_game_state(&req, &packages)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let piece_id = PieceId::from(req.selected_piece_id.clone());
     let selected_in_pocket = state
@@ -1795,6 +1864,7 @@ mod tests {
             move_option_id: None,
             global_state: HashMap::new(),
             pocket_pieces: vec![],
+            custom_pieces: vec![],
             pieces: vec![
                 LabPieceSpec {
                     id: "lab_white_rook_1".into(),
@@ -1815,14 +1885,74 @@ mod tests {
             ],
         };
 
-        let response = match get_lab_piece_options(Json(req)).await {
-            Ok(Json(response)) => response,
-            Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
-        };
+        let response =
+            match get_lab_piece_options(State(app.clone()), HeaderMap::new(), Json(req)).await {
+                Ok(Json(response)) => response,
+                Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+            };
 
         assert!(response.moves.contains(&Square::new(3, 6)));
         assert!(response.attacks.contains(&Square::new(3, 6)));
         assert!(app.games.is_empty());
+    }
+
+    #[test]
+    fn lab_game_installs_custom_piece_movement_and_visual() {
+        let mut definition = all_default_definitions()
+            .into_iter()
+            .find(|definition| definition.id == "knight")
+            .unwrap();
+        definition.id = "main".into();
+        definition.name = "Lab Custom".into();
+        definition.is_king = false;
+        definition.visual.default_asset_key = "data:image/svg+xml;base64,PHN2Zy8+".into();
+        let raw_script = serde_json::to_string(&serde_json::json!({
+            "format": brainfuck_chess_engine::CUSTOM_PIECE_SCRIPT_FORMAT,
+            "definitions": [definition],
+        }))
+        .unwrap();
+        let package = brainfuck_chess_engine::validate_and_build_custom_piece_package(
+            brainfuck_chess_engine::CustomPiecePackageInput {
+                package_id: "lab-piece".into(),
+                version: 1,
+                expected_content_hash: None,
+                raw_script,
+                exposed_piece_key: "main".into(),
+                score: 3,
+            },
+        )
+        .unwrap();
+        let runtime_type = package.exposed_type_id.clone();
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_custom_1".into(),
+            move_option_id: None,
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![LabPieceSpec {
+                id: "lab_custom_1".into(),
+                piece_type: runtime_type.clone(),
+                owner: "white".into(),
+                square: Square::new(3, 3),
+                state: HashMap::new(),
+                move_option_cooldowns: HashMap::new(),
+            }],
+        };
+
+        let state = build_lab_game_state(&req, &[package]).unwrap();
+        assert_eq!(
+            state.piece_definitions[&runtime_type]
+                .visual
+                .default_asset_key,
+            "data:image/svg+xml;base64,PHN2Zy8+"
+        );
+        assert!(!generate_piece_legal_move_actions_with_options(
+            &state,
+            &PieceId::from("lab_custom_1"),
+            &MoveGenerationOptions::default(),
+        )
+        .is_empty());
     }
 
     #[tokio::test]
@@ -1833,6 +1963,7 @@ mod tests {
             move_option_id: None,
             global_state: HashMap::new(),
             pocket_pieces: vec![],
+            custom_pieces: vec![],
             pieces: vec![LabPieceSpec {
                 id: "lab_white_windmill_1".into(),
                 piece_type: "windmill".into(),
@@ -1843,10 +1974,13 @@ mod tests {
             }],
         };
 
-        let response = match get_lab_piece_options(Json(req)).await {
-            Ok(Json(response)) => response,
-            Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
-        };
+        let response =
+            match get_lab_piece_options(State(AppState::in_memory()), HeaderMap::new(), Json(req))
+                .await
+            {
+                Ok(Json(response)) => response,
+                Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+            };
 
         assert!(response.moves.contains(&Square::new(4, 3)));
         assert!(!response.moves.contains(&Square::new(4, 4)));
@@ -1860,6 +1994,7 @@ mod tests {
             move_option_id: None,
             global_state: HashMap::new(),
             pieces: vec![],
+            custom_pieces: vec![],
             pocket_pieces: vec![LabPocketPieceSpec {
                 id: "lab_white_pocket_paratrooper_1".into(),
                 piece_type: "paratrooper".into(),
@@ -1868,10 +2003,13 @@ mod tests {
             }],
         };
 
-        let response = match get_lab_piece_options(Json(req)).await {
-            Ok(Json(response)) => response,
-            Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
-        };
+        let response =
+            match get_lab_piece_options(State(AppState::in_memory()), HeaderMap::new(), Json(req))
+                .await
+            {
+                Ok(Json(response)) => response,
+                Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+            };
 
         assert!(response.legal_moves.is_empty());
         assert!(!response.legal_drops.is_empty());

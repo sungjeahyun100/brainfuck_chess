@@ -89,6 +89,7 @@ export interface PieceLabOptionsRequest {
   board_size: number
   pieces: PieceLabPieceRequest[]
   pocket_pieces: PieceLabPocketPieceRequest[]
+  custom_pieces?: CustomDeckPieceRequest[]
   selected_piece_id: string
   move_option_id?: string
   global_state?: Record<string, number>
