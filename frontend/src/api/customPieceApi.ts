@@ -1,3 +1,7 @@
+import {
+  deactivateCustomPieceCatalog,
+  upsertCustomPieceCatalog,
+} from '../composables/useDeckValidation'
 import type { TurnAction } from '../types/game'
 import type {
   CustomPieceImageAsset,
@@ -11,6 +15,7 @@ import type {
 
 const BASE = '/api/custom-pieces'
 const PROTOTYPE_USER = 'browser-prototype-user'
+export const CUSTOM_PIECES_CHANGED_EVENT = 'brainfuck-chess:custom-pieces-changed'
 
 export type CustomPieceErrorKind =
   | 'authentication'
@@ -91,24 +96,52 @@ function userFacingError(kind: CustomPieceErrorKind, serverMessage?: string): st
   return serverMessage && kind !== 'server' ? serverMessage : fallback[kind]
 }
 
+function announceCustomPieceChange(detail: { kind: 'create' | 'update' | 'delete'; id: string; version?: number }) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(CUSTOM_PIECES_CHANGED_EVENT, { detail }))
+}
+
+async function createCustomPiece(input: CustomPieceInput): Promise<CustomPieceRecord> {
+  const record = await request<CustomPieceRecord>(BASE, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  upsertCustomPieceCatalog(record)
+  announceCustomPieceChange({ kind: 'create', id: record.id, version: record.version })
+  return record
+}
+
+async function updateCustomPiece(
+  id: string,
+  input: CustomPieceInput,
+  expectedVersion: number,
+): Promise<CustomPieceRecord> {
+  const record = await request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ ...input, expected_version: expectedVersion }),
+  })
+  upsertCustomPieceCatalog(record)
+  announceCustomPieceChange({ kind: 'update', id: record.id, version: record.version })
+  return record
+}
+
+async function deleteCustomPiece(id: string, expectedVersion: number): Promise<void> {
+  await request<void>(`${BASE}/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ expected_version: expectedVersion }),
+  })
+  deactivateCustomPieceCatalog(id)
+  announceCustomPieceChange({ kind: 'delete', id })
+}
+
 export const customPieceApi = {
   list: () => request<{ items: CustomPieceRecord[] }>(BASE),
   get: (id: string) => request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}`),
   getVersion: (id: string, version: number) =>
     request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}/versions/${version}`),
-  create: (input: CustomPieceInput) => request<CustomPieceRecord>(BASE, {
-    method: 'POST',
-    body: JSON.stringify(input),
-  }),
-  update: (id: string, input: CustomPieceInput, expectedVersion: number) =>
-    request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ ...input, expected_version: expectedVersion }),
-    }),
-  delete: (id: string, expectedVersion: number) => request<void>(`${BASE}/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    body: JSON.stringify({ expected_version: expectedVersion }),
-  }),
+  create: createCustomPiece,
+  update: updateCustomPiece,
+  delete: deleteCustomPiece,
   validate: (input: CustomPieceInput) => request<CustomPieceValidation>(`${BASE}/validate`, {
     method: 'POST',
     body: JSON.stringify(input),
