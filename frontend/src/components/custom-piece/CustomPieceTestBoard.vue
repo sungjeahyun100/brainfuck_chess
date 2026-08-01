@@ -61,7 +61,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { customPieceApi } from '../../api/customPieceApi'
 import PlayBoard from '../Board.vue'
 import { parseCustomPiecePackage, testPiecesFromServerState } from '../../composables/useCustomPieceDraft'
@@ -75,6 +75,7 @@ import type {
   Board,
   Piece,
   PieceDefinition,
+  PieceStateValue,
   PlayerId,
   Square,
   TurnAction,
@@ -99,6 +100,8 @@ const error = ref('')
 let nextId = 1
 let pendingOptions: Promise<boolean> | null = null
 let pendingOptionsPieceId: string | null = null
+let requestRevision = 0
+let draftRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const selectedServerPiece = computed(() =>
   selectedPieceId.value ? result.value?.state.pieces[selectedPieceId.value] : undefined,
@@ -148,6 +151,63 @@ watch(() => props.pieceKeys, (keys) => {
   }
 }, { immediate: true })
 
+watch(() => JSON.stringify(props.draft), () => {
+  requestRevision += 1
+  pendingOptions = null
+  pendingOptionsPieceId = null
+  result.value = null
+  error.value = ''
+  reconcilePieceStates()
+  status.value = '편집 중인 기물 변경사항을 테스트 보드에 반영했습니다.'
+
+  if (draftRefreshTimer) clearTimeout(draftRefreshTimer)
+  const selected = selectedPieceId.value
+  if (selected && pieces.value.some(piece => piece.id === selected)) {
+    draftRefreshTimer = setTimeout(() => {
+      draftRefreshTimer = null
+      void loadOptions(selected)
+    }, 250)
+  }
+})
+
+onBeforeUnmount(() => {
+  requestRevision += 1
+  if (draftRefreshTimer) clearTimeout(draftRefreshTimer)
+})
+
+function draftDefinitions(): Record<string, PieceDefinition> {
+  try {
+    return Object.fromEntries(parseCustomPiecePackage(props.draft.raw_script).definitions.map(
+      definition => [definition.id, definition],
+    ))
+  } catch {
+    return {}
+  }
+}
+
+function sameStateType(left: PieceStateValue, right: PieceStateValue): boolean {
+  return typeof left === typeof right
+}
+
+function reconcilePieceStates() {
+  const definitions = draftDefinitions()
+  pieces.value = pieces.value.map(piece => {
+    const definition = definitions[piece.piece_key]
+    if (!definition) return piece
+    const previous = piece.state ?? {}
+    const state = Object.fromEntries(definition.state_schema.map(schema => {
+      const current = previous[schema.key]
+      return [
+        schema.key,
+        current !== undefined && sameStateType(current, schema.default_value)
+          ? current
+          : schema.default_value,
+      ]
+    }))
+    return { ...piece, state }
+  })
+}
+
 function pieceAt(square: Square) {
   return pieces.value.find(piece => sameSquare(piece.square, square))
 }
@@ -180,11 +240,15 @@ async function selectSquare(square: Square) {
     return
   }
   if (!placementKey.value) return
+  const definition = draftDefinitions()[placementKey.value]
   pieces.value.push({
     id: `test-${nextId++}`,
     piece_key: placementKey.value,
     owner: placementOwner.value,
     square: { ...square },
+    state: definition
+      ? Object.fromEntries(definition.state_schema.map(schema => [schema.key, schema.default_value]))
+      : {},
   })
   result.value = null
   status.value = `${placementKey.value} 배치됨`
@@ -219,14 +283,18 @@ function board(): CustomPieceTestBoard {
 function loadOptions(pieceId: string): Promise<boolean> {
   if (pendingOptions && pendingOptionsPieceId === pieceId) return pendingOptions
 
+  const revision = requestRevision
   pendingOptionsPieceId = pieceId
   const request = (async () => {
     status.value = '서버에서 가능한 행동을 계산하는 중…'
     try {
-      result.value = await customPieceApi.testOptions(props.draft, board(), pieceId)
-      status.value = `가능한 이동 ${result.value.legal_moves.length}개 · 공격 칸 ${result.value.attacks.length}개`
+      const nextResult = await customPieceApi.testOptions(props.draft, board(), pieceId)
+      if (revision !== requestRevision) return false
+      result.value = nextResult
+      status.value = `가능한 이동 ${nextResult.legal_moves.length}개 · 공격 칸 ${nextResult.attacks.length}개`
       return true
     } catch (caught) {
+      if (revision !== requestRevision) return false
       error.value = caught instanceof Error ? caught.message : '행마 계산에 실패했습니다.'
       status.value = ''
       return false
@@ -243,11 +311,13 @@ function loadOptions(pieceId: string): Promise<boolean> {
 }
 
 async function applyAction(action: TurnAction) {
+  const revision = requestRevision
   status.value = '서버에서 행동을 적용하는 중…'
   try {
     const previousCount = pieces.value.length
     const previousPiece = pieces.value.find(piece => piece.id === action.piece_id)
     const applied = await customPieceApi.testAction(props.draft, board(), action)
+    if (revision !== requestRevision) return
     result.value = applied
     currentPlayer.value = applied.state.current_player
     pieces.value = testPiecesFromServerState(applied.state)
@@ -261,12 +331,14 @@ async function applyAction(action: TurnAction) {
     ].filter(Boolean)
     status.value = `행동 적용 완료${changes.length ? ` · ${changes.join(' · ')}` : ''}. 서버 상태로 갱신했습니다.`
   } catch (caught) {
+    if (revision !== requestRevision) return
     error.value = caught instanceof Error ? caught.message : '행동 적용에 실패했습니다.'
     status.value = ''
   }
 }
 
 function reset() {
+  requestRevision += 1
   pieces.value = []
   selectedPieceId.value = null
   result.value = null
@@ -276,6 +348,7 @@ function reset() {
 }
 
 function clearSelection() {
+  requestRevision += 1
   selectedPieceId.value = null
   result.value = null
   error.value = ''
