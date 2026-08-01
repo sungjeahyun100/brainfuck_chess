@@ -32,6 +32,12 @@ export const pieceCatalog = reactive<PieceCatalogItem[]>([
   { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
 ])
 
+export const pocketCatalog = reactive<PieceCatalogItem[]>(pieceCatalog.filter(piece => piece.canPocket))
+
+function syncPocketCatalog(): void {
+  pocketCatalog.splice(0, pocketCatalog.length, ...pieceCatalog.filter(piece => piece.canPocket))
+}
+
 export function customDeckPieceType(piece: Pick<CustomPieceRecord, 'id' | 'version' | 'exposed_piece_key'>): string {
   return `custom:${piece.id}:v${piece.version}:${piece.exposed_piece_key}`
 }
@@ -60,6 +66,7 @@ export function replaceCustomPieceCatalog(records: CustomPieceRecord[]): void {
     if (pieceCatalog[index].custom) pieceCatalog.splice(index, 1)
   }
   pieceCatalog.push(...records.map(customCatalogItem))
+  syncPocketCatalog()
 }
 
 export function upsertCustomPieceCatalog(record: CustomPieceRecord): void {
@@ -67,12 +74,14 @@ export function upsertCustomPieceCatalog(record: CustomPieceRecord): void {
   const index = pieceCatalog.findIndex(piece => piece.id === item.id)
   if (index >= 0) pieceCatalog.splice(index, 1, item)
   else pieceCatalog.push(item)
+  syncPocketCatalog()
 }
 
 export function deactivateCustomPieceCatalog(id: string): void {
   for (const piece of pieceCatalog) {
     if (piece.custom?.id === id) piece.custom.active = false
   }
+  syncPocketCatalog()
 }
 
 export function applyPieceScores(scores: Record<string, number>): void {
@@ -84,8 +93,6 @@ export function applyPieceScores(scores: Record<string, number>): void {
     piece.score = score
   }
 }
-
-export const pocketCatalog = pieceCatalog.filter(piece => piece.canPocket)
 
 export const catalogCategoryLabels: Record<string, string> = {
   custom: '내 커스텀 기물',
