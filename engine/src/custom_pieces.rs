@@ -415,6 +415,38 @@ fn syntax_error<T>(
     })
 }
 
+fn runtime_definitions_with_source_visuals(
+    package: &CustomPiecePackage,
+) -> Result<Vec<PieceDefinition>, CustomPieceError> {
+    let document: PieceSetDocument = serde_json::from_str(&package.raw_script)
+        .map_err(|error| CustomPieceError::ParseFailure(error.to_string()))?;
+    if document.format != CUSTOM_PIECE_SCRIPT_FORMAT {
+        return Err(CustomPieceError::UnsupportedFeature(document.format));
+    }
+
+    let source_variants = document
+        .definitions
+        .into_iter()
+        .map(|definition| {
+            (
+                custom_runtime_type_id(&package.package_id, package.version, &definition.id),
+                definition.visual.variants,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut definitions = package.definitions.clone();
+    for definition in &mut definitions {
+        let variants = source_variants.get(&definition.id).ok_or_else(|| {
+            CustomPieceError::CorruptSnapshot(format!(
+                "package `{}` source is missing definition `{}`",
+                package.package_id, definition.id
+            ))
+        })?;
+        definition.visual.variants = variants.clone();
+    }
+    Ok(definitions)
+}
+
 pub fn install_runtime_catalog(
     state: &mut GameState,
     packages: &[CustomPiecePackage],
@@ -426,6 +458,7 @@ pub fn install_runtime_catalog(
     let mut definitions = reserved.clone();
     definitions.extend(state.piece_definitions.keys().cloned());
     let mut package_versions = HashMap::new();
+    let mut runtime_definitions = Vec::with_capacity(packages.len());
 
     for package in packages {
         let actual_hash = stable_content_hash(&package.raw_script);
@@ -446,14 +479,16 @@ pub fn install_runtime_catalog(
                 });
             }
         }
-        for definition in &package.definitions {
+        let prepared = runtime_definitions_with_source_visuals(package)?;
+        for definition in &prepared {
             if reserved.contains(&definition.id) || !definitions.insert(definition.id.clone()) {
                 return Err(CustomPieceError::IdentifierCollision(definition.id.clone()));
             }
         }
+        runtime_definitions.push(prepared);
     }
-    for package in packages {
-        for definition in &package.definitions {
+    for (package, prepared) in packages.iter().zip(runtime_definitions) {
+        for definition in &prepared {
             state
                 .piece_definitions
                 .insert(definition.id.clone(), definition.clone());
@@ -462,10 +497,9 @@ pub fn install_runtime_catalog(
             package_id: package.package_id.clone(),
             version: package.version,
             content_hash: package.content_hash.clone(),
-            definition_snapshot_hash: definitions_hash(&package.definitions)?,
+            definition_snapshot_hash: definitions_hash(&prepared)?,
             exposed_type_id: package.exposed_type_id.clone(),
-            runtime_type_ids: package
-                .definitions
+            runtime_type_ids: prepared
                 .iter()
                 .map(|definition| definition.id.clone())
                 .collect(),
