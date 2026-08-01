@@ -4,8 +4,10 @@ import test from 'node:test'
 import { savedDeckToPlayerDeckRequest } from './useDeckSerialization.ts'
 import {
   customDeckPieceType,
+  deactivateCustomPieceCatalog,
   pieceCatalog,
   replaceCustomPieceCatalog,
+  upsertCustomPieceCatalog,
   validateSavedDeck,
 } from './useDeckValidation.ts'
 import type { SavedDeck } from '../types/deck.ts'
@@ -82,4 +84,28 @@ test('missing or inactive pinned versions are explicit deck validation failures'
 
   replaceCustomPieceCatalog([{ ...record, active: false }])
   assert.match(validateSavedDeck(deck(customDeckPieceType(record))).errors.join(' '), /비활성화/)
+})
+
+test('saved custom piece changes are published to the live deck catalog', () => {
+  replaceCustomPieceCatalog([record])
+  const updated = {
+    ...record,
+    name: 'Hero Plus',
+    score: 9,
+    version: 4,
+    content_hash: 'def456',
+    updated_at: 3,
+  }
+
+  upsertCustomPieceCatalog(updated)
+
+  const versions = pieceCatalog
+    .filter(piece => piece.custom?.id === record.id)
+    .sort((left, right) => left.custom!.version - right.custom!.version)
+  assert.deepEqual(versions.map(piece => piece.custom!.version), [3, 4])
+  assert.equal(versions[1].name, 'Hero Plus')
+  assert.equal(versions[1].score, 9)
+
+  deactivateCustomPieceCatalog(record.id)
+  assert.equal(versions.every(piece => piece.custom?.active === false), true)
 })
