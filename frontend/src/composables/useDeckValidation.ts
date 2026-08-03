@@ -73,11 +73,9 @@ function customCatalogItem(record: CustomPieceRecord): PieceCatalogItem {
 }
 
 export function replaceCustomPieceCatalog(records: CustomPieceRecord[]): void {
+  archivedCustomCatalog.clear()
   for (let index = pieceCatalog.length - 1; index >= 0; index -= 1) {
-    if (pieceCatalog[index].custom) {
-      rememberCustomCatalogItem(pieceCatalog[index])
-      pieceCatalog.splice(index, 1)
-    }
+    if (pieceCatalog[index].custom) pieceCatalog.splice(index, 1)
   }
   const items = records.map(customCatalogItem)
   items.forEach(rememberCustomCatalogItem)
