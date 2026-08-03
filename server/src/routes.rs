@@ -4,6 +4,8 @@ use axum::Router;
 use crate::app_state::AppState;
 use crate::*;
 
+mod custom_piece_image;
+
 /// HTTP-only routing table. Request parsing remains in handlers while game
 /// rules are delegated to engine services/boundaries.
 pub(crate) fn api(state: AppState) -> Router {
@@ -32,6 +34,10 @@ pub(crate) fn api(state: AppState) -> Router {
             get(custom_piece::get)
                 .put(custom_piece::update)
                 .delete(custom_piece::deactivate),
+        )
+        .route(
+            "/custom-pieces/:id/versions/:version/image-asset",
+            get(custom_piece_image::get),
         )
         .route(
             "/custom-pieces/:id/versions/:version",
