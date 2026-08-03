@@ -6,7 +6,7 @@ import {
   customPieceApi,
   CustomPieceApiError,
 } from './customPieceApi.ts'
-import type { CustomPieceInput, CustomPieceTestBoard } from '../types/customPiece.ts'
+import type { CustomPieceInput, CustomPieceRecord, CustomPieceTestBoard } from '../types/customPiece.ts'
 import type { TurnAction } from '../types/game.ts'
 
 const draft: CustomPieceInput = {
@@ -58,6 +58,45 @@ test('CRUD requests include prototype principal and optimistic version', async (
 
   mockJson({}, 204)
   await customPieceApi.delete('piece-1', 2)
+})
+
+test('uploaded SVG assets are resolved before the custom piece list is returned', async () => {
+  const record: CustomPieceRecord = {
+    ...draft,
+    id: 'uploaded-piece',
+    owner_id: 'alice',
+    image: { kind: 'uploaded', asset_id: 'svg-asset' },
+    internal_piece_keys: [],
+    validation_status: 'valid',
+    version: 3,
+    content_hash: 'hash',
+    created_at: 1,
+    updated_at: 2,
+    active: true,
+  }
+  const calls: string[] = []
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    const path = String(url)
+    calls.push(path)
+    const body = path.endsWith('/image-asset')
+      ? { asset_key: 'data:image/svg+xml;base64,PHN2Zy8+' }
+      : { items: [record] }
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  const response = await customPieceApi.list()
+
+  assert.deepEqual(calls, [
+    '/api/custom-pieces',
+    '/api/custom-pieces/uploaded-piece/versions/3/image-asset',
+  ])
+  assert.equal(
+    response.items[0].resolved_image_asset_key,
+    'data:image/svg+xml;base64,PHN2Zy8+',
+  )
 })
 
 test('validation and option preview use separate server endpoints without mutating board input', async () => {
