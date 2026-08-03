@@ -32,7 +32,7 @@ import windmillBlack from './assets/pieces/windmill-black.svg'
 import windmillWhite from './assets/pieces/windmill-white.svg'
 import windmillRookBlack from './assets/pieces/windmill-rook-black.svg'
 import windmillRookWhite from './assets/pieces/windmill-rook-white.svg'
-import { pieceCatalog } from './composables/useDeckValidation'
+import { findPieceCatalogItem } from './composables/useDeckValidation'
 import type { Piece, PieceDefinition, PlayerId } from './types/game'
 import { resolvePieceAssetKey } from './pieceVisual'
 export { resolvePieceAssetKey } from './pieceVisual'
@@ -66,7 +66,7 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
 export function pieceAsset(typeId: string, owner: PlayerId): string | undefined {
   if (typeId.startsWith('data:image/')) return typeId
 
-  const custom = pieceCatalog.find(piece => piece.id === typeId)?.custom
+  const custom = findPieceCatalogItem(typeId)?.custom
   const customAssetKey = custom?.assetKey
     ?? (custom?.image.kind === 'built_in' ? custom.image.asset_key : undefined)
   if (customAssetKey && customAssetKey !== typeId) {
