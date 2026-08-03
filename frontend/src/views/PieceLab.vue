@@ -59,7 +59,7 @@
         </div>
 
         <div class="placement-controls">
-          <button class="tool-button" :class="{ active: selectedTool === eraseTool }" @click="selectedTool = eraseTool">
+          <button class="tool-button" :class="{ active: selectedTool === eraseTool }" @click="toggleEraseTool">
             <span>x</span>
             <strong>지우개</strong>
           </button>
@@ -610,6 +610,11 @@ function clearSelection() {
   optionsError.value = null
 }
 
+function toggleEraseTool() {
+  selectedTool.value = selectedTool.value === eraseTool ? null : eraseTool
+  clearSelection()
+}
+
 function selectCatalogPiece(pieceType: DeckPieceType) {
   selectedTool.value = pieceType
   clearSelection()
@@ -789,6 +794,7 @@ async function onSquareClick(file: number, rank: number) {
 
   if (selectedPocketPiece.value) {
     if (!tryDropPocketPiece(selectedPocketPiece.value.id, file, rank)) {
+      clearSelection()
       optionsError.value = '선택한 포켓 기물을 착수할 수 없는 칸입니다.'
     }
     return
@@ -800,6 +806,11 @@ async function onSquareClick(file: number, rank: number) {
       if (selected && selected.owner !== existing.owner && await tryMovePlacedPiece(selectedPieceId.value, file, rank)) {
         return
       }
+      if (selected && selected.owner !== existing.owner) {
+        clearSelection()
+        optionsError.value = '선택한 기물이 행마법상 이동할 수 없는 칸입니다.'
+        return
+      }
     }
     selectedPieceId.value = existing.id
     return
@@ -807,6 +818,7 @@ async function onSquareClick(file: number, rank: number) {
 
   if (selectedPieceId.value) {
     if (!await tryMovePlacedPiece(selectedPieceId.value, file, rank)) {
+      clearSelection()
       optionsError.value = '선택한 기물이 행마법상 이동할 수 없는 칸입니다.'
     }
     return
@@ -940,6 +952,10 @@ function onDocumentPointerDown(event: PointerEvent) {
   if (labBoardElement.value.contains(event.target as Node | null)) return
 
   clearAnnotations()
+  const target = event.target
+  if (!(target instanceof Element) || !target.closest('button, input, select, textarea, a, label')) {
+    clearSelection()
+  }
 }
 
 function clearAnnotations() {
