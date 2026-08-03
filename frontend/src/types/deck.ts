@@ -19,6 +19,7 @@ export interface PieceCatalogItem {
     contentHash: string
     exposedPieceKey: string
     image: CustomPieceImage
+    assetKey?: string
     active: boolean
   }
 }
