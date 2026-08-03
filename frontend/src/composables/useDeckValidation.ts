@@ -56,6 +56,7 @@ function customCatalogItem(record: CustomPieceRecord): PieceCatalogItem {
       contentHash: record.content_hash,
       exposedPieceKey: record.exposed_piece_key,
       image: record.image,
+      assetKey: record.resolved_image_asset_key,
       active: record.active,
     },
   }
@@ -70,10 +71,10 @@ export function replaceCustomPieceCatalog(records: CustomPieceRecord[]): void {
 }
 
 export function upsertCustomPieceCatalog(record: CustomPieceRecord): void {
-  const item = customCatalogItem(record)
-  const index = pieceCatalog.findIndex(piece => piece.id === item.id)
-  if (index >= 0) pieceCatalog.splice(index, 1, item)
-  else pieceCatalog.push(item)
+  for (let index = pieceCatalog.length - 1; index >= 0; index -= 1) {
+    if (pieceCatalog[index].custom?.id === record.id) pieceCatalog.splice(index, 1)
+  }
+  pieceCatalog.push(customCatalogItem(record))
   syncPocketCatalog()
 }
 
