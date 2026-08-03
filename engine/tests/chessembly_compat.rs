@@ -219,8 +219,36 @@ fn test_variant_piece_definitions_are_registered() {
     assert_eq!(find("tempest-bishop").score, 5);
     assert_eq!(find("tempest-knight").score, 5);
     assert_eq!(find("bouncing-bishop").score, 7);
+    assert_eq!(find("nightrider").score, 5);
+    assert_eq!(find("dozer-white").score, 2);
+    assert_eq!(find("dozer-black").score, 2);
     assert_eq!(find("tempest-pawn-white").score, 1);
     assert_eq!(find("tempest-pawn-black").score, 1);
+}
+
+#[test]
+fn test_nightrider_repeats_knight_leaps_until_blocked() {
+    let mut board = create_board(8);
+    let def = nightrider_definition();
+    let piece = make_piece("nr1", "white", "nightrider", 0, 0);
+    let mut pieces = HashMap::new();
+    pieces.insert("nr1".into(), piece.clone());
+    pieces.insert(
+        "blocker".into(),
+        make_piece("blocker", "white", "pawn-white", 4, 2),
+    );
+    board
+        .squares
+        .insert(Square::new(4, 2).to_id(), Some("blocker".into()));
+
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+
+    assert!(result.movement_squares.contains(&Square::new(2, 1)));
+    assert!(!result.movement_squares.contains(&Square::new(4, 2)));
+    assert!(!result.movement_squares.contains(&Square::new(6, 3)));
+    assert!(result.movement_squares.contains(&Square::new(1, 2)));
+    assert!(result.movement_squares.contains(&Square::new(2, 4)));
+    assert!(result.movement_squares.contains(&Square::new(3, 6)));
 }
 
 #[test]

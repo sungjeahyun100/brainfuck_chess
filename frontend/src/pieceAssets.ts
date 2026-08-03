@@ -6,10 +6,14 @@ import bouncingBishopBlack from './assets/pieces/bouncing-bishop-black.svg'
 import bouncingBishopWhite from './assets/pieces/bouncing-bishop-white.svg'
 import cannonRookBlack from './assets/pieces/cannon-rook-black.svg'
 import cannonRookWhite from './assets/pieces/cannon-rook-white.svg'
+import dozerBlack from './assets/pieces/dozer-black.svg'
+import dozerWhite from './assets/pieces/dozer-white.svg'
 import kingBlack from './assets/pieces/king-black.svg'
 import kingWhite from './assets/pieces/king-white.svg'
 import knightBlack from './assets/pieces/knight-black.svg'
 import knightWhite from './assets/pieces/knight-white.svg'
+import nightriderBlack from './assets/pieces/nightrider-black.svg'
+import nightriderWhite from './assets/pieces/nightrider-white.svg'
 import pawnBlack from './assets/pieces/pawn-black.svg'
 import pawnWhite from './assets/pieces/pawn-white.svg'
 import paratrooperBlack from './assets/pieces/paratrooper-black.svg'
@@ -43,6 +47,7 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   'bouncing-bishop': { white: bouncingBishopWhite, black: bouncingBishopBlack },
   king: { white: kingWhite, black: kingBlack },
   knight: { white: knightWhite, black: knightBlack },
+  nightrider: { white: nightriderWhite, black: nightriderBlack },
   pawn: { white: pawnWhite, black: pawnBlack },
   paratrooper: { white: paratrooperWhite, black: paratrooperBlack },
   'pawn-white': { white: pawnWhite, black: pawnBlack },
@@ -54,6 +59,9 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   rook: { white: rookWhite, black: rookBlack },
   // TODO: temporary placeholder art (rook flipped upside-down) to visually distinguish from the regular rook
   'cannon-rook': { white: cannonRookWhite, black: cannonRookBlack },
+  dozer: { white: dozerWhite, black: dozerBlack },
+  'dozer-white': { white: dozerWhite, black: dozerBlack },
+  'dozer-black': { white: dozerWhite, black: dozerBlack },
   'tempest-queen': { white: tempestQueenWhite, black: tempestQueenBlack },
   'tempest-bishop': { white: tempestBishopWhite, black: tempestBishopBlack },
   'tempest-knight': { white: tempestKnightWhite, black: tempestKnightBlack },

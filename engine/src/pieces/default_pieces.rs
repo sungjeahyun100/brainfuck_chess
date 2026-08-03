@@ -283,6 +283,31 @@ take-move(-1, 2);"
     }
 }
 
+/// Nightrider: repeats Knight leaps in a straight line until blocked.
+pub fn nightrider_definition() -> PieceDefinition {
+    legacy_piece_definition! {
+        id: "nightrider".into(),
+        name: "Nightrider".into(),
+        score: 5,
+        chessembly_code: "\
+take-move(2, 1) repeat(1);
+take-move(2, -1) repeat(1);
+take-move(-2, 1) repeat(1);
+take-move(-2, -1) repeat(1);
+take-move(1, 2) repeat(1);
+take-move(-1, 2) repeat(1);
+take-move(1, -2) repeat(1);
+take-move(-1, -2) repeat(1);"
+            .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+    }
+}
+
 /// Paratrooper: cannot move on the board and may capture only while dropping.
 pub fn paratrooper_definition() -> PieceDefinition {
     PieceDefinition {
@@ -545,6 +570,55 @@ take(-1, -1);"
     }
 }
 
+/// White Dozer: advances one rank across a five-file-wide front and promotes
+/// to a Bishop or Knight on the last rank.
+pub fn dozer_white_definition() -> PieceDefinition {
+    legacy_piece_definition! {
+        id: "dozer-white".into(),
+        name: "Dozer".into(),
+        score: 2,
+        chessembly_code: "\
+take-move(-2, 1);
+take-move(-1, 1);
+take-move(0, 1);
+take-move(1, 1);
+take-move(2, 1);"
+            .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: Some(PromotionRule {
+            condition: PromotionCondition::LastRank,
+        }),
+        promotion_pool: vec!["knight".into(), "bishop".into()],
+    }
+}
+
+/// Black Dozer: mirrored White Dozer movement and first-rank promotion.
+pub fn dozer_black_definition() -> PieceDefinition {
+    legacy_piece_definition! {
+        id: "dozer-black".into(),
+        name: "Dozer".into(),
+        score: 2,
+        chessembly_code: "\
+take-move(-2, -1);
+take-move(-1, -1);
+take-move(0, -1);
+take-move(1, -1);
+take-move(2, -1);"
+            .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: Some(PromotionRule {
+            condition: PromotionCondition::FirstRank,
+        }),
+        promotion_pool: vec!["knight".into(), "bishop".into()],
+    }
+}
+
 fn tempest_pawn_promotion_pool() -> Vec<String> {
     vec![
         "tempest-queen".into(),
@@ -703,6 +777,7 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bishop_definition(),
         windmill_definition(),
         knight_definition(),
+        nightrider_definition(),
         paratrooper_definition(),
         amazon_definition(),
         cannon_rook_definition(),
@@ -710,6 +785,8 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bouncing_bishop_definition(),
         pawn_white_definition(),
         pawn_black_definition(),
+        dozer_white_definition(),
+        dozer_black_definition(),
         tempest_pawn_white_definition(),
         tempest_pawn_black_definition(),
         tempest_queen_definition(),

@@ -852,6 +852,48 @@ fn test_tempest_pawn_reaching_back_rank_generates_tempest_promotion_choices() {
 }
 
 #[test]
+fn dozers_move_forward_and_promote_only_to_knight_or_bishop() {
+    let mut white_state = make_game_state(8);
+    add_piece(&mut white_state, "wk", "white", "king", 0, 0);
+    add_piece(&mut white_state, "bk", "black", "king", 7, 7);
+    add_piece(&mut white_state, "wd", "white", "dozer-white", 3, 6);
+
+    let white_moves = generate_piece_legal_move_actions(&white_state, &"wd".into());
+    let mut white_promotions: Vec<_> = white_moves
+        .iter()
+        .filter(|action| action.to.rank == 7)
+        .filter_map(|action| action.promotion.clone())
+        .collect();
+    white_promotions.sort();
+    assert_eq!(
+        white_promotions,
+        vec![
+            "bishop", "bishop", "bishop", "bishop", "bishop", "knight", "knight", "knight",
+            "knight", "knight"
+        ]
+    );
+
+    let mut black_state = make_game_state(8);
+    add_piece(&mut black_state, "wk", "white", "king", 0, 0);
+    add_piece(&mut black_state, "bk", "black", "king", 7, 7);
+    add_piece(&mut black_state, "bd", "black", "dozer-black", 3, 1);
+    black_state.current_player = "black".into();
+
+    let black_moves = generate_piece_legal_move_actions(&black_state, &"bd".into());
+    let mut black_targets: Vec<_> = black_moves
+        .iter()
+        .filter(|action| action.to.rank == 0)
+        .map(|action| (action.to.file, action.promotion.clone().unwrap()))
+        .collect();
+    black_targets.sort();
+    assert_eq!(black_targets.len(), 10);
+    assert!(black_targets
+        .iter()
+        .all(|(file, promotion)| (1..=5).contains(file)
+            && matches!(promotion.as_str(), "bishop" | "knight")));
+}
+
+#[test]
 fn test_pawn_promotion_applies_chosen_piece_type() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 0, 0);

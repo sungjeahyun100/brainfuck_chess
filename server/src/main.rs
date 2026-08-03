@@ -286,8 +286,8 @@ struct ErrorResponse {
 
 fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
-        "king" | "queen" | "rook" | "bishop" | "knight" | "amazon" | "cannon-rook"
-        | "cannon_rook" | "tempest-rook" | "tempest-queen" | "tempest-knight"
+        "king" | "queen" | "rook" | "bishop" | "knight" | "nightrider" | "amazon"
+        | "cannon-rook" | "cannon_rook" | "tempest-rook" | "tempest-queen" | "tempest-knight"
         | "bouncing-bishop" | "tempest-bishop" | "windmill" | "paratrooper" => {
             Some(raw_piece_type.replace('_', "-"))
         }
@@ -303,6 +303,11 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
                 "tempest-pawn-black".into()
             })
         }
+        "dozer" | "dozer-white" | "dozer-black" => Some(if player_id == "white" {
+            "dozer-white".into()
+        } else {
+            "dozer-black".into()
+        }),
         _ => None,
     }
 }
@@ -971,6 +976,9 @@ async fn get_piece_scores() -> Json<HashMap<PieceTypeId, u32>> {
     }
     if let Some(score) = scores.get("tempest-pawn-white").copied() {
         scores.insert("tempest-pawn".into(), score);
+    }
+    if let Some(score) = scores.get("dozer-white").copied() {
+        scores.insert("dozer".into(), score);
     }
 
     Json(scores)
@@ -1829,6 +1837,10 @@ mod tests {
         assert_eq!(scores.get("tempest-knight"), Some(&5));
         assert_eq!(scores.get("pawn"), scores.get("pawn-white"));
         assert_eq!(scores.get("tempest-pawn"), scores.get("tempest-pawn-white"));
+        assert_eq!(scores.get("dozer"), Some(&2));
+        assert_eq!(scores.get("dozer"), scores.get("dozer-white"));
+        assert_eq!(resolve_piece_type("white", "dozer").as_deref(), Some("dozer-white"));
+        assert_eq!(resolve_piece_type("black", "dozer").as_deref(), Some("dozer-black"));
     }
 
     #[tokio::test]

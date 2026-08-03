@@ -556,6 +556,7 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'tempest-bishop': 'B',
   'tempest-knight': 'N',
   'bouncing-bishop': 'B',
+  nightrider: 'N',
   'windmill': 'W',
   'rook': '♖',
   'bishop': '♗',
@@ -564,6 +565,8 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'pawn-black': '♟',
   'tempest-pawn-white': '♙',
   'tempest-pawn-black': '♟',
+  'dozer-white': 'D',
+  'dozer-black': 'D',
 }
 
 function pieceSymbol(typeId: string): string {
