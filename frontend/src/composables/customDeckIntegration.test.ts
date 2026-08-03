@@ -89,7 +89,7 @@ test('missing or inactive pinned versions are explicit deck validation failures'
   assert.match(validateSavedDeck(deck(customDeckPieceType(record))).errors.join(' '), /비활성화/)
 })
 
-test('saving a new version replaces the previous live catalog item', () => {
+test('saving a new version replaces the previous live catalog item but preserves pinned metadata', () => {
   replaceCustomPieceCatalog([record])
   const updated = {
     ...record,
@@ -117,6 +117,11 @@ test('saving a new version replaces the previous live catalog item', () => {
     false,
   )
 
+  const pinnedSummary = validateSavedDeck(deck(customDeckPieceType(record)))
+  assert.equal(pinnedSummary.valid, true)
+  assert.equal(pinnedSummary.totalScore, 14)
+
   deactivateCustomPieceCatalog(record.id)
   assert.equal(versions[0].custom?.active, false)
+  assert.match(validateSavedDeck(deck(customDeckPieceType(record))).errors.join(' '), /비활성화/)
 })
