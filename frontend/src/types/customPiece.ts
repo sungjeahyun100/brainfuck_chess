@@ -46,6 +46,7 @@ export interface CustomPieceRecord extends CustomPieceInput {
   created_at: number
   updated_at: number
   active: boolean
+  resolved_image_asset_key?: string
 }
 
 export interface CustomPieceDiagnostic {
