@@ -89,6 +89,23 @@ test('missing or inactive pinned versions are explicit deck validation failures'
   assert.match(validateSavedDeck(deck(customDeckPieceType(record))).errors.join(' '), /비활성화/)
 })
 
+test('catalog refresh shows only the newest version while retaining pinned metadata', () => {
+  const updated = {
+    ...record,
+    name: 'Hero Plus',
+    score: 9,
+    version: 4,
+    content_hash: 'def456',
+    updated_at: 3,
+  }
+
+  replaceCustomPieceCatalog([updated, record])
+
+  const visible = pieceCatalog.filter(piece => piece.custom?.id === record.id)
+  assert.deepEqual(visible.map(piece => piece.custom!.version), [4])
+  assert.equal(validateSavedDeck(deck(customDeckPieceType(record))).totalScore, 14)
+})
+
 test('saving a new version replaces the previous live catalog item but preserves pinned metadata', () => {
   replaceCustomPieceCatalog([record])
   const updated = {
