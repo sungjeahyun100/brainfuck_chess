@@ -32,10 +32,20 @@ export const pieceCatalog = reactive<PieceCatalogItem[]>([
   { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
 ])
 
+const archivedCustomCatalog = new Map<DeckPieceType, PieceCatalogItem>()
+
 export const pocketCatalog = reactive<PieceCatalogItem[]>(pieceCatalog.filter(piece => piece.canPocket))
 
 function syncPocketCatalog(): void {
   pocketCatalog.splice(0, pocketCatalog.length, ...pieceCatalog.filter(piece => piece.canPocket))
+}
+
+function rememberCustomCatalogItem(item: PieceCatalogItem): void {
+  if (item.custom) archivedCustomCatalog.set(item.id, item)
+}
+
+export function findPieceCatalogItem(pieceType: DeckPieceType): PieceCatalogItem | undefined {
+  return pieceCatalog.find(piece => piece.id === pieceType) ?? archivedCustomCatalog.get(pieceType)
 }
 
 export function customDeckPieceType(piece: Pick<CustomPieceRecord, 'id' | 'version' | 'exposed_piece_key'>): string {
@@ -64,17 +74,27 @@ function customCatalogItem(record: CustomPieceRecord): PieceCatalogItem {
 
 export function replaceCustomPieceCatalog(records: CustomPieceRecord[]): void {
   for (let index = pieceCatalog.length - 1; index >= 0; index -= 1) {
-    if (pieceCatalog[index].custom) pieceCatalog.splice(index, 1)
+    if (pieceCatalog[index].custom) {
+      rememberCustomCatalogItem(pieceCatalog[index])
+      pieceCatalog.splice(index, 1)
+    }
   }
-  pieceCatalog.push(...records.map(customCatalogItem))
+  const items = records.map(customCatalogItem)
+  items.forEach(rememberCustomCatalogItem)
+  pieceCatalog.push(...items)
   syncPocketCatalog()
 }
 
 export function upsertCustomPieceCatalog(record: CustomPieceRecord): void {
   for (let index = pieceCatalog.length - 1; index >= 0; index -= 1) {
-    if (pieceCatalog[index].custom?.id === record.id) pieceCatalog.splice(index, 1)
+    if (pieceCatalog[index].custom?.id === record.id) {
+      rememberCustomCatalogItem(pieceCatalog[index])
+      pieceCatalog.splice(index, 1)
+    }
   }
-  pieceCatalog.push(customCatalogItem(record))
+  const item = customCatalogItem(record)
+  rememberCustomCatalogItem(item)
+  pieceCatalog.push(item)
   syncPocketCatalog()
 }
 
@@ -82,11 +102,15 @@ export function deactivateCustomPieceCatalog(id: string): void {
   for (const piece of pieceCatalog) {
     if (piece.custom?.id === id) piece.custom.active = false
   }
+  for (const piece of archivedCustomCatalog.values()) {
+    if (piece.custom?.id === id) piece.custom.active = false
+  }
   syncPocketCatalog()
 }
 
 export function applyPieceScores(scores: Record<string, number>): void {
   for (const piece of pieceCatalog) {
+    if (piece.custom) continue
     const score = scores[piece.id]
     if (!Number.isInteger(score) || score < 0) {
       throw new Error(`엔진 기물 점수가 누락되었거나 잘못되었습니다: ${piece.id}`)
@@ -168,19 +192,19 @@ export function emptyPocket(): Record<DeckPieceType, number> {
 }
 
 export function pieceScore(pieceType: DeckPieceType): number {
-  return pieceCatalog.find(piece => piece.id === pieceType)?.score ?? 0
+  return findPieceCatalogItem(pieceType)?.score ?? 0
 }
 
 export function canUseInPocket(pieceType: DeckPieceType): boolean {
-  return pieceCatalog.find(piece => piece.id === pieceType)?.canPocket === true
+  return findPieceCatalogItem(pieceType)?.canPocket === true
 }
 
 export function pieceLabel(pieceType: DeckPieceType): string {
-  return pieceCatalog.find(piece => piece.id === pieceType)?.name ?? pieceType
+  return findPieceCatalogItem(pieceType)?.name ?? pieceType
 }
 
 export function isUniqueStartingPiece(pieceType: DeckPieceType): boolean {
-  return pieceCatalog.find(piece => piece.id === pieceType)?.uniqueStarting === true
+  return findPieceCatalogItem(pieceType)?.uniqueStarting === true
 }
 
 export function totalPocketCount(deck: LobbyDeck): number {
@@ -269,7 +293,7 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
     ...Object.entries(deck.pocket).filter(([, count]) => count > 0).map(([pieceType]) => pieceType),
   ]
   for (const pieceType of new Set(usedTypes)) {
-    const catalogPiece = pieceCatalog.find(piece => piece.id === pieceType)
+    const catalogPiece = findPieceCatalogItem(pieceType)
     if (!catalogPiece) {
       errors.push(`사용할 수 없는 기물 버전입니다: ${pieceType}`)
     } else if (catalogPiece.custom && !catalogPiece.custom.active) {
