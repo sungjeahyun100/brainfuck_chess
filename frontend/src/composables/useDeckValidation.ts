@@ -77,9 +77,17 @@ export function replaceCustomPieceCatalog(records: CustomPieceRecord[]): void {
   for (let index = pieceCatalog.length - 1; index >= 0; index -= 1) {
     if (pieceCatalog[index].custom) pieceCatalog.splice(index, 1)
   }
-  const items = records.map(customCatalogItem)
-  items.forEach(rememberCustomCatalogItem)
-  pieceCatalog.push(...items)
+
+  const latestByPieceId = new Map<string, PieceCatalogItem>()
+  for (const record of records) {
+    const item = customCatalogItem(record)
+    rememberCustomCatalogItem(item)
+    const current = latestByPieceId.get(record.id)
+    if (!current || current.custom!.version < record.version) {
+      latestByPieceId.set(record.id, item)
+    }
+  }
+  pieceCatalog.push(...latestByPieceId.values())
   syncPocketCatalog()
 }
 
