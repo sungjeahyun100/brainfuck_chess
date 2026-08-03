@@ -21,6 +21,7 @@ const record: CustomPieceRecord = {
   description: 'custom hero',
   score: 7,
   image: { kind: 'built_in', asset_key: 'knight' },
+  resolved_image_asset_key: 'knight',
   raw_script: '{}',
   exposed_piece_key: 'hero',
   internal_piece_keys: ['hidden-state'],
@@ -60,6 +61,7 @@ test('custom catalog exposes only the representative and contributes its pinned 
 
   assert.deepEqual(customItems.map(piece => piece.id), [pieceType])
   assert.equal(customItems.some(piece => piece.id.includes('hidden-state')), false)
+  assert.equal(customItems[0].custom?.assetKey, 'knight')
   assert.equal(validateSavedDeck(deck(pieceType)).totalScore, 14)
 })
 
@@ -87,7 +89,7 @@ test('missing or inactive pinned versions are explicit deck validation failures'
   assert.match(validateSavedDeck(deck(customDeckPieceType(record))).errors.join(' '), /비활성화/)
 })
 
-test('saved custom piece changes are published to the live deck and pocket catalogs', () => {
+test('saving a new version replaces the previous live catalog item', () => {
   replaceCustomPieceCatalog([record])
   const updated = {
     ...record,
@@ -95,22 +97,26 @@ test('saved custom piece changes are published to the live deck and pocket catal
     score: 9,
     version: 4,
     content_hash: 'def456',
+    resolved_image_asset_key: 'data:image/svg+xml;base64,PHN2Zy8+',
     updated_at: 3,
   }
 
   upsertCustomPieceCatalog(updated)
 
-  const versions = pieceCatalog
-    .filter(piece => piece.custom?.id === record.id)
-    .sort((left, right) => left.custom!.version - right.custom!.version)
-  assert.deepEqual(versions.map(piece => piece.custom!.version), [3, 4])
-  assert.equal(versions[1].name, 'Hero Plus')
-  assert.equal(versions[1].score, 9)
+  const versions = pieceCatalog.filter(piece => piece.custom?.id === record.id)
+  assert.deepEqual(versions.map(piece => piece.custom!.version), [4])
+  assert.equal(versions[0].name, 'Hero Plus')
+  assert.equal(versions[0].score, 9)
+  assert.equal(versions[0].custom?.assetKey, updated.resolved_image_asset_key)
   assert.equal(
     pocketCatalog.some(piece => piece.id === customDeckPieceType(updated)),
     true,
   )
+  assert.equal(
+    pocketCatalog.some(piece => piece.id === customDeckPieceType(record)),
+    false,
+  )
 
   deactivateCustomPieceCatalog(record.id)
-  assert.equal(versions.every(piece => piece.custom?.active === false), true)
+  assert.equal(versions[0].custom?.active, false)
 })
