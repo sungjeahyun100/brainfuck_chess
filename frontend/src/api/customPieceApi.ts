@@ -17,6 +17,8 @@ const BASE = '/api/custom-pieces'
 const PROTOTYPE_USER = 'browser-prototype-user'
 export const CUSTOM_PIECES_CHANGED_EVENT = 'brainfuck-chess:custom-pieces-changed'
 
+const resolvedImageAssetCache = new Map<string, string>()
+
 export type CustomPieceErrorKind =
   | 'authentication'
   | 'permission'
@@ -96,16 +98,59 @@ function userFacingError(kind: CustomPieceErrorKind, serverMessage?: string): st
   return serverMessage && kind !== 'server' ? serverMessage : fallback[kind]
 }
 
+function imageCacheKey(record: Pick<CustomPieceRecord, 'id' | 'version'>): string {
+  return `${record.id}:v${record.version}`
+}
+
+async function hydrateCustomPieceRecord(record: CustomPieceRecord): Promise<CustomPieceRecord> {
+  if (record.image.kind === 'built_in') {
+    return { ...record, resolved_image_asset_key: record.image.asset_key }
+  }
+
+  const key = imageCacheKey(record)
+  const cached = resolvedImageAssetCache.get(key)
+  if (cached) return { ...record, resolved_image_asset_key: cached }
+
+  try {
+    const response = await request<{ asset_key: string }>(
+      `${BASE}/${encodeURIComponent(record.id)}/versions/${record.version}/image-asset`,
+    )
+    resolvedImageAssetCache.set(key, response.asset_key)
+    return { ...record, resolved_image_asset_key: response.asset_key }
+  } catch {
+    return record
+  }
+}
+
+async function listCustomPieces(): Promise<{ items: CustomPieceRecord[] }> {
+  const response = await request<{ items: CustomPieceRecord[] }>(BASE)
+  return {
+    items: await Promise.all(response.items.map(hydrateCustomPieceRecord)),
+  }
+}
+
+async function getCustomPiece(id: string): Promise<CustomPieceRecord> {
+  return hydrateCustomPieceRecord(
+    await request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}`),
+  )
+}
+
+async function getCustomPieceVersion(id: string, version: number): Promise<CustomPieceRecord> {
+  return hydrateCustomPieceRecord(
+    await request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}/versions/${version}`),
+  )
+}
+
 function announceCustomPieceChange(detail: { kind: 'create' | 'update' | 'delete'; id: string; version?: number }) {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent(CUSTOM_PIECES_CHANGED_EVENT, { detail }))
 }
 
 async function createCustomPiece(input: CustomPieceInput): Promise<CustomPieceRecord> {
-  const record = await request<CustomPieceRecord>(BASE, {
+  const record = await hydrateCustomPieceRecord(await request<CustomPieceRecord>(BASE, {
     method: 'POST',
     body: JSON.stringify(input),
-  })
+  }))
   upsertCustomPieceCatalog(record)
   announceCustomPieceChange({ kind: 'create', id: record.id, version: record.version })
   return record
@@ -116,10 +161,10 @@ async function updateCustomPiece(
   input: CustomPieceInput,
   expectedVersion: number,
 ): Promise<CustomPieceRecord> {
-  const record = await request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}`, {
+  const record = await hydrateCustomPieceRecord(await request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}`, {
     method: 'PUT',
     body: JSON.stringify({ ...input, expected_version: expectedVersion }),
-  })
+  }))
   upsertCustomPieceCatalog(record)
   announceCustomPieceChange({ kind: 'update', id: record.id, version: record.version })
   return record
@@ -135,10 +180,9 @@ async function deleteCustomPiece(id: string, expectedVersion: number): Promise<v
 }
 
 export const customPieceApi = {
-  list: () => request<{ items: CustomPieceRecord[] }>(BASE),
-  get: (id: string) => request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}`),
-  getVersion: (id: string, version: number) =>
-    request<CustomPieceRecord>(`${BASE}/${encodeURIComponent(id)}/versions/${version}`),
+  list: listCustomPieces,
+  get: getCustomPiece,
+  getVersion: getCustomPieceVersion,
   create: createCustomPiece,
   update: updateCustomPiece,
   delete: deleteCustomPiece,
