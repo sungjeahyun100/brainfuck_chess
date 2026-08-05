@@ -286,7 +286,7 @@ struct ErrorResponse {
 
 fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
-        "king" | "queen" | "rook" | "bishop" | "knight" | "nightrider" | "amazon"
+        "king" | "queen" | "rook" | "bishop" | "knight" | "nightrider" | "amazon" | "guhang"
         | "cannon-rook" | "cannon_rook" | "tempest-rook" | "tempest-queen" | "tempest-knight"
         | "bouncing-bishop" | "tempest-bishop" | "windmill" | "paratrooper" => {
             Some(raw_piece_type.replace('_', "-"))

@@ -367,6 +367,47 @@ take-move(-1, 2);"
     }
 }
 
+/// Guhang: enters each orthogonal direction and repeatedly fans out along the
+/// perpendicular axis.
+pub fn guhang_definition() -> PieceDefinition {
+    legacy_piece_definition! {
+        id: "guhang".into(),
+        name: "구행".into(),
+        score: 25,
+        chessembly_code: "\
+do
+take-move(1, 0)
+{ take-move(0, 1) repeat(1) }
+{ take-move(0, -1) repeat(1) }
+while;
+
+do
+take-move(-1, 0)
+{ take-move(0, 1) repeat(1) }
+{ take-move(0, -1) repeat(1) }
+while;
+
+do
+take-move(0, 1)
+{ take-move(1, 0) repeat(1) }
+{ take-move(-1, 0) repeat(1) }
+while;
+
+do
+take-move(0, -1)
+{ take-move(1, 0) repeat(1) }
+{ take-move(-1, 0) repeat(1) }
+while;"
+            .into(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+    }
+}
+
 /// Tempest Rook: steps diagonally, then storms horizontally and vertically away
 /// from that diagonal landing square.
 pub fn tempest_rook_definition() -> PieceDefinition {
@@ -405,70 +446,21 @@ pub fn tempest_rook_definition() -> PieceDefinition {
     }
 }
 
-/// Bouncing Bishop: moves like a Bishop normally and may reflect off board
-/// edges when its ability is selected.
+/// Bouncing Bishop: follows diagonals and reflects off board edges as its
+/// normal movement.
 pub fn bouncing_bishop_definition() -> PieceDefinition {
-    let bishop_code = bishop_definition().chessembly_code;
-    let bounce_code = bouncing_bishop_chessembly_code().to_string();
-    PieceDefinition {
+    legacy_piece_definition! {
         id: "bouncing-bishop".into(),
         name: "Bouncing Bishop".into(),
         score: 7,
-        chessembly_code: bishop_code.clone(),
+        chessembly_code: bouncing_bishop_chessembly_code().into(),
         chessembly_version: "1.0".into(),
         dialect: None,
         extensions: None,
         is_king: false,
-        can_capture_on_drop: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        state_schema: Vec::new(),
-        move_layers: vec![
-            MoveLayerDefinition {
-                id: "bishop_move".into(),
-                chessembly_code: bishop_code,
-                enabled_when: Vec::new(),
-                on_commit: Vec::new(),
-            },
-            MoveLayerDefinition {
-                id: "bounce_move".into(),
-                chessembly_code: bounce_code,
-                enabled_when: Vec::new(),
-                on_commit: Vec::new(),
-            },
-        ],
-        move_options: vec![
-            MoveOptionDefinition {
-                id: "normal".into(),
-                name: "일반 이동".into(),
-                description: "일반 비숍처럼 대각선으로 이동합니다.".into(),
-                kind: MoveOptionKind::Normal,
-                layer_ids: vec!["bishop_move".into()],
-                execution_mode: MoveOptionExecutionMode::MoveModifier,
-                contributes_to_attack_map: true,
-                cooldown: None,
-            },
-            MoveOptionDefinition {
-                id: "bounce_move".into(),
-                name: "반사 이동".into(),
-                description: "보드 가장자리에서 반사되는 대각선 경로로 이동합니다. 사용 후 소유자의 다음 2개 턴 동안 사용할 수 없습니다.".into(),
-                kind: MoveOptionKind::Ability,
-                layer_ids: vec!["bounce_move".into()],
-                execution_mode: MoveOptionExecutionMode::MoveModifier,
-                contributes_to_attack_map: true,
-                cooldown: Some(CooldownDefinition {
-                    turns: 2,
-                    clock: CooldownClock::OwnerTurns,
-                }),
-            },
-        ],
-        visual: PieceVisualDefinition {
-            default_asset_key: "bouncing-bishop".into(),
-            variants: Vec::new(),
-        },
     }
-    .normalize_and_validate()
-    .expect("bouncing bishop definition must be valid")
 }
 
 fn bouncing_bishop_chessembly_code() -> &'static str {
@@ -628,23 +620,44 @@ fn tempest_pawn_promotion_pool() -> Vec<String> {
     ]
 }
 
-/// White Tempest Pawn: moves exactly like a White Pawn, but promotes only into
+/// White Tempest Pawn: can advance or sidestep one square, captures one square
+/// diagonally forward or two squares straight ahead, and promotes only into
 /// tempest-line pieces.
 pub fn tempest_pawn_white_definition() -> PieceDefinition {
     let mut definition = pawn_white_definition();
     definition.id = "tempest-pawn-white".into();
     definition.name = "Tempest Pawn".into();
+    let chessembly_code = "\
+move(0, 1);
+move(1, 0);
+move(-1, 0);
+take(0, 2);
+take(1, 1);
+take(-1, 1);"
+        .into();
+    definition.chessembly_code = chessembly_code;
+    definition.move_layers[0].chessembly_code = definition.chessembly_code.clone();
     definition.promotion_pool = tempest_pawn_promotion_pool();
     definition.visual.default_asset_key = "tempest-pawn-white".into();
     definition
 }
 
-/// Black Tempest Pawn: moves exactly like a Black Pawn, but promotes only into
-/// tempest-line pieces.
+/// Black Tempest Pawn: mirrored White Tempest Pawn movement and first-rank
+/// promotion into tempest-line pieces.
 pub fn tempest_pawn_black_definition() -> PieceDefinition {
     let mut definition = pawn_black_definition();
     definition.id = "tempest-pawn-black".into();
     definition.name = "Tempest Pawn".into();
+    let chessembly_code = "\
+move(0, -1);
+move(1, 0);
+move(-1, 0);
+take(0, -2);
+take(1, -1);
+take(-1, -1);"
+        .into();
+    definition.chessembly_code = chessembly_code;
+    definition.move_layers[0].chessembly_code = definition.chessembly_code.clone();
     definition.promotion_pool = tempest_pawn_promotion_pool();
     definition.visual.default_asset_key = "tempest-pawn-black".into();
     definition
@@ -780,6 +793,7 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         nightrider_definition(),
         paratrooper_definition(),
         amazon_definition(),
+        guhang_definition(),
         cannon_rook_definition(),
         tempest_rook_definition(),
         bouncing_bishop_definition(),

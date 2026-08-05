@@ -214,6 +214,7 @@ fn test_variant_piece_definitions_are_registered() {
     let find = |id: &str| definitions.iter().find(|def| def.id == id).unwrap();
 
     assert_eq!(find("amazon").score, 13);
+    assert_eq!(find("guhang").score, 25);
     assert_eq!(find("tempest-queen").score, 10);
     assert_eq!(find("tempest-rook").score, 8);
     assert_eq!(find("tempest-bishop").score, 5);
@@ -224,6 +225,34 @@ fn test_variant_piece_definitions_are_registered() {
     assert_eq!(find("dozer-black").score, 2);
     assert_eq!(find("tempest-pawn-white").score, 1);
     assert_eq!(find("tempest-pawn-black").score, 1);
+}
+
+#[test]
+fn test_guhang_executes_all_four_orthogonal_fan_chains() {
+    let board = create_board(8);
+    let def = guhang_definition();
+    let piece = make_piece("g1", "white", "guhang", 3, 3);
+    let mut pieces = HashMap::new();
+    pieces.insert("g1".into(), piece.clone());
+
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+
+    for square in [
+        Square::new(4, 3),
+        Square::new(4, 7),
+        Square::new(4, 0),
+        Square::new(2, 3),
+        Square::new(2, 7),
+        Square::new(2, 0),
+        Square::new(3, 4),
+        Square::new(7, 4),
+        Square::new(0, 4),
+        Square::new(3, 2),
+        Square::new(7, 2),
+        Square::new(0, 2),
+    ] {
+        assert!(result.movement_squares.contains(&square), "missing {square:?}");
+    }
 }
 
 #[test]
@@ -310,30 +339,12 @@ fn test_bouncing_bishop_reflects_from_edges() {
     let mut pieces = HashMap::new();
     pieces.insert("bb1".into(), piece.clone());
 
-    let normal = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-    assert!(normal.movement_squares.contains(&Square::new(7, 6)));
-    assert!(!normal.movement_squares.contains(&Square::new(6, 7)));
+    assert_eq!(def.move_options.len(), 1);
+    assert_eq!(def.move_options[0].id, "normal");
+    assert_eq!(def.move_options[0].kind, MoveOptionKind::Normal);
+    assert!(def.move_options[0].cooldown.is_none());
 
-    let ability = def
-        .move_options
-        .iter()
-        .find(|option| option.id == "bounce_move")
-        .expect("bounce ability");
-    assert_eq!(ability.kind, MoveOptionKind::Ability);
-    assert_eq!(
-        ability.cooldown.as_ref().map(|cooldown| cooldown.turns),
-        Some(2)
-    );
-    assert_eq!(
-        ability.cooldown.as_ref().map(|cooldown| cooldown.clock),
-        Some(CooldownClock::OwnerTurns)
-    );
-    let bounce_layer = def
-        .move_layers
-        .iter()
-        .find(|layer| layer.id == "bounce_move")
-        .expect("bounce movement layer");
-    let result = run_code(&bounce_layer.chessembly_code, &piece, &board, &pieces, &def);
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
 
     assert!(result.movement_squares.contains(&Square::new(7, 6)));
     assert!(result.movement_squares.contains(&Square::new(6, 7)));

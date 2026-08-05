@@ -392,6 +392,7 @@ function displayPieceSymbol(pieceType: DeckPieceType): string {
     'tempest-knight': 'N',
     'bouncing-bishop': 'B',
     nightrider: 'N',
+    guhang: 'G',
     windmill: 'W',
     'tempest-pawn': '♙',
     dozer: 'D',

@@ -724,12 +724,7 @@ fn test_en_passant_expires_when_opponent_chooses_another_action() {
 // ─── Promotion ───────────────────────────────────────────────────────────────
 
 #[test]
-fn test_tempest_pawn_moves_like_pawn() {
-    let mut pawn_state = make_game_state(8);
-    add_piece(&mut pawn_state, "wk", "white", "king", 0, 0);
-    add_piece(&mut pawn_state, "bk", "black", "king", 7, 7);
-    add_piece(&mut pawn_state, "wp", "white", "pawn-white", 3, 1);
-
+fn test_tempest_pawn_uses_its_distinct_movement_definition() {
     let mut tempest_state = make_game_state(8);
     add_piece(&mut tempest_state, "wk", "white", "king", 0, 0);
     add_piece(&mut tempest_state, "bk", "black", "king", 7, 7);
@@ -742,31 +737,21 @@ fn test_tempest_pawn_moves_like_pawn() {
         1,
     );
 
-    let mut pawn_moves: Vec<(i32, i32, Option<String>)> =
-        generate_piece_legal_move_actions(&pawn_state, &"wp".into())
-            .into_iter()
-            .map(|action| (action.to.file, action.to.rank, action.promotion))
-            .collect();
     let mut tempest_moves: Vec<(i32, i32, Option<String>)> =
         generate_piece_legal_move_actions(&tempest_state, &"tp".into())
             .into_iter()
             .map(|action| (action.to.file, action.to.rank, action.promotion))
             .collect();
 
-    pawn_moves.sort();
     tempest_moves.sort();
-    assert_eq!(tempest_moves, pawn_moves);
+    assert_eq!(
+        tempest_moves,
+        vec![(2, 1, None), (3, 2, None), (4, 1, None)]
+    );
 }
 
 #[test]
-fn test_tempest_pawn_attacks_like_pawn() {
-    let mut pawn_state = make_game_state(8);
-    add_piece(&mut pawn_state, "wk", "white", "king", 0, 0);
-    add_piece(&mut pawn_state, "bk", "black", "king", 7, 7);
-    add_piece(&mut pawn_state, "wp", "white", "pawn-white", 3, 3);
-    add_piece(&mut pawn_state, "be1", "black", "knight", 2, 4);
-    add_piece(&mut pawn_state, "be2", "black", "bishop", 4, 4);
-
+fn test_tempest_pawn_uses_its_distinct_capture_definition() {
     let mut tempest_state = make_game_state(8);
     add_piece(&mut tempest_state, "wk", "white", "king", 0, 0);
     add_piece(&mut tempest_state, "bk", "black", "king", 7, 7);
@@ -780,13 +765,8 @@ fn test_tempest_pawn_attacks_like_pawn() {
     );
     add_piece(&mut tempest_state, "be1", "black", "knight", 2, 4);
     add_piece(&mut tempest_state, "be2", "black", "bishop", 4, 4);
+    add_piece(&mut tempest_state, "be3", "black", "rook", 3, 5);
 
-    let mut pawn_captures: Vec<(i32, i32)> =
-        generate_piece_legal_move_actions(&pawn_state, &"wp".into())
-            .into_iter()
-            .filter(|action| action.captured_piece_id.is_some())
-            .map(|action| (action.to.file, action.to.rank))
-            .collect();
     let mut tempest_captures: Vec<(i32, i32)> =
         generate_piece_legal_move_actions(&tempest_state, &"tp".into())
             .into_iter()
@@ -794,9 +774,8 @@ fn test_tempest_pawn_attacks_like_pawn() {
             .map(|action| (action.to.file, action.to.rank))
             .collect();
 
-    pawn_captures.sort();
     tempest_captures.sort();
-    assert_eq!(tempest_captures, pawn_captures);
+    assert_eq!(tempest_captures, vec![(2, 4), (3, 5), (4, 4)]);
 }
 
 #[test]
@@ -1321,7 +1300,7 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
 }
 
 #[test]
-fn bouncing_bishop_uses_reflection_only_as_two_owner_turn_cooldown_ability() {
+fn bouncing_bishop_uses_reflection_as_its_normal_move() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 0, 0);
     add_piece(&mut state, "bk", "black", "king", 7, 7);
@@ -1331,29 +1310,16 @@ fn bouncing_bishop_uses_reflection_only_as_two_owner_turn_cooldown_ability() {
     assert!(normal_moves
         .iter()
         .any(|action| action.to == Square::new(7, 6)));
-    assert!(!normal_moves
-        .iter()
-        .any(|action| action.to == Square::new(6, 7)));
-
-    let bounce_moves = generate_piece_legal_move_actions_with_options(
-        &state,
-        &"bb".into(),
-        &MoveGenerationOptions {
-            move_option_id: Some("bounce_move".into()),
-        },
-    );
-    let bounce_action = bounce_moves
+    let bounce_action = normal_moves
         .into_iter()
         .find(|action| action.to == Square::new(6, 7))
-        .expect("reflected destination must be available through the ability");
-    assert_eq!(bounce_action.move_option_id, "bounce_move");
+        .expect("reflected destination must be available through the normal move");
+    assert_eq!(bounce_action.move_option_id, "normal");
 
     state = apply_move_action(state, bounce_action);
-    assert_eq!(
-        state.pieces["bb"].move_option_cooldowns["bounce_move"].remaining,
-        2
-    );
+    assert!(state.pieces["bb"].move_option_cooldowns.is_empty());
     state.current_player = "white".into();
+    assert!(!generate_piece_legal_move_actions(&state, &"bb".into()).is_empty());
     assert!(generate_piece_legal_move_actions_with_options(
         &state,
         &"bb".into(),

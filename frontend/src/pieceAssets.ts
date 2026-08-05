@@ -10,6 +10,8 @@ import dozerBlack from './assets/pieces/dozer-black.svg'
 import dozerWhite from './assets/pieces/dozer-white.svg'
 import kingBlack from './assets/pieces/king-black.svg'
 import kingWhite from './assets/pieces/king-white.svg'
+import guhangBlack from './assets/pieces/guhang-black.svg'
+import guhangWhite from './assets/pieces/guhang-white.svg'
 import knightBlack from './assets/pieces/knight-black.svg'
 import knightWhite from './assets/pieces/knight-white.svg'
 import nightriderBlack from './assets/pieces/nightrider-black.svg'
@@ -46,6 +48,7 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   bishop: { white: bishopWhite, black: bishopBlack },
   'bouncing-bishop': { white: bouncingBishopWhite, black: bouncingBishopBlack },
   king: { white: kingWhite, black: kingBlack },
+  guhang: { white: guhangWhite, black: guhangBlack },
   knight: { white: knightWhite, black: knightBlack },
   nightrider: { white: nightriderWhite, black: nightriderBlack },
   pawn: { white: pawnWhite, black: pawnBlack },
