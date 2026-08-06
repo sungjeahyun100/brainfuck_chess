@@ -556,6 +556,8 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'tempest-bishop': 'B',
   'tempest-knight': 'N',
   'bouncing-bishop': 'B',
+  'bouncing-rook': 'R',
+  'bouncing-queen': 'Q',
   nightrider: 'N',
   guhang: 'G',
   'windmill': 'W',

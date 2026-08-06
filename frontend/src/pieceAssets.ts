@@ -4,6 +4,10 @@ import bishopBlack from './assets/pieces/bishop-black.svg'
 import bishopWhite from './assets/pieces/bishop-white.svg'
 import bouncingBishopBlack from './assets/pieces/bouncing-bishop-black.svg'
 import bouncingBishopWhite from './assets/pieces/bouncing-bishop-white.svg'
+import bouncingRookBlack from './assets/pieces/bouncing-rook-black.svg'
+import bouncingRookWhite from './assets/pieces/bouncing-rook-white.svg'
+import bouncingQueenBlack from './assets/pieces/bouncing-queen-black.svg'
+import bouncingQueenWhite from './assets/pieces/bouncing-queen-white.svg'
 import cannonRookBlack from './assets/pieces/cannon-rook-black.svg'
 import cannonRookWhite from './assets/pieces/cannon-rook-white.svg'
 import dozerBlack from './assets/pieces/dozer-black.svg'
@@ -47,6 +51,8 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   amazon: { white: amazonWhite, black: amazonBlack },
   bishop: { white: bishopWhite, black: bishopBlack },
   'bouncing-bishop': { white: bouncingBishopWhite, black: bouncingBishopBlack },
+  'bouncing-rook': { white: bouncingRookWhite, black: bouncingRookBlack },
+  'bouncing-queen': { white: bouncingQueenWhite, black: bouncingQueenBlack },
   king: { white: kingWhite, black: kingBlack },
   guhang: { white: guhangWhite, black: guhangBlack },
   knight: { white: knightWhite, black: knightBlack },

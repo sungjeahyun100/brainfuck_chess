@@ -288,7 +288,8 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
         "king" | "queen" | "rook" | "bishop" | "knight" | "nightrider" | "amazon" | "guhang"
         | "cannon-rook" | "cannon_rook" | "tempest-rook" | "tempest-queen" | "tempest-knight"
-        | "bouncing-bishop" | "tempest-bishop" | "windmill" | "paratrooper" => {
+        | "bouncing-bishop" | "bouncing-rook" | "bouncing-queen" | "tempest-bishop"
+        | "windmill" | "paratrooper" => {
             Some(raw_piece_type.replace('_', "-"))
         }
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
@@ -1835,6 +1836,8 @@ mod tests {
         assert_eq!(scores.get("tempest-rook"), Some(&8));
         assert_eq!(scores.get("tempest-bishop"), Some(&5));
         assert_eq!(scores.get("tempest-knight"), Some(&5));
+        assert_eq!(scores.get("bouncing-rook"), Some(&6));
+        assert_eq!(scores.get("bouncing-queen"), Some(&13));
         assert_eq!(scores.get("pawn"), scores.get("pawn-white"));
         assert_eq!(scores.get("tempest-pawn"), scores.get("tempest-pawn-white"));
         assert_eq!(scores.get("dozer"), Some(&2));

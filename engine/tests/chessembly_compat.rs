@@ -220,6 +220,8 @@ fn test_variant_piece_definitions_are_registered() {
     assert_eq!(find("tempest-bishop").score, 5);
     assert_eq!(find("tempest-knight").score, 5);
     assert_eq!(find("bouncing-bishop").score, 7);
+    assert_eq!(find("bouncing-rook").score, 6);
+    assert_eq!(find("bouncing-queen").score, 13);
     assert_eq!(find("nightrider").score, 5);
     assert_eq!(find("dozer-white").score, 2);
     assert_eq!(find("dozer-black").score, 2);
@@ -351,6 +353,41 @@ fn test_bouncing_bishop_reflects_from_edges() {
     assert!(result.movement_squares.contains(&Square::new(7, 2)));
     assert!(result.movement_squares.contains(&Square::new(0, 5)));
     assert!(result.movement_squares.contains(&Square::new(2, 7)));
+}
+
+#[test]
+fn test_bouncing_rook_turns_at_edges() {
+    let board = create_board(8);
+    let def = bouncing_rook_definition();
+    let piece = make_piece("br1", "white", "bouncing-rook", 3, 2);
+    let mut pieces = HashMap::new();
+    pieces.insert("br1".into(), piece.clone());
+
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+
+    assert!(result.movement_squares.contains(&Square::new(7, 2)));
+    assert!(result.movement_squares.contains(&Square::new(7, 7)));
+    assert!(result.movement_squares.contains(&Square::new(7, 0)));
+    assert!(result.movement_squares.contains(&Square::new(3, 7)));
+    assert!(result.movement_squares.contains(&Square::new(0, 7)));
+}
+
+#[test]
+fn test_bouncing_queen_combines_bishop_and_rook_bounces() {
+    let board = create_board(8);
+    let def = bouncing_queen_definition();
+    let piece = make_piece("bq1", "white", "bouncing-queen", 3, 2);
+    let mut pieces = HashMap::new();
+    pieces.insert("bq1".into(), piece.clone());
+
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
+
+    // Bouncing Bishop path.
+    assert!(result.movement_squares.contains(&Square::new(7, 6)));
+    assert!(result.movement_squares.contains(&Square::new(6, 7)));
+    // Bouncing Rook path.
+    assert!(result.movement_squares.contains(&Square::new(7, 2)));
+    assert!(result.movement_squares.contains(&Square::new(7, 7)));
 }
 
 // ─── Pawn ──────────────────────────────────────────────────────────────────
