@@ -57,11 +57,6 @@ pub enum Expr {
     Bound(i32, i32),
     /// True if (dx,dy) is beyond the board edge.
     Edge(i32, i32),
-    /// Scan one square like `take-move`, but stop before any occupied square.
-    BounceScan(i32, i32),
-    /// True when a scan was blocked by a piece and an adjacent Bouncing Pawn
-    /// exists at (dx,dy).
-    BouncingPawnOn(i32, i32),
     /// True if (dx,dy) is beyond the board corner.
     Corner(i32, i32),
 
