@@ -831,6 +831,32 @@ fn test_tempest_pawn_reaching_back_rank_generates_tempest_promotion_choices() {
 }
 
 #[test]
+fn bouncing_pawns_promote_on_their_respective_back_ranks() {
+    for (piece_id, owner, type_id, rank, target_rank) in [
+        ("bpw", "white", "bouncing-pawn-white", 6, 7),
+        ("bpb", "black", "bouncing-pawn-black", 1, 0),
+    ] {
+        let mut state = make_game_state(8);
+        state.current_player = owner.into();
+        add_piece(&mut state, "wk", "white", "king", 0, 0);
+        add_piece(&mut state, "bk", "black", "king", 7, 7);
+        add_piece(&mut state, piece_id, owner, type_id, 4, rank);
+
+        let moves = generate_piece_legal_move_actions(&state, &piece_id.into());
+        let mut choices: Vec<String> = moves
+            .iter()
+            .filter(|action| action.to == Square::new(4, target_rank))
+            .filter_map(|action| action.promotion.clone())
+            .collect();
+        choices.sort();
+        assert_eq!(
+            choices,
+            vec!["bouncing-bishop", "bouncing-queen", "bouncing-rook"]
+        );
+    }
+}
+
+#[test]
 fn dozers_move_forward_and_promote_only_to_knight_or_bishop() {
     let mut white_state = make_game_state(8);
     add_piece(&mut white_state, "wk", "white", "king", 0, 0);
@@ -1328,6 +1354,41 @@ fn bouncing_bishop_uses_reflection_as_its_normal_move() {
         },
     )
     .is_empty());
+}
+
+#[test]
+fn bouncing_rook_and_queen_use_pawns_next_to_friendly_blockers_in_legal_moves() {
+    for type_id in ["bouncing-rook", "bouncing-queen"] {
+        let mut state = make_game_state(8);
+        add_piece(&mut state, "wk", "white", "king", 0, 0);
+        add_piece(&mut state, "bk", "black", "king", 7, 7);
+        add_piece(&mut state, "bouncer", "white", type_id, 3, 3);
+        add_piece(&mut state, "blocker", "white", "pawn-white", 3, 5);
+        add_piece(
+            &mut state,
+            "wall",
+            "white",
+            "bouncing-pawn-white",
+            4,
+            5,
+        );
+
+        let moves = generate_piece_legal_move_actions(&state, &"bouncer".into());
+        assert!(
+            moves.iter().any(|action| action.to == Square::new(1, 4)),
+            "{type_id} should reflect away from the pawn beside its blocker"
+        );
+
+        state.pieces.get_mut("blocker").unwrap().owner = "black".into();
+        let enemy_blocked_moves =
+            generate_piece_legal_move_actions(&state, &"bouncer".into());
+        assert!(
+            !enemy_blocked_moves
+                .iter()
+                .any(|action| action.to == Square::new(1, 4)),
+            "{type_id} must not reflect from an enemy blocker"
+        );
+    }
 }
 
 #[test]

@@ -9,22 +9,27 @@ use crate::types::*;
 fn is_pawn_type(type_id: &str) -> bool {
     matches!(
         type_id,
-        "pawn-white" | "pawn-black" | "tempest-pawn-white" | "tempest-pawn-black"
+        "pawn-white"
+            | "pawn-black"
+            | "tempest-pawn-white"
+            | "tempest-pawn-black"
+            | "bouncing-pawn-white"
+            | "bouncing-pawn-black"
     )
 }
 
 fn pawn_forward_dir(type_id: &str) -> Option<i32> {
     match type_id {
-        "pawn-white" | "tempest-pawn-white" => Some(1),
-        "pawn-black" | "tempest-pawn-black" => Some(-1),
+        "pawn-white" | "tempest-pawn-white" | "bouncing-pawn-white" => Some(1),
+        "pawn-black" | "tempest-pawn-black" | "bouncing-pawn-black" => Some(-1),
         _ => None,
     }
 }
 
 fn pawn_start_rank(type_id: &str, board_size: i32) -> Option<i32> {
     match type_id {
-        "pawn-white" | "tempest-pawn-white" => Some(1),
-        "pawn-black" | "tempest-pawn-black" => Some(board_size - 2),
+        "pawn-white" | "tempest-pawn-white" | "bouncing-pawn-white" => Some(1),
+        "pawn-black" | "tempest-pawn-black" | "bouncing-pawn-black" => Some(board_size - 2),
         _ => None,
     }
 }

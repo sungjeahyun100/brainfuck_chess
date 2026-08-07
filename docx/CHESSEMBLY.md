@@ -416,6 +416,8 @@ Bouncing-Bishop 예시에서 핵심적으로 사용된다.
 
 - `bound(dx, dy)`: `(dx, dy)` 위치가 보드 밖이면, 어느 방향이든, `true`를 반환한다.
 - `edge(dx, dy)`: `(dx, dy)` 위치가 보드의 변을 벗어나면 `true`를 반환한다.
+- `bounce-scan(dx, dy)`: `take-move`처럼 빈칸을 탐색하지만 기물을 포획하지 않고 그 직전에서 멈춘다. 아군 기물에 막힌 경우만 폰 반사 조건을 활성화한다.
+- `bouncing-pawn-on(dx, dy)`: 직전 `bounce-scan`을 막은 아군 기물의 `(dx, dy)`에 같은 편 Bouncing Pawn이 있으면 `true`를 반환한다. 여러 방향에 폰이 있으면 각 방향의 반사 행마가 모두 생성된다.
 - `corner(dx, dy)`: `(dx, dy)` 위치가 보드의 모서리를 벗어나면 `true`를 반환한다.
 
 공식 문서의 추출 가능한 부분에는 “세부 경계 확인”이라는 항목이 있으나, 이 오프라인 추출본에서는 그 세부 목록의 본문이 완전히 확보되지 않았다. 프로젝트에서 `edge-right`, `edge-left`, `edge-top`, `edge-bottom` 등을 사용한다면 공식 Reference 또는 실제 구현을 추가 확인해야 한다.

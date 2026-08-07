@@ -3,7 +3,12 @@ use crate::types::*;
 fn is_pawn_type(type_id: &str) -> bool {
     matches!(
         type_id,
-        "pawn-white" | "pawn-black" | "tempest-pawn-white" | "tempest-pawn-black"
+        "pawn-white"
+            | "pawn-black"
+            | "tempest-pawn-white"
+            | "tempest-pawn-black"
+            | "bouncing-pawn-white"
+            | "bouncing-pawn-black"
     )
 }
 

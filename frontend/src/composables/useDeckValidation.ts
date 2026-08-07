@@ -26,6 +26,7 @@ export const pieceCatalog = reactive<PieceCatalogItem[]>([
   { id: 'bouncing-bishop', name: 'Bouncing Bishop', score: 0, category: 'variant', canPocket: true, aliases: ['bounce bishop'] },
   { id: 'bouncing-rook', name: 'Bouncing Rook', score: 0, category: 'variant', canPocket: true, aliases: ['bounce rook'] },
   { id: 'bouncing-queen', name: 'Bouncing Queen', score: 0, category: 'variant', canPocket: true, aliases: ['bounce queen'] },
+  { id: 'bouncing-pawn', name: 'Bouncing Pawn', score: 0, category: 'pawn', canPocket: true, aliases: ['bounce pawn'] },
   { id: 'windmill', name: 'Windmill', score: 0, category: 'variant', canPocket: true, aliases: ['풍차'] },
   { id: 'tempest-pawn', name: 'Tempest Pawn', score: 0, category: 'pawn', canPocket: true, aliases: ['storm pawn'] },
   { id: 'dozer', name: 'Dozer', score: 0, category: 'pawn', canPocket: true, aliases: ['도저'] },

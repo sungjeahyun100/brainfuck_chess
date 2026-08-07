@@ -393,6 +393,7 @@ function displayPieceSymbol(pieceType: DeckPieceType): string {
     'bouncing-bishop': 'B',
     'bouncing-rook': 'R',
     'bouncing-queen': 'Q',
+    'bouncing-pawn': '♙',
     nightrider: 'N',
     guhang: 'G',
     windmill: 'W',

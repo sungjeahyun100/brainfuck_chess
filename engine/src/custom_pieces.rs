@@ -292,6 +292,8 @@ fn validate_supported_tokens(
         "friendly",
         "bound",
         "edge",
+        "bounce-scan",
+        "bouncing-pawn-on",
         "corner",
         "danger",
         "repeat",

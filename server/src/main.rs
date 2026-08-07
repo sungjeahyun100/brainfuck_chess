@@ -304,6 +304,13 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
                 "tempest-pawn-black".into()
             })
         }
+        "bouncing-pawn" | "bouncing-pawn-white" | "bouncing-pawn-black" => {
+            Some(if player_id == "white" {
+                "bouncing-pawn-white".into()
+            } else {
+                "bouncing-pawn-black".into()
+            })
+        }
         "dozer" | "dozer-white" | "dozer-black" => Some(if player_id == "white" {
             "dozer-white".into()
         } else {
@@ -977,6 +984,9 @@ async fn get_piece_scores() -> Json<HashMap<PieceTypeId, u32>> {
     }
     if let Some(score) = scores.get("tempest-pawn-white").copied() {
         scores.insert("tempest-pawn".into(), score);
+    }
+    if let Some(score) = scores.get("bouncing-pawn-white").copied() {
+        scores.insert("bouncing-pawn".into(), score);
     }
     if let Some(score) = scores.get("dozer-white").copied() {
         scores.insert("dozer".into(), score);
@@ -1840,6 +1850,19 @@ mod tests {
         assert_eq!(scores.get("bouncing-queen"), Some(&13));
         assert_eq!(scores.get("pawn"), scores.get("pawn-white"));
         assert_eq!(scores.get("tempest-pawn"), scores.get("tempest-pawn-white"));
+        assert_eq!(scores.get("bouncing-pawn"), Some(&2));
+        assert_eq!(
+            scores.get("bouncing-pawn"),
+            scores.get("bouncing-pawn-white")
+        );
+        assert_eq!(
+            resolve_piece_type("white", "bouncing-pawn").as_deref(),
+            Some("bouncing-pawn-white")
+        );
+        assert_eq!(
+            resolve_piece_type("black", "bouncing-pawn").as_deref(),
+            Some("bouncing-pawn-black")
+        );
         assert_eq!(scores.get("dozer"), Some(&2));
         assert_eq!(scores.get("dozer"), scores.get("dozer-white"));
         assert_eq!(resolve_piece_type("white", "dozer").as_deref(), Some("dozer-white"));

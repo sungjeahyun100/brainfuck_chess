@@ -453,7 +453,7 @@ pub fn bouncing_bishop_definition() -> PieceDefinition {
         id: "bouncing-bishop".into(),
         name: "Bouncing Bishop".into(),
         score: 7,
-        chessembly_code: bouncing_bishop_chessembly_code().into(),
+        chessembly_code: bouncing_bishop_chessembly_code(),
         chessembly_version: "1.0".into(),
         dialect: None,
         extensions: None,
@@ -463,8 +463,8 @@ pub fn bouncing_bishop_definition() -> PieceDefinition {
     }
 }
 
-fn bouncing_bishop_chessembly_code() -> &'static str {
-    "\
+fn bouncing_bishop_chessembly_code() -> String {
+    let mut code = "\
 do
 take-move(1, 1)
 while
@@ -500,6 +500,13 @@ edge(-1, -1) {
 } {
   take-move(-1, 1) repeat(1)
 };"
+        .to_string();
+    append_bouncing_pawn_reflections(
+        &mut code,
+        &[(1, 1), (-1, 1), (1, -1), (-1, -1)],
+        true,
+    );
+    code
 }
 
 /// White Pawn:
@@ -788,7 +795,7 @@ pub fn bouncing_rook_definition() -> PieceDefinition {
         id: "bouncing-rook".into(),
         name: "Bouncing Rook".into(),
         score: 6,
-        chessembly_code: bouncing_rook_chessembly_code().into(),
+        chessembly_code: bouncing_rook_chessembly_code(),
         chessembly_version: "1.0".into(),
         dialect: None,
         extensions: None,
@@ -798,8 +805,8 @@ pub fn bouncing_rook_definition() -> PieceDefinition {
     }
 }
 
-pub fn bouncing_rook_chessembly_code() -> &'static str {
-    "\
+pub fn bouncing_rook_chessembly_code() -> String {
+    let mut code = "\
 do
 take-move(0, 1)
 while
@@ -835,6 +842,39 @@ edge(-1, 0) {
 } {
   take-move(0, -1) repeat(1)
 };"
+        .to_string();
+    append_bouncing_pawn_reflections(
+        &mut code,
+        &[(0, 1), (0, -1), (1, 0), (-1, 0)],
+        false,
+    );
+    code
+}
+
+fn append_bouncing_pawn_reflections(
+    code: &mut String,
+    incoming_directions: &[(i32, i32)],
+    preserve_unblocked_axis: bool,
+) {
+    for &(incoming_x, incoming_y) in incoming_directions {
+        for &(pawn_x, pawn_y) in &[(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let (outgoing_x, outgoing_y) = if preserve_unblocked_axis {
+                if pawn_x != 0 {
+                    (-incoming_x, incoming_y)
+                } else {
+                    (incoming_x, -incoming_y)
+                }
+            } else {
+                (-pawn_x, -pawn_y)
+            };
+            code.push_str(&format!(
+                "\n\ndo bounce-scan({incoming_x}, {incoming_y}) while \
+bouncing-pawn-on({pawn_x}, {pawn_y}) {{ \
+take-move({outgoing_x}, {outgoing_y}) repeat(1) \
+}};"
+            ));
+        }
+    }
 }
 
 /// Bouncing Queen: combines the complete Bouncing Bishop and Bouncing Rook
@@ -858,6 +898,34 @@ pub fn bouncing_queen_definition() -> PieceDefinition {
     }
 }
 
+pub fn bouncing_pawn_white_definition() -> PieceDefinition {
+    let mut definition = pawn_white_definition();
+    definition.id = "bouncing-pawn-white".into();
+    definition.name = "Bouncing Pawn".into();
+    definition.score = 2;
+    definition.promotion_pool = bouncing_pawn_promotion_pool();
+    definition.visual.default_asset_key = "bouncing-pawn-white".into();
+    definition
+}
+
+pub fn bouncing_pawn_black_definition() -> PieceDefinition {
+    let mut definition = pawn_black_definition();
+    definition.id = "bouncing-pawn-black".into();
+    definition.name = "Bouncing Pawn".into();
+    definition.score = 2;
+    definition.promotion_pool = bouncing_pawn_promotion_pool();
+    definition.visual.default_asset_key = "bouncing-pawn-black".into();
+    definition
+}
+
+fn bouncing_pawn_promotion_pool() -> Vec<String> {
+    vec![
+        "bouncing-rook".into(),
+        "bouncing-bishop".into(),
+        "bouncing-queen".into(),
+    ]
+}
+
 /// Return all standard piece definitions.
 pub fn all_default_definitions() -> Vec<PieceDefinition> {
     vec![
@@ -878,6 +946,8 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bouncing_queen_definition(),
         pawn_white_definition(),
         pawn_black_definition(),
+        bouncing_pawn_white_definition(),
+        bouncing_pawn_black_definition(),
         dozer_white_definition(),
         dozer_black_definition(),
         tempest_pawn_white_definition(),
