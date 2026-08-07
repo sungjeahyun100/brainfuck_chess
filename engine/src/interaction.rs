@@ -56,7 +56,6 @@ pub fn profile_for_piece_type(type_id: &str) -> InteractionProfile {
         "bouncing-bishop" => InteractionProfile {
             movement_tags: vec![InteractionTag::Bouncing],
             bounce_geometries: vec![BounceGeometry::Diagonal],
-            required_move_option: Some("bounce_move"),
             ..InteractionProfile::default()
         },
         "bouncing-queen" => InteractionProfile {
