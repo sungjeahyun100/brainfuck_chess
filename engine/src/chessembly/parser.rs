@@ -205,8 +205,6 @@ fn parse_expr(tokens: &[Token], pos: usize) -> Option<(Expr, usize)> {
                 "friendly" => parse_xy(tokens, pos + 1, Expr::Friendly),
                 "bound" => parse_xy(tokens, pos + 1, Expr::Bound),
                 "edge" => parse_xy(tokens, pos + 1, Expr::Edge),
-                "bounce-scan" => parse_xy(tokens, pos + 1, Expr::BounceScan),
-                "bouncing-pawn-on" => parse_xy(tokens, pos + 1, Expr::BouncingPawnOn),
                 "corner" => parse_xy(tokens, pos + 1, Expr::Corner),
                 "danger" => parse_xy(tokens, pos + 1, Expr::Danger),
                 "repeat" => parse_usize_arg(tokens, pos + 1, Expr::Repeat),
