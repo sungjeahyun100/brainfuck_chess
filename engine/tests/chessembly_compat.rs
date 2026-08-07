@@ -314,35 +314,19 @@ fn test_tempest_knight_executes_diagonal_chain_and_three_step_jumps() {
 }
 
 #[test]
-fn test_bouncing_bishop_reflects_from_edges_in_ability_layer() {
+fn test_bouncing_bishop_reflects_from_edges() {
     let board = create_board(8);
     let def = bouncing_bishop_definition();
     let piece = make_piece("bb1", "white", "bouncing-bishop", 3, 2);
     let mut pieces = HashMap::new();
     pieces.insert("bb1".into(), piece.clone());
 
-    assert_eq!(def.move_options.len(), 2);
-    assert_eq!(def.normal_move_option().unwrap().id, "normal");
-    let bounce_option = def
-        .move_options
-        .iter()
-        .find(|option| option.id == "bounce_move")
-        .unwrap();
-    assert_eq!(bounce_option.kind, MoveOptionKind::Ability);
-    assert_eq!(bounce_option.cooldown.as_ref().unwrap().turns, 2);
-    let bounce_layer = def
-        .move_layers
-        .iter()
-        .find(|layer| layer.id == "bounce_move")
-        .unwrap();
+    assert_eq!(def.move_options.len(), 1);
+    assert_eq!(def.move_options[0].id, "normal");
+    assert_eq!(def.move_options[0].kind, MoveOptionKind::Normal);
+    assert!(def.move_options[0].cooldown.is_none());
 
-    let result = run_code(
-        &bounce_layer.chessembly_code,
-        &piece,
-        &board,
-        &pieces,
-        &def,
-    );
+    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
     assert!(result.movement_squares.contains(&Square::new(7, 6)));
     assert!(result.movement_squares.contains(&Square::new(6, 7)));
     assert!(result.movement_squares.contains(&Square::new(7, 2)));
