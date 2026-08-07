@@ -11,8 +11,6 @@ use brainfuck_chess_engine::pieces::default_pieces::*;
 use brainfuck_chess_engine::rules::create_board;
 use brainfuck_chess_engine::types::*;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 fn make_piece(id: &str, owner: &str, type_id: &str, file: i32, rank: i32) -> Piece {
     Piece {
         id: id.into(),
@@ -58,8 +56,6 @@ fn sorted(mut squares: Vec<Square>) -> Vec<Square> {
     squares
 }
 
-// ─── Wazir ────────────────────────────────────────────────────────────────────
-
 #[test]
 fn test_wazir_center() {
     let board = create_board(8);
@@ -103,8 +99,6 @@ take-move(0, -1);"
     assert!(result.attack_squares.contains(&Square::new(3, 2)));
 }
 
-// ─── Rook slide ───────────────────────────────────────────────────────────────
-
 #[test]
 fn test_rook_slide_open_board() {
     let board = create_board(8);
@@ -114,8 +108,7 @@ fn test_rook_slide_open_board() {
     pieces.insert("r1".into(), piece.clone());
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-    let moves = result.movement_squares;
-    assert_eq!(moves.len(), 14, "Rook from corner should have 14 moves");
+    assert_eq!(result.movement_squares.len(), 14);
 }
 
 #[test]
@@ -123,18 +116,15 @@ fn test_rook_blocked_by_friendly() {
     let mut board = create_board(8);
     let piece = make_piece("r1", "white", "rook", 0, 0);
     let blocker = make_piece("p1", "white", "pawn-white", 3, 0);
-
     board
         .squares
         .insert(blocker.current_square.unwrap().to_id(), Some("p1".into()));
-
     let mut pieces = HashMap::new();
     pieces.insert("r1".into(), piece.clone());
     pieces.insert("p1".into(), blocker);
 
     let def = rook_definition();
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.movement_squares.contains(&Square::new(1, 0)));
     assert!(result.movement_squares.contains(&Square::new(2, 0)));
     assert!(!result.movement_squares.contains(&Square::new(3, 0)));
@@ -146,24 +136,19 @@ fn test_rook_can_capture_enemy() {
     let mut board = create_board(8);
     let piece = make_piece("r1", "white", "rook", 0, 0);
     let enemy = make_piece("e1", "black", "rook", 3, 0);
-
     board
         .squares
         .insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
-
     let mut pieces = HashMap::new();
     pieces.insert("r1".into(), piece.clone());
     pieces.insert("e1".into(), enemy);
 
     let def = rook_definition();
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.attack_squares.contains(&Square::new(3, 0)));
     assert!(!result.movement_squares.contains(&Square::new(4, 0)));
     assert!(!result.attack_squares.contains(&Square::new(4, 0)));
 }
-
-// ─── Knightrider ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_knightrider_slide() {
@@ -206,8 +191,6 @@ take-move(-1, 2) repeat(1);"
     assert!(!result.movement_squares.contains(&Square::new(4, 8)));
 }
 
-// ─── Variant defaults ───────────────────────────────────────────────────────
-
 #[test]
 fn test_variant_piece_definitions_are_registered() {
     let definitions = all_default_definitions();
@@ -240,7 +223,6 @@ fn test_guhang_executes_all_four_orthogonal_fan_chains() {
     pieces.insert("g1".into(), piece.clone());
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     for square in [
         Square::new(4, 3),
         Square::new(4, 7),
@@ -275,7 +257,6 @@ fn test_nightrider_repeats_knight_leaps_until_blocked() {
         .insert(Square::new(4, 2).to_id(), Some("blocker".into()));
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.movement_squares.contains(&Square::new(2, 1)));
     assert!(!result.movement_squares.contains(&Square::new(4, 2)));
     assert!(!result.movement_squares.contains(&Square::new(6, 3)));
@@ -293,7 +274,6 @@ fn test_amazon_combines_queen_and_knight() {
     pieces.insert("a1".into(), piece.clone());
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.movement_squares.contains(&Square::new(3, 7)));
     assert!(result.movement_squares.contains(&Square::new(7, 7)));
     assert!(result.movement_squares.contains(&Square::new(5, 4)));
@@ -309,7 +289,6 @@ fn test_tempest_rook_steps_diagonal_then_rays_outward() {
     pieces.insert("tr1".into(), piece.clone());
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.movement_squares.contains(&Square::new(4, 4)));
     assert!(result.movement_squares.contains(&Square::new(7, 4)));
     assert!(result.movement_squares.contains(&Square::new(4, 7)));
@@ -327,7 +306,6 @@ fn test_tempest_knight_executes_diagonal_chain_and_three_step_jumps() {
     pieces.insert("tn1".into(), piece.clone());
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.movement_squares.contains(&Square::new(4, 4)));
     assert!(result.movement_squares.contains(&Square::new(6, 5)));
     assert!(result.movement_squares.contains(&Square::new(5, 6)));
@@ -336,20 +314,35 @@ fn test_tempest_knight_executes_diagonal_chain_and_three_step_jumps() {
 }
 
 #[test]
-fn test_bouncing_bishop_reflects_from_edges() {
+fn test_bouncing_bishop_reflects_from_edges_in_ability_layer() {
     let board = create_board(8);
     let def = bouncing_bishop_definition();
     let piece = make_piece("bb1", "white", "bouncing-bishop", 3, 2);
     let mut pieces = HashMap::new();
     pieces.insert("bb1".into(), piece.clone());
 
-    assert_eq!(def.move_options.len(), 1);
-    assert_eq!(def.move_options[0].id, "normal");
-    assert_eq!(def.move_options[0].kind, MoveOptionKind::Normal);
-    assert!(def.move_options[0].cooldown.is_none());
+    assert_eq!(def.move_options.len(), 2);
+    assert_eq!(def.normal_move_option().unwrap().id, "normal");
+    let bounce_option = def
+        .move_options
+        .iter()
+        .find(|option| option.id == "bounce_move")
+        .unwrap();
+    assert_eq!(bounce_option.kind, MoveOptionKind::Ability);
+    assert_eq!(bounce_option.cooldown.as_ref().unwrap().turns, 2);
+    let bounce_layer = def
+        .move_layers
+        .iter()
+        .find(|layer| layer.id == "bounce_move")
+        .unwrap();
 
-    let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
+    let result = run_code(
+        &bounce_layer.chessembly_code,
+        &piece,
+        &board,
+        &pieces,
+        &def,
+    );
     assert!(result.movement_squares.contains(&Square::new(7, 6)));
     assert!(result.movement_squares.contains(&Square::new(6, 7)));
     assert!(result.movement_squares.contains(&Square::new(7, 2)));
@@ -366,177 +359,11 @@ fn test_bouncing_rook_turns_at_edges() {
     pieces.insert("br1".into(), piece.clone());
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.movement_squares.contains(&Square::new(7, 2)));
     assert!(result.movement_squares.contains(&Square::new(7, 7)));
     assert!(result.movement_squares.contains(&Square::new(7, 0)));
     assert!(result.movement_squares.contains(&Square::new(3, 7)));
     assert!(result.movement_squares.contains(&Square::new(0, 7)));
-}
-
-#[test]
-fn test_bouncing_pieces_reflect_from_bouncing_pawns() {
-    let mut board = create_board(8);
-    let bishop_def = bouncing_bishop_definition();
-    let bishop = make_piece("bb1", "white", "bouncing-bishop", 3, 3);
-    let blocker = make_piece("blocker", "white", "pawn-white", 5, 5);
-    let white_wall = make_piece("bpw", "white", "bouncing-pawn-white", 6, 5);
-    board
-        .squares
-        .insert(Square::new(5, 5).to_id(), Some(blocker.id.clone()));
-    board
-        .squares
-        .insert(Square::new(6, 5).to_id(), Some(white_wall.id.clone()));
-    let mut pieces = HashMap::from([
-        (bishop.id.clone(), bishop.clone()),
-        (blocker.id.clone(), blocker),
-        (white_wall.id.clone(), white_wall),
-    ]);
-
-    let bishop_result = run_code(
-        &bishop_def.chessembly_code,
-        &bishop,
-        &board,
-        &pieces,
-        &bishop_def,
-    );
-    assert!(bishop_result.movement_squares.contains(&Square::new(4, 4)));
-    assert!(bishop_result.movement_squares.contains(&Square::new(3, 5)));
-    assert!(!bishop_result.movement_squares.contains(&Square::new(5, 5)));
-
-    board.squares.insert(Square::new(6, 5).to_id(), None);
-    let rook_def = bouncing_rook_definition();
-    let rook = make_piece("br1", "white", "bouncing-rook", 3, 3);
-    let rook_blocker = make_piece("rook-blocker", "white", "pawn-white", 3, 5);
-    let black_wall = make_piece("bpb", "white", "bouncing-pawn-white", 4, 5);
-    board
-        .squares
-        .insert(Square::new(3, 5).to_id(), Some(rook_blocker.id.clone()));
-    board
-        .squares
-        .insert(Square::new(4, 5).to_id(), Some(black_wall.id.clone()));
-    pieces = HashMap::from([
-        (rook.id.clone(), rook.clone()),
-        (rook_blocker.id.clone(), rook_blocker),
-        (black_wall.id.clone(), black_wall),
-    ]);
-
-    let rook_result = run_code(&rook_def.chessembly_code, &rook, &board, &pieces, &rook_def);
-    assert!(rook_result.movement_squares.contains(&Square::new(3, 4)));
-    assert!(rook_result.movement_squares.contains(&Square::new(2, 4)));
-    assert!(!rook_result.movement_squares.contains(&Square::new(4, 5)));
-
-    let queen_def = bouncing_queen_definition();
-    let queen = make_piece("bq1", "white", "bouncing-queen", 3, 3);
-    pieces.insert(queen.id.clone(), queen.clone());
-    let queen_result = run_code(
-        &queen_def.chessembly_code,
-        &queen,
-        &board,
-        &pieces,
-        &queen_def,
-    );
-    assert!(queen_result.movement_squares.contains(&Square::new(2, 4)));
-
-    let ordinary_rook_def = rook_definition();
-    let ordinary_rook = make_piece("r1", "white", "rook", 3, 3);
-    pieces.insert(ordinary_rook.id.clone(), ordinary_rook.clone());
-    pieces.get_mut("rook-blocker").unwrap().owner = "black".into();
-    let ordinary_result = run_code(
-        &ordinary_rook_def.chessembly_code,
-        &ordinary_rook,
-        &board,
-        &pieces,
-        &ordinary_rook_def,
-    );
-    assert!(ordinary_result.movement_squares.contains(&Square::new(3, 5)));
-}
-
-#[test]
-fn test_multiple_adjacent_bouncing_pawns_enable_each_reflection() {
-    let mut board = create_board(8);
-    let def = bouncing_bishop_definition();
-    let bishop = make_piece("bb1", "white", "bouncing-bishop", 3, 3);
-    let blocker = make_piece("blocker", "white", "pawn-white", 5, 5);
-    let right_wall = make_piece("right", "white", "bouncing-pawn-white", 5, 4);
-    let top_wall = make_piece("top", "white", "bouncing-pawn-white", 4, 5);
-    for piece in [&blocker, &right_wall, &top_wall] {
-        let square = piece.current_square.unwrap();
-        board.squares.insert(square.to_id(), Some(piece.id.clone()));
-    }
-    let pieces = HashMap::from([
-        (bishop.id.clone(), bishop.clone()),
-        (blocker.id.clone(), blocker),
-        (right_wall.id.clone(), right_wall),
-        (top_wall.id.clone(), top_wall),
-    ]);
-
-    let result = run_code(&def.chessembly_code, &bishop, &board, &pieces, &def);
-    assert!(result.movement_squares.contains(&Square::new(3, 5)));
-    assert!(result.movement_squares.contains(&Square::new(5, 3)));
-}
-
-#[test]
-fn test_piece_reflection_requires_friendly_blocker_and_friendly_bouncing_pawn() {
-    let def = bouncing_bishop_definition();
-    let bishop = make_piece("bb1", "white", "bouncing-bishop", 3, 3);
-
-    for (blocker_owner, wall_owner) in [("black", "white"), ("white", "black")] {
-        let mut board = create_board(8);
-        let blocker = make_piece("blocker", blocker_owner, "pawn-white", 5, 5);
-        let wall = make_piece("wall", wall_owner, "bouncing-pawn-white", 6, 5);
-        for piece in [&blocker, &wall] {
-            let square = piece.current_square.unwrap();
-            board.squares.insert(square.to_id(), Some(piece.id.clone()));
-        }
-        let pieces = HashMap::from([
-            (bishop.id.clone(), bishop.clone()),
-            (blocker.id.clone(), blocker),
-            (wall.id.clone(), wall),
-        ]);
-
-        let result = run_code(&def.chessembly_code, &bishop, &board, &pieces, &def);
-        assert!(!result.movement_squares.contains(&Square::new(3, 5)));
-    }
-}
-
-#[test]
-fn test_rook_and_queen_reflect_only_from_friendly_blockers() {
-    for (definition, type_id) in [
-        (bouncing_rook_definition(), "bouncing-rook"),
-        (bouncing_queen_definition(), "bouncing-queen"),
-    ] {
-        for (blocker_owner, should_reflect) in [("white", true), ("black", false)] {
-            let mut board = create_board(8);
-            let piece = make_piece("bouncer", "white", type_id, 3, 3);
-            let blocker = make_piece("blocker", blocker_owner, "pawn-white", 3, 5);
-            let wall = make_piece("wall", "white", "bouncing-pawn-white", 4, 5);
-            for board_piece in [&blocker, &wall] {
-                let square = board_piece.current_square.unwrap();
-                board
-                    .squares
-                    .insert(square.to_id(), Some(board_piece.id.clone()));
-            }
-            let pieces = HashMap::from([
-                (piece.id.clone(), piece.clone()),
-                (blocker.id.clone(), blocker),
-                (wall.id.clone(), wall),
-            ]);
-
-            let result = run_code(
-                &definition.chessembly_code,
-                &piece,
-                &board,
-                &pieces,
-                &definition,
-            );
-            assert_eq!(
-                result.movement_squares.contains(&Square::new(1, 4)),
-                should_reflect,
-                "{type_id} reflection mismatch for a {blocker_owner} blocker"
-            );
-        }
-    }
 }
 
 #[test]
@@ -548,16 +375,35 @@ fn test_bouncing_queen_combines_bishop_and_rook_bounces() {
     pieces.insert("bq1".into(), piece.clone());
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
-    // Bouncing Bishop path.
     assert!(result.movement_squares.contains(&Square::new(7, 6)));
     assert!(result.movement_squares.contains(&Square::new(6, 7)));
-    // Bouncing Rook path.
     assert!(result.movement_squares.contains(&Square::new(7, 2)));
     assert!(result.movement_squares.contains(&Square::new(7, 7)));
 }
 
-// ─── Pawn ──────────────────────────────────────────────────────────────────
+#[test]
+fn test_piece_on_remains_a_general_condition() {
+    let mut board = create_board(8);
+    let def = rook_definition();
+    let piece = make_piece("r1", "white", "rook", 3, 3);
+    let target = make_piece("target", "white", "pawn-white", 4, 3);
+    board
+        .squares
+        .insert(Square::new(4, 3).to_id(), Some(target.id.clone()));
+    let pieces = HashMap::from([
+        (piece.id.clone(), piece.clone()),
+        (target.id.clone(), target),
+    ]);
+
+    let result = run_code(
+        "piece-on(pawn-white, 1, 0) move(0, 1);",
+        &piece,
+        &board,
+        &pieces,
+        &def,
+    );
+    assert!(result.movement_squares.contains(&Square::new(3, 4)));
+}
 
 #[test]
 fn test_white_pawn_movement_and_attack_separated() {
@@ -568,7 +414,6 @@ fn test_white_pawn_movement_and_attack_separated() {
     pieces.insert("pw1".into(), piece.clone());
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.movement_squares.contains(&Square::new(3, 4)));
     assert!(result.attack_squares.contains(&Square::new(4, 4)));
     assert!(result.attack_squares.contains(&Square::new(2, 4)));
@@ -581,21 +426,16 @@ fn test_white_pawn_attack_captures_enemy() {
     let def = pawn_white_definition();
     let piece = make_piece("pw1", "white", "pawn-white", 3, 3);
     let enemy = make_piece("e1", "black", "pawn-black", 4, 4);
-
     board
         .squares
         .insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
-
     let mut pieces = HashMap::new();
     pieces.insert("pw1".into(), piece.clone());
     pieces.insert("e1".into(), enemy);
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.attack_squares.contains(&Square::new(4, 4)));
 }
-
-// ─── King ─────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_king_moves() {
@@ -608,8 +448,6 @@ fn test_king_moves() {
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
     assert_eq!(result.movement_squares.len(), 8);
 }
-
-// ─── Scope block ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_scope_block_y_move() {
@@ -650,7 +488,6 @@ fn test_catch_scans_and_marks_threatened_squares() {
     board
         .squares
         .insert(enemy.current_square.unwrap().to_id(), Some("e1".into()));
-
     let mut pieces = HashMap::new();
     pieces.insert("c1".into(), piece.clone());
     pieces.insert("e1".into(), enemy);
@@ -674,7 +511,6 @@ fn test_catch_scans_and_marks_threatened_squares() {
     };
 
     let result = run_code(&def.chessembly_code, &piece, &board, &pieces, &def);
-
     assert!(result.attack_squares.contains(&Square::new(1, 0)));
     assert!(result.attack_squares.contains(&Square::new(2, 0)));
     assert!(result.attack_squares.contains(&Square::new(3, 0)));
