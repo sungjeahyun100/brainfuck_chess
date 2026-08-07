@@ -446,70 +446,21 @@ pub fn tempest_rook_definition() -> PieceDefinition {
     }
 }
 
-/// Bouncing Bishop: moves like a Bishop normally and may reflect off board
-/// edges when its ability is selected.
+/// Bouncing Bishop: follows diagonals and reflects off board edges as its
+/// normal movement.
 pub fn bouncing_bishop_definition() -> PieceDefinition {
-    let bishop_code = bishop_definition().chessembly_code;
-    let bounce_code = bouncing_bishop_chessembly_code().to_string();
-    PieceDefinition {
+    legacy_piece_definition! {
         id: "bouncing-bishop".into(),
         name: "Bouncing Bishop".into(),
         score: 7,
-        chessembly_code: bishop_code.clone(),
+        chessembly_code: bouncing_bishop_chessembly_code().to_string(),
         chessembly_version: "1.0".into(),
         dialect: None,
         extensions: None,
         is_king: false,
-        can_capture_on_drop: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        state_schema: Vec::new(),
-        move_layers: vec![
-            MoveLayerDefinition {
-                id: "bishop_move".into(),
-                chessembly_code: bishop_code,
-                enabled_when: Vec::new(),
-                on_commit: Vec::new(),
-            },
-            MoveLayerDefinition {
-                id: "bounce_move".into(),
-                chessembly_code: bounce_code,
-                enabled_when: Vec::new(),
-                on_commit: Vec::new(),
-            },
-        ],
-        move_options: vec![
-            MoveOptionDefinition {
-                id: "normal".into(),
-                name: "일반 이동".into(),
-                description: "일반 비숍처럼 대각선으로 이동합니다.".into(),
-                kind: MoveOptionKind::Normal,
-                layer_ids: vec!["bishop_move".into()],
-                execution_mode: MoveOptionExecutionMode::MoveModifier,
-                contributes_to_attack_map: true,
-                cooldown: None,
-            },
-            MoveOptionDefinition {
-                id: "bounce_move".into(),
-                name: "반사 이동".into(),
-                description: "보드 가장자리에서 반사되는 대각선 경로로 이동합니다. 사용 후 소유자의 다음 2개 턴 동안 사용할 수 없습니다.".into(),
-                kind: MoveOptionKind::Ability,
-                layer_ids: vec!["bounce_move".into()],
-                execution_mode: MoveOptionExecutionMode::MoveModifier,
-                contributes_to_attack_map: true,
-                cooldown: Some(CooldownDefinition {
-                    turns: 2,
-                    clock: CooldownClock::OwnerTurns,
-                }),
-            },
-        ],
-        visual: PieceVisualDefinition {
-            default_asset_key: "bouncing-bishop".into(),
-            variants: Vec::new(),
-        },
     }
-    .normalize_and_validate()
-    .expect("bouncing bishop definition must be valid")
 }
 
 fn bouncing_bishop_chessembly_code() -> &'static str {
