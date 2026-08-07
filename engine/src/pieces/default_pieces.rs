@@ -446,25 +446,74 @@ pub fn tempest_rook_definition() -> PieceDefinition {
     }
 }
 
-/// Bouncing Bishop: follows diagonals and reflects off board edges as its
-/// normal movement.
+/// Bouncing Bishop: moves like a Bishop normally and may reflect off board
+/// edges when its ability is selected.
 pub fn bouncing_bishop_definition() -> PieceDefinition {
-    legacy_piece_definition! {
+    let bishop_code = bishop_definition().chessembly_code;
+    let bounce_code = bouncing_bishop_chessembly_code().to_string();
+    PieceDefinition {
         id: "bouncing-bishop".into(),
         name: "Bouncing Bishop".into(),
         score: 7,
-        chessembly_code: bouncing_bishop_chessembly_code(),
+        chessembly_code: bishop_code.clone(),
         chessembly_version: "1.0".into(),
         dialect: None,
         extensions: None,
         is_king: false,
+        can_capture_on_drop: false,
         promotion: None,
         promotion_pool: Vec::new(),
+        state_schema: Vec::new(),
+        move_layers: vec![
+            MoveLayerDefinition {
+                id: "bishop_move".into(),
+                chessembly_code: bishop_code,
+                enabled_when: Vec::new(),
+                on_commit: Vec::new(),
+            },
+            MoveLayerDefinition {
+                id: "bounce_move".into(),
+                chessembly_code: bounce_code,
+                enabled_when: Vec::new(),
+                on_commit: Vec::new(),
+            },
+        ],
+        move_options: vec![
+            MoveOptionDefinition {
+                id: "normal".into(),
+                name: "일반 이동".into(),
+                description: "일반 비숍처럼 대각선으로 이동합니다.".into(),
+                kind: MoveOptionKind::Normal,
+                layer_ids: vec!["bishop_move".into()],
+                execution_mode: MoveOptionExecutionMode::MoveModifier,
+                contributes_to_attack_map: true,
+                cooldown: None,
+            },
+            MoveOptionDefinition {
+                id: "bounce_move".into(),
+                name: "반사 이동".into(),
+                description: "보드 가장자리에서 반사되는 대각선 경로로 이동합니다. 사용 후 소유자의 다음 2개 턴 동안 사용할 수 없습니다.".into(),
+                kind: MoveOptionKind::Ability,
+                layer_ids: vec!["bounce_move".into()],
+                execution_mode: MoveOptionExecutionMode::MoveModifier,
+                contributes_to_attack_map: true,
+                cooldown: Some(CooldownDefinition {
+                    turns: 2,
+                    clock: CooldownClock::OwnerTurns,
+                }),
+            },
+        ],
+        visual: PieceVisualDefinition {
+            default_asset_key: "bouncing-bishop".into(),
+            variants: Vec::new(),
+        },
     }
+    .normalize_and_validate()
+    .expect("bouncing bishop definition must be valid")
 }
 
-fn bouncing_bishop_chessembly_code() -> String {
-    let mut code = "\
+fn bouncing_bishop_chessembly_code() -> &'static str {
+    "\
 do
 take-move(1, 1)
 while
@@ -500,13 +549,6 @@ edge(-1, -1) {
 } {
   take-move(-1, 1) repeat(1)
 };"
-        .to_string();
-    append_bouncing_pawn_reflections(
-        &mut code,
-        &[(1, 1), (-1, 1), (1, -1), (-1, -1)],
-        true,
-    );
-    code
 }
 
 /// White Pawn:
@@ -806,7 +848,7 @@ pub fn bouncing_rook_definition() -> PieceDefinition {
 }
 
 pub fn bouncing_rook_chessembly_code() -> String {
-    let mut code = "\
+    "\
 do
 take-move(0, 1)
 while
@@ -842,39 +884,7 @@ edge(-1, 0) {
 } {
   take-move(0, -1) repeat(1)
 };"
-        .to_string();
-    append_bouncing_pawn_reflections(
-        &mut code,
-        &[(0, 1), (0, -1), (1, 0), (-1, 0)],
-        false,
-    );
-    code
-}
-
-fn append_bouncing_pawn_reflections(
-    code: &mut String,
-    incoming_directions: &[(i32, i32)],
-    preserve_unblocked_axis: bool,
-) {
-    for &(incoming_x, incoming_y) in incoming_directions {
-        for &(pawn_x, pawn_y) in &[(1, 0), (-1, 0), (0, 1), (0, -1)] {
-            let (outgoing_x, outgoing_y) = if preserve_unblocked_axis {
-                if pawn_x != 0 {
-                    (-incoming_x, incoming_y)
-                } else {
-                    (incoming_x, -incoming_y)
-                }
-            } else {
-                (-pawn_x, -pawn_y)
-            };
-            code.push_str(&format!(
-                "\n\ndo bounce-scan({incoming_x}, {incoming_y}) while \
-bouncing-pawn-on({pawn_x}, {pawn_y}) {{ \
-take-move({outgoing_x}, {outgoing_y}) repeat(1) \
-}};"
-            ));
-        }
-    }
+        .to_string()
 }
 
 /// Bouncing Queen: combines the complete Bouncing Bishop and Bouncing Rook
