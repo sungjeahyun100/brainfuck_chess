@@ -5,6 +5,7 @@ pub mod chessembly;
 pub mod context;
 pub mod custom_pieces;
 pub mod endgame;
+pub mod interaction;
 pub mod legal_moves;
 pub mod pieces;
 pub mod placement;
