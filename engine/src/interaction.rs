@@ -68,6 +68,37 @@ pub fn profile_for_piece_type(type_id: &str) -> InteractionProfile {
     }
 }
 
+/// True when an occupied destination is a wall for the mover's active
+/// interaction profile. Legal-move generation uses this to suppress an ordinary
+/// Chessembly capture/move that would otherwise bypass the interaction layer.
+pub fn destination_is_blocked_by_interaction(
+    game_state: &GameState,
+    piece: &Piece,
+    to: Square,
+    move_option_id: &str,
+) -> bool {
+    let mover_profile = profile_for_piece_type(&piece.type_id);
+    if mover_profile.movement_tags.is_empty()
+        || !mover_profile.is_enabled_for_option(move_option_id)
+    {
+        return false;
+    }
+
+    let Some(target_id) = game_state.board.get_piece_at(&to) else {
+        return false;
+    };
+    let Some(target) = game_state.pieces.get(target_id) else {
+        return false;
+    };
+    let target_profile = profile_for_piece_type(&target.type_id);
+
+    mover_profile
+        .movement_tags
+        .iter()
+        .copied()
+        .any(|tag| target_profile.blocks(tag))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InteractionMoveCandidate {
     pub to: Square,
