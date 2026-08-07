@@ -132,7 +132,7 @@ pub fn resolve_piece_interactions(
 
     let mut result = InteractionResult::default();
     for geometry in profile.bounce_geometries {
-        for incoming in incoming_directions(geometry) {
+        for &incoming in incoming_directions(geometry) {
             resolve_first_bouncing_wall(
                 game_state,
                 piece,
