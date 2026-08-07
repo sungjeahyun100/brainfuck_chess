@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crate::attack_map::generate_attack_map;
 use crate::chessembly::run_chessembly_layer_for_piece;
+use crate::interaction::resolve_piece_interactions;
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -251,39 +252,41 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
 
     let empty_maps = HashMap::new();
     let mut attacked = Vec::new();
-    for layer_id in definition
+    for option in definition
         .move_options
         .iter()
         .filter(|option| option.contributes_to_attack_map && can_use_move_option(piece, option))
-        .flat_map(|option| &option.layer_ids)
     {
-        let Some(layer) = definition
-            .move_layers
-            .iter()
-            .find(|layer| &layer.id == layer_id)
-        else {
-            continue;
-        };
-        if !layer.is_enabled_for(piece) {
-            continue;
+        for layer_id in &option.layer_ids {
+            let Some(layer) = definition
+                .move_layers
+                .iter()
+                .find(|layer| &layer.id == layer_id)
+            else {
+                continue;
+            };
+            if !layer.is_enabled_for(piece) {
+                continue;
+            }
+            attacked.extend(
+                run_chessembly_layer_for_piece(
+                    game_state,
+                    piece,
+                    definition,
+                    layer,
+                    game_state.current_player.clone(),
+                    &game_state.global_state,
+                    &empty_maps,
+                )
+                .attack_squares,
+            );
         }
-        attacked.extend(
-            run_chessembly_layer_for_piece(
-                game_state,
-                piece,
-                definition,
-                layer,
-                game_state.current_player.clone(),
-                &game_state.global_state,
-                &empty_maps,
-            )
-            .attack_squares,
-        );
+        attacked.extend(resolve_piece_interactions(game_state, piece, &option.id).attack_squares);
     }
+    attacked.retain(|sq| game_state.board.is_in_bounds(sq));
+    attacked.sort_by_key(|sq| (sq.rank, sq.file));
+    attacked.dedup();
     attacked
-        .into_iter()
-        .filter(|sq| game_state.board.is_in_bounds(sq))
-        .collect()
 }
 
 /// Generate legal move actions for one piece owned by the current player.
@@ -384,6 +387,24 @@ pub fn generate_piece_legal_move_actions_with_options(
         special_layer,
     );
     let special_source_layers = vec![special_layer.id.clone()];
+    let interaction_context = MoveBuildContext {
+        game_state,
+        piece_id,
+        piece,
+        definition,
+        player_id,
+        option: selected_option,
+        layer: special_layer,
+    };
+    for candidate in resolve_piece_interactions(game_state, piece, &selected_option.id).moves {
+        push_move_or_promotions(
+            &mut actions,
+            &interaction_context,
+            candidate.to,
+            candidate.captured_piece_id,
+            &special_effects,
+        );
+    }
 
     // En passant: pawn can capture onto target square even when destination is empty.
     if let Some(dir) = pawn_forward_dir(&piece.type_id) {
