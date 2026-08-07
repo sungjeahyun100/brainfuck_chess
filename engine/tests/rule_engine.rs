@@ -1185,43 +1185,45 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
 }
 
 #[test]
-fn bouncing_bishop_reflection_is_an_ability_with_cooldown() {
+fn bouncing_bishop_reflection_is_part_of_normal_movement() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 0, 0);
     add_piece(&mut state, "bk", "black", "king", 7, 7);
     add_piece(&mut state, "bb", "white", "bouncing-bishop", 3, 2);
 
-    let normal_moves = generate_piece_legal_move_actions(&state, &"bb".into());
-    assert!(normal_moves.iter().any(|action| action.to == Square::new(7, 6)));
-    assert!(!normal_moves.iter().any(|action| action.to == Square::new(6, 7)));
+    let definition = &state.piece_definitions["bouncing-bishop"];
+    assert_eq!(definition.move_options.len(), 1);
+    assert_eq!(definition.move_options[0].id, "normal");
+    assert!(definition.move_options[0].cooldown.is_none());
 
-    let bounce_moves = generate_piece_legal_move_actions_with_options(
-        &state,
-        &"bb".into(),
-        &MoveGenerationOptions {
-            move_option_id: Some("bounce_move".into()),
-        },
-    );
-    let bounce_action = bounce_moves
+    let normal_moves = generate_piece_legal_move_actions(&state, &"bb".into());
+    let reflected_action = normal_moves
         .into_iter()
         .find(|action| action.to == Square::new(6, 7))
-        .expect("reflected destination must be available through bounce_move");
-    assert_eq!(bounce_action.move_option_id, "bounce_move");
+        .expect("reflected destination must be available through normal movement");
+    assert_eq!(reflected_action.move_option_id, "normal");
 
-    state = apply_move_action(state, bounce_action);
-    assert_eq!(
-        state.pieces["bb"].move_option_cooldowns["bounce_move"].remaining,
-        2
+    state = apply_move_action(state, reflected_action);
+    assert!(state.pieces["bb"].move_option_cooldowns.is_empty());
+
+    let mut wall_state = make_game_state(8);
+    add_piece(&mut wall_state, "wk", "white", "king", 0, 0);
+    add_piece(&mut wall_state, "bk", "black", "king", 7, 7);
+    add_piece(&mut wall_state, "bb", "white", "bouncing-bishop", 3, 3);
+    add_piece(
+        &mut wall_state,
+        "wall",
+        "black",
+        "bouncing-pawn-black",
+        5,
+        5,
     );
-    assert!(!generate_piece_legal_move_actions(&state, &"bb".into()).is_empty());
-    assert!(generate_piece_legal_move_actions_with_options(
-        &state,
-        &"bb".into(),
-        &MoveGenerationOptions {
-            move_option_id: Some("bounce_move".into()),
-        },
-    )
-    .is_empty());
+
+    let wall_moves = generate_piece_legal_move_actions(&wall_state, &"bb".into());
+    assert!(wall_moves.iter().any(|action| action.to == Square::new(4, 4)));
+    assert!(wall_moves.iter().any(|action| action.to == Square::new(3, 5)));
+    assert!(wall_moves.iter().any(|action| action.to == Square::new(5, 3)));
+    assert!(!wall_moves.iter().any(|action| action.to == Square::new(5, 5)));
 }
 
 #[test]
