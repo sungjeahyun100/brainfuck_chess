@@ -91,8 +91,6 @@ struct ChainState {
     /// be activated yet (waiting for `jump` to decide).
     pending_take_square: Option<Square>,
     pending_take_is_attack: bool,
-    bounce_scan_blocked_by_piece: bool,
-    bounce_scan_blocker_square: Option<Square>,
 }
 
 impl ChainState {
@@ -106,8 +104,6 @@ impl ChainState {
             last_was_take: false,
             pending_take_square: None,
             pending_take_is_attack: false,
-            bounce_scan_blocked_by_piece: false,
-            bounce_scan_blocker_square: None,
         }
     }
 }
@@ -260,30 +256,6 @@ fn eval_expr(
                     }
                 }
             }
-        }
-
-        Expr::BounceScan(dx, dy) => {
-            let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
-            state.bounce_scan_blocked_by_piece = false;
-            state.bounce_scan_blocker_square = None;
-            if !ctx.board.is_in_bounds(&target) {
-                return Ok((ExprResult::False, 1));
-            }
-            if let Some(piece_id) = ctx.board.get_piece_at(&target) {
-                state.bounce_scan_blocked_by_piece = ctx
-                    .all_pieces
-                    .get(piece_id)
-                    .map(|piece| piece.owner == ctx.player)
-                    .unwrap_or(false);
-                if state.bounce_scan_blocked_by_piece {
-                    state.bounce_scan_blocker_square = Some(target);
-                }
-                return Ok((ExprResult::False, 1));
-            }
-            activate_attack(target, state, result);
-            activate_movement(target, state, result);
-            state.anchor = target;
-            (ExprResult::True, 1)
         }
 
         Expr::Catch(dx, dy) => {
@@ -500,21 +472,6 @@ fn eval_expr(
             }
         }
 
-        Expr::BouncingPawnOn(dx, dy) => {
-            let has_bouncing_pawn = state
-                .bounce_scan_blocker_square
-                .map(|blocker| Square::new(blocker.file + dx, blocker.rank + dy))
-                .and_then(|target| ctx.board.get_piece_at(&target))
-                .and_then(|piece_id| ctx.all_pieces.get(piece_id))
-                .map(|piece| piece.owner == ctx.player && is_bouncing_pawn(piece))
-                .unwrap_or(false);
-            if state.bounce_scan_blocked_by_piece && has_bouncing_pawn {
-                (ExprResult::True, 1)
-            } else {
-                (ExprResult::False, 1)
-            }
-        }
-
         Expr::Corner(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
             let in_corner = (target.file < 0 || target.file >= ctx.board.size)
@@ -721,13 +678,6 @@ fn eval_expr(
 
         Expr::End => (ExprResult::False, 1),
     })
-}
-
-fn is_bouncing_pawn(piece: &Piece) -> bool {
-    matches!(
-        piece.type_id.as_str(),
-        "bouncing-pawn-white" | "bouncing-pawn-black"
-    )
 }
 
 // ─── Activation helpers ──────────────────────────────────────────────────────
