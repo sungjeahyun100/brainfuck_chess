@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::attack_map::generate_attack_map;
 use crate::chessembly::run_chessembly_layer_for_piece;
-use crate::interaction::resolve_piece_interactions;
+use crate::interaction::{destination_is_blocked_by_interaction, resolve_piece_interactions};
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -77,6 +77,15 @@ fn push_move_or_promotions(
     captured_piece_id: Option<PieceId>,
     effects: &ActionEffects,
 ) {
+    if destination_is_blocked_by_interaction(
+        context.game_state,
+        context.piece,
+        to,
+        &context.option.id,
+    ) {
+        return;
+    }
+
     let from = context.piece.current_square.unwrap();
     if let Some(promotion_options) = context
         .definition
@@ -257,6 +266,7 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
         .iter()
         .filter(|option| option.contributes_to_attack_map && can_use_move_option(piece, option))
     {
+        let mut option_attacked = Vec::new();
         for layer_id in &option.layer_ids {
             let Some(layer) = definition
                 .move_layers
@@ -268,7 +278,7 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
             if !layer.is_enabled_for(piece) {
                 continue;
             }
-            attacked.extend(
+            option_attacked.extend(
                 run_chessembly_layer_for_piece(
                     game_state,
                     piece,
@@ -281,6 +291,10 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
                 .attack_squares,
             );
         }
+        option_attacked.retain(|to| {
+            !destination_is_blocked_by_interaction(game_state, piece, *to, &option.id)
+        });
+        attacked.extend(option_attacked);
         attacked.extend(resolve_piece_interactions(game_state, piece, &option.id).attack_squares);
     }
     attacked.retain(|sq| game_state.board.is_in_bounds(sq));
