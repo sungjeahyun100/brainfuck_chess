@@ -8,7 +8,8 @@ import bouncingRookBlack from './assets/pieces/bouncing-rook-black.svg'
 import bouncingRookWhite from './assets/pieces/bouncing-rook-white.svg'
 import bouncingQueenBlack from './assets/pieces/bouncing-queen-black.svg'
 import bouncingQueenWhite from './assets/pieces/bouncing-queen-white.svg'
-import bouncingPawn from './assets/pieces/bouncing-pawn.svg'
+import bouncingPawnBlack from './assets/pieces/bouncing-pawn-black.svg'
+import bouncingPawnWhite from './assets/pieces/bouncing-pawn-white.svg'
 import cannonRookBlack from './assets/pieces/cannon-rook-black.svg'
 import cannonRookWhite from './assets/pieces/cannon-rook-white.svg'
 import dozerBlack from './assets/pieces/dozer-black.svg'
@@ -54,9 +55,9 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   'bouncing-bishop': { white: bouncingBishopWhite, black: bouncingBishopBlack },
   'bouncing-rook': { white: bouncingRookWhite, black: bouncingRookBlack },
   'bouncing-queen': { white: bouncingQueenWhite, black: bouncingQueenBlack },
-  'bouncing-pawn': { white: bouncingPawn, black: bouncingPawn },
-  'bouncing-pawn-white': { white: bouncingPawn, black: bouncingPawn },
-  'bouncing-pawn-black': { white: bouncingPawn, black: bouncingPawn },
+  'bouncing-pawn': { white: bouncingPawnWhite, black: bouncingPawnBlack },
+  'bouncing-pawn-white': { white: bouncingPawnWhite, black: bouncingPawnBlack },
+  'bouncing-pawn-black': { white: bouncingPawnWhite, black: bouncingPawnBlack },
   king: { white: kingWhite, black: kingBlack },
   guhang: { white: guhangWhite, black: guhangBlack },
   knight: { white: knightWhite, black: knightBlack },
