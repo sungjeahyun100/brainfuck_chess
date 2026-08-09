@@ -1,4 +1,4 @@
-use std::cmp::Reverse;
+use std::cmp::Ordering;
 
 use crate::ai::types::AiAction;
 use crate::types::{GameState, PlayerId};
@@ -26,5 +26,69 @@ fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
 }
 
 pub fn order_ai_actions(state: &GameState, actions: &mut [AiAction], _bot_player_id: &PlayerId) {
-    actions.sort_by_key(|action| Reverse(action_priority(state, action)));
+    actions.sort_by(|left, right| {
+        action_priority(state, right)
+            .cmp(&action_priority(state, left))
+            .then_with(|| canonical_action_cmp(left, right))
+    });
+}
+
+fn canonical_action_cmp(left: &AiAction, right: &AiAction) -> Ordering {
+    match (left, right) {
+        (AiAction::Move(left), AiAction::Move(right)) => left
+            .piece_id
+            .cmp(&right.piece_id)
+            .then_with(|| square_cmp(left.from, right.from))
+            .then_with(|| square_cmp(left.to, right.to))
+            .then_with(|| left.captured_piece_id.cmp(&right.captured_piece_id))
+            .then_with(|| left.promotion.cmp(&right.promotion))
+            .then_with(|| left.move_option_id.cmp(&right.move_option_id))
+            .then_with(|| left.source_layer_ids.cmp(&right.source_layer_ids))
+            .then_with(|| format!("{:?}", left.effects).cmp(&format!("{:?}", right.effects))),
+        (AiAction::Drop(left), AiAction::Drop(right)) => left
+            .piece_id
+            .cmp(&right.piece_id)
+            .then_with(|| square_cmp(left.to, right.to))
+            .then_with(|| left.captured_piece_id.cmp(&right.captured_piece_id)),
+        (AiAction::Ability(left), AiAction::Ability(right)) => left
+            .piece_id
+            .cmp(&right.piece_id)
+            .then_with(|| left.ability_id.cmp(&right.ability_id))
+            .then_with(|| left.target_piece_id.cmp(&right.target_piece_id))
+            .then_with(|| left.pocket_piece_id.cmp(&right.pocket_piece_id))
+            .then_with(|| optional_square_cmp(left.to, right.to))
+            .then_with(|| {
+                left.deployments
+                    .iter()
+                    .zip(&right.deployments)
+                    .find_map(|(left, right)| {
+                        let ordering = left
+                            .pocket_piece_id
+                            .cmp(&right.pocket_piece_id)
+                            .then_with(|| square_cmp(left.to, right.to));
+                        (ordering != Ordering::Equal).then_some(ordering)
+                    })
+                    .unwrap_or_else(|| left.deployments.len().cmp(&right.deployments.len()))
+            }),
+        (AiAction::Move(_), _) => Ordering::Less,
+        (AiAction::Drop(_), AiAction::Move(_)) => Ordering::Greater,
+        (AiAction::Drop(_), AiAction::Ability(_)) => Ordering::Less,
+        (AiAction::Ability(_), _) => Ordering::Greater,
+    }
+}
+
+fn square_cmp(left: crate::types::Square, right: crate::types::Square) -> Ordering {
+    (left.file, left.rank).cmp(&(right.file, right.rank))
+}
+
+fn optional_square_cmp(
+    left: Option<crate::types::Square>,
+    right: Option<crate::types::Square>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => square_cmp(left, right),
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+    }
 }

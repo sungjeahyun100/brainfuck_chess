@@ -193,6 +193,10 @@ struct BotTurnStats {
     depth_reached: u8,
     completed_depth: u8,
     beta_cutoffs: u64,
+    tt_probes: u64,
+    tt_hits: u64,
+    tt_cutoffs: u64,
+    tt_stores: u64,
     elapsed_ms: u64,
 }
 
@@ -1640,6 +1644,10 @@ async fn run_bot_turn(
             depth_reached: result.depth_reached,
             completed_depth: result.completed_depth,
             beta_cutoffs: result.stats.beta_cutoffs,
+            tt_probes: result.stats.tt_probes,
+            tt_hits: result.stats.tt_hits,
+            tt_cutoffs: result.stats.tt_cutoffs,
+            tt_stores: result.stats.tt_stores,
             elapsed_ms: result.elapsed_ms,
         },
     }))

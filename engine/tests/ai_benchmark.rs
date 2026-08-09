@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use brainfuck_chess_engine::ai::{
-    apply_ai_action, choose_bot_action, generate_ai_actions, AiAction, BotDifficulty,
+    apply_ai_action, choose_bot_action, choose_bot_action_with_limits_and_options,
+    choose_bot_action_with_options, generate_ai_actions, AiAction, BotDifficulty, SearchLimits,
+    SearchOptions,
 };
 use brainfuck_chess_engine::pieces::default_pieces::all_default_definitions;
 use brainfuck_chess_engine::profiling;
@@ -390,25 +392,84 @@ fn benchmark_positions_produce_legal_ai_decisions() {
 }
 
 #[test]
+fn benchmark_positions_match_with_transposition_table_enabled_and_disabled() {
+    let limits = SearchLimits {
+        max_depth_actions: 2,
+        max_nodes: 100_000,
+        soft_time_ms: 10_000,
+        hard_time_ms: 20_000,
+    };
+    for position in benchmark_positions() {
+        let without = choose_bot_action_with_limits_and_options(
+            &position.state,
+            &"white".into(),
+            BotDifficulty::Normal,
+            limits,
+            SearchOptions {
+                use_transposition_table: false,
+            },
+        )
+        .unwrap_or_else(|| panic!("{} produced no non-TT decision", position.name));
+        let with = choose_bot_action_with_limits_and_options(
+            &position.state,
+            &"white".into(),
+            BotDifficulty::Normal,
+            limits,
+            SearchOptions::default(),
+        )
+        .unwrap_or_else(|| panic!("{} produced no TT decision", position.name));
+        assert_eq!(
+            with.completed_depth, without.completed_depth,
+            "{} depth",
+            position.name
+        );
+        assert_eq!(with.action, without.action, "{} action", position.name);
+        assert_eq!(with.score, without.score, "{} score", position.name);
+    }
+}
+
+#[test]
 #[ignore = "repeatable AI baseline; run explicitly with --features profiling --ignored --nocapture"]
 fn ai_search_baseline() {
+    run_search_baseline(SearchOptions::default());
+}
+
+#[test]
+#[ignore = "TT-off comparison baseline; run explicitly with --features profiling --ignored --nocapture"]
+fn ai_search_tt_off_comparison() {
+    run_search_baseline(SearchOptions {
+        use_transposition_table: false,
+    });
+}
+
+fn run_search_baseline(options: SearchOptions) {
     for position in benchmark_positions() {
         let before = profiling::snapshot();
         let started = Instant::now();
-        let decision = choose_bot_action(&position.state, &"white".into(), BotDifficulty::Normal)
-            .unwrap_or_else(|| panic!("{} produced no AI decision", position.name));
+        let decision = choose_bot_action_with_options(
+            &position.state,
+            &"white".into(),
+            BotDifficulty::Normal,
+            options,
+        )
+        .unwrap_or_else(|| panic!("{} produced no AI decision", position.name));
         let elapsed = started.elapsed();
         let counters = profiling::snapshot().since(before);
         assert!(action_is_legal(&position.state, &decision.action));
         println!(
-            "position={} action={} score={} nodes={} reached_depth={} completed_depth={} beta_cutoffs={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
+            "position={} tt_enabled={} action={} score={} nodes={} reached_depth={} completed_depth={} beta_cutoffs={} tt_probes={} tt_hits={} tt_cutoffs={} tt_stores={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
             position.name,
+            options.use_transposition_table,
             serde_json::to_string(&decision.action).unwrap(),
             decision.score,
             decision.searched_nodes,
             decision.depth_reached,
             decision.completed_depth,
             decision.stats.beta_cutoffs,
+            decision.stats.tt_probes,
+            decision.stats.tt_hits,
+            decision.stats.tt_cutoffs,
+            decision.stats.tt_stores,
             elapsed.as_secs_f64() * 1_000.0,
             counters.legal_move_generation_calls,
             counters.drop_generation_calls,

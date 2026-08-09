@@ -27,6 +27,19 @@ pub struct SearchLimits {
     pub hard_time_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchOptions {
+    pub use_transposition_table: bool,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            use_transposition_table: true,
+        }
+    }
+}
+
 impl BotDifficulty {
     pub const fn limits(self) -> SearchLimits {
         match self {
@@ -72,8 +85,10 @@ pub struct SearchStats {
     pub completed_depth: u8,
     pub beta_cutoffs: u64,
     pub qnodes: u64,
+    pub tt_probes: u64,
     pub tt_hits: u64,
     pub tt_cutoffs: u64,
+    pub tt_stores: u64,
     pub aspiration_researches: u64,
 }
 

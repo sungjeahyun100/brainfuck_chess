@@ -3,9 +3,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::actions::{apply_canonical_action, submit_action};
 use crate::ai::evaluate::{evaluate, WIN_SCORE};
 use crate::ai::move_ordering::order_ai_actions;
+use crate::ai::transposition_table::{
+    BoundType, PositionKey, TranspositionEntry, TranspositionTable,
+};
 use crate::ai::types::{
     ActionTimelineFrame, AiAction, BotDecision, BotDifficulty, BotTurnResult, SearchLimits,
-    SearchStats,
+    SearchOptions, SearchStats,
 };
 use crate::legal_moves::{
     generate_legal_ability_actions, generate_legal_drop_actions, generate_legal_move_actions,
@@ -54,6 +57,7 @@ struct SearchContext<'a> {
     limits: &'a SearchLimits,
     started: Instant,
     stats: SearchStats,
+    transposition_table: Option<TranspositionTable>,
 }
 
 impl SearchContext<'_> {
@@ -73,6 +77,34 @@ enum SearchOutcome {
     Aborted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TableProbe {
+    cutoff_score: Option<i32>,
+}
+
+fn apply_table_bound(
+    entry: &TranspositionEntry,
+    depth: u8,
+    alpha: &mut i32,
+    beta: &mut i32,
+) -> TableProbe {
+    if entry.depth < depth {
+        return TableProbe { cutoff_score: None };
+    }
+    match entry.bound {
+        BoundType::Exact => {
+            return TableProbe {
+                cutoff_score: Some(entry.score),
+            };
+        }
+        BoundType::LowerBound => *alpha = (*alpha).max(entry.score),
+        BoundType::UpperBound => *beta = (*beta).min(entry.score),
+    }
+    TableProbe {
+        cutoff_score: (*alpha >= *beta).then_some(entry.score),
+    }
+}
+
 fn alpha_beta(
     state: GameState,
     depth: u8,
@@ -86,18 +118,61 @@ fn alpha_beta(
     }
     context.stats.searched_nodes += 1;
     context.stats.depth_reached = context.stats.depth_reached.max(ply);
+    let original_alpha = alpha;
+    let original_beta = beta;
+    let position_key = PositionKey::from_state(&state);
+    let table_entry = context.transposition_table.as_ref().and_then(|table| {
+        context.stats.tt_probes += 1;
+        table.get(&position_key).cloned()
+    });
+    if let Some(entry) = table_entry.as_ref() {
+        context.stats.tt_hits += 1;
+        let probe = apply_table_bound(entry, depth, &mut alpha, &mut beta);
+        if let Some(score) = probe.cutoff_score {
+            context.stats.tt_cutoffs += 1;
+            return SearchOutcome::Complete(score);
+        }
+    }
     if depth == 0 || state.phase == GamePhase::Ended || state.result.is_some() {
-        return SearchOutcome::Complete(evaluate(&state, context.bot_player_id));
+        let score = evaluate(&state, context.bot_player_id);
+        store_table_entry(
+            context,
+            position_key,
+            TranspositionEntry {
+                depth,
+                score,
+                bound: BoundType::Exact,
+                best_action: None,
+            },
+        );
+        return SearchOutcome::Complete(score);
     }
 
     let maximizing = &state.current_player == context.bot_player_id;
     let mut actions = generate_ai_actions(&state);
     if actions.is_empty() {
-        return SearchOutcome::Complete(evaluate(&state, context.bot_player_id));
+        let score = evaluate(&state, context.bot_player_id);
+        store_table_entry(
+            context,
+            position_key,
+            TranspositionEntry {
+                depth,
+                score,
+                bound: BoundType::Exact,
+                best_action: None,
+            },
+        );
+        return SearchOutcome::Complete(score);
     }
     order_ai_actions(&state, &mut actions, context.bot_player_id);
+    if let Some(best_action) = table_entry.and_then(|entry| entry.best_action) {
+        if let Some(index) = actions.iter().position(|action| action == &best_action) {
+            actions.swap(0, index);
+        }
+    }
 
     let mut best = if maximizing { i32::MIN } else { i32::MAX };
+    let mut best_action = None;
     for action in actions {
         if context.hard_limit_reached() {
             return SearchOutcome::Aborted;
@@ -109,10 +184,16 @@ fn alpha_beta(
             return SearchOutcome::Aborted;
         };
         if maximizing {
-            best = best.max(score);
+            if score > best {
+                best = score;
+                best_action = Some(action.clone());
+            }
             alpha = alpha.max(best);
         } else {
-            best = best.min(score);
+            if score < best {
+                best = score;
+                best_action = Some(action.clone());
+            }
             beta = beta.min(best);
         }
         if beta <= alpha {
@@ -121,10 +202,38 @@ fn alpha_beta(
         }
     }
 
-    if best == i32::MIN || best == i32::MAX {
-        SearchOutcome::Complete(evaluate(&state, context.bot_player_id))
+    let score = if best == i32::MIN || best == i32::MAX {
+        evaluate(&state, context.bot_player_id)
     } else {
-        SearchOutcome::Complete(best)
+        best
+    };
+    let bound = if score <= original_alpha {
+        BoundType::UpperBound
+    } else if score >= original_beta {
+        BoundType::LowerBound
+    } else {
+        BoundType::Exact
+    };
+    store_table_entry(
+        context,
+        position_key,
+        TranspositionEntry {
+            depth,
+            score,
+            bound,
+            best_action,
+        },
+    );
+    SearchOutcome::Complete(score)
+}
+
+fn store_table_entry(context: &mut SearchContext<'_>, key: PositionKey, entry: TranspositionEntry) {
+    if context
+        .transposition_table
+        .as_mut()
+        .is_some_and(|table| table.store(key, entry))
+    {
+        context.stats.tt_stores += 1;
     }
 }
 
@@ -213,15 +322,57 @@ pub fn choose_bot_action(
     bot_player_id: &PlayerId,
     difficulty: BotDifficulty,
 ) -> Option<BotDecision> {
-    let limits = difficulty.limits();
-    choose_bot_action_with_limits(state, bot_player_id, difficulty, limits)
+    choose_bot_action_with_options(state, bot_player_id, difficulty, SearchOptions::default())
 }
 
+pub fn choose_bot_action_with_options(
+    state: &GameState,
+    bot_player_id: &PlayerId,
+    difficulty: BotDifficulty,
+    options: SearchOptions,
+) -> Option<BotDecision> {
+    let limits = difficulty.limits();
+    choose_bot_action_with_limits_and_options(state, bot_player_id, difficulty, limits, options)
+}
+
+pub fn choose_bot_action_with_limits_and_options(
+    state: &GameState,
+    bot_player_id: &PlayerId,
+    difficulty: BotDifficulty,
+    limits: SearchLimits,
+    options: SearchOptions,
+) -> Option<BotDecision> {
+    choose_bot_action_with_config(
+        state,
+        bot_player_id,
+        difficulty,
+        limits,
+        options.use_transposition_table,
+    )
+}
+
+#[cfg(test)]
 fn choose_bot_action_with_limits(
     state: &GameState,
     bot_player_id: &PlayerId,
     difficulty: BotDifficulty,
     limits: SearchLimits,
+) -> Option<BotDecision> {
+    choose_bot_action_with_limits_and_options(
+        state,
+        bot_player_id,
+        difficulty,
+        limits,
+        SearchOptions::default(),
+    )
+}
+
+fn choose_bot_action_with_config(
+    state: &GameState,
+    bot_player_id: &PlayerId,
+    difficulty: BotDifficulty,
+    limits: SearchLimits,
+    transposition_table_enabled: bool,
 ) -> Option<BotDecision> {
     let started = Instant::now();
     let mut actions = generate_ai_actions(state);
@@ -237,6 +388,8 @@ fn choose_bot_action_with_limits(
         limits: &limits,
         started,
         stats: SearchStats::default(),
+        transposition_table: transposition_table_enabled
+            .then(|| TranspositionTable::new(limits.max_nodes.min(65_536) as usize)),
     };
     let root_result = if context.soft_limit_reached() {
         RootSearchResult {
@@ -389,7 +542,7 @@ mod tests {
         };
         for (id, owner, type_id, square) in [
             ("wk", "white", "king", Square::new(0, 0)),
-            ("wr", "white", "rook", Square::new(3, 0)),
+            ("wr", "white", "rook", Square::new(7, 0)),
             ("bk", "black", "king", Square::new(7, 7)),
         ] {
             let piece_id: crate::types::PieceId = id.into();
@@ -440,5 +593,240 @@ mod tests {
         assert_eq!(decision.searched_nodes, 1);
         assert_eq!(decision.completed_depth, 0);
         assert!(generate_ai_actions(&state).contains(&decision.action));
+
+        let limits = SearchLimits {
+            max_depth_actions: 3,
+            max_nodes: 1,
+            soft_time_ms: 1_000,
+            hard_time_ms: 1_000,
+        };
+        let bot_player_id = "white".to_string();
+        let mut context = SearchContext {
+            bot_player_id: &bot_player_id,
+            limits: &limits,
+            started: Instant::now(),
+            stats: SearchStats::default(),
+            transposition_table: Some(TranspositionTable::new(100)),
+        };
+        assert_eq!(
+            alpha_beta(state, 3, 0, i32::MIN + 1, i32::MAX, &mut context),
+            SearchOutcome::Aborted
+        );
+        assert_eq!(context.transposition_table.as_ref().unwrap().len(), 0);
+        assert_eq!(context.stats.tt_stores, 0);
+    }
+
+    #[test]
+    fn table_bound_lookup_obeys_depth_and_window_semantics() {
+        let entry = |depth, score, bound| TranspositionEntry {
+            depth,
+            score,
+            bound,
+            best_action: None,
+        };
+
+        let mut alpha = -100;
+        let mut beta = 100;
+        assert_eq!(
+            apply_table_bound(&entry(2, 7, BoundType::Exact), 2, &mut alpha, &mut beta)
+                .cutoff_score,
+            Some(7)
+        );
+
+        let mut alpha = -100;
+        let mut beta = 10;
+        assert_eq!(
+            apply_table_bound(
+                &entry(2, 10, BoundType::LowerBound),
+                2,
+                &mut alpha,
+                &mut beta
+            )
+            .cutoff_score,
+            Some(10)
+        );
+
+        let mut alpha = -10;
+        let mut beta = 100;
+        assert_eq!(
+            apply_table_bound(
+                &entry(2, -10, BoundType::UpperBound),
+                2,
+                &mut alpha,
+                &mut beta
+            )
+            .cutoff_score,
+            Some(-10)
+        );
+
+        let mut alpha = -100;
+        let mut beta = 100;
+        assert_eq!(
+            apply_table_bound(&entry(1, 99, BoundType::Exact), 2, &mut alpha, &mut beta)
+                .cutoff_score,
+            None
+        );
+        assert_eq!((alpha, beta), (-100, 100));
+    }
+
+    #[test]
+    fn representative_variant_positions_match_with_table_enabled_and_disabled() {
+        let mut positions = Vec::new();
+
+        let mut stateful = searchable_state();
+        add_test_piece(
+            &mut stateful,
+            "windmill",
+            "white",
+            "windmill",
+            Some(Square::new(3, 3)),
+        );
+        add_test_piece(
+            &mut stateful,
+            "cannon",
+            "white",
+            "cannon-rook",
+            Some(Square::new(5, 2)),
+        );
+        stateful
+            .pieces
+            .get_mut("cannon")
+            .unwrap()
+            .move_option_cooldowns
+            .insert(
+                "cannon_move".into(),
+                crate::types::CooldownState { remaining: 2 },
+            );
+        positions.push(("piece-state-cooldown", stateful));
+
+        let mut drop_capture = searchable_state();
+        add_test_piece(
+            &mut drop_capture,
+            "enemy",
+            "black",
+            "knight",
+            Some(Square::new(3, 0)),
+        );
+        add_test_piece(&mut drop_capture, "para", "white", "paratrooper", None);
+        positions.push(("drop-capture", drop_capture));
+
+        let mut airborne = searchable_state();
+        add_test_piece(
+            &mut airborne,
+            "airborne",
+            "white",
+            "airborne",
+            Some(Square::new(3, 3)),
+        );
+        add_test_piece(&mut airborne, "air-bishop", "white", "bishop", None);
+        add_test_piece(&mut airborne, "air-knight", "white", "knight", None);
+        positions.push(("airborne-deployment", airborne));
+
+        let mut alternating = searchable_state();
+        add_test_piece(
+            &mut alternating,
+            "soldier",
+            "white",
+            "alternating-soldier",
+            Some(Square::new(3, 3)),
+        );
+        add_test_piece(
+            &mut alternating,
+            "swap-target",
+            "white",
+            "bishop",
+            Some(Square::new(4, 4)),
+        );
+        add_test_piece(
+            &mut alternating,
+            "enemy",
+            "black",
+            "bishop",
+            Some(Square::new(2, 2)),
+        );
+        add_test_piece(&mut alternating, "swap-reserve", "white", "knight", None);
+        positions.push(("alternating-soldier-pocket-swap", alternating));
+        positions.push(("immediate-king-capture", searchable_state()));
+
+        let limits = SearchLimits {
+            max_depth_actions: 2,
+            max_nodes: 100_000,
+            soft_time_ms: 10_000,
+            hard_time_ms: 20_000,
+        };
+        let mut hits = 0;
+        for (name, state) in positions {
+            let without = choose_bot_action_with_config(
+                &state,
+                &"white".into(),
+                BotDifficulty::Normal,
+                limits,
+                false,
+            )
+            .unwrap_or_else(|| panic!("{name} produced no non-TT decision"));
+            let with = choose_bot_action_with_config(
+                &state,
+                &"white".into(),
+                BotDifficulty::Normal,
+                limits,
+                true,
+            )
+            .unwrap_or_else(|| panic!("{name} produced no TT decision"));
+            assert_eq!(with.action, without.action, "{name} action differs");
+            assert_eq!(with.score, without.score, "{name} score differs");
+            assert_eq!(with.completed_depth, 2, "{name} TT search aborted");
+            assert_eq!(without.completed_depth, 2, "{name} non-TT search aborted");
+            hits += with.stats.tt_hits;
+        }
+        assert!(
+            hits > 0,
+            "representative searches should exercise TT lookup"
+        );
+    }
+
+    fn add_test_piece(
+        state: &mut GameState,
+        id: &str,
+        owner: &str,
+        type_id: &str,
+        square: Option<Square>,
+    ) {
+        let piece_id: crate::types::PieceId = id.into();
+        let definition = &state.piece_definitions[type_id];
+        if let Some(square) = square {
+            state
+                .board
+                .squares
+                .insert(square.to_id(), Some(piece_id.clone()));
+            state
+                .players
+                .get_mut(owner)
+                .unwrap()
+                .deck
+                .starting_pieces
+                .push(piece_id.clone());
+        } else {
+            state
+                .players
+                .get_mut(owner)
+                .unwrap()
+                .deck
+                .pocket_pieces
+                .push(piece_id.clone());
+        }
+        state.pieces.insert(
+            piece_id.clone(),
+            Piece {
+                id: piece_id,
+                owner: owner.into(),
+                type_id: type_id.into(),
+                current_square: square,
+                in_pocket: square.is_none(),
+                captured: false,
+                has_moved: true,
+                state: definition.initial_state(),
+                move_option_cooldowns: HashMap::new(),
+            },
+        );
     }
 }
