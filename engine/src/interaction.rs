@@ -1,5 +1,30 @@
 use crate::types::{GameState, Piece, PieceId, Square};
 
+/// Resolve occupied squares in the eight-cell Moore neighborhood around a
+/// board piece. Ability code owns policy (ally/enemy/royal); interaction owns
+/// board proximity and occupancy detection.
+pub fn neighboring_pieces<'a>(game_state: &'a GameState, piece: &Piece) -> Vec<&'a Piece> {
+    let Some(origin) = piece.current_square else {
+        return Vec::new();
+    };
+    let mut neighbors = Vec::new();
+    for rank_offset in -1..=1 {
+        for file_offset in -1..=1 {
+            if file_offset == 0 && rank_offset == 0 {
+                continue;
+            }
+            let square = Square::new(origin.file + file_offset, origin.rank + rank_offset);
+            let Some(target_id) = game_state.board.get_piece_at(&square) else {
+                continue;
+            };
+            if let Some(target) = game_state.pieces.get(target_id) {
+                neighbors.push(target);
+            }
+        }
+    }
+    neighbors
+}
+
 /// Semantic interaction categories. Movement code asks whether a target blocks
 /// one of its tags instead of checking concrete piece type ids.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -132,13 +157,7 @@ pub fn resolve_piece_interactions(
     let mut result = InteractionResult::default();
     for geometry in profile.bounce_geometries {
         for &incoming in incoming_directions(geometry) {
-            resolve_first_bouncing_wall(
-                game_state,
-                piece,
-                incoming,
-                geometry,
-                &mut result,
-            );
+            resolve_first_bouncing_wall(game_state, piece, incoming, geometry, &mut result);
         }
     }
     result
@@ -248,10 +267,7 @@ fn incoming_directions(geometry: BounceGeometry) -> &'static [(i32, i32)] {
     }
 }
 
-fn reflected_directions(
-    incoming: (i32, i32),
-    geometry: BounceGeometry,
-) -> [(i32, i32); 2] {
+fn reflected_directions(incoming: (i32, i32), geometry: BounceGeometry) -> [(i32, i32); 2] {
     match geometry {
         BounceGeometry::Orthogonal if incoming.0 == 0 => [(-1, 0), (1, 0)],
         BounceGeometry::Orthogonal => [(0, -1), (0, 1)],

@@ -9,8 +9,9 @@ use brainfuck_chess_engine::context::PieceCatalog;
 use brainfuck_chess_engine::endgame::{apply_and_advance_turn, apply_move_action, has_living_king};
 use brainfuck_chess_engine::legal_moves::{
     generate_drop_candidates_by_type, generate_legal_drop_actions, generate_legal_move_actions,
-    generate_piece_legal_drop_actions, generate_piece_legal_move_actions,
-    generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
+    generate_piece_legal_ability_actions, generate_piece_legal_drop_actions,
+    generate_piece_legal_move_actions, generate_piece_legal_move_actions_with_options,
+    MoveGenerationOptions,
 };
 use brainfuck_chess_engine::pieces::default_pieces::*;
 use brainfuck_chess_engine::rules::*;
@@ -128,6 +129,90 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         .deck
         .pocket_pieces
         .push(id.into());
+}
+
+#[test]
+fn alternating_soldier_replaces_adjacent_friendly_piece_from_pocket() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "actor", "white", "alternating-soldier", 3, 3);
+    add_piece(&mut state, "target", "white", "bishop", 4, 4);
+    add_piece(&mut state, "enemy", "black", "bishop", 2, 2);
+    add_pocket_piece(&mut state, "reserve", "white", "knight");
+    let actions = generate_piece_legal_ability_actions(&state, &"actor".into(), "relieve");
+    assert_eq!(
+        actions.len(),
+        1,
+        "enemy adjacent pieces are not valid relief targets"
+    );
+    let state = submit_action(state, TurnAction::Ability(actions[0].clone())).unwrap();
+    assert_eq!(
+        state
+            .board
+            .get_piece_at(&Square::new(4, 4))
+            .map(PieceId::as_str),
+        Some("reserve")
+    );
+    assert!(state.pieces["target"].in_pocket);
+    assert!(!state.pieces["reserve"].in_pocket);
+}
+
+#[test]
+fn airborne_summons_only_low_score_pocket_piece_into_forward_rectangle() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "actor", "white", "airborne", 3, 3);
+    add_pocket_piece(&mut state, "low", "white", "bishop");
+    add_pocket_piece(&mut state, "high", "white", "rook");
+    let actions = generate_piece_legal_ability_actions(&state, &"actor".into(), "airdrop");
+    assert_eq!(actions.len(), 6);
+    assert!(actions.iter().all(|action| action
+        .pocket_piece_id
+        .as_ref()
+        .is_some_and(|id| id == "low")
+        && action
+            .to
+            .is_some_and(|sq| (4..=5).contains(&sq.rank) && (2..=4).contains(&sq.file))));
+}
+
+#[test]
+fn airborne_commits_multiple_unique_deployments_in_one_turn() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "actor", "white", "airborne", 3, 3);
+    add_pocket_piece(&mut state, "first", "white", "bishop");
+    add_pocket_piece(&mut state, "second", "white", "knight");
+    let action = AbilityAction {
+        player_id: "white".into(),
+        piece_id: "actor".into(),
+        ability_id: "airdrop".into(),
+        target_piece_id: None,
+        pocket_piece_id: None,
+        to: None,
+        deployments: vec![
+            AbilityDeployment { pocket_piece_id: "first".into(), to: Square::new(2, 4) },
+            AbilityDeployment { pocket_piece_id: "second".into(), to: Square::new(3, 5) },
+        ],
+    };
+    let state = submit_action(state, TurnAction::Ability(action)).unwrap();
+    assert_eq!(state.board.get_piece_at(&Square::new(2, 4)).map(PieceId::as_str), Some("first"));
+    assert_eq!(state.board.get_piece_at(&Square::new(3, 5)).map(PieceId::as_str), Some("second"));
+    assert_eq!(state.current_player, "black");
+}
+
+#[test]
+fn green_camp_returns_enemy_to_its_owners_pocket_but_excludes_king() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "actor", "white", "green-camp", 3, 3);
+    add_piece(&mut state, "enemy", "black", "rook", 4, 3);
+    add_piece(&mut state, "king", "black", "king", 2, 3);
+    let actions = generate_piece_legal_ability_actions(&state, &"actor".into(), "recall");
+    assert_eq!(actions.len(), 1);
+    let state = submit_action(state, TurnAction::Ability(actions[0].clone())).unwrap();
+    assert!(state.pieces["enemy"].in_pocket);
+    assert!(state.players["black"]
+        .deck
+        .pocket_pieces
+        .iter()
+        .any(|id| id == "enemy"));
+    assert!(state.board.get_piece_at(&Square::new(4, 3)).is_none());
 }
 
 #[test]
@@ -514,8 +599,14 @@ fn test_king_capture_ends_game() {
 
     let result_state = apply_move_action(state, action);
     assert_eq!(result_state.phase, GamePhase::Ended);
-    assert_eq!(result_state.result.as_ref().unwrap().winner, Some("white".to_string()));
-    assert_eq!(result_state.result.as_ref().unwrap().reason, GameEndReason::KingCapture);
+    assert_eq!(
+        result_state.result.as_ref().unwrap().winner,
+        Some("white".to_string())
+    );
+    assert_eq!(
+        result_state.result.as_ref().unwrap().reason,
+        GameEndReason::KingCapture
+    );
 }
 
 #[test]
@@ -557,7 +648,9 @@ fn test_castling_kingside_generated_and_applied() {
     add_piece(&mut state, "bk", "black", "king", 4, 7);
 
     let legal = generate_legal_move_actions(&state);
-    assert!(legal.iter().any(|m| m.piece_id == "wk" && m.to == Square::new(6, 0)));
+    assert!(legal
+        .iter()
+        .any(|m| m.piece_id == "wk" && m.to == Square::new(6, 0)));
     assert!(generate_piece_legal_move_actions(&state, &"wk".into())
         .iter()
         .any(|m| m.to == Square::new(6, 0)));
@@ -574,8 +667,14 @@ fn test_castling_kingside_generated_and_applied() {
         effects: ActionEffects::default(),
     };
     let new_state = apply_move_action(state, action);
-    assert_eq!(new_state.pieces["wk"].current_square, Some(Square::new(6, 0)));
-    assert_eq!(new_state.pieces["wr"].current_square, Some(Square::new(5, 0)));
+    assert_eq!(
+        new_state.pieces["wk"].current_square,
+        Some(Square::new(6, 0))
+    );
+    assert_eq!(
+        new_state.pieces["wr"].current_square,
+        Some(Square::new(5, 0))
+    );
 }
 
 #[test]
@@ -615,7 +714,10 @@ fn test_en_passant_generated_and_applied() {
         effects: ActionEffects::default(),
     };
     let new_state = apply_move_action(state, white_ep);
-    assert_eq!(new_state.pieces["wp"].current_square, Some(Square::new(5, 5)));
+    assert_eq!(
+        new_state.pieces["wp"].current_square,
+        Some(Square::new(5, 5))
+    );
     assert!(new_state.pieces["bp"].captured);
     assert_eq!(new_state.board.get_piece_at(&Square::new(5, 4)), None);
     assert_eq!(new_state.en_passant_target, None);
@@ -669,7 +771,14 @@ fn test_tempest_pawn_uses_its_distinct_movement_definition() {
     let mut tempest_state = make_game_state(8);
     add_piece(&mut tempest_state, "wk", "white", "king", 0, 0);
     add_piece(&mut tempest_state, "bk", "black", "king", 7, 7);
-    add_piece(&mut tempest_state, "tp", "white", "tempest-pawn-white", 3, 1);
+    add_piece(
+        &mut tempest_state,
+        "tp",
+        "white",
+        "tempest-pawn-white",
+        3,
+        1,
+    );
 
     let mut tempest_moves: Vec<(i32, i32, Option<String>)> =
         generate_piece_legal_move_actions(&tempest_state, &"tp".into())
@@ -677,7 +786,10 @@ fn test_tempest_pawn_uses_its_distinct_movement_definition() {
             .map(|action| (action.to.file, action.to.rank, action.promotion))
             .collect();
     tempest_moves.sort();
-    assert_eq!(tempest_moves, vec![(2, 1, None), (3, 2, None), (4, 1, None)]);
+    assert_eq!(
+        tempest_moves,
+        vec![(2, 1, None), (3, 2, None), (4, 1, None)]
+    );
 }
 
 #[test]
@@ -685,7 +797,14 @@ fn test_tempest_pawn_uses_its_distinct_capture_definition() {
     let mut tempest_state = make_game_state(8);
     add_piece(&mut tempest_state, "wk", "white", "king", 0, 0);
     add_piece(&mut tempest_state, "bk", "black", "king", 7, 7);
-    add_piece(&mut tempest_state, "tp", "white", "tempest-pawn-white", 3, 3);
+    add_piece(
+        &mut tempest_state,
+        "tp",
+        "white",
+        "tempest-pawn-white",
+        3,
+        3,
+    );
     add_piece(&mut tempest_state, "be1", "black", "knight", 2, 4);
     add_piece(&mut tempest_state, "be2", "black", "bishop", 4, 4);
     add_piece(&mut tempest_state, "be3", "black", "rook", 3, 5);
@@ -710,7 +829,10 @@ fn test_pawn_reaching_back_rank_generates_promotion_choices() {
     let moves = generate_piece_legal_move_actions(&state, &"wp".into());
     let promotions: Vec<&MoveAction> = moves.iter().filter(|m| m.to == Square::new(4, 7)).collect();
     assert_eq!(promotions.len(), 4);
-    let mut choices: Vec<String> = promotions.iter().filter_map(|m| m.promotion.clone()).collect();
+    let mut choices: Vec<String> = promotions
+        .iter()
+        .filter_map(|m| m.promotion.clone())
+        .collect();
     choices.sort();
     assert_eq!(choices, vec!["bishop", "knight", "queen", "rook"]);
 }
@@ -725,9 +847,20 @@ fn test_tempest_pawn_reaching_back_rank_generates_tempest_promotion_choices() {
     let moves = generate_piece_legal_move_actions(&state, &"tp".into());
     let promotions: Vec<&MoveAction> = moves.iter().filter(|m| m.to == Square::new(4, 7)).collect();
     assert_eq!(promotions.len(), 4);
-    let mut choices: Vec<String> = promotions.iter().filter_map(|m| m.promotion.clone()).collect();
+    let mut choices: Vec<String> = promotions
+        .iter()
+        .filter_map(|m| m.promotion.clone())
+        .collect();
     choices.sort();
-    assert_eq!(choices, vec!["tempest-bishop", "tempest-knight", "tempest-queen", "tempest-rook"]);
+    assert_eq!(
+        choices,
+        vec![
+            "tempest-bishop",
+            "tempest-knight",
+            "tempest-queen",
+            "tempest-rook"
+        ]
+    );
 }
 
 #[test]
@@ -749,7 +882,10 @@ fn bouncing_pawns_promote_on_their_respective_back_ranks() {
             .filter_map(|action| action.promotion.clone())
             .collect();
         choices.sort();
-        assert_eq!(choices, vec!["bouncing-bishop", "bouncing-queen", "bouncing-rook"]);
+        assert_eq!(
+            choices,
+            vec!["bouncing-bishop", "bouncing-queen", "bouncing-rook"]
+        );
     }
 }
 
@@ -815,7 +951,10 @@ fn test_pawn_promotion_applies_chosen_piece_type() {
     };
     let new_state = apply_move_action(state, action);
     assert_eq!(new_state.pieces["wp"].type_id, "queen");
-    assert_eq!(new_state.pieces["wp"].current_square, Some(Square::new(4, 7)));
+    assert_eq!(
+        new_state.pieces["wp"].current_square,
+        Some(Square::new(4, 7))
+    );
 }
 
 #[test]
@@ -838,7 +977,10 @@ fn test_tempest_pawn_promotion_applies_chosen_piece_type() {
     };
     let new_state = apply_move_action(state, action);
     assert_eq!(new_state.pieces["tp"].type_id, "tempest-queen");
-    assert_eq!(new_state.pieces["tp"].current_square, Some(Square::new(4, 7)));
+    assert_eq!(
+        new_state.pieces["tp"].current_square,
+        Some(Square::new(4, 7))
+    );
 }
 
 #[test]
@@ -861,7 +1003,8 @@ fn test_non_promoting_pawn_move_has_single_action_without_promotion() {
     add_piece(&mut state, "wp", "white", "pawn-white", 4, 3);
 
     let moves = generate_piece_legal_move_actions(&state, &"wp".into());
-    let single_step: Vec<&MoveAction> = moves.iter().filter(|m| m.to == Square::new(4, 4)).collect();
+    let single_step: Vec<&MoveAction> =
+        moves.iter().filter(|m| m.to == Square::new(4, 4)).collect();
     assert_eq!(single_step.len(), 1);
     assert_eq!(single_step[0].promotion, None);
 }
@@ -901,7 +1044,9 @@ fn test_custom_piece_definition_can_generate_promotion_choices() {
     }
     .normalize_and_validate()
     .unwrap();
-    state.piece_definitions.insert("promoter".into(), definition);
+    state
+        .piece_definitions
+        .insert("promoter".into(), definition);
     state.rebuild_chessembly_cache();
     add_piece(&mut state, "wk", "white", "king", 0, 0);
     add_piece(&mut state, "bk", "black", "king", 7, 7);
@@ -963,7 +1108,10 @@ fn test_chessembly_cache_preserves_legal_moves_and_attack_map() {
     let empty_maps = HashMap::new();
     let cached_attack_map = generate_attack_map(&cached_state, &"white".into(), &empty_maps);
     let rebuilt_attack_map = generate_attack_map(&rebuilt_state, &"white".into(), &empty_maps);
-    assert_eq!(cached_attack_map.attacked_squares, rebuilt_attack_map.attacked_squares);
+    assert_eq!(
+        cached_attack_map.attacked_squares,
+        rebuilt_attack_map.attacked_squares
+    );
     assert_eq!(cached_attack_map.source_map, rebuilt_attack_map.source_map);
 }
 
@@ -975,7 +1123,10 @@ fn test_chessembly_cache_clone_and_deserialize_rebuild() {
         .values()
         .map(|definition| definition.move_layers.len())
         .sum();
-    assert_eq!(state.cached_chessembly_program_count(), expected_program_count);
+    assert_eq!(
+        state.cached_chessembly_program_count(),
+        expected_program_count
+    );
 
     let cloned = state.clone();
     let state_rook = state.chessembly_program(&"rook".to_string()).unwrap();
@@ -989,7 +1140,10 @@ fn test_chessembly_cache_clone_and_deserialize_rebuild() {
     let deserialized: GameState = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized.cached_chessembly_program_count(), 0);
     deserialized.ensure_chessembly_cache();
-    assert_eq!(deserialized.cached_chessembly_program_count(), expected_program_count);
+    assert_eq!(
+        deserialized.cached_chessembly_program_count(),
+        expected_program_count
+    );
 }
 
 #[test]
@@ -1104,7 +1258,9 @@ fn test_drop_candidates_are_grouped_by_piece_type() {
 
     assert!(!knight_candidates.is_empty());
     assert_eq!(knight_candidates.len(), rook_candidates.len());
-    assert!(knight_candidates.iter().all(|candidate| candidate.count == 2));
+    assert!(knight_candidates
+        .iter()
+        .all(|candidate| candidate.count == 2));
     assert!(rook_candidates.iter().all(|candidate| candidate.count == 1));
 }
 
@@ -1120,8 +1276,12 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
     add_piece(&mut state, "blocked", "white", "pawn-white", 6, 3);
 
     let base_moves = generate_piece_legal_move_actions(&state, &"cr".into());
-    assert!(base_moves.iter().any(|action| action.to == Square::new(4, 3)));
-    assert!(!base_moves.iter().any(|action| action.to == Square::new(3, 5)));
+    assert!(base_moves
+        .iter()
+        .any(|action| action.to == Square::new(4, 3)));
+    assert!(!base_moves
+        .iter()
+        .any(|action| action.to == Square::new(3, 5)));
 
     let cannon_moves = generate_piece_legal_move_actions_with_options(
         &state,
@@ -1138,10 +1298,18 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
             && action.captured_piece_id.as_ref().map(|id| id.as_str()) == Some("enemy")
             && action.move_option_id == "cannon_move"
     }));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(4, 3)));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(5, 3)));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(6, 3)));
-    assert!(!cannon_moves.iter().any(|action| action.to == Square::new(7, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(4, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(5, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(6, 3)));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(7, 3)));
 
     let action = cannon_moves
         .iter()
@@ -1220,10 +1388,18 @@ fn bouncing_bishop_reflection_is_part_of_normal_movement() {
     );
 
     let wall_moves = generate_piece_legal_move_actions(&wall_state, &"bb".into());
-    assert!(wall_moves.iter().any(|action| action.to == Square::new(4, 4)));
-    assert!(wall_moves.iter().any(|action| action.to == Square::new(3, 5)));
-    assert!(wall_moves.iter().any(|action| action.to == Square::new(5, 3)));
-    assert!(!wall_moves.iter().any(|action| action.to == Square::new(5, 5)));
+    assert!(wall_moves
+        .iter()
+        .any(|action| action.to == Square::new(4, 4)));
+    assert!(wall_moves
+        .iter()
+        .any(|action| action.to == Square::new(3, 5)));
+    assert!(wall_moves
+        .iter()
+        .any(|action| action.to == Square::new(5, 3)));
+    assert!(!wall_moves
+        .iter()
+        .any(|action| action.to == Square::new(5, 5)));
 }
 
 #[test]
@@ -1268,7 +1444,9 @@ fn bouncing_pawn_is_a_direct_wall_for_bouncing_rook_and_queen() {
         action.to == Square::new(3, 5)
             && action.captured_piece_id.as_ref().map(PieceId::as_str) == Some("wall")
     }));
-    assert!(!ordinary_moves.iter().any(|action| action.to == Square::new(1, 4)));
+    assert!(!ordinary_moves
+        .iter()
+        .any(|action| action.to == Square::new(1, 4)));
 }
 
 #[test]
@@ -1291,21 +1469,30 @@ fn owner_turn_cooldown_is_set_on_commit_and_ticks_only_after_later_owner_actions
     .unwrap();
     state = apply_and_advance_turn(state, TurnAction::Move(cannon_action));
     assert_eq!(state.current_player, "black");
-    assert_eq!(state.pieces["cr"].move_option_cooldowns["cannon_move"].remaining, 3);
+    assert_eq!(
+        state.pieces["cr"].move_option_cooldowns["cannon_move"].remaining,
+        3
+    );
 
     let black_move = generate_piece_legal_move_actions(&state, &"bk".into())
         .into_iter()
         .next()
         .unwrap();
     state = apply_and_advance_turn(state, TurnAction::Move(black_move));
-    assert_eq!(state.pieces["cr"].move_option_cooldowns["cannon_move"].remaining, 3);
+    assert_eq!(
+        state.pieces["cr"].move_option_cooldowns["cannon_move"].remaining,
+        3
+    );
 
     let white_move = generate_piece_legal_move_actions(&state, &"wk".into())
         .into_iter()
         .next()
         .unwrap();
     state = apply_and_advance_turn(state, TurnAction::Move(white_move));
-    assert_eq!(state.pieces["cr"].move_option_cooldowns["cannon_move"].remaining, 2);
+    assert_eq!(
+        state.pieces["cr"].move_option_cooldowns["cannon_move"].remaining,
+        2
+    );
     assert_eq!(state.history.len(), 3);
 }
 
@@ -1317,7 +1504,8 @@ fn promotion_resets_piece_state_cooldowns_and_visual_definition() {
     add_piece(&mut state, "wp", "white", "pawn-white", 4, 6);
     {
         let pawn = state.pieces.get_mut("wp").unwrap();
-        pawn.state.insert("legacy".into(), PieceStateValue::Boolean(true));
+        pawn.state
+            .insert("legacy".into(), PieceStateValue::Boolean(true));
         pawn.move_option_cooldowns
             .insert("legacy".into(), CooldownState { remaining: 9 });
     }
@@ -1332,7 +1520,10 @@ fn promotion_resets_piece_state_cooldowns_and_visual_definition() {
     assert_eq!(promoted.type_id, "knight");
     assert!(promoted.state.is_empty());
     assert!(promoted.move_option_cooldowns.is_empty());
-    assert_eq!(state.piece_definitions["knight"].resolve_asset_key(promoted), "knight");
+    assert_eq!(
+        state.piece_definitions["knight"].resolve_asset_key(promoted),
+        "knight"
+    );
 }
 
 #[test]
@@ -1343,5 +1534,8 @@ fn piece_definition_validation_rejects_unknown_references() {
 
     let mut definition = windmill_definition();
     definition.visual.variants[0].enabled_when[0].key = "typo".into();
-    assert!(definition.validate().unwrap_err().contains("unknown state key"));
+    assert!(definition
+        .validate()
+        .unwrap_err()
+        .contains("unknown state key"));
 }

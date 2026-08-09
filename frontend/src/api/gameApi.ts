@@ -67,6 +67,7 @@ interface ResignGameRequest {
 export interface PieceOptionsResponse {
   moves: MoveAction[]
   attacks: Square[]
+  ability_actions: import('../types/game').AbilityAction[]
 }
 
 export interface PieceLabPieceRequest {
@@ -109,6 +110,7 @@ export interface PieceLabOptionsResponse {
   moves: Square[]
   legal_moves: MoveAction[]
   legal_drops: DropAction[]
+  legal_ability_actions: import('../types/game').AbilityAction[]
   attacks: Square[]
   move_options: PieceLabMoveOption[]
   piece_definitions: Record<string, PieceDefinition>

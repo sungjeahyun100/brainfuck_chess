@@ -994,6 +994,7 @@ pub(crate) async fn test_action(
     let selected = match &input.action {
         TurnAction::Move(action) => action.piece_id.clone(),
         TurnAction::Drop(action) => action.piece_id.clone(),
+        TurnAction::Ability(action) => action.piece_id.clone(),
     };
     let state = submit_action(state, input.action).map_err(|_| {
         validation(

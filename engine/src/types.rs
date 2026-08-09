@@ -525,7 +525,9 @@ impl PieceDefinition {
             }
         }
         for option in &self.move_options {
-            if option.layer_ids.is_empty() {
+            if option.layer_ids.is_empty()
+                && option.execution_mode == MoveOptionExecutionMode::MoveModifier
+            {
                 return Err(format!(
                     "{}: move option `{}` has no layers",
                     self.id, option.id
@@ -780,6 +782,30 @@ pub struct Player {
 pub enum TurnAction {
     Move(MoveAction),
     Drop(DropAction),
+    Ability(AbilityAction),
+}
+
+/// A canonical, server-generated standalone ability action. Optional targets
+/// are explicit so clients never submit an inferred board mutation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AbilityAction {
+    pub player_id: PlayerId,
+    pub piece_id: PieceId,
+    pub ability_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_piece_id: Option<PieceId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pocket_piece_id: Option<PieceId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Square>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deployments: Vec<AbilityDeployment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AbilityDeployment {
+    pub pocket_piece_id: PieceId,
+    pub to: Square,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

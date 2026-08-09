@@ -36,6 +36,44 @@
       </div>
     </div>
 
+    <div v-if="labAirdropOpen" class="lab-airdrop-overlay">
+      <div class="lab-airdrop-box">
+        <h2>공수부대 다중 소환</h2>
+        <p>4점 이하 포켓 기물을 골라 전방 2×3 영역에 원하는 만큼 배치하세요.</p>
+        <div class="lab-airdrop-layout">
+          <div class="lab-airdrop-pocket">
+            <button
+              v-for="pieceId in labAirdropEligiblePieceIds"
+              :key="pieceId"
+              type="button"
+              :class="{ selected: labAirdropSelectedPieceId === pieceId, used: labAirdropUsedPieceIds.has(pieceId) }"
+              :disabled="labAirdropUsedPieceIds.has(pieceId)"
+              @click="labAirdropSelectedPieceId = pieceId"
+            >
+              <span>{{ pieceLabel(pocketPieces.find(piece => piece.id === pieceId)?.pieceType ?? pieceId) }}</span>
+              <small>{{ labDefinitions[pocketPieces.find(piece => piece.id === pieceId)?.pieceType ?? '']?.score ?? 0 }}점</small>
+            </button>
+          </div>
+          <div class="lab-airdrop-grid">
+            <button
+              v-for="square in labAirdropSquares"
+              :key="squareId(square)"
+              type="button"
+              :class="{ occupied: labAirdropDeploymentAt(square) }"
+              @click="placeLabAirdrop(square)"
+            >
+              {{ labAirdropDeploymentLabel(square) || `${fileLabel(square.file)}${square.rank + 1}` }}
+            </button>
+          </div>
+        </div>
+        <small>{{ labAirdropDraft.length }}개 배치됨 · 배치된 칸을 다시 누르면 취소됩니다.</small>
+        <div class="lab-airdrop-actions">
+          <button class="btn-secondary" type="button" @click="cancelLabAirdrop">취소</button>
+          <button class="btn-start" type="button" :disabled="labAirdropDraft.length === 0" @click="confirmLabAirdrop">한 번에 착수</button>
+        </div>
+      </div>
+    </div>
+
     <div class="piece-lab-grid">
       <section class="card lab-panel lab-controls">
         <div class="section-header">
@@ -304,7 +342,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, type PieceLabMoveOption } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import type { DeckPieceType } from '../types/deck'
-import type { DropAction, MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square } from '../types/game'
+import type { AbilityAction, AbilityDeployment, DropAction, MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square } from '../types/game'
 import { boardSizes, pieceCatalog, pieceLabel, pocketCatalog } from '../composables/useDeckValidation'
 
 interface PieceLabPiece {
@@ -361,12 +399,16 @@ const pieceSearch = ref('')
 const moves = ref<Square[]>([])
 const legalMoves = ref<MoveAction[]>([])
 const legalDrops = ref<DropAction[]>([])
+const legalAbilityActions = ref<AbilityAction[]>([])
 const attacks = ref<Square[]>([])
 const globalState = ref<Record<string, number>>({})
 const abilitySquares = ref<Square[]>([])
 const abilities = ref<PieceLabMoveOption[]>([])
 const labDefinitions = ref<Record<string, PieceDefinition>>({})
 const activeAbilityId = ref<string | null>(null)
+const labAirdropOpen = ref(false)
+const labAirdropSelectedPieceId = ref<string | null>(null)
+const labAirdropDraft = ref<AbilityDeployment[]>([])
 const optionsLoading = ref(false)
 const optionsError = ref<string | null>(null)
 const draggedCatalogPiece = ref<string | null>(null)
@@ -418,6 +460,18 @@ const displayAbilities = computed<PieceLabMoveOption[]>(() => {
 const abilitySummary = computed(() => {
   if (displayAbilities.value.length > 0) return `${displayAbilities.value.length}개 등록`
   return '없음'
+})
+const labAirdropEligiblePieceIds = computed(() => Array.from(new Set(
+  legalAbilityActions.value.flatMap(action => action.pocket_piece_id ? [action.pocket_piece_id] : []),
+)))
+const labAirdropUsedPieceIds = computed(() => new Set(labAirdropDraft.value.map(item => item.pocket_piece_id)))
+const labAirdropSquares = computed(() => {
+  const seen = new Set<string>()
+  return legalAbilityActions.value.flatMap(action => {
+    if (!action.to || seen.has(squareId(action.to))) return []
+    seen.add(squareId(action.to))
+    return [action.to]
+  }).sort((left, right) => right.rank - left.rank || left.file - right.file)
 })
 const renderedArrows = computed(() => {
   const rendered = arrows.value
@@ -599,6 +653,7 @@ function resetLabPieces() {
   moves.value = []
   legalMoves.value = []
   legalDrops.value = []
+  legalAbilityActions.value = []
   attacks.value = []
   abilitySquares.value = []
   abilities.value = []
@@ -613,6 +668,7 @@ function clearSelection() {
   moves.value = []
   legalMoves.value = []
   legalDrops.value = []
+  legalAbilityActions.value = []
   attacks.value = []
   abilitySquares.value = []
   abilities.value = []
@@ -752,6 +808,53 @@ function applyLabDrop(action: DropAction) {
   optionsError.value = null
 }
 
+function applyLabAbility(action: AbilityAction) {
+  if (!action.to) return
+  if (action.ability_id === 'relieve' && action.target_piece_id && action.pocket_piece_id) {
+    const target = pieces.value.find(piece => piece.id === action.target_piece_id)
+    const reserve = pocketPieces.value.find(piece => piece.id === action.pocket_piece_id)
+    if (!target || !reserve) return
+    pieces.value = pieces.value.filter(piece => piece.id !== target.id)
+    pocketPieces.value = pocketPieces.value.filter(piece => piece.id !== reserve.id)
+    pocketPieces.value = [...pocketPieces.value, { ...target, square: undefined } as PieceLabPocketPiece]
+    pieces.value = [...pieces.value, { ...reserve, square: action.to, moveOptionCooldowns: {} }]
+  } else if (action.ability_id === 'airdrop' && action.pocket_piece_id) {
+    const reserve = pocketPieces.value.find(piece => piece.id === action.pocket_piece_id)
+    if (!reserve) return
+    pocketPieces.value = pocketPieces.value.filter(piece => piece.id !== reserve.id)
+    pieces.value = [...pieces.value, { ...reserve, square: action.to, moveOptionCooldowns: {} }]
+  } else if (action.ability_id === 'recall' && action.target_piece_id) {
+    const target = pieces.value.find(piece => piece.id === action.target_piece_id)
+    if (!target) return
+    pieces.value = pieces.value.filter(piece => piece.id !== target.id)
+    pocketPieces.value = [...pocketPieces.value, { ...target, square: undefined } as PieceLabPocketPiece]
+  }
+  activeAbilityId.value = null
+  abilitySquares.value = []
+  legalAbilityActions.value = []
+  loadedOptionsPieceId.value = null
+  optionsError.value = null
+}
+
+function tryLabAbility(to: Square): boolean {
+  const candidates = legalAbilityActions.value.filter(action => action.to && sameSquare(action.to, to))
+  if (candidates.length === 0) return false
+  let chosen = candidates[0]
+  if (candidates.length > 1) {
+    const choices = candidates.map((action, index) => {
+      const pocket = action.pocket_piece_id
+        ? pocketPieces.value.find(piece => piece.id === action.pocket_piece_id)
+        : null
+      return `${index + 1}: ${pocket ? pieceLabel(pocket.pieceType) : '대상 기물'}`
+    })
+    const selected = Number(window.prompt(`사용할 포켓 기물을 고르세요.\n${choices.join('\n')}`, '1')) - 1
+    if (!Number.isInteger(selected) || !candidates[selected]) return false
+    chosen = candidates[selected]
+  }
+  applyLabAbility(chosen)
+  return true
+}
+
 function tryDropPocketPiece(pieceId: string, file: number, rank: number): boolean {
   const action = legalDrops.value.find(drop => drop.piece_id === pieceId && sameSquare(drop.to, { file, rank }))
   if (!action) return false
@@ -797,6 +900,12 @@ async function tryMovePlacedPiece(pieceId: string, file: number, rank: number): 
 
 async function onSquareClick(file: number, rank: number) {
   const existing = pieceAt(file, rank)
+  if (activeAbilityId.value && selectedLabPiece.value) {
+    if (!tryLabAbility({ file, rank })) {
+      optionsError.value = '특수능력을 사용할 수 없는 대상입니다.'
+    }
+    return
+  }
   if (selectedTool.value === eraseTool) {
     if (!existing) return
     pieces.value = pieces.value.filter(piece => piece.id !== existing.id)
@@ -1155,6 +1264,70 @@ async function toggleAbility(ability: PieceLabMoveOption) {
   activeAbilityId.value = activeAbilityId.value === ability.id ? null : ability.id
   loadedOptionsPieceId.value = null
   await loadSelectedPieceOptions()
+  if (activeAbilityId.value === 'airdrop' && legalAbilityActions.value.length > 0) {
+    labAirdropDraft.value = []
+    labAirdropSelectedPieceId.value = labAirdropEligiblePieceIds.value[0] ?? null
+    labAirdropOpen.value = true
+  }
+}
+
+function labAirdropDeploymentAt(square: Square): AbilityDeployment | undefined {
+  return labAirdropDraft.value.find(item => sameSquare(item.to, square))
+}
+
+function labAirdropDeploymentLabel(square: Square): string {
+  const deployment = labAirdropDeploymentAt(square)
+  const pocket = deployment
+    ? pocketPieces.value.find(piece => piece.id === deployment.pocket_piece_id)
+    : null
+  return pocket ? pieceLabel(pocket.pieceType) : ''
+}
+
+function placeLabAirdrop(square: Square) {
+  const existing = labAirdropDeploymentAt(square)
+  if (existing) {
+    labAirdropDraft.value = labAirdropDraft.value.filter(item => !sameSquare(item.to, square))
+    labAirdropSelectedPieceId.value = existing.pocket_piece_id
+    return
+  }
+  const pieceId = labAirdropSelectedPieceId.value
+  if (!pieceId || labAirdropUsedPieceIds.value.has(pieceId)) return
+  const legal = legalAbilityActions.value.some(action =>
+    action.pocket_piece_id === pieceId && action.to && sameSquare(action.to, square))
+  if (!legal) return
+  labAirdropDraft.value = [...labAirdropDraft.value, { pocket_piece_id: pieceId, to: square }]
+  labAirdropSelectedPieceId.value = labAirdropEligiblePieceIds.value.find(id => !labAirdropUsedPieceIds.value.has(id)) ?? null
+}
+
+function cancelLabAirdrop() {
+  labAirdropOpen.value = false
+  labAirdropDraft.value = []
+  labAirdropSelectedPieceId.value = null
+  activeAbilityId.value = null
+  abilitySquares.value = []
+}
+
+function confirmLabAirdrop() {
+  if (labAirdropDraft.value.length === 0) return
+  const deployments = [...labAirdropDraft.value]
+  const deployedIds = new Set(deployments.map(item => item.pocket_piece_id))
+  const deployed = pocketPieces.value
+    .filter(piece => deployedIds.has(piece.id))
+    .map(piece => {
+      const deployment = deployments.find(item => item.pocket_piece_id === piece.id)!
+      return { ...piece, square: deployment.to, moveOptionCooldowns: {} }
+    })
+  pocketPieces.value = pocketPieces.value.filter(piece => !deployedIds.has(piece.id))
+  pieces.value = [...pieces.value, ...deployed]
+  lastMove.value = null
+  labAirdropOpen.value = false
+  labAirdropDraft.value = []
+  labAirdropSelectedPieceId.value = null
+  activeAbilityId.value = null
+  abilitySquares.value = []
+  legalAbilityActions.value = []
+  loadedOptionsPieceId.value = null
+  optionsError.value = null
 }
 
 function isAbilitySquare(square: Square): boolean {
@@ -1210,6 +1383,7 @@ async function loadSelectedPieceOptions() {
     moves.value = response.moves
     legalMoves.value = response.legal_moves
     legalDrops.value = response.legal_drops
+    legalAbilityActions.value = response.legal_ability_actions
     attacks.value = response.attacks
     abilitySquares.value = activeAbilityId.value ? response.moves : []
     labDefinitions.value = response.piece_definitions
@@ -1617,7 +1791,42 @@ onBeforeUnmount(() => {
   border-color: var(--accent);
 }
 
+.lab-airdrop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(3, 12, 22, 0.76);
+}
+
+.lab-airdrop-box {
+  width: min(680px, 100%);
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #102235;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+.lab-airdrop-box h2,
+.lab-airdrop-box p { margin-top: 0; }
+.lab-airdrop-box p,
+.lab-airdrop-box > small { color: var(--muted); }
+.lab-airdrop-layout { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.2fr); gap: 18px; margin: 18px 0 12px; }
+.lab-airdrop-pocket { display: grid; align-content: start; gap: 8px; max-height: 280px; overflow: auto; }
+.lab-airdrop-pocket button { display: flex; justify-content: space-between; padding: 10px; border: 2px solid var(--line); border-radius: 8px; color: inherit; background: rgba(255,255,255,.04); cursor: pointer; }
+.lab-airdrop-pocket button.selected { border-color: var(--accent); background: rgba(82, 208, 255, .14); }
+.lab-airdrop-pocket button.used { opacity: .42; }
+.lab-airdrop-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.lab-airdrop-grid button { min-height: 72px; padding: 6px; border: 2px dashed #66839e; border-radius: 8px; color: inherit; background: rgba(255,255,255,.04); cursor: pointer; }
+.lab-airdrop-grid button.occupied { border-style: solid; border-color: #66d58a; background: rgba(102, 213, 138, .14); font-weight: 800; }
+.lab-airdrop-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
 @media (max-width: 1200px) {
+  .lab-airdrop-layout { grid-template-columns: 1fr; }
   .piece-lab-grid {
     grid-template-columns: 1fr;
   }

@@ -4,7 +4,9 @@ use std::time::Instant;
 
 use crate::attack_map::generate_attack_map;
 use crate::chessembly::run_chessembly_layer_for_piece;
-use crate::interaction::{destination_is_blocked_by_interaction, resolve_piece_interactions};
+use crate::interaction::{
+    destination_is_blocked_by_interaction, neighboring_pieces, resolve_piece_interactions,
+};
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -639,6 +641,185 @@ pub fn generate_piece_legal_drop_actions(
             piece_id: piece_id.clone(),
             to: sq,
             captured_piece_id: game_state.board.get_piece_at(&sq).cloned(),
+        })
+        .collect()
+}
+
+/// Generate canonical targets for the three built-in standalone abilities.
+pub fn generate_piece_legal_ability_actions(
+    game_state: &GameState,
+    piece_id: &PieceId,
+    ability_id: &str,
+) -> Vec<AbilityAction> {
+    let Some(actor) = game_state.pieces.get(piece_id) else {
+        return Vec::new();
+    };
+    if actor.owner != game_state.current_player || !actor.is_on_board() {
+        return Vec::new();
+    }
+    let Some(origin) = actor.current_square else {
+        return Vec::new();
+    };
+    let mut actions = Vec::new();
+    let adjacent = neighboring_pieces(game_state, actor);
+    match (actor.type_id.as_str(), ability_id) {
+        ("alternating-soldier", "relieve") => {
+            let Some(player) = game_state.players.get(&actor.owner) else {
+                return Vec::new();
+            };
+            for target in adjacent.iter().filter(|target| target.owner == actor.owner) {
+                for pocket_id in &player.deck.pocket_pieces {
+                    let Some(pocket) = game_state.pieces.get(pocket_id) else {
+                        continue;
+                    };
+                    if pocket.in_pocket && !pocket.captured {
+                        actions.push(AbilityAction {
+                            player_id: actor.owner.clone(),
+                            piece_id: piece_id.clone(),
+                            ability_id: ability_id.into(),
+                            target_piece_id: Some(target.id.clone()),
+                            pocket_piece_id: Some(pocket_id.clone()),
+                            to: target.current_square,
+                            deployments: Vec::new(),
+                        });
+                    }
+                }
+            }
+        }
+        ("airborne", "airdrop") => {
+            let Some(player) = game_state.players.get(&actor.owner) else {
+                return Vec::new();
+            };
+            let forward = if actor.owner == "white" { 1 } else { -1 };
+            for pocket_id in &player.deck.pocket_pieces {
+                let Some(pocket) = game_state.pieces.get(pocket_id) else {
+                    continue;
+                };
+                let eligible = pocket.in_pocket
+                    && !pocket.captured
+                    && game_state
+                        .piece_definitions
+                        .get(&pocket.type_id)
+                        .is_some_and(|def| !def.is_king && def.score <= 4);
+                if !eligible {
+                    continue;
+                }
+                for depth in 1..=2 {
+                    for width in -1..=1 {
+                        let to = Square::new(origin.file + width, origin.rank + forward * depth);
+                        if game_state.board.is_in_bounds(&to) && game_state.board.is_empty(&to) {
+                            actions.push(AbilityAction {
+                                player_id: actor.owner.clone(),
+                                piece_id: piece_id.clone(),
+                                ability_id: ability_id.into(),
+                                target_piece_id: None,
+                                pocket_piece_id: Some(pocket_id.clone()),
+                                to: Some(to),
+                                deployments: Vec::new(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        ("green-camp", "recall") => {
+            for target in adjacent {
+                if game_state
+                    .piece_definitions
+                    .get(&target.type_id)
+                    .is_some_and(|def| !def.is_king)
+                {
+                    actions.push(AbilityAction {
+                        player_id: actor.owner.clone(),
+                        piece_id: piece_id.clone(),
+                        ability_id: ability_id.into(),
+                        target_piece_id: Some(target.id.clone()),
+                        pocket_piece_id: None,
+                        to: target.current_square,
+                        deployments: Vec::new(),
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+    actions
+}
+
+/// Validate a submitted ability against canonical candidates. Airborne is a
+/// bounded multi-deployment action, so each unique deployment must be one of
+/// the canonical single-piece candidates generated from the same state.
+pub fn is_legal_ability_action(game_state: &GameState, action: &AbilityAction) -> bool {
+    if action.ability_id != "airdrop" {
+        return action.deployments.is_empty()
+            && generate_piece_legal_ability_actions(
+                game_state,
+                &action.piece_id,
+                &action.ability_id,
+            )
+            .into_iter()
+            .any(|candidate| candidate == *action);
+    }
+    if action.player_id != game_state.current_player
+        || action.deployments.is_empty()
+        || action.target_piece_id.is_some()
+        || action.pocket_piece_id.is_some()
+        || action.to.is_some()
+    {
+        return false;
+    }
+    let singles = generate_piece_legal_ability_actions(game_state, &action.piece_id, "airdrop");
+    let mut piece_ids = std::collections::HashSet::new();
+    let mut squares = std::collections::HashSet::new();
+    action.deployments.iter().all(|deployment| {
+        piece_ids.insert(deployment.pocket_piece_id.clone())
+            && squares.insert(deployment.to.to_id())
+            && singles.iter().any(|candidate| {
+                candidate.pocket_piece_id.as_ref() == Some(&deployment.pocket_piece_id)
+                    && candidate.to == Some(deployment.to)
+            })
+    })
+}
+
+/// Generate every standalone ability action available to the current player.
+pub fn generate_legal_ability_actions(game_state: &GameState) -> Vec<AbilityAction> {
+    let mut piece_ids = game_state
+        .pieces
+        .iter()
+        .filter_map(|(id, piece)| (piece.owner == game_state.current_player).then_some(id.clone()))
+        .collect::<Vec<_>>();
+    piece_ids.sort();
+    piece_ids
+        .into_iter()
+        .flat_map(|piece_id| {
+            let option_ids = game_state
+                .pieces
+                .get(&piece_id)
+                .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+                .map(|definition| {
+                    definition
+                        .move_options
+                        .iter()
+                        .filter(|option| {
+                            option.execution_mode == MoveOptionExecutionMode::StandaloneAction
+                        })
+                        .map(|option| option.id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            option_ids.into_iter().flat_map(move |option_id| {
+                let mut actions = generate_piece_legal_ability_actions(game_state, &piece_id, &option_id);
+                if option_id == "airdrop" {
+                    for action in &mut actions {
+                        if let (Some(pocket_piece_id), Some(to)) =
+                            (action.pocket_piece_id.take(), action.to.take())
+                        {
+                            action.deployments = vec![AbilityDeployment { pocket_piece_id, to }];
+                        }
+                    }
+                }
+                actions
+            })
         })
         .collect()
 }

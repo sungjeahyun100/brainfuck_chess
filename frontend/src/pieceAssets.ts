@@ -26,6 +26,12 @@ import pawnBlack from './assets/pieces/pawn-black.svg'
 import pawnWhite from './assets/pieces/pawn-white.svg'
 import paratrooperBlack from './assets/pieces/paratrooper-black.svg'
 import paratrooperWhite from './assets/pieces/paratrooper-white.svg'
+import guardBlack from './assets/pieces/guard-black.svg'
+import guardWhite from './assets/pieces/guard-white.svg'
+import airborneBlack from './assets/pieces/airborne-black.svg'
+import airborneWhite from './assets/pieces/airborne-white.svg'
+import greenCampBlack from './assets/pieces/green-camp-black.svg'
+import greenCampWhite from './assets/pieces/green-camp-white.svg'
 import queenBlack from './assets/pieces/queen-black.svg'
 import queenWhite from './assets/pieces/queen-white.svg'
 import rookBlack from './assets/pieces/rook-black.svg'
@@ -64,6 +70,9 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   nightrider: { white: nightriderWhite, black: nightriderBlack },
   pawn: { white: pawnWhite, black: pawnBlack },
   paratrooper: { white: paratrooperWhite, black: paratrooperBlack },
+  'alternating-soldier': { white: guardWhite, black: guardBlack },
+  airborne: { white: airborneWhite, black: airborneBlack },
+  'green-camp': { white: greenCampWhite, black: greenCampBlack },
   'pawn-white': { white: pawnWhite, black: pawnBlack },
   'pawn-black': { white: pawnWhite, black: pawnBlack },
   'tempest-pawn': { white: tempestPawnWhite, black: tempestPawnBlack },

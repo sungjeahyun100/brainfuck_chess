@@ -24,8 +24,8 @@ use brainfuck_chess_engine::{
     custom_pieces::{install_runtime_catalog, CustomPiecePackage},
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
-        generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
-        MoveGenerationOptions,
+        generate_piece_legal_ability_actions, generate_piece_legal_drop_actions,
+        generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
     },
     pieces::default_pieces::all_default_definitions,
     rules::{
@@ -144,6 +144,22 @@ struct SubmitActionRequest {
 enum SubmitAction {
     Move(SubmitMoveRequest),
     Drop(SubmitDropRequest),
+    Ability(SubmitAbilityRequest),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SubmitAbilityRequest {
+    piece_id: PieceId,
+    ability_id: String,
+    #[serde(default)]
+    target_piece_id: Option<PieceId>,
+    #[serde(default)]
+    pocket_piece_id: Option<PieceId>,
+    #[serde(default)]
+    to: Option<Square>,
+    #[serde(default)]
+    deployments: Vec<AbilityDeployment>,
 }
 
 #[derive(Deserialize)]
@@ -206,6 +222,7 @@ struct PieceAttacksResponse {
 struct PieceOptionsResponse {
     moves: Vec<MoveAction>,
     attacks: Vec<Square>,
+    ability_actions: Vec<AbilityAction>,
 }
 
 #[derive(Default, Deserialize)]
@@ -272,6 +289,7 @@ struct LabPieceOptionsResponse {
     moves: Vec<Square>,
     legal_moves: Vec<MoveAction>,
     legal_drops: Vec<DropAction>,
+    legal_ability_actions: Vec<AbilityAction>,
     attacks: Vec<Square>,
     move_options: Vec<LabMoveOption>,
     piece_definitions: HashMap<PieceTypeId, PieceDefinition>,
@@ -286,12 +304,28 @@ struct ErrorResponse {
 
 fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
-        "king" | "queen" | "rook" | "bishop" | "knight" | "nightrider" | "amazon" | "guhang"
-        | "cannon-rook" | "cannon_rook" | "tempest-rook" | "tempest-queen" | "tempest-knight"
-        | "bouncing-bishop" | "bouncing-rook" | "bouncing-queen" | "tempest-bishop"
-        | "windmill" | "paratrooper" => {
-            Some(raw_piece_type.replace('_', "-"))
-        }
+        "king"
+        | "queen"
+        | "rook"
+        | "bishop"
+        | "knight"
+        | "nightrider"
+        | "amazon"
+        | "guhang"
+        | "cannon-rook"
+        | "cannon_rook"
+        | "tempest-rook"
+        | "tempest-queen"
+        | "tempest-knight"
+        | "bouncing-bishop"
+        | "bouncing-rook"
+        | "bouncing-queen"
+        | "tempest-bishop"
+        | "windmill"
+        | "paratrooper"
+        | "alternating-soldier"
+        | "airborne"
+        | "green-camp" => Some(raw_piece_type.replace('_', "-")),
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
             "pawn-white".into()
         } else {
@@ -1520,6 +1554,19 @@ async fn submit_action(
             *state = submit_engine_action(state.clone(), TurnAction::Drop(legal_action))
                 .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
         }
+        SubmitAction::Ability(request) => {
+            let legal_action = AbilityAction {
+                player_id: state.current_player.clone(),
+                piece_id: request.piece_id,
+                ability_id: request.ability_id,
+                target_piece_id: request.target_piece_id,
+                pocket_piece_id: request.pocket_piece_id,
+                to: request.to,
+                deployments: request.deployments,
+            };
+            *state = submit_engine_action(state.clone(), TurnAction::Ability(legal_action))
+                .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+        }
     }
 
     Ok(Json(state.clone()))
@@ -1654,15 +1701,28 @@ async fn get_piece_options(
     let piece_id = PieceId::from(piece_id);
     match app.games.get(&id) {
         Some(state) => {
-            let moves = generate_piece_legal_move_actions_with_options(
-                &state,
-                &piece_id,
-                &MoveGenerationOptions {
-                    move_option_id: query.move_option_id,
-                },
-            );
+            let ability_actions = query
+                .move_option_id
+                .as_deref()
+                .map(|id| generate_piece_legal_ability_actions(&state, &piece_id, id))
+                .unwrap_or_default();
+            let moves = if ability_actions.is_empty() {
+                generate_piece_legal_move_actions_with_options(
+                    &state,
+                    &piece_id,
+                    &MoveGenerationOptions {
+                        move_option_id: query.move_option_id,
+                    },
+                )
+            } else {
+                Vec::new()
+            };
             let attacks = generate_piece_attack_squares(&state, &piece_id);
-            Ok(Json(PieceOptionsResponse { moves, attacks }))
+            Ok(Json(PieceOptionsResponse {
+                moves,
+                attacks,
+                ability_actions,
+            }))
         }
         None => Err((
             StatusCode::NOT_FOUND,
@@ -1725,11 +1785,22 @@ async fn get_lab_piece_options(
     } else {
         Vec::new()
     };
+    let legal_ability_actions = if selected_in_pocket {
+        Vec::new()
+    } else {
+        req.move_option_id
+            .as_deref()
+            .map(|ability_id| {
+                generate_piece_legal_ability_actions(&state, &piece_id, ability_id)
+            })
+            .unwrap_or_default()
+    };
     let mut seen_moves = HashSet::new();
     let moves = legal_moves
         .iter()
         .map(|action| action.to)
         .chain(legal_drops.iter().map(|action| action.to))
+        .chain(legal_ability_actions.iter().filter_map(|action| action.to))
         .filter(|square| seen_moves.insert(square.to_id()))
         .collect();
     let mut seen_attacks = HashSet::new();
@@ -1763,8 +1834,14 @@ async fn get_lab_piece_options(
                         id: option.id.clone(),
                         name: option.name.clone(),
                         description: option.description.clone(),
-                        available: option.execution_mode == MoveOptionExecutionMode::MoveModifier
-                            && cooldown_remaining == 0,
+                        available: cooldown_remaining == 0
+                            && (option.execution_mode == MoveOptionExecutionMode::MoveModifier
+                                || !generate_piece_legal_ability_actions(
+                                    &state,
+                                    &piece_id,
+                                    &option.id,
+                                )
+                                .is_empty()),
                         kind: option.kind,
                         execution_mode: option.execution_mode,
                         cooldown_remaining,
@@ -1778,6 +1855,7 @@ async fn get_lab_piece_options(
         moves,
         legal_moves,
         legal_drops,
+        legal_ability_actions,
         attacks,
         move_options,
         piece_definitions: state.piece_definitions.clone(),
@@ -1865,8 +1943,14 @@ mod tests {
         );
         assert_eq!(scores.get("dozer"), Some(&2));
         assert_eq!(scores.get("dozer"), scores.get("dozer-white"));
-        assert_eq!(resolve_piece_type("white", "dozer").as_deref(), Some("dozer-white"));
-        assert_eq!(resolve_piece_type("black", "dozer").as_deref(), Some("dozer-black"));
+        assert_eq!(
+            resolve_piece_type("white", "dozer").as_deref(),
+            Some("dozer-white")
+        );
+        assert_eq!(
+            resolve_piece_type("black", "dozer").as_deref(),
+            Some("dozer-black")
+        );
     }
 
     #[tokio::test]

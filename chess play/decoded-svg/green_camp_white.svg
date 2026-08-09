@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <g fill="#FFFFFF" stroke="#111111" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- flag pole -->
+    <path d="M256 83 V156" fill="none"/>
+    <circle cx="256" cy="72" r="10"/>
+    <path d="M258 91
+             C282 76 305 96 333 88
+             C326 113 299 127 258 116 Z"/>
+    <!-- tent outer -->
+    <path d="M256 154 L102 365 H410 Z"/>
+    <!-- tent opening -->
+    <path d="M256 185
+             C241 244 219 312 177 365
+             H230
+             C242 323 251 260 256 185 Z"/>
+    <path d="M256 185
+             C271 244 293 312 335 365
+             H282
+             C270 323 261 260 256 185 Z"/>
+    <!-- tie ropes -->
+    <path d="M116 347 L75 389" fill="none"/>
+    <path d="M396 347 L437 389" fill="none"/>
+    <path d="M65 385 L81 399 L92 376" fill="none"/>
+    <path d="M447 385 L431 399 L420 376" fill="none"/>
+    <!-- side posts -->
+    <path d="M110 354 V389" fill="none"/>
+    <path d="M402 354 V389" fill="none"/>
+    <!-- ground line -->
+    <path d="M104 390 H408" fill="none"/>
+
+  </g>
+</svg>

@@ -171,7 +171,33 @@ export interface SubmitDropAction {
   to: Square
 }
 
-export type SubmitAction = SubmitMoveAction | SubmitDropAction
+export interface AbilityAction {
+  type: 'ability'
+  player_id: PlayerId
+  piece_id: PieceId
+  ability_id: string
+  target_piece_id?: PieceId
+  pocket_piece_id?: PieceId
+  to?: Square
+  deployments: AbilityDeployment[]
+}
+
+export interface AbilityDeployment {
+  pocket_piece_id: PieceId
+  to: Square
+}
+
+export interface SubmitAbilityAction {
+  type: 'ability'
+  piece_id: PieceId
+  ability_id: string
+  target_piece_id?: PieceId
+  pocket_piece_id?: PieceId
+  to?: Square
+  deployments?: AbilityDeployment[]
+}
+
+export type SubmitAction = SubmitMoveAction | SubmitDropAction | SubmitAbilityAction
 
 export interface GlobalStateUpdate {
     key: string
@@ -186,11 +212,11 @@ export interface DropAction {
   captured_piece_id?: PieceId
 }
 
-export type TurnAction = MoveAction | DropAction
+export type TurnAction = MoveAction | DropAction | AbilityAction
 
 export type BotDifficulty = 'easy' | 'normal' | 'hard'
 
-export type AiAction = MoveAction | DropAction
+export type AiAction = MoveAction | DropAction | AbilityAction
 
 export interface ActionTimelineFrame {
   action: AiAction

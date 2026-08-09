@@ -132,6 +132,33 @@ fn generated_actions_are_accepted_by_the_ai_apply_boundary() {
 }
 
 #[test]
+fn standalone_piece_abilities_are_exposed_to_ai_and_apply_canonically() {
+    let mut state = make_state();
+    add_board_piece(
+        &mut state,
+        "camp",
+        "white",
+        "green-camp",
+        Square::new(3, 3),
+    );
+    add_board_piece(
+        &mut state,
+        "enemy",
+        "black",
+        "rook",
+        Square::new(4, 3),
+    );
+
+    let ability = generate_ai_actions(&state)
+        .into_iter()
+        .find(|action| matches!(action, AiAction::Ability(_)))
+        .expect("AI should receive the Green Camp recall action");
+    let applied = apply_ai_action(state, &ability).unwrap();
+    assert!(applied.pieces["enemy"].in_pocket);
+    assert_eq!(applied.current_player, "black");
+}
+
+#[test]
 fn bot_timeline_last_snapshot_matches_final_state() {
     let mut state = make_state();
     add_board_piece(&mut state, "wk", "white", "king", Square::new(4, 0));

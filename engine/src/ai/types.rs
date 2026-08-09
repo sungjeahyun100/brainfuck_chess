@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::types::{DropAction, MoveAction};
+use crate::types::{AbilityAction, DropAction, MoveAction};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AiAction {
     Move(MoveAction),
     Drop(DropAction),
+    Ability(AbilityAction),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

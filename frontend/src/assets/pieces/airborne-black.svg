@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <g fill="#111111" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- canopy -->
+    <path d="M92 196
+             C103 118 170 69 256 69
+             C342 69 409 118 420 196
+             C393 178 368 176 343 194
+             C315 171 286 170 256 194
+             C226 170 197 171 169 194
+             C144 176 119 178 92 196 Z"/>
+    <!-- canopy seams -->
+    <path d="M256 70 C211 101 194 143 196 184" fill="none"/>
+    <path d="M256 70 C301 101 318 143 316 184" fill="none"/>
+    <path d="M92 196 C126 186 149 195 169 217" fill="none"/>
+    <path d="M420 196 C386 186 363 195 343 217" fill="none"/>
+    <!-- suspension lines -->
+    <path d="M107 199 L184 314" fill="none"/>
+    <path d="M169 195 L214 299" fill="none"/>
+    <path d="M343 195 L298 299" fill="none"/>
+    <path d="M405 199 L328 314" fill="none"/>
+    <!-- helmet -->
+    <path d="M178 299
+             C181 252 211 225 256 225
+             C301 225 331 252 334 299
+             L349 318
+             C352 325 347 333 339 333
+             H173
+             C165 333 160 325 163 318 Z"/>
+    <path d="M235 258 H277" fill="none"/>
+    <path d="M239 276 H273" fill="none"/>
+    <path d="M242 294 H270" fill="none"/>
+    <!-- head -->
+    <path d="M199 334
+             V356
+             C199 397 222 422 256 422
+             C290 422 313 397 313 356
+             V334 Z"/>
+    <!-- helmet side straps -->
+    <path d="M198 342 C184 347 183 372 194 386" fill="none"/>
+    <path d="M314 342 C328 347 329 372 318 386" fill="none"/>
+    <!-- shoulders / harness -->
+    <path d="M216 410 L177 431
+             C163 439 153 454 149 477
+             H363
+             C359 454 349 439 335 431
+             L296 410"/>
+    <path d="M217 410 L239 450 H273 L295 410" fill="none"/>
+    <path d="M190 433 L220 477" fill="none"/>
+    <path d="M322 433 L292 477" fill="none"/>
+
+  </g>
+</svg>
+
+

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <g fill="#111111" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- rifle -->
+    <path d="M105 365 L87 132 L108 130 L126 313" fill="none"/>
+    <path d="M101 211 L131 208 L139 344" fill="none"/>
+    <!-- helmet -->
+    <path d="M167 183
+             C170 116 209 78 263 78
+             C318 78 356 117 360 183
+             L375 201
+             C378 207 373 214 365 214
+             H160
+             C152 214 148 206 153 200 Z"/>
+    <path d="M197 179 H330" fill="none"/>
+    <!-- head -->
+    <path d="M194 216
+             V242
+             C194 286 222 315 263 315
+             C304 315 332 286 332 242
+             V216 Z"/>
+    <!-- ears -->
+    <path d="M194 230 C180 229 174 240 178 255 C181 266 186 274 198 276" fill="none"/>
+    <path d="M332 230 C346 229 352 240 348 255 C345 266 340 274 328 276" fill="none"/>
+    <!-- shoulders / uniform -->
+    <path d="M203 302 L166 324
+             C145 337 132 362 127 399
+             H399
+             C394 362 381 337 360 324
+             L323 302
+             L294 332
+             L263 355
+             L232 332 Z"/>
+    <!-- collar -->
+    <path d="M204 303 L232 332 L263 355 L229 382 L189 329 Z"/>
+    <path d="M322 303 L294 332 L263 355 L297 382 L337 329 Z"/>
+    <!-- jacket center -->
+    <path d="M263 355 V399" fill="none"/>
+    <circle cx="263" cy="374" r="7"/>
+    <!-- shoulder tabs -->
+    <path d="M164 326 L202 316" fill="none"/>
+    <path d="M362 326 L324 316" fill="none"/>
+
+  </g>
+</svg>
+

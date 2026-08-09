@@ -1,7 +1,7 @@
 use crate::endgame::apply_and_advance_turn;
 use crate::legal_moves::{
-    generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
-    MoveGenerationOptions,
+    generate_piece_legal_drop_actions, is_legal_ability_action,
+    generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
 };
 use crate::types::{GamePhase, GameState, TurnAction};
 
@@ -30,6 +30,7 @@ pub fn submit_action(state: GameState, action: TurnAction) -> Result<GameState, 
                     .into_iter()
                     .any(|candidate| candidate == *action)
         }
+        TurnAction::Ability(action) => is_legal_ability_action(&state, action),
     };
     if !legal {
         return Err("canonical legal action이 아닙니다.".into());

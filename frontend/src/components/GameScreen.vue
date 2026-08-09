@@ -53,6 +53,43 @@
       </div>
     </div>
 
+    <div v-if="airdropOpen" class="airdrop-overlay">
+      <div class="airdrop-box">
+        <h3>공수부대 다중 소환</h3>
+        <p>4점 이하 포켓 기물을 선택하고 전방 2×3 칸에 배치하세요.</p>
+        <div class="airdrop-layout">
+          <div class="airdrop-pocket">
+            <button
+              v-for="pieceId in airdropEligiblePieceIds"
+              :key="pieceId"
+              :class="{ selected: airdropSelectedPieceId === pieceId, used: airdropUsedPieceIds.has(pieceId) }"
+              :disabled="airdropUsedPieceIds.has(pieceId)"
+              @click="airdropSelectedPieceId = pieceId"
+            >
+              {{ props.state.piece_definitions[props.state.pieces[pieceId].type_id]?.name ?? props.state.pieces[pieceId].type_id }}
+              <small>{{ props.state.piece_definitions[props.state.pieces[pieceId].type_id]?.score }}점</small>
+            </button>
+          </div>
+          <div class="airdrop-grid">
+            <button
+              v-for="square in airdropSquares"
+              :key="squareId(square)"
+              :class="{ occupied: airdropDeploymentAt(square) }"
+              @click="placeAirdropDraft(square)"
+            >
+              <span v-if="airdropDeploymentAt(square)">{{ airdropDeploymentLabel(square) }}</span>
+              <span v-else>{{ square.file + 1 }},{{ square.rank + 1 }}</span>
+            </button>
+          </div>
+        </div>
+        <small>배치 {{ airdropDraft.length }}개 · 배치된 칸을 누르면 취소됩니다.</small>
+        <div class="airdrop-actions">
+          <button @click="cancelAirdrop">취소</button>
+          <button class="confirm" :disabled="airdropDraft.length === 0" @click="confirmAirdrop">한 번에 착수</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Game over overlay -->
     <div v-if="viewState.phase === 'ended'" class="game-over-overlay">
       <div class="game-over-box">
@@ -203,6 +240,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import type {
+  AbilityDeployment,
   AiAction,
   ActionTimelineFrame,
   BotDifficulty,
@@ -249,6 +287,10 @@ const botReplayMessage = ref<string | null>(null)
 const lastBotStats = ref<BotTurnStats | null>(null)
 const draggedPocketPieceId = ref<string | null>(null)
 const promotionRequest = ref<{ pieceId: string; to: Square; owner: PlayerId; options: string[] } | null>(null)
+const airdropOpen = ref(false)
+const airdropSelectedPieceId = ref<string | null>(null)
+const airdropDraft = ref<AbilityDeployment[]>([])
+const airdropOptions = ref<LegalPieceOptions | null>(null)
 let promotionResolve: ((choice: string | null) => void) | null = null
 const botPreviewSelectedPieceId = ref<string | null>(null)
 const botPreviewMovableSquares = ref<Square[]>([])
@@ -274,6 +316,7 @@ interface LegalPieceOptions {
   movable: Square[]
   captures: Square[]
   moves: MoveAction[]
+  abilityActions: import('../types/game').AbilityAction[]
 }
 
 const pieceOptionsCache = new Map<string, LegalPieceOptions>()
@@ -338,12 +381,23 @@ const selectedAbilityHelpText = computed(() => {
     .find(reason => reason.length > 0)
   return unavailable ?? ''
 })
+const airdropEligiblePieceIds = computed(() => Array.from(new Set(
+  (airdropOptions.value?.abilityActions ?? []).flatMap(action => action.pocket_piece_id ? [action.pocket_piece_id] : []),
+)))
+const airdropSquares = computed(() => {
+  const seen = new Set<string>()
+  return (airdropOptions.value?.abilityActions ?? []).flatMap(action => {
+    if (!action.to || seen.has(squareId(action.to))) return []
+    seen.add(squareId(action.to))
+    return [action.to]
+  }).sort((left, right) => right.rank - left.rank || left.file - right.file)
+})
+const airdropUsedPieceIds = computed(() => new Set(airdropDraft.value.map(item => item.pocket_piece_id)))
 
 function abilityUnavailableReason(ability: MoveOptionDefinition): string {
   if (!selectedPiece.value) return '선택한 기물이 없습니다.'
   if (selectedPieceAbilities.value.length === 0) return '선택한 기물은 특수 능력이 없습니다.'
   if (selectedPiece.value.owner !== props.state.current_player) return '현재 턴의 기물이 아닙니다.'
-  if (ability.execution_mode !== 'move_modifier') return '독립 실행 옵션은 아직 지원되지 않습니다.'
   const remaining = selectedPiece.value.move_option_cooldowns?.[ability.id]?.remaining ?? 0
   if (remaining > 0) {
     const clockLabel = ability.cooldown?.clock === 'global_turns'
@@ -405,6 +459,10 @@ function actionLabel(action: AiAction): string {
   const pieceName = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? action.piece_id
   if (action.type === 'drop') {
     return `${pieceName} 포켓 기물 놓기: ${action.to.file + 1}, ${action.to.rank + 1}`
+  }
+  if (action.type === 'ability') {
+    const target = action.to ? `: ${action.to.file + 1}, ${action.to.rank + 1}` : ''
+    return `${pieceName} 특수 능력${target}`
   }
 
   const captureText = action.captured_piece_id ? ' 포획' : ' 이동'
@@ -531,7 +589,8 @@ function applyDropForReplay(state: GameState, action: DropAction): GameState {
 
 function applyActionForReplay(state: GameState, action: AiAction): GameState {
   if (action.type === 'move') return applyMoveForReplay(state, action)
-  return applyDropForReplay(state, action)
+  if (action.type === 'drop') return applyDropForReplay(state, action)
+  return state
 }
 
 function previewBotAction(action: AiAction) {
@@ -545,6 +604,9 @@ function previewBotAction(action: AiAction) {
     }
   } else if (action.type === 'drop') {
     botPreviewDropSquares.value = [action.to]
+  } else if (action.to) {
+    botPreviewSelectedPieceId.value = action.piece_id
+    botPreviewMovableSquares.value = [action.to]
   }
 }
 
@@ -776,13 +838,15 @@ async function loadPieceOptions(pieceId: string, abilityId: string | null = null
   const pending = pieceOptionsRequests.get(key)
   if (pending) return pending
 
-  const request = api.getPieceOptions(props.state.id, pieceId, abilityId).then(({ moves }) => {
+  const request = api.getPieceOptions(props.state.id, pieceId, abilityId).then(({ moves, ability_actions }) => {
+    const abilityTargets = ability_actions.flatMap(action => action.to ? [action.to] : [])
     const options: LegalPieceOptions = {
       abilityId,
-      legalTargets: moves.map(move => move.to),
-      movable: moves.filter(move => !move.captured_piece_id).map(move => move.to),
-      captures: moves.filter(move => Boolean(move.captured_piece_id)).map(move => move.to),
+      legalTargets: [...moves.map(move => move.to), ...abilityTargets],
+      movable: abilityId ? abilityTargets : moves.filter(move => !move.captured_piece_id).map(move => move.to),
+      captures: abilityId ? [] : moves.filter(move => Boolean(move.captured_piece_id)).map(move => move.to),
       moves,
+      abilityActions: ability_actions,
     }
     pieceOptionsCache.set(key, options)
     pieceOptionsRequests.delete(key)
@@ -855,10 +919,67 @@ async function toggleAbilityMode(abilityId: string) {
 
   const pieceId = selectedPieceId.value
   const options = await loadPieceOptions(pieceId, abilityId)
+  if (abilityId === 'airdrop' && options.abilityActions.length > 0) {
+    airdropOptions.value = options
+    airdropDraft.value = []
+    airdropSelectedPieceId.value = airdropEligiblePieceIds.value[0] ?? null
+    airdropOpen.value = true
+  }
   if (selectedPieceId.value === pieceId && abilityMode.value && activeAbilityId.value === abilityId) {
     legalTargetSquares.value = options.legalTargets
     movableSquares.value = options.movable
     attackSquares.value = options.captures
+  }
+}
+
+function airdropDeploymentAt(square: Square): AbilityDeployment | undefined {
+  return airdropDraft.value.find(item => sameSquare(item.to, square))
+}
+
+function airdropDeploymentLabel(square: Square): string {
+  const deployment = airdropDeploymentAt(square)
+  const piece = deployment ? props.state.pieces[deployment.pocket_piece_id] : undefined
+  return piece ? props.state.piece_definitions[piece.type_id]?.name ?? piece.type_id : ''
+}
+
+function placeAirdropDraft(square: Square) {
+  const existing = airdropDeploymentAt(square)
+  if (existing) {
+    airdropDraft.value = airdropDraft.value.filter(item => !sameSquare(item.to, square))
+    airdropSelectedPieceId.value = existing.pocket_piece_id
+    return
+  }
+  const pieceId = airdropSelectedPieceId.value
+  if (!pieceId || airdropUsedPieceIds.value.has(pieceId)) return
+  const canonical = airdropOptions.value?.abilityActions.some(action =>
+    action.pocket_piece_id === pieceId && action.to && sameSquare(action.to, square))
+  if (!canonical) return
+  airdropDraft.value = [...airdropDraft.value, { pocket_piece_id: pieceId, to: square }]
+  airdropSelectedPieceId.value = airdropEligiblePieceIds.value.find(id => !airdropUsedPieceIds.value.has(id)) ?? null
+}
+
+function cancelAirdrop() {
+  airdropOpen.value = false
+  airdropDraft.value = []
+  airdropOptions.value = null
+  clearSelection()
+}
+
+async function confirmAirdrop() {
+  const pieceId = selectedPieceId.value
+  if (!pieceId || airdropDraft.value.length === 0) return
+  try {
+    const newState = await api.submitAction(props.state.id, {
+      type: 'ability', piece_id: pieceId, ability_id: 'airdrop', deployments: airdropDraft.value,
+    })
+    emit('stateUpdate', newState)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    airdropOpen.value = false
+    airdropDraft.value = []
+    airdropOptions.value = null
+    clearSelection()
   }
 }
 
@@ -963,6 +1084,35 @@ async function submitMove(pieceId: string, to: Square) {
   }
 }
 
+async function submitAbility(pieceId: string, to: Square) {
+  const abilityId = activeAbilityId.value
+  if (!abilityId) return
+  const options = await loadPieceOptions(pieceId, abilityId)
+  const candidates = options.abilityActions.filter(action => action.to && sameSquare(action.to, to))
+  if (candidates.length === 0) { clearSelection(); return }
+  let chosen = candidates[0]
+  if (candidates.length > 1) {
+    const labels = candidates.map((candidate, index) => {
+      const pocket = candidate.pocket_piece_id ? props.state.pieces[candidate.pocket_piece_id] : undefined
+      const name = pocket ? props.state.piece_definitions[pocket.type_id]?.name ?? pocket.type_id : '대상'
+      return `${index + 1}: ${name}`
+    })
+    const answer = window.prompt(`교대/소환할 포켓 기물을 고르세요.\n${labels.join('\n')}`, '1')
+    const index = Number(answer) - 1
+    if (!Number.isInteger(index) || !candidates[index]) return
+    chosen = candidates[index]
+  }
+  try {
+    const newState = await api.submitAction(props.state.id, {
+      type: 'ability', piece_id: pieceId, ability_id: abilityId,
+      target_piece_id: chosen.target_piece_id,
+      pocket_piece_id: chosen.pocket_piece_id, to: chosen.to,
+    })
+    emit('stateUpdate', newState)
+  } catch (e: unknown) { error.value = e instanceof Error ? e.message : String(e) }
+  finally { clearSelection() }
+}
+
 async function submitDrop(pieceId: string, to: Square) {
   const targets = selectedPocketPieceId.value === pieceId && dropSquares.value.length > 0
     ? dropSquares.value
@@ -1009,6 +1159,10 @@ async function onSquareClick(sq: Square) {
 
   // ── Move mode: selected piece → move to target ──
   if (selectedPieceId.value) {
+    if (abilityMode.value) {
+      await submitAbility(selectedPieceId.value, sq)
+      return
+    }
     if (pieceId && piece && piece.owner === currentPlayer && pieceId !== selectedPieceId.value) {
       await selectBoardPiece(pieceId)
       return
@@ -1345,7 +1499,28 @@ async function onResign() {
 }
 .promotion-choice-image { width: 48px; height: 48px; }
 
+.airdrop-overlay {
+  position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 20, 32, 0.68); padding: 20px;
+}
+.airdrop-box { width: min(680px, 100%); padding: 24px; border-radius: 14px; background: white; color: #1f2933; }
+.airdrop-box h3 { margin: 0 0 6px; }
+.airdrop-box > p { margin: 0 0 18px; color: #52606d; }
+.airdrop-layout { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.2fr); gap: 18px; margin-bottom: 14px; }
+.airdrop-pocket { display: grid; align-content: start; gap: 8px; max-height: 280px; overflow: auto; }
+.airdrop-pocket button { display: flex; justify-content: space-between; padding: 10px; border: 2px solid #d9e2ec; border-radius: 8px; background: #f8fafc; cursor: pointer; }
+.airdrop-pocket button.selected { border-color: #1976d2; background: #e3f2fd; }
+.airdrop-pocket button.used { opacity: 0.45; }
+.airdrop-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.airdrop-grid button { min-height: 72px; padding: 6px; border: 2px dashed #9fb3c8; border-radius: 8px; background: #f0f4f8; cursor: pointer; }
+.airdrop-grid button.occupied { border-style: solid; border-color: #2e7d32; background: #e8f5e9; font-weight: 700; }
+.airdrop-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.airdrop-actions button { padding: 9px 16px; border: 0; border-radius: 7px; cursor: pointer; }
+.airdrop-actions .confirm { background: #1976d2; color: white; }
+.airdrop-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+
 @media (max-width: 900px) {
+  .airdrop-layout { grid-template-columns: 1fr; }
   .game-screen { padding: 12px; }
   .header,
   .footer {

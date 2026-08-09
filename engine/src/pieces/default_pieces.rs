@@ -334,6 +334,102 @@ pub fn paratrooper_definition() -> PieceDefinition {
     .expect("paratrooper definition must be valid")
 }
 
+fn king_step_code() -> String {
+    king_definition().chessembly_code
+}
+
+fn standalone_piece_definition(
+    id: &str,
+    name: &str,
+    score: u32,
+    ability_id: &str,
+    ability_name: &str,
+    description: &str,
+) -> PieceDefinition {
+    let movement = king_step_code();
+    PieceDefinition {
+        id: id.into(),
+        name: name.into(),
+        score,
+        chessembly_code: movement.clone(),
+        chessembly_version: "1.0".into(),
+        dialect: None,
+        extensions: None,
+        is_king: false,
+        can_capture_on_drop: false,
+        promotion: None,
+        promotion_pool: Vec::new(),
+        state_schema: Vec::new(),
+        move_layers: vec![MoveLayerDefinition {
+            id: "king_step".into(),
+            chessembly_code: movement,
+            enabled_when: Vec::new(),
+            on_commit: Vec::new(),
+        }],
+        move_options: vec![
+            MoveOptionDefinition {
+                id: "normal".into(),
+                name: "일반 이동".into(),
+                description: "왕처럼 한 칸 이동합니다.".into(),
+                kind: MoveOptionKind::Normal,
+                layer_ids: vec!["king_step".into()],
+                execution_mode: MoveOptionExecutionMode::MoveModifier,
+                contributes_to_attack_map: true,
+                cooldown: None,
+            },
+            MoveOptionDefinition {
+                id: ability_id.into(),
+                name: ability_name.into(),
+                description: description.into(),
+                kind: MoveOptionKind::Ability,
+                layer_ids: Vec::new(),
+                execution_mode: MoveOptionExecutionMode::StandaloneAction,
+                contributes_to_attack_map: false,
+                cooldown: None,
+            },
+        ],
+        visual: PieceVisualDefinition {
+            default_asset_key: id.into(),
+            variants: Vec::new(),
+        },
+    }
+    .normalize_and_validate()
+    .expect("standalone built-in definition must be valid")
+}
+
+pub fn alternating_soldier_definition() -> PieceDefinition {
+    standalone_piece_definition(
+        "alternating-soldier",
+        "교대병",
+        4,
+        "relieve",
+        "교대",
+        "주변 8칸의 기물 하나와 자신의 포켓 기물 하나를 교대합니다.",
+    )
+}
+
+pub fn airborne_definition() -> PieceDefinition {
+    standalone_piece_definition(
+        "airborne",
+        "공수부대",
+        6,
+        "airdrop",
+        "공중 소환",
+        "전방 2×3 구역에 점수 4 이하인 포켓 기물을 소환합니다.",
+    )
+}
+
+pub fn green_camp_definition() -> PieceDefinition {
+    standalone_piece_definition(
+        "green-camp",
+        "그린캠프",
+        5,
+        "recall",
+        "포켓 복귀",
+        "주변 8칸의 기물 하나를 그 기물 소유자의 포켓으로 돌려보냅니다.",
+    )
+}
+
 /// Amazon: combines Queen sliding moves with Knight jumps.
 pub fn amazon_definition() -> PieceDefinition {
     legacy_piece_definition! {
@@ -835,7 +931,7 @@ edge(-1, 0) {
 } {
   take-move(0, -1) repeat(1)
 };"
-        .to_string()
+    .to_string()
 }
 
 /// Bouncing Queen: combines the complete Bouncing Bishop and Bouncing Rook
@@ -898,6 +994,9 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         knight_definition(),
         nightrider_definition(),
         paratrooper_definition(),
+        alternating_soldier_definition(),
+        airborne_definition(),
+        green_camp_definition(),
         amazon_definition(),
         guhang_definition(),
         cannon_rook_definition(),

@@ -7,7 +7,9 @@ use crate::ai::types::{
     ActionTimelineFrame, AiAction, BotDecision, BotDifficulty, BotTurnResult, SearchLimits,
     SearchStats,
 };
-use crate::legal_moves::{generate_legal_drop_actions, generate_legal_move_actions};
+use crate::legal_moves::{
+    generate_legal_ability_actions, generate_legal_drop_actions, generate_legal_move_actions,
+};
 use crate::types::{GamePhase, GameState, PlayerId, TurnAction};
 
 pub fn generate_ai_actions(state: &GameState) -> Vec<AiAction> {
@@ -22,6 +24,11 @@ pub fn generate_ai_actions(state: &GameState) -> Vec<AiAction> {
             generate_legal_drop_actions(state)
                 .into_iter()
                 .map(AiAction::Drop),
+        )
+        .chain(
+            generate_legal_ability_actions(state)
+                .into_iter()
+                .map(AiAction::Ability),
         )
         .collect()
 }
@@ -49,6 +56,15 @@ pub fn apply_ai_action(state: GameState, action: &AiAction) -> Result<GameState,
                 return Err("AI가 합법적이지 않은 착수를 선택했습니다.".into());
             }
             submit_action(state, TurnAction::Drop(action.clone()))
+        }
+        AiAction::Ability(action) => {
+            let legal = generate_legal_ability_actions(&state)
+                .iter()
+                .any(|candidate| candidate == action);
+            if !legal {
+                return Err("AI가 합법적이지 않은 특수 능력을 선택했습니다.".into());
+            }
+            submit_action(state, TurnAction::Ability(action.clone()))
         }
     }
 }

@@ -21,6 +21,7 @@ fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
             }
         }
         AiAction::Drop(_) => (3, 0),
+        AiAction::Ability(_) => (3, 0),
     }
 }
 

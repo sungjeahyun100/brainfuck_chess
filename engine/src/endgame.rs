@@ -210,6 +210,7 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
     let player_id = match &action {
         TurnAction::Move(action) => action.player_id.clone(),
         TurnAction::Drop(action) => action.player_id.clone(),
+        TurnAction::Ability(action) => action.player_id.clone(),
     };
     let newly_set_cooldowns: std::collections::HashSet<(PieceId, String)> = match &action {
         TurnAction::Move(action) => action
@@ -224,6 +225,7 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
     game_state = match action.clone() {
         TurnAction::Move(action) => apply_move_action(game_state, action),
         TurnAction::Drop(action) => apply_drop_action(game_state, action),
+        TurnAction::Ability(action) => apply_ability_action(game_state, action),
     };
 
     game_state.history.push(ActionRecord {
@@ -243,6 +245,79 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         game_state.turn_number += 1;
     }
     game_state
+}
+
+pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> GameState {
+    match action.ability_id.as_str() {
+        "relieve" => {
+            let Some(target_id) = action.target_piece_id else {
+                return state;
+            };
+            let Some(pocket_id) = action.pocket_piece_id else {
+                return state;
+            };
+            let Some(square) = action.to else {
+                return state;
+            };
+            if let Some(target) = state.pieces.get_mut(&target_id) {
+                target.current_square = None;
+                target.in_pocket = true;
+            }
+            if let Some(pocket) = state.pieces.get_mut(&pocket_id) {
+                pocket.current_square = Some(square);
+                pocket.in_pocket = false;
+            }
+            if let Some(player) = state.players.get_mut(&action.player_id) {
+                player.deck.pocket_pieces.retain(|id| id != &pocket_id);
+                player.deck.pocket_pieces.push(target_id);
+            }
+            state.board.squares.insert(square.to_id(), Some(pocket_id));
+        }
+        "airdrop" => {
+            for deployment in action.deployments {
+                if let Some(pocket) = state.pieces.get_mut(&deployment.pocket_piece_id) {
+                    pocket.current_square = Some(deployment.to);
+                    pocket.in_pocket = false;
+                }
+                if let Some(player) = state.players.get_mut(&action.player_id) {
+                    player.deck.pocket_pieces.retain(|id| id != &deployment.pocket_piece_id);
+                }
+                state.board.squares.insert(
+                    deployment.to.to_id(),
+                    Some(deployment.pocket_piece_id),
+                );
+            }
+        }
+        "recall" => {
+            let Some(target_id) = action.target_piece_id else {
+                return state;
+            };
+            let Some(square) = action.to else {
+                return state;
+            };
+            let Some(owner) = state
+                .pieces
+                .get(&target_id)
+                .map(|piece| piece.owner.clone())
+            else {
+                return state;
+            };
+            if let Some(target) = state.pieces.get_mut(&target_id) {
+                target.current_square = None;
+                target.in_pocket = true;
+            }
+            state.board.squares.insert(square.to_id(), None);
+            if let Some(player) = state.players.get_mut(&owner) {
+                player.deck.pocket_pieces.push(target_id);
+            }
+        }
+        _ => {}
+    }
+    if state.en_passant_available_to.as_ref() == Some(&action.player_id) {
+        state.en_passant_target = None;
+        state.en_passant_available_to = None;
+    }
+    state
 }
 
 fn tick_move_option_cooldowns(

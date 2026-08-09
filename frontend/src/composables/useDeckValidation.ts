@@ -35,6 +35,9 @@ export const pieceCatalog = reactive<PieceCatalogItem[]>([
   { id: 'knight', name: 'Knight', score: 0, category: 'minor', canPocket: true },
   { id: 'nightrider', name: 'Nightrider', score: 0, category: 'variant', canPocket: true, aliases: ['나이트라이더'] },
   { id: 'paratrooper', name: '공수부대 대원', score: 0, category: 'variant', canPocket: true, aliases: ['Paratrooper', '공수부대'] },
+  { id: 'alternating-soldier', name: '교대병', score: 0, category: 'variant', canPocket: true },
+  { id: 'airborne', name: '공수부대', score: 0, category: 'variant', canPocket: true },
+  { id: 'green-camp', name: '그린캠프', score: 0, category: 'variant', canPocket: true },
   { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
 ])
 
