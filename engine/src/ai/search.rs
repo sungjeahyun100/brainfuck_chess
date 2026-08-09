@@ -34,6 +34,7 @@ pub fn generate_ai_actions(state: &GameState) -> Vec<AiAction> {
 }
 
 pub fn apply_ai_action(state: GameState, action: &AiAction) -> Result<GameState, String> {
+    crate::profiling::record_action_application(1);
     if state.phase == GamePhase::Ended || state.result.is_some() {
         return Err("게임이 이미 종료되었습니다.".into());
     }

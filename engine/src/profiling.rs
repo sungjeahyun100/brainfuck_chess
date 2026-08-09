@@ -19,6 +19,55 @@ pub struct ProfilingSnapshot {
     pub generated_drop_candidates: u64,
     pub chessembly_cache_hits: u64,
     pub chessembly_cache_rebuilds: u64,
+    pub evaluation_calls: u64,
+    pub action_application_calls: u64,
+}
+
+impl ProfilingSnapshot {
+    /// Returns the saturating counter delta since an earlier snapshot.
+    pub fn since(self, earlier: Self) -> Self {
+        Self {
+            legal_move_generation_calls: self
+                .legal_move_generation_calls
+                .saturating_sub(earlier.legal_move_generation_calls),
+            drop_generation_calls: self
+                .drop_generation_calls
+                .saturating_sub(earlier.drop_generation_calls),
+            attack_map_generation_calls: self
+                .attack_map_generation_calls
+                .saturating_sub(earlier.attack_map_generation_calls),
+            chessembly_run_calls: self
+                .chessembly_run_calls
+                .saturating_sub(earlier.chessembly_run_calls),
+            placement_generation_calls: self
+                .placement_generation_calls
+                .saturating_sub(earlier.placement_generation_calls),
+            legal_move_generation_nanos: self
+                .legal_move_generation_nanos
+                .saturating_sub(earlier.legal_move_generation_nanos),
+            placement_generation_nanos: self
+                .placement_generation_nanos
+                .saturating_sub(earlier.placement_generation_nanos),
+            generated_move_candidates: self
+                .generated_move_candidates
+                .saturating_sub(earlier.generated_move_candidates),
+            generated_drop_candidates: self
+                .generated_drop_candidates
+                .saturating_sub(earlier.generated_drop_candidates),
+            chessembly_cache_hits: self
+                .chessembly_cache_hits
+                .saturating_sub(earlier.chessembly_cache_hits),
+            chessembly_cache_rebuilds: self
+                .chessembly_cache_rebuilds
+                .saturating_sub(earlier.chessembly_cache_rebuilds),
+            evaluation_calls: self
+                .evaluation_calls
+                .saturating_sub(earlier.evaluation_calls),
+            action_application_calls: self
+                .action_application_calls
+                .saturating_sub(earlier.action_application_calls),
+        }
+    }
 }
 
 #[cfg(feature = "profiling")]
@@ -37,6 +86,8 @@ mod enabled {
     pub static DROP_CANDIDATES: AtomicU64 = AtomicU64::new(0);
     pub static CACHE_HITS: AtomicU64 = AtomicU64::new(0);
     pub static CACHE_REBUILDS: AtomicU64 = AtomicU64::new(0);
+    pub static EVALUATION_CALLS: AtomicU64 = AtomicU64::new(0);
+    pub static ACTION_APPLICATION_CALLS: AtomicU64 = AtomicU64::new(0);
 
     pub fn add(counter: &AtomicU64, value: u64) {
         counter.fetch_add(value, Ordering::Relaxed);
@@ -56,6 +107,8 @@ mod enabled {
             generated_drop_candidates: load(&DROP_CANDIDATES),
             chessembly_cache_hits: load(&CACHE_HITS),
             chessembly_cache_rebuilds: load(&CACHE_REBUILDS),
+            evaluation_calls: load(&EVALUATION_CALLS),
+            action_application_calls: load(&ACTION_APPLICATION_CALLS),
         }
     }
 }
@@ -75,6 +128,8 @@ recorder!(record_attack_map, ATTACK_CALLS);
 recorder!(record_chessembly_run, CHESSEMBLY_CALLS);
 recorder!(record_cache_hit, CACHE_HITS);
 recorder!(record_cache_rebuild, CACHE_REBUILDS);
+recorder!(record_evaluation, EVALUATION_CALLS);
+recorder!(record_action_application, ACTION_APPLICATION_CALLS);
 
 #[cfg(feature = "profiling")]
 pub(crate) fn record_legal_moves(duration: Duration, candidates: usize) {

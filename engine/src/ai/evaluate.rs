@@ -37,6 +37,7 @@ fn mobility(state: &GameState, player_id: &PlayerId) -> (usize, usize, bool) {
 }
 
 pub fn evaluate(state: &GameState, bot_player_id: &PlayerId) -> i32 {
+    crate::profiling::record_evaluation(1);
     if state.phase == GamePhase::Ended || state.result.is_some() {
         return match state
             .result
