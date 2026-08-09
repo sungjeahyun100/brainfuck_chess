@@ -616,6 +616,9 @@ function movementDescription(pieceType: string): string {
     'tempest-knight': '대각선 진입 후 확장된 Knight 계열 도약과 3칸 직선 도약을 사용합니다.',
     windmill: '성공적으로 이동할 때마다 Bishop 계열 대각선 행마와 Rook 계열 직선 행마가 번갈아 전환됩니다.',
     paratrooper: '이동할 수 없습니다. 빈 착수 가능 칸에 착수하거나, 착수 가능 칸의 적 기물을 잡으면서 착수할 수 있습니다.',
+    'alternating-soldier': '왕처럼 8방향으로 한 칸 이동합니다. 교대를 사용하면 주변 8칸의 기물 하나와 자신의 포켓 기물 하나를 바꿉니다.',
+    airborne: '왕처럼 8방향으로 한 칸 이동합니다. 공중 소환을 사용하면 전방 2×3 구역에 점수 4 이하인 포켓 기물을 소환합니다.',
+    'green-camp': '왕처럼 8방향으로 한 칸 이동합니다. 포켓 복귀를 사용하면 주변 8칸의 기물 하나를 해당 기물 소유자의 포켓으로 돌려보냅니다.',
   }
   return descriptions[pieceType] ?? 'Custom Piece: 등록된 Chessembly 행마법을 따릅니다.'
 }
