@@ -28,6 +28,9 @@ cargo test -p brainfuck-chess-engine --features profiling --test ai_benchmark ai
 | `standalone-ability` | Green Camp의 standalone ability 사용 가능 |
 | `piece-state-cooldown` | Windmill state와 Cannon Rook cooldown 존재 |
 | `immediate-king-capture` | 즉시 King capture 가능 |
+| `drop-capture` | Paratrooper가 적 기물 점유 칸에 착수하며 capture |
+| `airborne-deployment` | Airborne과 점수 4 이하 포켓 기물 3개의 airdrop 분기 |
+| `alternating-soldier-pocket-swap` | Alternating Soldier가 인접 아군을 포켓 기물로 교체 |
 
 ## 기준 결과
 
@@ -41,6 +44,9 @@ cargo test -p brainfuck-chess-engine --features profiling --test ai_benchmark ai
 | standalone-ability | 187 | 2 | 51.75 | move와 standalone ability 후보를 함께 생성 |
 | piece-state-cooldown | 174 | 2 | 47.03 | state predicate와 cooldown을 포함 |
 | immediate-king-capture | 90 | 2 | 19.55 | 즉시 승리 후보가 존재하는 기준 |
+| drop-capture | 140 | 2 | 36.35 | AI가 `captured_piece_id` 를 가진 Paratrooper Drop을 선택 |
+| airborne-deployment | 392 | 2 | 138.35 | AI가 deployment를 포함한 `airdrop` Ability를 선택 |
+| alternating-soldier-pocket-swap | 491 | 2 | 153.35 | `relieve` swap을 포함한 가장 큰 추가 분기 |
 
 각 실행은 selected action, score, searched nodes, reached/completed depth, elapsed와 다음 profiling counter를 한 줄로 출력한다.
 

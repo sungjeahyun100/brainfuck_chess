@@ -204,6 +204,62 @@ fn benchmark_positions() -> Vec<BenchmarkPosition> {
     add_board_piece(&mut king_capture, "wr", "white", "rook", Square::new(4, 0));
     add_board_piece(&mut king_capture, "bk", "black", "king", Square::new(4, 7));
 
+    let mut drop_capture = empty_state("drop-capture");
+    add_board_piece(&mut drop_capture, "wk", "white", "king", Square::new(0, 0));
+    add_board_piece(&mut drop_capture, "bk", "black", "king", Square::new(7, 7));
+    add_board_piece(
+        &mut drop_capture,
+        "enemy",
+        "black",
+        "knight",
+        Square::new(3, 0),
+    );
+    add_pocket_piece(&mut drop_capture, "para", "white", "paratrooper");
+
+    let mut airborne = empty_state("airborne-deployment");
+    add_board_piece(&mut airborne, "wk", "white", "king", Square::new(0, 0));
+    add_board_piece(&mut airborne, "bk", "black", "king", Square::new(7, 7));
+    add_board_piece(
+        &mut airborne,
+        "airborne",
+        "white",
+        "airborne",
+        Square::new(3, 3),
+    );
+    for (id, kind) in [
+        ("air-bishop", "bishop"),
+        ("air-knight", "knight"),
+        ("air-pawn", "pawn-white"),
+    ] {
+        add_pocket_piece(&mut airborne, id, "white", kind);
+    }
+
+    let mut pocket_swap = empty_state("alternating-soldier-pocket-swap");
+    add_board_piece(&mut pocket_swap, "wk", "white", "king", Square::new(0, 0));
+    add_board_piece(&mut pocket_swap, "bk", "black", "king", Square::new(7, 6));
+    add_board_piece(
+        &mut pocket_swap,
+        "soldier",
+        "white",
+        "alternating-soldier",
+        Square::new(3, 3),
+    );
+    add_board_piece(
+        &mut pocket_swap,
+        "swap-target",
+        "white",
+        "bishop",
+        Square::new(4, 4),
+    );
+    add_board_piece(
+        &mut pocket_swap,
+        "enemy",
+        "black",
+        "bishop",
+        Square::new(2, 2),
+    );
+    add_pocket_piece(&mut pocket_swap, "swap-reserve", "white", "knight");
+
     vec![
         BenchmarkPosition {
             name: "middlegame",
@@ -229,6 +285,18 @@ fn benchmark_positions() -> Vec<BenchmarkPosition> {
             name: "immediate-king-capture",
             state: king_capture,
         },
+        BenchmarkPosition {
+            name: "drop-capture",
+            state: drop_capture,
+        },
+        BenchmarkPosition {
+            name: "airborne-deployment",
+            state: airborne,
+        },
+        BenchmarkPosition {
+            name: "alternating-soldier-pocket-swap",
+            state: pocket_swap,
+        },
     ]
 }
 
@@ -242,7 +310,7 @@ fn action_is_legal(state: &GameState, selected: &AiAction) -> bool {
 #[test]
 fn benchmark_positions_produce_legal_ai_decisions() {
     let positions = benchmark_positions();
-    assert_eq!(positions.len(), 6);
+    assert_eq!(positions.len(), 9);
     for position in &positions {
         let decision = choose_bot_action(&position.state, &"white".into(), BotDifficulty::Easy)
             .unwrap_or_else(|| panic!("{} produced no AI decision", position.name));
@@ -252,7 +320,6 @@ fn benchmark_positions_produce_legal_ai_decisions() {
             position.name
         );
     }
-
     let actions = |name: &str| {
         generate_ai_actions(
             &positions
@@ -296,6 +363,29 @@ fn benchmark_positions_produce_legal_ai_decisions() {
         .any(|action| matches!(
             action,
             AiAction::Move(action) if action.captured_piece_id.as_ref().map(PieceId::as_str) == Some("bk")
+        )));
+    assert!(actions("drop-capture").iter().any(|action| matches!(
+        action,
+        AiAction::Drop(action)
+            if action.piece_id.as_str() == "para"
+                && action.captured_piece_id.as_ref().map(PieceId::as_str) == Some("enemy")
+    )));
+    assert!(actions("airborne-deployment").iter().any(|action| matches!(
+        action,
+        AiAction::Ability(action)
+            if action.piece_id.as_str() == "airborne"
+                && action.ability_id == "airdrop"
+                && !action.deployments.is_empty()
+    )));
+    assert!(actions("alternating-soldier-pocket-swap")
+        .iter()
+        .any(|action| matches!(
+            action,
+            AiAction::Ability(action)
+                if action.piece_id.as_str() == "soldier"
+                    && action.ability_id == "relieve"
+                    && action.target_piece_id.as_ref().map(PieceId::as_str) == Some("swap-target")
+                    && action.pocket_piece_id.as_ref().map(PieceId::as_str) == Some("swap-reserve")
         )));
 }
 
