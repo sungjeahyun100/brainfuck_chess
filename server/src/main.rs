@@ -191,6 +191,8 @@ struct BotTurnRequest {
 struct BotTurnStats {
     searched_nodes: u64,
     depth_reached: u8,
+    completed_depth: u8,
+    beta_cutoffs: u64,
     elapsed_ms: u64,
 }
 
@@ -1636,6 +1638,8 @@ async fn run_bot_turn(
         stats: BotTurnStats {
             searched_nodes: result.searched_nodes,
             depth_reached: result.depth_reached,
+            completed_depth: result.completed_depth,
+            beta_cutoffs: result.stats.beta_cutoffs,
             elapsed_ms: result.elapsed_ms,
         },
     }))

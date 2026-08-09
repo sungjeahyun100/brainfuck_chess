@@ -185,3 +185,99 @@ Move, Drop, Ability 각각 가능한 범위에서 테스트한다.
 * elapsed time
 
 변화를 보고한다.
+
+# Goal 1 추가 요구사항 — Airborne 다중 deployment 지원
+
+현재 `generate_legal_ability_actions()`에서 Airborne의 `airdrop`은 실제 게임 규칙상 하나의 `AbilityAction`에 여러 `AbilityDeployment`를 포함할 수 있음에도, AI 검색 후보에서는 사실상 deployment 1개짜리 action만 생성되고 있다.
+
+이 문제를 Goal 1의 search foundation 작업과 함께 해결한다.
+
+## 요구사항
+
+1. AI가 검색하는 action space와 실제 플레이어가 제출할 수 있는 canonical legal action space가 불필요하게 달라지지 않도록 한다.
+
+2. Airborne의 `airdrop`에 대해 실제 규칙이 허용하는 다중 deployment 조합을 AI도 검색할 수 있어야 한다.
+
+3. 생성되는 multi-deployment action은 기존 `is_legal_ability_action()` 및 public `submit_action()`에서 정상적으로 accepted 되는 canonical action이어야 한다.
+
+4. 다음 제약을 모두 지켜야 한다.
+
+   * 동일 pocket piece를 한 action에서 두 번 사용할 수 없음
+   * 동일 square에 두 deployment를 둘 수 없음
+   * 각 pocket piece는 원래 `airdrop` 조건을 만족해야 함
+   * 각 square는 해당 Airborne 능력의 합법 영역이어야 함
+   * King이나 점수 제한을 초과하는 기물 등 기존 eligibility 규칙을 우회하지 않음
+
+5. 조합 폭발을 고려한다.
+   단순히 가능한 모든 deployment 부분집합과 순열을 중복 생성하지 않는다.
+   순서만 다른 동일 의미 action은 하나로 canonicalize한다.
+
+예:
+
+```text
+Bishop -> c5
+Knight -> d6
+```
+
+와
+
+```text
+Knight -> d6
+Bishop -> c5
+```
+
+가 동일한 게임 결과를 의미한다면 AI 후보에서는 중복되지 않아야 한다.
+
+6. 현재 `generate_ai_actions()`가 public gameplay legal generation을 재사용하는 구조라면,
+   Airborne만 AI 전용 하드코딩으로 우회하기보다 legal ability generation 자체의 canonical representation을 정리하는 쪽을 우선 검토한다.
+
+단, UI/API에서 필요로 하는 single-deployment 후보와 실제 한 턴의 multi-deployment action이 서로 다른 개념이라면 역할을 명확히 분리해도 된다.
+
+7. 이 변경 때문에 일반 Ability, Green Camp, Alternating Soldier 등의 기존 action generation semantics가 변경되어서는 안 된다.
+
+## 테스트
+
+최소 다음을 추가한다.
+
+### multi-deployment generation
+
+Airborne + pocket Bishop + Knight 상태에서 AI legal actions에 다음과 같은 action이 존재해야 한다.
+
+```text
+airdrop:
+- Bishop -> 합법 칸 A
+- Knight -> 합법 칸 B
+```
+
+즉 `deployments.len() >= 2`인 legal `AiAction::Ability`가 실제 생성되어야 한다.
+
+### canonical validity
+
+생성된 multi-deployment action을:
+
+```text
+submit_action(state, TurnAction::Ability(action))
+```
+
+으로 제출했을 때 성공해야 한다.
+
+### no duplicate permutations
+
+동일 deployment 집합을 순서만 바꾼 action이 중복 생성되지 않는지 테스트한다.
+
+### uniqueness constraints
+
+* 같은 piece를 두 번 배치하는 action 없음
+* 같은 square를 두 번 사용하는 action 없음
+
+### benchmark coverage
+
+Goal 0의 `airborne-deployment` benchmark correctness assertion을 강화하여 단순히 `deployments`가 비어 있지 않은지만 확인하지 말고, 최소 하나의 `deployments.len() >= 2` action이 존재하는지 확인한다.
+
+기존 baseline position은 유지한다.
+
+## 완료 조건
+
+Goal 1 완료 시 Airborne은 실제 게임에서 허용되는 다중 deployment 능력을 AI 검색에서도 고려할 수 있어야 하며, 생성된 action은 기존 canonical validation 경계를 그대로 통과해야 한다.
+
+

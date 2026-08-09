@@ -58,12 +58,23 @@ pub struct BotDecision {
     pub score: i32,
     pub searched_nodes: u64,
     pub depth_reached: u8,
+    #[serde(default)]
+    pub completed_depth: u8,
+    #[serde(default)]
+    pub stats: SearchStats,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SearchStats {
     pub searched_nodes: u64,
     pub depth_reached: u8,
+    pub completed_depth: u8,
+    pub beta_cutoffs: u64,
+    pub qnodes: u64,
+    pub tt_hits: u64,
+    pub tt_cutoffs: u64,
+    pub aspiration_researches: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +86,10 @@ pub struct BotTurnResult {
     pub timeline: Vec<ActionTimelineFrame>,
     pub searched_nodes: u64,
     pub depth_reached: u8,
+    #[serde(default)]
+    pub completed_depth: u8,
+    #[serde(default)]
+    pub stats: SearchStats,
     pub elapsed_ms: u64,
 }
 

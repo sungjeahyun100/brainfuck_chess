@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use brainfuck_chess_engine::actions::submit_action;
 use brainfuck_chess_engine::ai::{
     apply_ai_action, choose_bot_action, generate_ai_actions, play_bot_turn, play_bot_turn_detailed,
     AiAction, BotDifficulty,
@@ -338,4 +339,51 @@ fn difficulty_limits_are_bounded_as_configured() {
     assert_eq!((hard.max_depth_actions, hard.max_nodes), (3, 10_000));
     assert!(easy.hard_time_ms < normal.hard_time_ms);
     assert!(normal.hard_time_ms < hard.hard_time_ms);
+}
+
+#[test]
+fn airborne_actions_include_unique_canonical_multi_deployments() {
+    let mut state = make_state();
+    add_board_piece(
+        &mut state,
+        "airborne",
+        "white",
+        "airborne",
+        Square::new(3, 3),
+    );
+    add_pocket_piece(&mut state, "bishop", "white", "bishop");
+    add_pocket_piece(&mut state, "knight", "white", "knight");
+
+    let actions = generate_ai_actions(&state)
+        .into_iter()
+        .filter_map(|action| match action {
+            AiAction::Ability(action) if action.ability_id == "airdrop" => Some(action),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let multi = actions
+        .iter()
+        .find(|action| action.deployments.len() >= 2)
+        .expect("AI should generate a multi-deployment airdrop");
+    assert!(submit_action(state.clone(), TurnAction::Ability(multi.clone())).is_ok());
+
+    let mut canonical_sets = std::collections::HashSet::new();
+    for action in actions {
+        let mut pieces = std::collections::HashSet::new();
+        let mut squares = std::collections::HashSet::new();
+        assert!(action.deployments.iter().all(|deployment| {
+            pieces.insert(deployment.pocket_piece_id.clone())
+                && squares.insert(deployment.to.to_id())
+        }));
+        let mut signature = action
+            .deployments
+            .iter()
+            .map(|deployment| format!("{}:{}", deployment.pocket_piece_id, deployment.to.to_id()))
+            .collect::<Vec<_>>();
+        signature.sort();
+        assert!(
+            canonical_sets.insert(signature),
+            "duplicate deployment permutation"
+        );
+    }
 }

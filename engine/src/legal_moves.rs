@@ -783,6 +783,87 @@ pub fn is_legal_ability_action(game_state: &GameState, action: &AbilityAction) -
 
 /// Generate every standalone ability action available to the current player.
 pub fn generate_legal_ability_actions(game_state: &GameState) -> Vec<AbilityAction> {
+    fn canonical_airdrop_actions(
+        player_id: &PlayerId,
+        actor_id: &PieceId,
+        singles: Vec<AbilityAction>,
+    ) -> Vec<AbilityAction> {
+        let mut by_piece = std::collections::BTreeMap::<PieceId, Vec<Square>>::new();
+        for single in singles {
+            if let (Some(piece_id), Some(to)) = (single.pocket_piece_id, single.to) {
+                by_piece.entry(piece_id).or_default().push(to);
+            }
+        }
+        let choices = by_piece.into_iter().collect::<Vec<_>>();
+        let mut actions = Vec::new();
+        let mut deployments = Vec::new();
+        let mut occupied = std::collections::HashSet::new();
+
+        fn extend(
+            index: usize,
+            choices: &[(PieceId, Vec<Square>)],
+            player_id: &PlayerId,
+            actor_id: &PieceId,
+            deployments: &mut Vec<AbilityDeployment>,
+            occupied: &mut std::collections::HashSet<SquareId>,
+            actions: &mut Vec<AbilityAction>,
+        ) {
+            if index == choices.len() {
+                return;
+            }
+            extend(
+                index + 1,
+                choices,
+                player_id,
+                actor_id,
+                deployments,
+                occupied,
+                actions,
+            );
+            let (pocket_piece_id, squares) = &choices[index];
+            for to in squares {
+                if !occupied.insert(to.to_id()) {
+                    continue;
+                }
+                deployments.push(AbilityDeployment {
+                    pocket_piece_id: pocket_piece_id.clone(),
+                    to: *to,
+                });
+                actions.push(AbilityAction {
+                    player_id: player_id.clone(),
+                    piece_id: actor_id.clone(),
+                    ability_id: "airdrop".into(),
+                    target_piece_id: None,
+                    pocket_piece_id: None,
+                    to: None,
+                    deployments: deployments.clone(),
+                });
+                extend(
+                    index + 1,
+                    choices,
+                    player_id,
+                    actor_id,
+                    deployments,
+                    occupied,
+                    actions,
+                );
+                deployments.pop();
+                occupied.remove(&to.to_id());
+            }
+        }
+
+        extend(
+            0,
+            &choices,
+            player_id,
+            actor_id,
+            &mut deployments,
+            &mut occupied,
+            &mut actions,
+        );
+        actions
+    }
+
     let mut piece_ids = game_state
         .pieces
         .iter()
@@ -808,17 +889,13 @@ pub fn generate_legal_ability_actions(game_state: &GameState) -> Vec<AbilityActi
                 })
                 .unwrap_or_default();
             option_ids.into_iter().flat_map(move |option_id| {
-                let mut actions = generate_piece_legal_ability_actions(game_state, &piece_id, &option_id);
+                let actions =
+                    generate_piece_legal_ability_actions(game_state, &piece_id, &option_id);
                 if option_id == "airdrop" {
-                    for action in &mut actions {
-                        if let (Some(pocket_piece_id), Some(to)) =
-                            (action.pocket_piece_id.take(), action.to.take())
-                        {
-                            action.deployments = vec![AbilityDeployment { pocket_piece_id, to }];
-                        }
-                    }
+                    canonical_airdrop_actions(&game_state.current_player, &piece_id, actions)
+                } else {
+                    actions
                 }
-                actions
             })
         })
         .collect()

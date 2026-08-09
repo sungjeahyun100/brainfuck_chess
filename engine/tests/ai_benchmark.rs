@@ -375,7 +375,7 @@ fn benchmark_positions_produce_legal_ai_decisions() {
         AiAction::Ability(action)
             if action.piece_id.as_str() == "airborne"
                 && action.ability_id == "airdrop"
-                && !action.deployments.is_empty()
+                && action.deployments.len() >= 2
     )));
     assert!(actions("alternating-soldier-pocket-swap")
         .iter()
@@ -401,12 +401,14 @@ fn ai_search_baseline() {
         let counters = profiling::snapshot().since(before);
         assert!(action_is_legal(&position.state, &decision.action));
         println!(
-            "position={} action={} score={} nodes={} reached/completed_depth={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
+            "position={} action={} score={} nodes={} reached_depth={} completed_depth={} beta_cutoffs={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
             position.name,
             serde_json::to_string(&decision.action).unwrap(),
             decision.score,
             decision.searched_nodes,
             decision.depth_reached,
+            decision.completed_depth,
+            decision.stats.beta_cutoffs,
             elapsed.as_secs_f64() * 1_000.0,
             counters.legal_move_generation_calls,
             counters.drop_generation_calls,
