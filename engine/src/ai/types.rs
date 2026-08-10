@@ -83,6 +83,8 @@ pub struct SearchStats {
     pub searched_nodes: u64,
     pub depth_reached: u8,
     pub completed_depth: u8,
+    pub iterations_started: u8,
+    pub iterations_completed: u8,
     pub beta_cutoffs: u64,
     pub qnodes: u64,
     pub tt_probes: u64,

@@ -257,6 +257,15 @@ struct RootSearchResult {
     completed: bool,
 }
 
+fn prioritize_action(actions: &mut [AiAction], priority: Option<&AiAction>) {
+    let Some(priority) = priority else {
+        return;
+    };
+    if let Some(index) = actions.iter().position(|action| action == priority) {
+        actions.swap(0, index);
+    }
+}
+
 fn search_root(
     state: &GameState,
     actions: &[AiAction],
@@ -405,20 +414,29 @@ fn choose_bot_action_with_config(
         transposition_table: transposition_table_enabled
             .then(|| TranspositionTable::new(limits.max_nodes.min(65_536) as usize)),
     };
-    let root_result = if context.soft_limit_reached() {
-        RootSearchResult {
-            best: None,
-            scores: Vec::new(),
-            completed: false,
+    let mut last_completed = None;
+    let mut previous_iteration_best = None;
+    for depth in 1..=limits.max_depth_actions {
+        if context.hard_limit_reached() {
+            break;
         }
-    } else {
-        search_root(state, &actions, limits.max_depth_actions, &mut context)
-    };
-    if root_result.completed {
-        context.stats.completed_depth = limits.max_depth_actions;
+        let mut iteration_actions = actions.clone();
+        prioritize_action(&mut iteration_actions, previous_iteration_best.as_ref());
+        context.stats.iterations_started += 1;
+        let root_result = search_root(state, &iteration_actions, depth, &mut context);
+        if !root_result.completed {
+            break;
+        }
+        previous_iteration_best = root_result.best.as_ref().map(|(action, _)| action.clone());
+        context.stats.completed_depth = depth;
+        context.stats.iterations_completed += 1;
+        last_completed = Some(root_result);
+        if context.soft_limit_reached() {
+            break;
+        }
     }
 
-    let Some((best_action, best_score)) = root_result.best else {
+    let Some(mut root_result) = last_completed else {
         let score = evaluate(state, bot_player_id);
         return Some(BotDecision {
             action: fallback_action,
@@ -429,6 +447,10 @@ fn choose_bot_action_with_config(
             stats: context.stats,
         });
     };
+    let (best_action, best_score) = root_result
+        .best
+        .take()
+        .expect("a completed root search with legal actions must have a best action");
 
     // Easy retains a small amount of variety without using incomplete scores.
     let (action, score) = if difficulty == BotDifficulty::Easy && best_score < WIN_SCORE {
@@ -628,6 +650,147 @@ mod tests {
         );
         assert_eq!(context.transposition_table.as_ref().unwrap().len(), 0);
         assert_eq!(context.stats.tt_stores, 0);
+    }
+
+    fn search_with_limits_and_tt(
+        state: &GameState,
+        limits: SearchLimits,
+        use_transposition_table: bool,
+    ) -> BotDecision {
+        choose_bot_action_with_config(
+            state,
+            &"white".into(),
+            BotDifficulty::Normal,
+            limits,
+            use_transposition_table,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn iterative_deepening_completes_every_depth_with_sufficient_budget() {
+        let decision = search_with_limits_and_tt(
+            &searchable_state(),
+            SearchLimits {
+                max_depth_actions: 3,
+                max_nodes: 100_000,
+                soft_time_ms: 10_000,
+                hard_time_ms: 20_000,
+            },
+            true,
+        );
+
+        assert_eq!(decision.completed_depth, 3);
+        assert_eq!(decision.stats.iterations_started, 3);
+        assert_eq!(decision.stats.iterations_completed, 3);
+    }
+
+    #[test]
+    fn aborted_iteration_returns_the_last_completed_result() {
+        let state = searchable_state();
+        let depth_one = search_with_limits_and_tt(
+            &state,
+            SearchLimits {
+                max_depth_actions: 1,
+                max_nodes: 100_000,
+                soft_time_ms: 10_000,
+                hard_time_ms: 20_000,
+            },
+            false,
+        );
+        let interrupted = search_with_limits_and_tt(
+            &state,
+            SearchLimits {
+                max_depth_actions: 2,
+                max_nodes: depth_one.searched_nodes + 2,
+                soft_time_ms: 10_000,
+                hard_time_ms: 20_000,
+            },
+            false,
+        );
+
+        assert_eq!(interrupted.completed_depth, 1);
+        assert_eq!(interrupted.stats.iterations_started, 2);
+        assert_eq!(interrupted.stats.iterations_completed, 1);
+        assert_eq!(interrupted.action, depth_one.action);
+        assert_eq!(interrupted.score, depth_one.score);
+        assert!(interrupted.depth_reached > interrupted.completed_depth);
+    }
+
+    #[test]
+    fn soft_limit_stops_only_after_a_completed_iteration() {
+        let decision = search_with_limits_and_tt(
+            &searchable_state(),
+            SearchLimits {
+                max_depth_actions: 3,
+                max_nodes: 100_000,
+                soft_time_ms: 0,
+                hard_time_ms: 20_000,
+            },
+            false,
+        );
+
+        assert_eq!(decision.completed_depth, 1);
+        assert_eq!(decision.stats.iterations_started, 1);
+        assert_eq!(decision.stats.iterations_completed, 1);
+    }
+
+    #[test]
+    fn transposition_table_is_reused_across_iterations() {
+        let state = searchable_state();
+        let limits = |max_depth_actions| SearchLimits {
+            max_depth_actions,
+            max_nodes: 100_000,
+            soft_time_ms: 10_000,
+            hard_time_ms: 20_000,
+        };
+        let depth_one = search_with_limits_and_tt(&state, limits(1), true);
+        let depth_two = search_with_limits_and_tt(&state, limits(2), true);
+
+        assert_eq!(depth_two.completed_depth, 2);
+        assert_eq!(depth_two.stats.iterations_completed, 2);
+        assert!(depth_two.stats.tt_hits > depth_one.stats.tt_hits);
+        assert!(depth_two.stats.tt_hits > depth_two.stats.tt_cutoffs);
+    }
+
+    #[test]
+    fn previous_iteration_best_is_prioritized_without_duplication() {
+        let state = searchable_state();
+        let mut actions = generate_ai_actions(&state);
+        order_ai_actions(&state, &mut actions, &"white".into());
+        let original_len = actions.len();
+        let priority = actions.last().unwrap().clone();
+
+        prioritize_action(&mut actions, Some(&priority));
+
+        assert_eq!(actions.first(), Some(&priority));
+        assert_eq!(actions.len(), original_len);
+        assert_eq!(
+            actions.iter().filter(|action| *action == &priority).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn strong_difficulties_are_deterministic_with_identical_limits() {
+        let state = searchable_state();
+        let limits = SearchLimits {
+            max_depth_actions: 2,
+            max_nodes: 100_000,
+            soft_time_ms: 10_000,
+            hard_time_ms: 20_000,
+        };
+        for difficulty in [BotDifficulty::Normal, BotDifficulty::Hard] {
+            let first =
+                choose_bot_action_with_config(&state, &"white".into(), difficulty, limits, true)
+                    .unwrap();
+            let second =
+                choose_bot_action_with_config(&state, &"white".into(), difficulty, limits, true)
+                    .unwrap();
+            assert_eq!(first.action, second.action);
+            assert_eq!(first.score, second.score);
+            assert_eq!(first.completed_depth, second.completed_depth);
+        }
     }
 
     #[test]

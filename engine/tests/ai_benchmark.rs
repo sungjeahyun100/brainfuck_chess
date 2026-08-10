@@ -495,6 +495,35 @@ fn ai_search_tt_off_comparison() {
     });
 }
 
+#[test]
+#[ignore = "actual Easy/Normal/Hard budgets; run explicitly with --features profiling --ignored --nocapture"]
+fn ai_search_difficulty_budgets() {
+    for position in benchmark_positions() {
+        for difficulty in [
+            BotDifficulty::Easy,
+            BotDifficulty::Normal,
+            BotDifficulty::Hard,
+        ] {
+            let started = Instant::now();
+            let decision = choose_bot_action(&position.state, &"white".into(), difficulty)
+                .unwrap_or_else(|| panic!("{} produced no AI decision", position.name));
+            assert!(action_is_legal(&position.state, &decision.action));
+            println!(
+                "position={} difficulty={:?} max_depth={} nodes={} reached_depth={} completed_depth={} iterations_started={} iterations_completed={} elapsed_ms={:.3}",
+                position.name,
+                difficulty,
+                difficulty.limits().max_depth_actions,
+                decision.searched_nodes,
+                decision.depth_reached,
+                decision.completed_depth,
+                decision.stats.iterations_started,
+                decision.stats.iterations_completed,
+                started.elapsed().as_secs_f64() * 1_000.0,
+            );
+        }
+    }
+}
+
 fn run_search_baseline(options: SearchOptions) {
     for position in benchmark_positions() {
         let before = profiling::snapshot();
@@ -510,7 +539,7 @@ fn run_search_baseline(options: SearchOptions) {
         let counters = profiling::snapshot().since(before);
         assert!(action_is_legal(&position.state, &decision.action));
         println!(
-            "position={} tt_enabled={} action={} score={} nodes={} reached_depth={} completed_depth={} beta_cutoffs={} position_key_generations={} tt_probes={} tt_hits={} tt_cutoffs={} tt_stores={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
+            "position={} tt_enabled={} action={} score={} nodes={} reached_depth={} completed_depth={} iterations_started={} iterations_completed={} beta_cutoffs={} position_key_generations={} tt_probes={} tt_hits={} tt_cutoffs={} tt_stores={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
             position.name,
             options.use_transposition_table,
             serde_json::to_string(&decision.action).unwrap(),
@@ -518,6 +547,8 @@ fn run_search_baseline(options: SearchOptions) {
             decision.searched_nodes,
             decision.depth_reached,
             decision.completed_depth,
+            decision.stats.iterations_started,
+            decision.stats.iterations_completed,
             decision.stats.beta_cutoffs,
             counters.position_key_generation_calls,
             decision.stats.tt_probes,
