@@ -36,6 +36,45 @@ pub fn order_ai_actions(state: &GameState, actions: &mut [AiAction], _bot_player
     });
 }
 
+pub(crate) fn order_quiescence_actions(state: &GameState, actions: &mut [AiAction]) {
+    actions.sort_by(|left, right| {
+        quiescence_priority(state, right)
+            .cmp(&quiescence_priority(state, left))
+            .then_with(|| canonical_action_cmp(left, right))
+    });
+}
+
+fn quiescence_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
+    let captured_value = |captured_id: Option<&crate::types::PieceId>| {
+        captured_id
+            .and_then(|id| state.pieces.get(id))
+            .and_then(|piece| state.piece_definitions.get(&piece.type_id))
+            .map_or(0, |definition| definition.score)
+    };
+    match action {
+        AiAction::Move(action) => {
+            let captured = action
+                .captured_piece_id
+                .as_ref()
+                .and_then(|id| state.pieces.get(id))
+                .and_then(|piece| state.piece_definitions.get(&piece.type_id));
+            if captured.is_some_and(|definition| definition.is_king) {
+                (7, u32::MAX)
+            } else if action.captured_piece_id.is_some() && action.promotion.is_some() {
+                (6, captured.map_or(0, |definition| definition.score))
+            } else if action.captured_piece_id.is_some() {
+                (5, captured.map_or(0, |definition| definition.score))
+            } else if action.promotion.is_some() {
+                (4, 0)
+            } else {
+                (0, 0)
+            }
+        }
+        AiAction::Drop(action) => (3, captured_value(action.captured_piece_id.as_ref())),
+        AiAction::Ability(action) => (2, captured_value(action.target_piece_id.as_ref())),
+    }
+}
+
 fn canonical_action_cmp(left: &AiAction, right: &AiAction) -> Ordering {
     match (left, right) {
         (AiAction::Move(left), AiAction::Move(right)) => left

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::actions::{apply_canonical_action, submit_action};
 use crate::ai::evaluate::{evaluate, WIN_SCORE};
-use crate::ai::move_ordering::order_ai_actions;
+use crate::ai::move_ordering::{order_ai_actions, order_quiescence_actions};
 use crate::ai::transposition_table::{
     BoundType, PositionKey, TranspositionEntry, TranspositionTable,
 };
@@ -12,8 +12,13 @@ use crate::ai::types::{
 };
 use crate::legal_moves::{
     generate_legal_ability_actions, generate_legal_drop_actions, generate_legal_move_actions,
+    generate_piece_legal_ability_actions, generate_piece_legal_drop_actions,
 };
-use crate::types::{GamePhase, GameState, PlayerId, TurnAction};
+use crate::types::{
+    AbilityAction, DropAction, GamePhase, GameState, MoveAction, PlayerId, TurnAction,
+};
+
+const MAX_QUIESCENCE_PLIES: u8 = 8;
 
 pub fn generate_ai_actions(state: &GameState) -> Vec<AiAction> {
     if state.phase == GamePhase::Ended || state.result.is_some() {
@@ -118,6 +123,9 @@ fn alpha_beta(
     }
     context.stats.searched_nodes += 1;
     context.stats.depth_reached = context.stats.depth_reached.max(ply);
+    if depth == 0 {
+        return quiescence_search(state, alpha, beta, 0, context, false);
+    }
     let original_alpha = alpha;
     let original_beta = beta;
     let position_key = context
@@ -142,7 +150,7 @@ fn alpha_beta(
             return SearchOutcome::Complete(score);
         }
     }
-    if depth == 0 || state.phase == GamePhase::Ended || state.result.is_some() {
+    if state.phase == GamePhase::Ended || state.result.is_some() {
         let score = evaluate(&state, context.bot_player_id);
         store_table_entry(
             context,
@@ -234,6 +242,144 @@ fn alpha_beta(
         },
     );
     SearchOutcome::Complete(score)
+}
+
+fn is_noisy_move(action: &MoveAction) -> bool {
+    action.captured_piece_id.is_some() || action.promotion.is_some()
+}
+
+fn is_noisy_drop(action: &DropAction) -> bool {
+    action.captured_piece_id.is_some()
+}
+
+fn is_noisy_ability(state: &GameState, action: &AbilityAction) -> bool {
+    action.ability_id == "recall"
+        && action
+            .target_piece_id
+            .as_ref()
+            .and_then(|id| state.pieces.get(id))
+            .is_some_and(|target| target.owner != action.player_id)
+}
+
+fn generate_quiescence_actions(state: &GameState) -> Vec<AiAction> {
+    let moves = generate_legal_move_actions(state)
+        .into_iter()
+        .filter(is_noisy_move)
+        .map(AiAction::Move);
+
+    let mut capture_drop_piece_ids = state
+        .players
+        .get(&state.current_player)
+        .into_iter()
+        .flat_map(|player| &player.deck.pocket_pieces)
+        .filter(|piece_id| {
+            state
+                .pieces
+                .get(*piece_id)
+                .and_then(|piece| state.piece_definitions.get(&piece.type_id))
+                .is_some_and(|definition| definition.can_capture_on_drop)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    capture_drop_piece_ids.sort();
+    let drops = capture_drop_piece_ids.into_iter().flat_map(|piece_id| {
+        generate_piece_legal_drop_actions(state, &piece_id)
+            .into_iter()
+            .filter(is_noisy_drop)
+            .map(AiAction::Drop)
+    });
+
+    let mut recall_actor_ids = state
+        .pieces
+        .iter()
+        .filter_map(|(piece_id, piece)| {
+            (piece.owner == state.current_player
+                && piece.is_on_board()
+                && state
+                    .piece_definitions
+                    .get(&piece.type_id)
+                    .is_some_and(|definition| {
+                        definition
+                            .move_options
+                            .iter()
+                            .any(|option| option.id == "recall")
+                    }))
+            .then_some(piece_id.clone())
+        })
+        .collect::<Vec<_>>();
+    recall_actor_ids.sort();
+    let abilities = recall_actor_ids.into_iter().flat_map(|piece_id| {
+        generate_piece_legal_ability_actions(state, &piece_id, "recall")
+            .into_iter()
+            .filter(|action| is_noisy_ability(state, action))
+            .map(AiAction::Ability)
+    });
+
+    let mut actions = moves.chain(drops).chain(abilities).collect::<Vec<_>>();
+    order_quiescence_actions(state, &mut actions);
+    actions
+}
+
+fn quiescence_search(
+    state: GameState,
+    mut alpha: i32,
+    mut beta: i32,
+    qply: u8,
+    context: &mut SearchContext<'_>,
+    count_search_node: bool,
+) -> SearchOutcome {
+    if count_search_node {
+        if context.hard_limit_reached() {
+            return SearchOutcome::Aborted;
+        }
+        context.stats.searched_nodes += 1;
+    }
+    context.stats.qnodes += 1;
+
+    let stand_pat = evaluate(&state, context.bot_player_id);
+    if state.phase == GamePhase::Ended || state.result.is_some() {
+        return SearchOutcome::Complete(stand_pat);
+    }
+
+    let maximizing = &state.current_player == context.bot_player_id;
+    let mut best = stand_pat;
+    if maximizing {
+        if stand_pat >= beta {
+            return SearchOutcome::Complete(stand_pat);
+        }
+        alpha = alpha.max(stand_pat);
+    } else {
+        if stand_pat <= alpha {
+            return SearchOutcome::Complete(stand_pat);
+        }
+        beta = beta.min(stand_pat);
+    }
+    if qply >= MAX_QUIESCENCE_PLIES {
+        return SearchOutcome::Complete(stand_pat);
+    }
+
+    for action in generate_quiescence_actions(&state) {
+        if context.hard_limit_reached() {
+            return SearchOutcome::Aborted;
+        }
+        let next_state = apply_generated_action(state.clone(), &action);
+        let SearchOutcome::Complete(score) =
+            quiescence_search(next_state, alpha, beta, qply + 1, context, true)
+        else {
+            return SearchOutcome::Aborted;
+        };
+        if maximizing {
+            best = best.max(score);
+            alpha = alpha.max(best);
+        } else {
+            best = best.min(score);
+            beta = beta.min(best);
+        }
+        if beta <= alpha {
+            break;
+        }
+    }
+    SearchOutcome::Complete(best)
 }
 
 fn store_table_entry(
@@ -715,6 +861,7 @@ mod tests {
         assert_eq!(interrupted.action, depth_one.action);
         assert_eq!(interrupted.score, depth_one.score);
         assert!(interrupted.depth_reached > interrupted.completed_depth);
+        assert!(interrupted.stats.qnodes > depth_one.stats.qnodes);
     }
 
     #[test]
@@ -744,13 +891,13 @@ mod tests {
             soft_time_ms: 10_000,
             hard_time_ms: 20_000,
         };
-        let depth_one = search_with_limits_and_tt(&state, limits(1), true);
         let depth_two = search_with_limits_and_tt(&state, limits(2), true);
+        let depth_three = search_with_limits_and_tt(&state, limits(3), true);
 
-        assert_eq!(depth_two.completed_depth, 2);
-        assert_eq!(depth_two.stats.iterations_completed, 2);
-        assert!(depth_two.stats.tt_hits > depth_one.stats.tt_hits);
-        assert!(depth_two.stats.tt_hits > depth_two.stats.tt_cutoffs);
+        assert_eq!(depth_three.completed_depth, 3);
+        assert_eq!(depth_three.stats.iterations_completed, 3);
+        assert!(depth_three.stats.tt_hits > depth_two.stats.tt_hits);
+        assert!(depth_three.stats.tt_hits > depth_three.stats.tt_cutoffs);
     }
 
     #[test]
@@ -791,6 +938,298 @@ mod tests {
             assert_eq!(first.score, second.score);
             assert_eq!(first.completed_depth, second.completed_depth);
         }
+    }
+
+    fn qsearch_result(state: GameState, max_nodes: u64, qply: u8) -> (SearchOutcome, SearchStats) {
+        let limits = SearchLimits {
+            max_depth_actions: 1,
+            max_nodes,
+            soft_time_ms: 10_000,
+            hard_time_ms: 20_000,
+        };
+        let player = "white".to_string();
+        let mut context = SearchContext {
+            bot_player_id: &player,
+            limits: &limits,
+            started: Instant::now(),
+            stats: SearchStats::default(),
+            transposition_table: Some(TranspositionTable::new(100)),
+        };
+        let result = quiescence_search(state, i32::MIN + 1, i32::MAX, qply, &mut context, true);
+        (result, context.stats)
+    }
+
+    #[test]
+    fn noisy_policy_includes_capture_promotion_drop_capture_and_enemy_recall() {
+        let mut promotion = searchable_state();
+        add_test_piece(
+            &mut promotion,
+            "promoting-pawn",
+            "white",
+            "pawn-white",
+            Some(Square::new(1, 6)),
+        );
+        let promotion_action = generate_quiescence_actions(&promotion)
+            .into_iter()
+            .find(|action| matches!(action, AiAction::Move(action) if action.promotion.is_some()))
+            .expect("non-capture promotion must be noisy");
+        let promoted = apply_generated_action(promotion, &promotion_action);
+        let AiAction::Move(promotion_action) = promotion_action else {
+            unreachable!();
+        };
+        assert_eq!(
+            promoted.pieces[&promotion_action.piece_id].type_id,
+            promotion_action.promotion.unwrap()
+        );
+
+        let mut drops = searchable_state();
+        add_test_piece(
+            &mut drops,
+            "drop-target",
+            "black",
+            "queen",
+            Some(Square::new(3, 0)),
+        );
+        add_test_piece(&mut drops, "para", "white", "paratrooper", None);
+        add_test_piece(&mut drops, "quiet-pocket", "white", "knight", None);
+        let drop_actions = generate_quiescence_actions(&drops);
+        assert!(drop_actions.iter().any(|action| matches!(
+            action,
+            AiAction::Drop(action)
+                if action.piece_id == "para"
+                    && action.captured_piece_id.as_ref().map(crate::types::PieceId::as_str)
+                        == Some("drop-target")
+        )));
+        assert!(drop_actions.iter().all(|action| !matches!(
+            action,
+            AiAction::Drop(action) if action.captured_piece_id.is_none()
+        )));
+
+        let mut recalls = searchable_state();
+        add_test_piece(
+            &mut recalls,
+            "camp",
+            "white",
+            "green-camp",
+            Some(Square::new(3, 3)),
+        );
+        add_test_piece(
+            &mut recalls,
+            "friendly",
+            "white",
+            "bishop",
+            Some(Square::new(4, 3)),
+        );
+        add_test_piece(
+            &mut recalls,
+            "enemy",
+            "black",
+            "bishop",
+            Some(Square::new(2, 3)),
+        );
+        let recall_actions = generate_quiescence_actions(&recalls);
+        assert!(recall_actions.iter().any(|action| matches!(
+            action,
+            AiAction::Ability(action)
+                if action.target_piece_id.as_ref().map(crate::types::PieceId::as_str)
+                    == Some("enemy")
+        )));
+        assert!(recall_actions.iter().all(|action| !matches!(
+            action,
+            AiAction::Ability(action)
+                if action.target_piece_id.as_ref().map(crate::types::PieceId::as_str)
+                    == Some("friendly")
+        )));
+    }
+
+    #[test]
+    fn quiet_moves_drops_airdrop_relieve_and_friendly_recall_are_excluded() {
+        let mut state = searchable_state();
+        add_test_piece(
+            &mut state,
+            "camp",
+            "white",
+            "green-camp",
+            Some(Square::new(3, 3)),
+        );
+        add_test_piece(
+            &mut state,
+            "friendly",
+            "white",
+            "bishop",
+            Some(Square::new(4, 3)),
+        );
+        add_test_piece(
+            &mut state,
+            "airborne",
+            "white",
+            "airborne",
+            Some(Square::new(1, 1)),
+        );
+        add_test_piece(
+            &mut state,
+            "soldier",
+            "white",
+            "alternating-soldier",
+            Some(Square::new(5, 5)),
+        );
+        add_test_piece(&mut state, "reserve", "white", "knight", None);
+
+        let actions = generate_quiescence_actions(&state);
+        assert!(actions.iter().all(|action| match action {
+            AiAction::Move(action) => is_noisy_move(action),
+            AiAction::Drop(action) => is_noisy_drop(action),
+            AiAction::Ability(action) => {
+                is_noisy_ability(&state, action)
+                    && action.ability_id != "airdrop"
+                    && action.ability_id != "relieve"
+            }
+        }));
+        assert!(actions.iter().all(|action| !matches!(
+            action,
+            AiAction::Ability(action)
+                if action.target_piece_id.as_ref().map(crate::types::PieceId::as_str)
+                    == Some("friendly")
+        )));
+    }
+
+    #[test]
+    fn qsearch_scores_recapture_capture_drop_and_enemy_recall_horizons() {
+        let mut recapture = searchable_state();
+        relocate_test_piece(&mut recapture, "wr", Square::new(1, 0));
+        add_test_piece(
+            &mut recapture,
+            "white-queen",
+            "white",
+            "queen",
+            Some(Square::new(3, 3)),
+        );
+        add_test_piece(
+            &mut recapture,
+            "black-rook",
+            "black",
+            "rook",
+            Some(Square::new(3, 7)),
+        );
+        recapture.current_player = "black".into();
+        assert!(generate_quiescence_actions(&recapture)
+            .iter()
+            .any(|action| matches!(
+                action,
+                AiAction::Move(action)
+                    if action.piece_id == "black-rook"
+                        && action.captured_piece_id.as_ref().map(crate::types::PieceId::as_str)
+                            == Some("white-queen")
+            )));
+        let recapture_stand_pat = evaluate(&recapture, &"white".into());
+        let (SearchOutcome::Complete(recapture_score), _) = qsearch_result(recapture, 10_000, 0)
+        else {
+            panic!("recapture qsearch aborted");
+        };
+        assert!(
+            recapture_score < recapture_stand_pat,
+            "recapture score {recapture_score} should be below stand-pat {recapture_stand_pat}"
+        );
+
+        let mut capture_drop = searchable_state();
+        relocate_test_piece(&mut capture_drop, "wr", Square::new(1, 0));
+        add_test_piece(
+            &mut capture_drop,
+            "drop-victim",
+            "white",
+            "queen",
+            Some(Square::new(3, 7)),
+        );
+        add_test_piece(
+            &mut capture_drop,
+            "black-para",
+            "black",
+            "paratrooper",
+            None,
+        );
+        capture_drop.current_player = "black".into();
+        let drop_actions = generate_quiescence_actions(&capture_drop);
+        let capture_action = drop_actions
+            .iter()
+            .find(|action| matches!(action, AiAction::Drop(action) if action.captured_piece_id.as_ref().map(crate::types::PieceId::as_str) == Some("drop-victim")))
+            .expect("canonical capture-on-drop must be noisy");
+        assert!(apply_ai_action(capture_drop.clone(), capture_action).is_ok());
+        let drop_stand_pat = evaluate(&capture_drop, &"white".into());
+        let (SearchOutcome::Complete(drop_score), _) = qsearch_result(capture_drop, 10_000, 0)
+        else {
+            panic!("capture-drop qsearch aborted");
+        };
+        assert!(drop_score < drop_stand_pat);
+
+        let mut recall = searchable_state();
+        relocate_test_piece(&mut recall, "wr", Square::new(1, 0));
+        add_test_piece(
+            &mut recall,
+            "black-camp",
+            "black",
+            "green-camp",
+            Some(Square::new(3, 3)),
+        );
+        add_test_piece(
+            &mut recall,
+            "recall-victim",
+            "white",
+            "queen",
+            Some(Square::new(4, 3)),
+        );
+        recall
+            .pieces
+            .get_mut("black-camp")
+            .unwrap()
+            .move_option_cooldowns
+            .insert(
+                "normal".into(),
+                crate::types::CooldownState { remaining: 1 },
+            );
+        recall.current_player = "black".into();
+        let recall_action = generate_quiescence_actions(&recall)
+            .into_iter()
+            .find(|action| matches!(action, AiAction::Ability(action) if action.target_piece_id.as_ref().map(crate::types::PieceId::as_str) == Some("recall-victim")))
+            .expect("enemy recall must be noisy");
+        assert!(apply_ai_action(recall.clone(), &recall_action).is_ok());
+        let recall_stand_pat = evaluate(&recall, &"white".into());
+        let (SearchOutcome::Complete(recall_score), _) = qsearch_result(recall, 10_000, 0) else {
+            panic!("recall qsearch aborted");
+        };
+        assert!(recall_score < recall_stand_pat);
+    }
+
+    #[test]
+    fn qsearch_respects_node_abort_and_safety_limit_without_tt_store() {
+        let mut tactical = searchable_state();
+        add_test_piece(
+            &mut tactical,
+            "white-queen",
+            "white",
+            "queen",
+            Some(Square::new(3, 3)),
+        );
+        add_test_piece(
+            &mut tactical,
+            "black-rook",
+            "black",
+            "rook",
+            Some(Square::new(3, 7)),
+        );
+        tactical.current_player = "black".into();
+
+        let (aborted, aborted_stats) = qsearch_result(tactical.clone(), 1, 0);
+        assert_eq!(aborted, SearchOutcome::Aborted);
+        assert_eq!(aborted_stats.searched_nodes, 1);
+        assert_eq!(aborted_stats.qnodes, 1);
+        assert_eq!(aborted_stats.tt_stores, 0);
+
+        let stand_pat = evaluate(&tactical, &"white".into());
+        let (bounded, bounded_stats) = qsearch_result(tactical, 10_000, MAX_QUIESCENCE_PLIES);
+        assert_eq!(bounded, SearchOutcome::Complete(stand_pat));
+        assert_eq!(bounded_stats.searched_nodes, 1);
+        assert_eq!(bounded_stats.qnodes, 1);
+        assert_eq!(bounded_stats.tt_stores, 0);
     }
 
     #[test]
@@ -1005,5 +1444,16 @@ mod tests {
                 move_option_cooldowns: HashMap::new(),
             },
         );
+    }
+
+    fn relocate_test_piece(state: &mut GameState, id: &str, to: Square) {
+        let piece_id: crate::types::PieceId = id.into();
+        let from = state.pieces[&piece_id].current_square.unwrap();
+        state.board.squares.insert(from.to_id(), None);
+        state
+            .board
+            .squares
+            .insert(to.to_id(), Some(piece_id.clone()));
+        state.pieces.get_mut(&piece_id).unwrap().current_square = Some(to);
     }
 }

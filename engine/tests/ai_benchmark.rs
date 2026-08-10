@@ -302,6 +302,80 @@ fn benchmark_positions() -> Vec<BenchmarkPosition> {
     ]
 }
 
+fn qsearch_horizon_positions() -> Vec<BenchmarkPosition> {
+    let mut recapture = empty_state("qsearch-recapture");
+    add_board_piece(&mut recapture, "wk", "white", "king", Square::new(0, 0));
+    add_board_piece(&mut recapture, "bk", "black", "king", Square::new(7, 7));
+    add_board_piece(
+        &mut recapture,
+        "white-queen",
+        "white",
+        "queen",
+        Square::new(3, 3),
+    );
+    add_board_piece(
+        &mut recapture,
+        "black-rook",
+        "black",
+        "rook",
+        Square::new(3, 7),
+    );
+    recapture.current_player = "black".into();
+
+    let mut capture_drop = empty_state("qsearch-capture-drop");
+    add_board_piece(&mut capture_drop, "wk", "white", "king", Square::new(0, 0));
+    add_board_piece(&mut capture_drop, "bk", "black", "king", Square::new(7, 7));
+    add_board_piece(
+        &mut capture_drop,
+        "drop-victim",
+        "white",
+        "queen",
+        Square::new(3, 7),
+    );
+    add_pocket_piece(&mut capture_drop, "black-para", "black", "paratrooper");
+    capture_drop.current_player = "black".into();
+
+    let mut recall = empty_state("qsearch-enemy-recall");
+    add_board_piece(&mut recall, "wk", "white", "king", Square::new(0, 0));
+    add_board_piece(&mut recall, "bk", "black", "king", Square::new(7, 7));
+    add_board_piece(
+        &mut recall,
+        "black-camp",
+        "black",
+        "green-camp",
+        Square::new(3, 3),
+    );
+    add_board_piece(
+        &mut recall,
+        "recall-victim",
+        "white",
+        "queen",
+        Square::new(4, 3),
+    );
+    recall
+        .pieces
+        .get_mut("black-camp")
+        .unwrap()
+        .move_option_cooldowns
+        .insert("normal".into(), CooldownState { remaining: 1 });
+    recall.current_player = "black".into();
+
+    vec![
+        BenchmarkPosition {
+            name: "qsearch-recapture",
+            state: recapture,
+        },
+        BenchmarkPosition {
+            name: "qsearch-capture-drop",
+            state: capture_drop,
+        },
+        BenchmarkPosition {
+            name: "qsearch-enemy-recall",
+            state: recall,
+        },
+    ]
+}
+
 fn action_is_legal(state: &GameState, selected: &AiAction) -> bool {
     generate_ai_actions(state)
         .iter()
@@ -524,6 +598,46 @@ fn ai_search_difficulty_budgets() {
     }
 }
 
+#[test]
+#[ignore = "QSearch horizon profiling; run explicitly with --features profiling --ignored --nocapture"]
+fn qsearch_horizon_benchmark() {
+    let limits = SearchLimits {
+        max_depth_actions: 1,
+        max_nodes: 100_000,
+        soft_time_ms: 10_000,
+        hard_time_ms: 20_000,
+    };
+    for position in qsearch_horizon_positions() {
+        let before = profiling::snapshot();
+        let started = Instant::now();
+        let decision = choose_bot_action_with_limits_and_options(
+            &position.state,
+            &"black".into(),
+            BotDifficulty::Normal,
+            limits,
+            SearchOptions::default(),
+        )
+        .unwrap();
+        let counters = profiling::snapshot().since(before);
+        assert!(action_is_legal(&position.state, &decision.action));
+        assert!(decision.stats.qnodes <= decision.searched_nodes);
+        println!(
+            "position={} action={} score={} nodes={} qnodes={} completed_depth={} elapsed_ms={:.3} legal_gen={} drop_gen={} evaluations={} action_applications={}",
+            position.name,
+            serde_json::to_string(&decision.action).unwrap(),
+            decision.score,
+            decision.searched_nodes,
+            decision.stats.qnodes,
+            decision.completed_depth,
+            started.elapsed().as_secs_f64() * 1_000.0,
+            counters.legal_move_generation_calls,
+            counters.drop_generation_calls,
+            counters.evaluation_calls,
+            counters.action_application_calls,
+        );
+    }
+}
+
 fn run_search_baseline(options: SearchOptions) {
     for position in benchmark_positions() {
         let before = profiling::snapshot();
@@ -539,12 +653,13 @@ fn run_search_baseline(options: SearchOptions) {
         let counters = profiling::snapshot().since(before);
         assert!(action_is_legal(&position.state, &decision.action));
         println!(
-            "position={} tt_enabled={} action={} score={} nodes={} reached_depth={} completed_depth={} iterations_started={} iterations_completed={} beta_cutoffs={} position_key_generations={} tt_probes={} tt_hits={} tt_cutoffs={} tt_stores={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
+            "position={} tt_enabled={} action={} score={} nodes={} qnodes={} reached_depth={} completed_depth={} iterations_started={} iterations_completed={} beta_cutoffs={} position_key_generations={} tt_probes={} tt_hits={} tt_cutoffs={} tt_stores={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
             position.name,
             options.use_transposition_table,
             serde_json::to_string(&decision.action).unwrap(),
             decision.score,
             decision.searched_nodes,
+            decision.stats.qnodes,
             decision.depth_reached,
             decision.completed_depth,
             decision.stats.iterations_started,
