@@ -19,6 +19,10 @@ use crate::types::{
 };
 
 const MAX_QUIESCENCE_PLIES: u8 = 8;
+const SEARCH_NEG_INF: i32 = i32::MIN + 1;
+const SEARCH_POS_INF: i32 = i32::MAX;
+const ASPIRATION_INITIAL_DELTA: i32 = 250;
+const ASPIRATION_MAX_WIDENINGS: u8 = 4;
 
 pub fn generate_ai_actions(state: &GameState) -> Vec<AiAction> {
     if state.phase == GamePhase::Ended || state.result.is_some() {
@@ -400,7 +404,42 @@ fn store_table_entry(
 struct RootSearchResult {
     best: Option<(AiAction, i32)>,
     scores: Vec<(AiAction, i32)>,
-    completed: bool,
+}
+
+enum RootSearchOutcome {
+    Exact(RootSearchResult),
+    FailLow(RootSearchResult),
+    FailHigh(RootSearchResult),
+    Aborted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SearchWindow {
+    alpha: i32,
+    beta: i32,
+}
+
+impl SearchWindow {
+    const FULL: Self = Self {
+        alpha: SEARCH_NEG_INF,
+        beta: SEARCH_POS_INF,
+    };
+
+    fn around(score: i32, delta: i32) -> Self {
+        let delta = i64::from(delta.max(1));
+        Self {
+            alpha: (i64::from(score) - delta)
+                .clamp(i64::from(SEARCH_NEG_INF), i64::from(SEARCH_POS_INF))
+                as i32,
+            beta: (i64::from(score) + delta)
+                .clamp(i64::from(SEARCH_NEG_INF), i64::from(SEARCH_POS_INF))
+                as i32,
+        }
+    }
+
+    const fn is_full(self) -> bool {
+        self.alpha == SEARCH_NEG_INF && self.beta == SEARCH_POS_INF
+    }
 }
 
 fn prioritize_action(actions: &mut [AiAction], priority: Option<&AiAction>) {
@@ -416,21 +455,18 @@ fn search_root(
     state: &GameState,
     actions: &[AiAction],
     depth: u8,
+    window: SearchWindow,
     context: &mut SearchContext<'_>,
-) -> RootSearchResult {
+) -> RootSearchOutcome {
     let maximizing = &state.current_player == context.bot_player_id;
     let mut best: Option<(AiAction, i32)> = None;
     let mut scores = Vec::with_capacity(actions.len());
-    let mut alpha = i32::MIN + 1;
-    let mut beta = i32::MAX;
+    let mut alpha = window.alpha;
+    let mut beta = window.beta;
 
     for action in actions {
         if context.hard_limit_reached() {
-            return RootSearchResult {
-                best: None,
-                scores: Vec::new(),
-                completed: false,
-            };
+            return RootSearchOutcome::Aborted;
         }
         let next_state = apply_generated_action(state.clone(), action);
         let score = if next_state
@@ -444,11 +480,7 @@ fn search_root(
             let SearchOutcome::Complete(score) =
                 alpha_beta(next_state, depth.saturating_sub(1), 1, alpha, beta, context)
             else {
-                return RootSearchResult {
-                    best: None,
-                    scores: Vec::new(),
-                    completed: false,
-                };
+                return RootSearchOutcome::Aborted;
             };
             score
         };
@@ -468,11 +500,71 @@ fn search_root(
         } else {
             beta = beta.min(score);
         }
+        if alpha >= beta {
+            break;
+        }
     }
-    RootSearchResult {
-        best,
-        scores,
-        completed: true,
+    let result = RootSearchResult { best, scores };
+    let score = result.best.as_ref().map_or_else(
+        || evaluate(state, context.bot_player_id),
+        |(_, score)| *score,
+    );
+    if window.is_full() {
+        RootSearchOutcome::Exact(result)
+    } else if score <= window.alpha {
+        RootSearchOutcome::FailLow(result)
+    } else if score >= window.beta {
+        RootSearchOutcome::FailHigh(result)
+    } else {
+        RootSearchOutcome::Exact(result)
+    }
+}
+
+fn search_iteration(
+    state: &GameState,
+    actions: &[AiAction],
+    depth: u8,
+    previous_completed_score: Option<i32>,
+    aspiration_enabled: bool,
+    aspiration_initial_delta: i32,
+    context: &mut SearchContext<'_>,
+) -> Option<RootSearchResult> {
+    let use_aspiration = aspiration_enabled && depth >= 2 && previous_completed_score.is_some();
+    let center = previous_completed_score.unwrap_or_default();
+    let mut delta = aspiration_initial_delta.max(1);
+    let mut window = if use_aspiration {
+        context.stats.aspiration_searches += 1;
+        SearchWindow::around(center, delta)
+    } else {
+        SearchWindow::FULL
+    };
+    let mut failed_pass_best = None;
+    let mut widenings = 0_u8;
+
+    loop {
+        let mut pass_actions = actions.to_vec();
+        prioritize_action(&mut pass_actions, failed_pass_best.as_ref());
+        match search_root(state, &pass_actions, depth, window, context) {
+            RootSearchOutcome::Exact(result) => return Some(result),
+            RootSearchOutcome::Aborted => return None,
+            RootSearchOutcome::FailLow(result) => {
+                context.stats.aspiration_fail_lows += 1;
+                failed_pass_best = result.best.map(|(action, _)| action);
+            }
+            RootSearchOutcome::FailHigh(result) => {
+                context.stats.aspiration_fail_highs += 1;
+                failed_pass_best = result.best.map(|(action, _)| action);
+            }
+        }
+
+        context.stats.aspiration_researches += 1;
+        if widenings >= ASPIRATION_MAX_WIDENINGS {
+            window = SearchWindow::FULL;
+        } else {
+            delta = delta.saturating_mul(2);
+            window = SearchWindow::around(center, delta);
+            widenings += 1;
+        }
     }
 }
 
@@ -516,7 +608,8 @@ pub fn choose_bot_action_with_limits_and_options(
         bot_player_id,
         difficulty,
         limits,
-        options.use_transposition_table,
+        options,
+        ASPIRATION_INITIAL_DELTA,
     )
 }
 
@@ -541,7 +634,8 @@ fn choose_bot_action_with_config(
     bot_player_id: &PlayerId,
     difficulty: BotDifficulty,
     limits: SearchLimits,
-    transposition_table_enabled: bool,
+    options: SearchOptions,
+    aspiration_initial_delta: i32,
 ) -> Option<BotDecision> {
     let started = Instant::now();
     let mut actions = generate_ai_actions(state);
@@ -557,11 +651,13 @@ fn choose_bot_action_with_config(
         limits: &limits,
         started,
         stats: SearchStats::default(),
-        transposition_table: transposition_table_enabled
+        transposition_table: options
+            .use_transposition_table
             .then(|| TranspositionTable::new(limits.max_nodes.min(65_536) as usize)),
     };
     let mut last_completed = None;
     let mut previous_iteration_best = None;
+    let mut previous_completed_score = None;
     for depth in 1..=limits.max_depth_actions {
         if context.hard_limit_reached() {
             break;
@@ -569,11 +665,19 @@ fn choose_bot_action_with_config(
         let mut iteration_actions = actions.clone();
         prioritize_action(&mut iteration_actions, previous_iteration_best.as_ref());
         context.stats.iterations_started += 1;
-        let root_result = search_root(state, &iteration_actions, depth, &mut context);
-        if !root_result.completed {
+        let Some(root_result) = search_iteration(
+            state,
+            &iteration_actions,
+            depth,
+            previous_completed_score,
+            options.use_aspiration_window,
+            aspiration_initial_delta,
+            &mut context,
+        ) else {
             break;
-        }
+        };
         previous_iteration_best = root_result.best.as_ref().map(|(action, _)| action.clone());
+        previous_completed_score = root_result.best.as_ref().map(|(_, score)| *score);
         context.stats.completed_depth = depth;
         context.stats.iterations_completed += 1;
         last_completed = Some(root_result);
@@ -808,9 +912,205 @@ mod tests {
             &"white".into(),
             BotDifficulty::Normal,
             limits,
-            use_transposition_table,
+            SearchOptions {
+                use_transposition_table,
+                ..SearchOptions::default()
+            },
+            ASPIRATION_INITIAL_DELTA,
         )
         .unwrap()
+    }
+
+    fn fail_low_state() -> GameState {
+        let mut state = searchable_state();
+        relocate_test_piece(&mut state, "wr", Square::new(1, 0));
+        state
+    }
+
+    fn fail_high_state() -> GameState {
+        let mut black_quiet = searchable_state();
+        relocate_test_piece(&mut black_quiet, "wr", Square::new(1, 0));
+        add_test_piece(
+            &mut black_quiet,
+            "black-rook",
+            "black",
+            "rook",
+            Some(Square::new(1, 7)),
+        );
+        black_quiet.current_player = "black".into();
+        black_quiet
+    }
+
+    fn search_with_test_config(
+        state: &GameState,
+        bot: &str,
+        max_depth_actions: u8,
+        max_nodes: u64,
+        use_transposition_table: bool,
+        use_aspiration_window: bool,
+        aspiration_delta: i32,
+    ) -> BotDecision {
+        choose_bot_action_with_config(
+            state,
+            &bot.into(),
+            BotDifficulty::Normal,
+            SearchLimits {
+                max_depth_actions,
+                max_nodes,
+                soft_time_ms: 10_000,
+                hard_time_ms: 20_000,
+            },
+            SearchOptions {
+                use_transposition_table,
+                use_aspiration_window,
+            },
+            aspiration_delta,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn stable_aspiration_completes_without_research_and_off_has_zero_stats() {
+        let state = searchable_state();
+        let full = search_with_test_config(&state, "white", 2, 100_000, true, false, 1);
+        let aspiration = search_with_test_config(&state, "white", 2, 100_000, true, true, 1);
+
+        assert_eq!(aspiration.action, full.action);
+        assert_eq!(aspiration.score, full.score);
+        assert_eq!(aspiration.completed_depth, 2);
+        assert_eq!(aspiration.stats.aspiration_searches, 1);
+        assert_eq!(aspiration.stats.aspiration_researches, 0);
+        assert_eq!(aspiration.stats.aspiration_fail_lows, 0);
+        assert_eq!(aspiration.stats.aspiration_fail_highs, 0);
+        assert_eq!(aspiration.stats.iterations_started, 2);
+        assert_eq!(aspiration.stats.iterations_completed, 2);
+
+        assert_eq!(full.stats.aspiration_searches, 0);
+        assert_eq!(full.stats.aspiration_researches, 0);
+        assert_eq!(full.stats.aspiration_fail_lows, 0);
+        assert_eq!(full.stats.aspiration_fail_highs, 0);
+    }
+
+    #[test]
+    fn tiny_windows_fail_low_and_high_then_match_full_window_with_or_without_tt() {
+        for (state, bot, expect_low) in [
+            (fail_low_state(), "white", true),
+            (fail_high_state(), "black", false),
+        ] {
+            for use_transposition_table in [false, true] {
+                let full = search_with_test_config(
+                    &state,
+                    bot,
+                    2,
+                    100_000,
+                    use_transposition_table,
+                    false,
+                    1,
+                );
+                let aspiration = search_with_test_config(
+                    &state,
+                    bot,
+                    2,
+                    100_000,
+                    use_transposition_table,
+                    true,
+                    1,
+                );
+
+                assert_eq!(aspiration.action, full.action);
+                assert_eq!(aspiration.score, full.score);
+                assert_eq!(aspiration.completed_depth, full.completed_depth);
+                assert_eq!(aspiration.stats.iterations_started, 2);
+                assert_eq!(aspiration.stats.iterations_completed, 2);
+                assert_eq!(aspiration.stats.aspiration_searches, 1);
+                assert!(aspiration.stats.aspiration_researches >= 2);
+                if expect_low {
+                    assert!(aspiration.stats.aspiration_fail_lows >= 2);
+                    assert_eq!(aspiration.stats.aspiration_fail_highs, 0);
+                    if !use_transposition_table {
+                        assert_eq!(aspiration.stats.aspiration_researches, 3);
+                    }
+                } else {
+                    assert!(aspiration.stats.aspiration_fail_highs >= 2);
+                    assert_eq!(aspiration.stats.aspiration_fail_lows, 0);
+                    if !use_transposition_table {
+                        assert_eq!(aspiration.stats.aspiration_researches, 2);
+                    }
+                }
+                if !use_transposition_table {
+                    assert_eq!(aspiration.stats.tt_probes, 0);
+                    assert_eq!(aspiration.stats.tt_hits, 0);
+                    assert_eq!(aspiration.stats.tt_cutoffs, 0);
+                    assert_eq!(aspiration.stats.tt_stores, 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn aspiration_research_abort_returns_previous_completed_iteration() {
+        let state = fail_low_state();
+        let depth_one = search_with_test_config(&state, "white", 1, 100_000, false, true, 1);
+        let completed = search_with_test_config(&state, "white", 2, 100_000, false, true, 1);
+        assert!(completed.stats.aspiration_researches > 0);
+
+        let interrupted = (depth_one.searched_nodes + 1..completed.searched_nodes)
+            .map(|max_nodes| search_with_test_config(&state, "white", 2, max_nodes, false, true, 1))
+            .find(|decision| {
+                decision.completed_depth == 1 && decision.stats.aspiration_researches > 0
+            })
+            .expect("a deterministic node budget must abort an aspiration re-search");
+
+        assert_eq!(interrupted.completed_depth, 1);
+        assert_eq!(interrupted.action, depth_one.action);
+        assert_eq!(interrupted.score, depth_one.score);
+        assert_eq!(interrupted.stats.iterations_started, 2);
+        assert_eq!(interrupted.stats.iterations_completed, 1);
+        assert!(interrupted.stats.aspiration_fail_lows > 0);
+        assert!(interrupted.stats.aspiration_researches > 0);
+    }
+
+    #[test]
+    fn aspiration_window_arithmetic_is_overflow_safe() {
+        let low = SearchWindow::around(i32::MIN, i32::MAX);
+        let high = SearchWindow::around(i32::MAX, i32::MAX);
+        assert_eq!(low.alpha, SEARCH_NEG_INF);
+        assert!(low.beta > low.alpha);
+        assert_eq!(high.beta, SEARCH_POS_INF);
+        assert!(high.alpha < high.beta);
+        assert!(SearchWindow::around(WIN_SCORE, ASPIRATION_INITIAL_DELTA).alpha < WIN_SCORE);
+        assert!(SearchWindow::around(WIN_SCORE, ASPIRATION_INITIAL_DELTA).beta > WIN_SCORE);
+    }
+
+    #[test]
+    fn aspiration_widening_has_a_finite_full_window_fallback() {
+        let state = searchable_state();
+        let limits = SearchLimits {
+            max_depth_actions: 2,
+            max_nodes: 100_000,
+            soft_time_ms: 10_000,
+            hard_time_ms: 20_000,
+        };
+        let player = "white".to_string();
+        let mut actions = generate_ai_actions(&state);
+        order_ai_actions(&state, &mut actions, &player);
+        let mut context = SearchContext {
+            bot_player_id: &player,
+            limits: &limits,
+            started: Instant::now(),
+            stats: SearchStats::default(),
+            transposition_table: None,
+        };
+
+        let result = search_iteration(&state, &actions, 2, Some(0), true, 1, &mut context)
+            .expect("full-window fallback must complete");
+
+        assert_eq!(
+            result.best.as_ref().map(|(_, score)| *score),
+            Some(WIN_SCORE)
+        );
+        assert_eq!(context.stats.aspiration_fail_highs, 5);
+        assert_eq!(context.stats.aspiration_researches, 5);
     }
 
     #[test]
@@ -928,12 +1228,24 @@ mod tests {
             hard_time_ms: 20_000,
         };
         for difficulty in [BotDifficulty::Normal, BotDifficulty::Hard] {
-            let first =
-                choose_bot_action_with_config(&state, &"white".into(), difficulty, limits, true)
-                    .unwrap();
-            let second =
-                choose_bot_action_with_config(&state, &"white".into(), difficulty, limits, true)
-                    .unwrap();
+            let first = choose_bot_action_with_config(
+                &state,
+                &"white".into(),
+                difficulty,
+                limits,
+                SearchOptions::default(),
+                ASPIRATION_INITIAL_DELTA,
+            )
+            .unwrap();
+            let second = choose_bot_action_with_config(
+                &state,
+                &"white".into(),
+                difficulty,
+                limits,
+                SearchOptions::default(),
+                ASPIRATION_INITIAL_DELTA,
+            )
+            .unwrap();
             assert_eq!(first.action, second.action);
             assert_eq!(first.score, second.score);
             assert_eq!(first.completed_depth, second.completed_depth);
@@ -1460,7 +1772,11 @@ mod tests {
                 &"white".into(),
                 BotDifficulty::Normal,
                 limits,
-                false,
+                SearchOptions {
+                    use_transposition_table: false,
+                    ..SearchOptions::default()
+                },
+                ASPIRATION_INITIAL_DELTA,
             )
             .unwrap_or_else(|| panic!("{name} produced no non-TT decision"));
             let with = choose_bot_action_with_config(
@@ -1468,7 +1784,8 @@ mod tests {
                 &"white".into(),
                 BotDifficulty::Normal,
                 limits,
-                true,
+                SearchOptions::default(),
+                ASPIRATION_INITIAL_DELTA,
             )
             .unwrap_or_else(|| panic!("{name} produced no TT decision"));
             assert_eq!(with.action, without.action, "{name} action differs");

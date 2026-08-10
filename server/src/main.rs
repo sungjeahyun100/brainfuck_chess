@@ -200,6 +200,10 @@ struct BotTurnStats {
     tt_hits: u64,
     tt_cutoffs: u64,
     tt_stores: u64,
+    aspiration_searches: u64,
+    aspiration_researches: u64,
+    aspiration_fail_lows: u64,
+    aspiration_fail_highs: u64,
     elapsed_ms: u64,
 }
 
@@ -1654,6 +1658,10 @@ async fn run_bot_turn(
             tt_hits: result.stats.tt_hits,
             tt_cutoffs: result.stats.tt_cutoffs,
             tt_stores: result.stats.tt_stores,
+            aspiration_searches: result.stats.aspiration_searches,
+            aspiration_researches: result.stats.aspiration_researches,
+            aspiration_fail_lows: result.stats.aspiration_fail_lows,
+            aspiration_fail_highs: result.stats.aspiration_fail_highs,
             elapsed_ms: result.elapsed_ms,
         },
     }))

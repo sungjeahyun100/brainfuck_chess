@@ -474,47 +474,68 @@ fn benchmark_positions_match_with_transposition_table_enabled_and_disabled() {
         hard_time_ms: 20_000,
     };
     for position in benchmark_positions() {
-        let without = choose_bot_action_with_limits_and_options(
-            &position.state,
-            &"white".into(),
-            BotDifficulty::Normal,
-            limits,
+        let configurations = [
+            SearchOptions {
+                use_transposition_table: true,
+                use_aspiration_window: false,
+            },
+            SearchOptions {
+                use_transposition_table: true,
+                use_aspiration_window: true,
+            },
             SearchOptions {
                 use_transposition_table: false,
+                use_aspiration_window: false,
             },
-        )
-        .unwrap_or_else(|| panic!("{} produced no non-TT decision", position.name));
-        let with = choose_bot_action_with_limits_and_options(
-            &position.state,
-            &"white".into(),
-            BotDifficulty::Normal,
-            limits,
-            SearchOptions::default(),
-        )
-        .unwrap_or_else(|| panic!("{} produced no TT decision", position.name));
-        assert_eq!(
-            with.completed_depth, without.completed_depth,
-            "{} depth",
-            position.name
-        );
-        assert_eq!(with.action, without.action, "{} action", position.name);
-        assert_eq!(with.score, without.score, "{} score", position.name);
-        assert_eq!(
-            without.stats.tt_probes, 0,
-            "{} TT-off probes",
-            position.name
-        );
-        assert_eq!(without.stats.tt_hits, 0, "{} TT-off hits", position.name);
-        assert_eq!(
-            without.stats.tt_cutoffs, 0,
-            "{} TT-off cutoffs",
-            position.name
-        );
-        assert_eq!(
-            without.stats.tt_stores, 0,
-            "{} TT-off stores",
-            position.name
-        );
+            SearchOptions {
+                use_transposition_table: false,
+                use_aspiration_window: true,
+            },
+        ];
+        let decisions = configurations.map(|options| {
+            choose_bot_action_with_limits_and_options(
+                &position.state,
+                &"white".into(),
+                BotDifficulty::Normal,
+                limits,
+                options,
+            )
+            .unwrap_or_else(|| panic!("{} produced no AI decision", position.name))
+        });
+        let expected = &decisions[0];
+        for (options, decision) in configurations.into_iter().zip(&decisions) {
+            assert_eq!(
+                decision.completed_depth, expected.completed_depth,
+                "{} depth",
+                position.name
+            );
+            assert_eq!(decision.action, expected.action, "{} action", position.name);
+            assert_eq!(decision.score, expected.score, "{} score", position.name);
+            if !options.use_transposition_table {
+                assert_eq!(
+                    decision.stats.tt_probes, 0,
+                    "{} TT-off probes",
+                    position.name
+                );
+                assert_eq!(decision.stats.tt_hits, 0, "{} TT-off hits", position.name);
+                assert_eq!(
+                    decision.stats.tt_cutoffs, 0,
+                    "{} TT-off cutoffs",
+                    position.name
+                );
+                assert_eq!(
+                    decision.stats.tt_stores, 0,
+                    "{} TT-off stores",
+                    position.name
+                );
+            }
+            if !options.use_aspiration_window {
+                assert_eq!(decision.stats.aspiration_searches, 0);
+                assert_eq!(decision.stats.aspiration_researches, 0);
+                assert_eq!(decision.stats.aspiration_fail_lows, 0);
+                assert_eq!(decision.stats.aspiration_fail_highs, 0);
+            }
+        }
     }
 }
 
@@ -537,6 +558,7 @@ fn position_keys_are_generated_only_when_transposition_table_is_enabled() {
             limits,
             SearchOptions {
                 use_transposition_table,
+                ..SearchOptions::default()
             },
         )
         .unwrap();
@@ -566,6 +588,16 @@ fn ai_search_baseline() {
 fn ai_search_tt_off_comparison() {
     run_search_baseline(SearchOptions {
         use_transposition_table: false,
+        ..SearchOptions::default()
+    });
+}
+
+#[test]
+#[ignore = "aspiration-off full-window ID comparison; run explicitly with --features profiling --ignored --nocapture"]
+fn ai_search_aspiration_off_comparison() {
+    run_search_baseline(SearchOptions {
+        use_aspiration_window: false,
+        ..SearchOptions::default()
     });
 }
 
@@ -583,7 +615,7 @@ fn ai_search_difficulty_budgets() {
                 .unwrap_or_else(|| panic!("{} produced no AI decision", position.name));
             assert!(action_is_legal(&position.state, &decision.action));
             println!(
-                "position={} difficulty={:?} max_depth={} nodes={} reached_depth={} completed_depth={} iterations_started={} iterations_completed={} elapsed_ms={:.3}",
+                "position={} difficulty={:?} max_depth={} nodes={} reached_depth={} completed_depth={} iterations_started={} iterations_completed={} aspiration_searches={} aspiration_researches={} aspiration_fail_lows={} aspiration_fail_highs={} elapsed_ms={:.3}",
                 position.name,
                 difficulty,
                 difficulty.limits().max_depth_actions,
@@ -592,6 +624,10 @@ fn ai_search_difficulty_budgets() {
                 decision.completed_depth,
                 decision.stats.iterations_started,
                 decision.stats.iterations_completed,
+                decision.stats.aspiration_searches,
+                decision.stats.aspiration_researches,
+                decision.stats.aspiration_fail_lows,
+                decision.stats.aspiration_fail_highs,
                 started.elapsed().as_secs_f64() * 1_000.0,
             );
         }
@@ -653,9 +689,10 @@ fn run_search_baseline(options: SearchOptions) {
         let counters = profiling::snapshot().since(before);
         assert!(action_is_legal(&position.state, &decision.action));
         println!(
-            "position={} tt_enabled={} action={} score={} nodes={} qnodes={} reached_depth={} completed_depth={} iterations_started={} iterations_completed={} beta_cutoffs={} position_key_generations={} tt_probes={} tt_hits={} tt_cutoffs={} tt_stores={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
+            "position={} tt_enabled={} aspiration_enabled={} action={} score={} nodes={} qnodes={} reached_depth={} completed_depth={} iterations_started={} iterations_completed={} aspiration_searches={} aspiration_researches={} aspiration_fail_lows={} aspiration_fail_highs={} beta_cutoffs={} position_key_generations={} tt_probes={} tt_hits={} tt_cutoffs={} tt_stores={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
             position.name,
             options.use_transposition_table,
+            options.use_aspiration_window,
             serde_json::to_string(&decision.action).unwrap(),
             decision.score,
             decision.searched_nodes,
@@ -664,6 +701,10 @@ fn run_search_baseline(options: SearchOptions) {
             decision.completed_depth,
             decision.stats.iterations_started,
             decision.stats.iterations_completed,
+            decision.stats.aspiration_searches,
+            decision.stats.aspiration_researches,
+            decision.stats.aspiration_fail_lows,
+            decision.stats.aspiration_fail_highs,
             decision.stats.beta_cutoffs,
             counters.position_key_generation_calls,
             decision.stats.tt_probes,

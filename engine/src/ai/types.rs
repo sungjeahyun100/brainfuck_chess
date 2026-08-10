@@ -28,14 +28,17 @@ pub struct SearchLimits {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SearchOptions {
     pub use_transposition_table: bool,
+    pub use_aspiration_window: bool,
 }
 
 impl Default for SearchOptions {
     fn default() -> Self {
         Self {
             use_transposition_table: true,
+            use_aspiration_window: true,
         }
     }
 }
@@ -91,7 +94,10 @@ pub struct SearchStats {
     pub tt_hits: u64,
     pub tt_cutoffs: u64,
     pub tt_stores: u64,
+    pub aspiration_searches: u64,
     pub aspiration_researches: u64,
+    pub aspiration_fail_lows: u64,
+    pub aspiration_fail_highs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,4 +120,20 @@ pub struct BotTurnResult {
 pub struct ActionTimelineFrame {
     pub action: AiAction,
     pub state: crate::types::GameState,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SearchOptions;
+
+    #[test]
+    fn search_options_default_missing_aspiration_to_enabled() {
+        let legacy: SearchOptions =
+            serde_json::from_str(r#"{"use_transposition_table":false}"#).unwrap();
+        assert!(!legacy.use_transposition_table);
+        assert!(legacy.use_aspiration_window);
+
+        let defaults: SearchOptions = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults, SearchOptions::default());
+    }
 }
