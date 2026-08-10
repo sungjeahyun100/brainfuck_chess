@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::actions::{apply_canonical_action, submit_action};
-use crate::ai::evaluate::{evaluate, WIN_SCORE};
+use crate::ai::evaluate::{evaluate, evaluate_without_king_capture_threat, WIN_SCORE};
 use crate::ai::move_ordering::{order_ai_actions, order_quiescence_actions};
 use crate::ai::transposition_table::{
     BoundType, PositionKey, TranspositionEntry, TranspositionTable,
@@ -336,7 +336,7 @@ fn quiescence_search(
     }
     context.stats.qnodes += 1;
 
-    let stand_pat = evaluate(&state, context.bot_player_id);
+    let stand_pat = evaluate_without_king_capture_threat(&state, context.bot_player_id);
     if state.phase == GamePhase::Ended || state.result.is_some() {
         return SearchOutcome::Complete(stand_pat);
     }
@@ -679,7 +679,7 @@ mod tests {
     use super::*;
     use crate::pieces::default_pieces::all_default_definitions;
     use crate::rules::create_board;
-    use crate::types::{ChessemblyProgramCache, Deck, Piece, Square};
+    use crate::types::{ChessemblyProgramCache, Deck, GameEndReason, Piece, Square};
 
     fn searchable_state() -> GameState {
         let definitions: HashMap<_, _> = all_default_definitions()
@@ -960,6 +960,89 @@ mod tests {
     }
 
     #[test]
+    fn qsearch_stand_pat_excludes_avoidable_king_capture_threat() {
+        let mut state = searchable_state();
+        state.current_player = "black".into();
+
+        assert!(generate_legal_move_actions(&state)
+            .iter()
+            .any(|action| { action.piece_id == "bk" && action.captured_piece_id.is_none() }));
+
+        let normal_score = evaluate(&state, &"white".into());
+        let qsearch_stand_pat = evaluate_without_king_capture_threat(&state, &"white".into());
+        assert_eq!(normal_score, qsearch_stand_pat + 100_000);
+
+        let (result, _) = qsearch_result(state, 10_000, MAX_QUIESCENCE_PLIES);
+        assert_eq!(result, SearchOutcome::Complete(qsearch_stand_pat));
+        assert!(qsearch_stand_pat.abs() < 100_000);
+    }
+
+    #[test]
+    fn qsearch_finds_actual_move_and_drop_king_captures() {
+        let move_capture = searchable_state();
+        let move_actions = generate_quiescence_actions(&move_capture);
+        assert!(matches!(
+            move_actions.first(),
+            Some(AiAction::Move(action))
+                if action.captured_piece_id.as_ref().map(crate::types::PieceId::as_str)
+                    == Some("bk")
+        ));
+        let (move_result, _) = qsearch_result(move_capture, 10_000, 0);
+        assert_eq!(move_result, SearchOutcome::Complete(WIN_SCORE));
+
+        let mut drop_capture = searchable_state();
+        relocate_test_piece(&mut drop_capture, "wr", Square::new(1, 1));
+        relocate_test_piece(&mut drop_capture, "bk", Square::new(3, 0));
+        add_test_piece(
+            &mut drop_capture,
+            "ordinary-target",
+            "black",
+            "queen",
+            Some(Square::new(4, 0)),
+        );
+        add_test_piece(&mut drop_capture, "para", "white", "paratrooper", None);
+
+        let actions = generate_quiescence_actions(&drop_capture);
+        let king_drop = actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action,
+                    AiAction::Drop(action)
+                        if action.captured_piece_id.as_ref().map(crate::types::PieceId::as_str)
+                            == Some("bk")
+                )
+            })
+            .expect("canonical King capture-on-drop must be noisy")
+            .clone();
+        let king_index = actions
+            .iter()
+            .position(|action| action == &king_drop)
+            .unwrap();
+        let ordinary_index = actions
+            .iter()
+            .position(|action| {
+                matches!(
+                    action,
+                    AiAction::Drop(action)
+                        if action.captured_piece_id.as_ref().map(crate::types::PieceId::as_str)
+                            == Some("ordinary-target")
+                )
+            })
+            .expect("ordinary capture-on-drop must be present for ordering comparison");
+        assert!(king_index < ordinary_index);
+
+        let applied = apply_ai_action(drop_capture.clone(), &king_drop).unwrap();
+        assert_eq!(applied.phase, GamePhase::Ended);
+        let result = applied.result.expect("King capture must end the game");
+        assert_eq!(result.winner.as_deref(), Some("white"));
+        assert_eq!(result.reason, GameEndReason::KingCapture);
+
+        let (drop_result, _) = qsearch_result(drop_capture, 10_000, 0);
+        assert_eq!(drop_result, SearchOutcome::Complete(WIN_SCORE));
+    }
+
+    #[test]
     fn noisy_policy_includes_capture_promotion_drop_capture_and_enemy_recall() {
         let mut promotion = searchable_state();
         add_test_piece(
@@ -1121,7 +1204,7 @@ mod tests {
                         && action.captured_piece_id.as_ref().map(crate::types::PieceId::as_str)
                             == Some("white-queen")
             )));
-        let recapture_stand_pat = evaluate(&recapture, &"white".into());
+        let recapture_stand_pat = evaluate_without_king_capture_threat(&recapture, &"white".into());
         let (SearchOutcome::Complete(recapture_score), _) = qsearch_result(recapture, 10_000, 0)
         else {
             panic!("recapture qsearch aborted");
@@ -1154,7 +1237,7 @@ mod tests {
             .find(|action| matches!(action, AiAction::Drop(action) if action.captured_piece_id.as_ref().map(crate::types::PieceId::as_str) == Some("drop-victim")))
             .expect("canonical capture-on-drop must be noisy");
         assert!(apply_ai_action(capture_drop.clone(), capture_action).is_ok());
-        let drop_stand_pat = evaluate(&capture_drop, &"white".into());
+        let drop_stand_pat = evaluate_without_king_capture_threat(&capture_drop, &"white".into());
         let (SearchOutcome::Complete(drop_score), _) = qsearch_result(capture_drop, 10_000, 0)
         else {
             panic!("capture-drop qsearch aborted");
@@ -1192,7 +1275,7 @@ mod tests {
             .find(|action| matches!(action, AiAction::Ability(action) if action.target_piece_id.as_ref().map(crate::types::PieceId::as_str) == Some("recall-victim")))
             .expect("enemy recall must be noisy");
         assert!(apply_ai_action(recall.clone(), &recall_action).is_ok());
-        let recall_stand_pat = evaluate(&recall, &"white".into());
+        let recall_stand_pat = evaluate_without_king_capture_threat(&recall, &"white".into());
         let (SearchOutcome::Complete(recall_score), _) = qsearch_result(recall, 10_000, 0) else {
             panic!("recall qsearch aborted");
         };
@@ -1224,7 +1307,7 @@ mod tests {
         assert_eq!(aborted_stats.qnodes, 1);
         assert_eq!(aborted_stats.tt_stores, 0);
 
-        let stand_pat = evaluate(&tactical, &"white".into());
+        let stand_pat = evaluate_without_king_capture_threat(&tactical, &"white".into());
         let (bounded, bounded_stats) = qsearch_result(tactical, 10_000, MAX_QUIESCENCE_PLIES);
         assert_eq!(bounded, SearchOutcome::Complete(stand_pat));
         assert_eq!(bounded_stats.searched_nodes, 1);

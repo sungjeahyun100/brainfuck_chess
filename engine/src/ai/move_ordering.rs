@@ -70,7 +70,18 @@ fn quiescence_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
                 (0, 0)
             }
         }
-        AiAction::Drop(action) => (3, captured_value(action.captured_piece_id.as_ref())),
+        AiAction::Drop(action) => {
+            let captured = action
+                .captured_piece_id
+                .as_ref()
+                .and_then(|id| state.pieces.get(id))
+                .and_then(|piece| state.piece_definitions.get(&piece.type_id));
+            if captured.is_some_and(|definition| definition.is_king) {
+                (7, u32::MAX)
+            } else {
+                (3, captured.map_or(0, |definition| definition.score))
+            }
+        }
         AiAction::Ability(action) => (2, captured_value(action.target_piece_id.as_ref())),
     }
 }

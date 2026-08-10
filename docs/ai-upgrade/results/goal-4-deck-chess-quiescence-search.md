@@ -210,3 +210,132 @@ Airborne Hard는 Goal 3의 9,456 nodes, 809.430 ms에서 Goal 4의 5,558 nodes, 
 * debug Normal `middlegame`은 300 ms hard limit으로 depth 2가 중단돼 depth 1 fallback을 반환했다. release에서는 depth 2를 완료했다. 성능 판단은 release를 기준으로 하되 debug abort semantics도 정상 동작했다.
 
 noisy policy, horizon correctness, shared budget abort, TT isolation과 release budget 동작이 검증됐으므로 Goal 5 — Aspiration Window로 넘어갈 수 있는 상태다.
+
+---
+
+## Goal 4 보완
+
+### 문제 분석과 변경 파일
+
+Goal 4 초안의 QSearch stand-pat이 일반 `evaluate()`를 그대로 호출했다. 이 evaluator는 실제 `current_player`와 무관하게 양쪽 player view를 만들어 “해당 player가 지금 두면 King capture가 가능한지”를 계산하고 `KING_CAPTURE_THREAT = 100,000`을 더했다. 하지만 QSearch noisy allow-list는 quiet King escape/block을 탐색하지 않으므로, 상대 차례에 회피 가능한 위협도 확정된 전술 점수처럼 stand-pat에 남는 의미 충돌이 있었다.
+
+변경 파일은 다음과 같다.
+
+* `engine/src/ai/evaluate.rs`: 공통 `evaluate_internal` 경로와 QSearch용 threat-제외 entry point 추가
+* `engine/src/ai/search.rs`: QSearch stand-pat 호출 교체, avoidable threat/actual King capture/King capture Drop regression 추가
+* `engine/src/ai/move_ordering.rs`: captured definition이 King인 Drop을 Move King capture와 같은 최상위 priority로 배치
+* `docs/ai-upgrade/results/goal-4-deck-chess-quiescence-search.md`: 보완 설계, 검증과 release 재측정 기록
+
+### Evaluator 구조와 stand-pat 의미
+
+material, pocket material, move/drop mobility, terminal result, profiling count와 score clamp은 하나의 `evaluate_internal` 구현을 공유한다. 차이는 King-capture-threat 적용 여부뿐이다.
+
+```text
+normal evaluate
+  -> include_king_capture_threat = true
+
+QSearch stand-pat
+  -> include_king_capture_threat = false
+```
+
+terminal 분기는 옵션보다 앞서 공통으로 처리되므로 실제 `GameResult::KingCapture`의 `±WIN_SCORE` 의미는 변하지 않았다. 현재 player에게 합법적인 King capture가 있으면 QSearch가 그 canonical noisy action을 직접 적용하고 terminal score를 받는다.
+
+quiet King move, block, ordinary drop을 QSearch에 추가하지 않았다. 이들을 추가하면 기존의 보수적 noisy allow-list가 무너지고 Deck Chess action space에서 QSearch가 일반 search처럼 확장될 수 있다. 이번 보완은 탐색 policy가 아닌 stand-pat의 의미만 바꾸는 선을 지켰다.
+
+### King capture regression과 Drop ordering
+
+`qsearch_stand_pat_excludes_avoidable_king_capture_threat` fixture는 White rook이 Black King을 공격하지만 현재 player는 Black이고 Black King에게 non-capture quiet move가 있다. 결과는 다음과 같다.
+
+* normal evaluation과 Q stand-pat의 차이는 정확히 `100,000`
+* Q stand-pat의 절댓값은 `100,000` 미만
+* safety qply에서 QSearch 반환값은 threat를 뺀 stand-pat과 일치
+
+`qsearch_finds_actual_move_and_drop_king_captures`는 반대 의미를 함께 검증한다.
+
+* Move King capture가 noisy list의 최우선 action이고 QSearch score가 `WIN_SCORE`
+* built-in Paratrooper generator가 만든 `captured_piece_id == enemy King`인 canonical Drop이 noisy
+* captured definition의 `is_king` 확인으로 King Drop priority가 `(7, u32::MAX)`이며 일반 queen capture Drop보다 앞서 정렬
+* public `apply_ai_action` 결과가 `GamePhase::Ended`, winner White, `GameEndReason::KingCapture`
+* 같은 position의 QSearch score가 `WIN_SCORE`
+
+보완 후 ordering은 King capture(Move/Drop), capture+promotion, high-value Move capture, promotion, ordinary capture-on-drop, enemy recall 순이다. 동점은 기존 allocation-free canonical comparator로 해결하므로 deterministic ordering을 유지한다.
+
+기존 recapture, capture-on-drop horizon, enemy recall, promotion, quiet exclusions, node abort, safety limit, TT store 0, Q abort→ID fallback, immediate King capture와 variant TT ON/OFF regression은 삭제하거나 약화하지 않았다. noisy allow-list, `MAX_QUIESCENCE_PLIES = 8`, normal TT isolation, `searched_nodes = normal + QSearch`, hard/node abort와 last-completed ID fallback 의미도 그대로다.
+
+### 전체 검증
+
+```sh
+cargo test --workspace --all-features
+cargo clippy --workspace --all-features -- -D warnings
+```
+
+* workspace test: 148개 통과, 실패 0, 명시 benchmark 4개 ignored
+* clippy: warning/error 없이 통과
+* targeted QSearch unit test 4개 통과
+* 9개 benchmark legality, TT ON/OFF equality, TT OFF key counter regression 통과
+* release TT ON, TT OFF, difficulty budget, QSearch horizon benchmark 모두 명시 실행
+
+### 보완 후 9개 release benchmark
+
+Normal limits, TT ON 단일 실행이다. elapsed는 strict assertion이 아니다. 모두 normal depth 2를 완료했다.
+
+| position | selected action | score | nodes/qnodes | elapsed ms | completed | TT hits/cutoffs |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `middlegame` | `wq d3-f5 x bb` | 414 | 426/381 | 126.506 | 2 | 0/0 |
+| `tactical-captures` | `wq d4-g4 x br2` | 198 | 271/238 | 29.654 | 2 | 0/0 |
+| `drop-branching` | `drop wq b2` | 1,903 | 215/150 | 21.942 | 2 | 0/0 |
+| `standalone-ability` | `camp d4-e4 x enemy` | 506 | 42/30 | 3.233 | 2 | 0/0 |
+| `piece-state-cooldown` | `wk a1-b2` | 1,150 | 110/81 | 9.030 | 2 | 0/0 |
+| `immediate-king-capture` | `wr e1-e8 x bk` | 1,000,000 | 46/31 | 3.209 | 2 | 0/0 |
+| `drop-capture` | `drop para d1 x enemy` | 290 | 75/57 | 5.621 | 2 | 0/0 |
+| `airborne-deployment` | `airdrop bishop/knight` | 1,488 | 1,037/729 | 87.473 | 2 | 9/9 |
+| `alternating-soldier-pocket-swap` | `soldier d4-c3 x enemy` | 1,046 | 155/106 | 9.161 | 2 | 0/0 |
+
+TT OFF는 9개 모두 TT ON과 action, score, completed depth가 같았다. 모든 position의 position-key generations, probes, hits, cutoffs, stores는 0이었다. Airborne의 OFF/ON nodes는 1,048/1,037로 normal TT cutoff 9회가 유지됐다.
+
+### Goal 4 초안 대비
+
+| position | score 초안 → 보완 | nodes 초안 → 보완 | qnodes 초안 → 보완 | elapsed ms 초안 → 보완 | completed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `middlegame` | 416 → 414 | 878 → 426 | 833 → 381 | 226.095 → 126.506 | 2 → 2 |
+| `tactical-captures` | 100,198 → 198 | 254 → 271 | 221 → 238 | 25.172 → 29.654 | 2 → 2 |
+| `drop-branching` | 1,903 → 1,903 | 222 → 215 | 157 → 150 | 22.870 → 21.942 | 2 → 2 |
+| `standalone-ability` | 506 → 506 | 42 → 42 | 30 → 30 | 3.202 → 3.233 | 2 → 2 |
+| `piece-state-cooldown` | 1,150 → 1,150 | 112 → 110 | 83 → 81 | 9.355 → 9.030 | 2 → 2 |
+| `immediate-king-capture` | 1,000,000 → 1,000,000 | 46 → 46 | 31 → 31 | 3.259 → 3.209 | 2 → 2 |
+| `drop-capture` | 290 → 290 | 75 → 75 | 57 → 57 | 5.583 → 5.621 | 2 → 2 |
+| `airborne-deployment` | 1,488 → 1,488 | 1,036 → 1,037 | 728 → 729 | 87.415 → 87.473 | 2 → 2 |
+| `alternating-soldier-pocket-swap` | 1,046 → 1,046 | 154 → 155 | 105 → 106 | 9.086 → 9.161 | 2 → 2 |
+
+`tactical-captures`의 정확히 `+100,000` 수준 score artifact가 사라졌다. 초안의 `100,198`은 QSearch가 quiet evasion을 보지 않는 상태에서 speculative threat를 stand-pat에 확정 이득처럼 포함한 것이 원인이었다. 보완 후 `198`은 threat heuristic을 뺀 뒤 noisy capture continuation으로 계산된 값이다. 선택도 quiet `wr e3-h3`에서 canonical `wq d4-g4 x br2`로 바뀌어 artifact가 실제 root decision에 영향을 주고 있었음을 확인했다. 단, Goal 3의 `-318`과 같아야 한다고 강제하지 않았다. 보완 후 score에는 정상적인 QSearch continuation이 남아 있다.
+
+`middlegame`은 동일 action을 선택하면서 nodes/qnodes가 크게 줄었다. threat를 뺀 stand-pat이 alpha/beta window와 continuation 순서에 영향을 준 결과다. `drop-branching`은 거의 동일하고, Airborne는 nodes/qnodes 1개 정도의 실행 차이만 있었다. 즉 보완이 noisy category나 Airborne generation 범위를 넓히지 않았다.
+
+### 실제 difficulty budget
+
+limits는 변경하지 않았다. 보완 후 release TT ON의 `Normal completed / Hard reached-completed, Hard elapsed ms`다.
+
+| position | Normal completed | Hard reached/completed | Hard elapsed ms |
+| --- | ---: | ---: | ---: |
+| `middlegame` | 2 | 3/3 | 292.993 |
+| `tactical-captures` | 2 | 3/3 | 117.845 |
+| `drop-branching` | 2 | 3/3 | 703.082 |
+| `standalone-ability` | 2 | 3/3 | 14.120 |
+| `piece-state-cooldown` | 2 | 3/3 | 93.565 |
+| `immediate-king-capture` | 2 | 3/3 | 24.255 |
+| `drop-capture` | 2 | 3/3 | 14.558 |
+| `airborne-deployment` | 2 | 3/2 | 800.652 |
+| `alternating-soldier-pocket-swap` | 2 | 3/3 | 32.730 |
+
+Normal은 여전히 9개 모두 depth 2를 완료했다. Hard `drop-branching`은 초안의 depth 3 abort/depth 2 fallback에서 이번 실행의 depth 3 완료로 바뀌었다. 실행 시간에 의존하는 결과이므로 strict 개선 보장으로 해석하지는 않는다. Airborne은 여전히 depth 3 진입 후 800 ms hard limit에서 abort되고 마지막 completed depth 2를 반환했다.
+
+QSearch horizon release도 재실행했다: recapture 13/13 nodes/qnodes, 4.526 ms; capture-on-drop 25/25, 7.074 ms; enemy recall 4/4, 2.054 ms였다. 모두 기존 canonical tactical action과 score regression을 유지했다.
+
+### 남은 위험과 다음 단계
+
+* QSearch stand-pat에서 speculative King threat를 제거하는 것은 quiet evasion을 더하지 않고 위양성을 없애는 보수적 정책이다. 위협 정밀도 향상이 필요하면 향후 check/check-evasion 전용 설계로 다뤄야 한다.
+* evaluator가 양쪽 mobility를 위해 legal Move/Drop을 생성하는 비용과 capture chain의 qnode 확장은 남아 있다.
+* Hard Airborne의 expensive legal/action generation hard-limit blind spot과 depth 2 fallback은 여전히 재현된다. 이번 변경은 Airborne ability generation을 QSearch에 추가하지 않았다.
+* QSearch는 계속 normal TT를 probe/store하지 않는다. q-depth가 다른 result를 normal Exact entry로 재사용하는 correctness 위험은 없다.
+
+King-threat stand-pat 의미 충돌과 Drop King-capture ordering 누락이 수정됐고, actual terminal win, 기존 noisy policy, abort/ID fallback, TT isolation과 release budget 행동이 검증됐다. 따라서 **Goal 4는 완료 상태이며 Goal 5 — Aspiration Window로 진행할 수 있다.**

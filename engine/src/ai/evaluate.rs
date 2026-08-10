@@ -37,6 +37,21 @@ fn mobility(state: &GameState, player_id: &PlayerId) -> (usize, usize, bool) {
 }
 
 pub fn evaluate(state: &GameState, bot_player_id: &PlayerId) -> i32 {
+    evaluate_internal(state, bot_player_id, true)
+}
+
+pub(crate) fn evaluate_without_king_capture_threat(
+    state: &GameState,
+    bot_player_id: &PlayerId,
+) -> i32 {
+    evaluate_internal(state, bot_player_id, false)
+}
+
+fn evaluate_internal(
+    state: &GameState,
+    bot_player_id: &PlayerId,
+    include_king_capture_threat: bool,
+) -> i32 {
     crate::profiling::record_evaluation(1);
     if state.phase == GamePhase::Ended || state.result.is_some() {
         return match state
@@ -90,11 +105,13 @@ pub fn evaluate(state: &GameState, bot_player_id: &PlayerId) -> i32 {
 
     score += (bot_moves as i64 - opponent_moves as i64) * i64::from(MOVE_MOBILITY_WEIGHT);
     score += (bot_drops as i64 - opponent_drops as i64) * i64::from(DROP_MOBILITY_WEIGHT);
-    if bot_king_capture {
-        score += i64::from(KING_CAPTURE_THREAT);
-    }
-    if opponent_king_capture {
-        score -= i64::from(KING_CAPTURE_THREAT);
+    if include_king_capture_threat {
+        if bot_king_capture {
+            score += i64::from(KING_CAPTURE_THREAT);
+        }
+        if opponent_king_capture {
+            score -= i64::from(KING_CAPTURE_THREAT);
+        }
     }
     score.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
