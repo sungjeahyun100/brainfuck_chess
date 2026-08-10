@@ -253,3 +253,89 @@ Goal 2 release TT OFF/ON에서 Airborne은 49.953 ms/49.661 ms였으며 nodes와
 * custom definitions는 search lifetime 동안 immutable이라는 불변조건에 의존한다. TT를 game/global lifetime으로 승격하는 변경은 ruleset fingerprint 없이는 안전하지 않다.
 
 현재 구현의 우선순위는 raw speed보다 collision-safe canonical identity와 incomplete-search 비저장을 통한 correctness다. 후속 최적화에서는 canonical key의 allocation/정렬 비용을 줄이되 동일 key regression suite를 유지해야 한다.
+
+## Goal 2 보완
+
+### 변경 범위와 원인
+
+Goal 2 완료 커밋 `d5f69a2`의 correctness 설계는 유지하고 두 가지 측정/성능 문제만 수정했다.
+
+* `engine/src/ai/search.rs`: `SearchContext`에 TT가 있을 때만 `Option<PositionKey>`를 생성하고 probe/store에 전달한다. TT OFF에서는 canonicalization, hash lookup 및 store가 모두 실행되지 않는다. 완료된 node만 store하며 abort 전파, bound 판정과 TT best-action ordering은 기존 그대로다.
+* `engine/src/ai/transposition_table.rs`, `engine/src/profiling.rs`: profiling feature에서만 동작하는 `position_key_generation_calls` counter를 `PositionKey::from_state` 입구에 추가했다. profiling이 없는 production build에서는 recorder가 no-op이다.
+* `engine/src/ai/move_ordering.rs`: `format!("{:?}", effects)` 비교를 제거했다. effects의 네 필드를 `global_state_updates -> piece_state_updates -> cooldown_updates -> piece_type_transition` 순서로, 각 필드와 vector 원소를 직접 lexicographic 비교한다. `PieceStateValue` variant 순서는 Integer, Boolean, Text다. public 모델에 불필요한 `Ord`는 추가하지 않았다.
+* `engine/tests/ai_benchmark.rs`: TT OFF의 key counter와 네 TT 통계가 0이고 TT ON의 key counter/probe가 양수인지 검증한다. 기존 9개 position의 ON/OFF action, score, completed depth 비교는 유지하고 TT OFF 통계 assertion을 강화했다. benchmark 출력에도 key counter를 추가했다.
+
+기존 문제는 `alpha_beta`가 `context.transposition_table.as_ref()`를 확인하기 전에 무조건 `PositionKey::from_state(&state)`를 호출한 데 있었다. 따라서 OFF도 pieces, piece state, cooldown, player membership, global state 등을 clone/sort하고 key를 hash할 준비 비용을 매 node 지불했다. 보완 후에는 table 존재 여부가 key 생성의 guard다.
+
+### 회귀 및 전체 검증
+
+profiling regression에서 TT OFF `position_key_generation_calls == 0`, TT ON `> 0`을 확인했다. 같은 테스트에서 TT OFF의 `tt_probes`, `tt_hits`, `tt_cutoffs`, `tt_stores`는 모두 0이다. 충분한 depth-2 budget을 사용한 기존 9개 position은 ON/OFF의 action, score, completed depth가 모두 같았다. node-limit abort test도 유지되어 abort된 parent가 entry나 store count를 만들지 않는다.
+
+실행 명령과 결과:
+
+```sh
+cargo test -p brainfuck-chess-engine --features profiling --test ai_benchmark position_keys_are_generated_only_when_transposition_table_is_enabled
+cargo test -p brainfuck-chess-engine --features profiling --test ai_benchmark benchmark_positions_match_with_transposition_table_enabled_and_disabled
+cargo test --workspace --all-features
+cargo clippy --workspace --all-features -- -D warnings
+```
+
+* 두 targeted regression: 통과
+* 전체 workspace test: 실행 136개 통과, 실패 0개, profiling benchmark 2개 ignored
+* clippy: warning/error 없이 통과
+
+### Release benchmark 재측정
+
+2026-08-10에 다음 명령을 단일 test thread로 실행했다. elapsed는 단일 실행 관측값이며 assertion이 아니다.
+
+```sh
+cargo test -p brainfuck-chess-engine --release --features profiling --test ai_benchmark ai_search_baseline -- --ignored --nocapture --test-threads=1
+cargo test -p brainfuck-chess-engine --release --features profiling --test ai_benchmark ai_search_tt_off_comparison -- --ignored --nocapture --test-threads=1
+```
+
+비교 기준은 다음과 같다.
+
+* A: Goal 1 완료 시 기록한 release baseline
+* B: Goal 2 보완 전 TT ON으로 기록한 release 결과
+* C: Goal 2 보완 후 TT OFF. key generation과 모든 TT operation이 0인 실제 비-TT 기준선
+* D: Goal 2 보완 후 TT ON
+
+| position | A Goal 1 ms | B 보완 전 ON ms | C 보완 후 OFF ms | D 보완 후 ON ms |
+| --- | ---: | ---: | ---: | ---: |
+| `middlegame` | 47.079 | 86.082 | 45.008 | 47.840 |
+| `tactical-captures` | 105.204 | 171.412 | 94.017 | 58.351 |
+| `drop-branching` | 13.195 | 49.376 | 21.956 | 16.326 |
+| `standalone-ability` | 1.700 | 2.802 | 1.688 | 1.788 |
+| `piece-state-cooldown` | 8.250 | 7.443 | 5.479 | 5.768 |
+| `immediate-king-capture` | 1.767 | 1.946 | 1.757 | 1.801 |
+| `drop-capture` | 3.959 | 3.332 | 3.144 | 3.296 |
+| `airborne-deployment` | 48.010 | 49.661 | 48.288 | 49.295 |
+| `alternating-soldier-pocket-swap` | 3.584 | 3.966 | 3.664 | 3.973 |
+
+B와 D는 동일한 Goal 2 search semantics와 TT 통계를 가지며, D는 effects comparator allocation 제거 후 재측정값이다. A는 deterministic tie-break 도입 전이라 일부 position의 node 수가 C/D와 다를 수 있다. 이전 Goal 2 표에 기록된 A/B node, legal generation, application, beta-cutoff 값과 함께 해석해야 한다.
+
+보완 후 C/D의 전체 search/TT counter는 다음과 같다. 각 cell은 `C OFF / D ON`이다.
+
+| position | nodes | legal gen | applications | beta cutoffs | key generations | probes | hits | TT cutoffs | stores |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `middlegame` | 128 / 128 | 212 / 212 | 128 / 128 | 44 / 44 | 0 / 128 | 0 / 128 | 0 / 0 | 0 / 0 | 0 / 128 |
+| `tactical-captures` | 299 / 299 | 566 / 566 | 299 / 299 | 30 / 30 | 0 / 299 | 0 / 299 | 0 / 0 | 0 / 0 | 0 / 299 |
+| `drop-branching` | 172 / 172 | 280 / 280 | 172 / 172 | 61 / 61 | 0 / 172 | 0 / 172 | 0 / 0 | 0 / 0 | 0 / 172 |
+| `standalone-ability` | 26 / 26 | 41 / 41 | 26 / 26 | 11 / 11 | 0 / 26 | 0 / 26 | 0 / 0 | 0 / 0 | 0 / 26 |
+| `piece-state-cooldown` | 77 / 77 | 126 / 126 | 77 / 77 | 25 / 25 | 0 / 77 | 0 / 77 | 0 / 0 | 0 / 0 | 0 / 77 |
+| `immediate-king-capture` | 30 / 30 | 46 / 46 | 31 / 31 | 15 / 15 | 0 / 30 | 0 / 30 | 0 / 0 | 0 / 0 | 0 / 30 |
+| `drop-capture` | 50 / 50 | 81 / 81 | 50 / 50 | 15 / 15 | 0 / 50 | 0 / 50 | 0 / 0 | 0 / 0 | 0 / 50 |
+| `airborne-deployment` | 687 / 677 | 1,067 / 1,038 | 687 / 677 | 301 / 292 | 0 / 677 | 0 / 677 | 0 / 9 | 0 / 9 | 0 / 668 |
+| `alternating-soldier-pocket-swap` | 102 / 102 | 66 / 66 | 102 / 102 | 48 / 48 | 0 / 102 | 0 / 102 | 0 / 0 | 0 / 0 | 0 / 102 |
+
+### 주요 position 분석
+
+* `tactical-captures`: C는 94.017 ms로 A의 105.204 ms와 같은 범위이며 이번 실행에서는 10.6% 낮았다. hit가 없는 C/D는 nodes와 모든 non-TT work counter가 같고 D에만 key/probe/store 299회가 추가되므로 구조상 그 추가 작업이 pure TT overhead다. 다만 이번 단일 elapsed는 D 58.351 ms로 C보다 오히려 낮아 시스템 변동이 overhead보다 컸으며, 이 시간 차이를 TT 이득으로 해석할 수 없다. 보완 전 B 171.412 ms와 비교하면 OFF counter가 더 이상 TT key 비용을 포함하지 않음은 명확하다.
+* `drop-branching`: C는 21.956 ms로 A 13.195 ms보다 8.761 ms 높다. A와 C는 deterministic ordering 구현 및 실행 변동이 달라 직접적인 key overhead 비교가 아니다. 같은 코드의 C/D는 hit 없이 D에 key/probe/store 172회만 추가되지만 단일 elapsed는 D 16.326 ms로 더 낮았다. tactical과 마찬가지로 시간 노이즈가 커서 key 비용의 비율을 이 한 번의 elapsed로 정량화할 수 없으며, counters가 순수 비교 경계를 제공한다.
+* `airborne-deployment`: D는 9 hits/9 TT cutoffs로 nodes를 687에서 677(-1.5%), legal generation을 1,067에서 1,038(-2.7%), applications를 687에서 677로 줄였다. D는 677개 key를 생성했고 elapsed는 C 48.288 ms 대비 D 49.295 ms로 1.007 ms(2.1%) 높았다. 이 depth에서는 pruning 이익이 canonical key 비용을 거의 상쇄하지만 완전히 넘지는 못했다.
+
+### 남아 있는 TT 성능 위험과 다음 단계
+
+canonical `PositionKey`는 correctness를 위해 owned clone/sort/hash를 수행한다. hit가 없는 position에서는 D처럼 이 비용을 그대로 추가하며, 특히 drop branching에서 상대 비중이 크다. 이번 보완 범위에서는 Zobrist/incremental hashing이나 TT lifetime을 변경하지 않았다. elapsed 변동이 있으므로 반복 샘플링 없이 작은 차이를 일반화해서는 안 된다.
+
+TT OFF 기준선이 이제 key/TT 비용을 포함하지 않고, allocation 없는 deterministic ordering과 ON/OFF correctness/abort regression이 유지되므로 Goal 3 — Iterative Deepening으로 넘어갈 수 있는 상태다. Goal 3에서 cross-iteration reuse를 측정할 때도 C/D counter를 함께 유지해야 한다.

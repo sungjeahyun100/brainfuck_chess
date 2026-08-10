@@ -8,6 +8,7 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ProfilingSnapshot {
+    pub position_key_generation_calls: u64,
     pub legal_move_generation_calls: u64,
     pub drop_generation_calls: u64,
     pub attack_map_generation_calls: u64,
@@ -27,6 +28,9 @@ impl ProfilingSnapshot {
     /// Returns the saturating counter delta since an earlier snapshot.
     pub fn since(self, earlier: Self) -> Self {
         Self {
+            position_key_generation_calls: self
+                .position_key_generation_calls
+                .saturating_sub(earlier.position_key_generation_calls),
             legal_move_generation_calls: self
                 .legal_move_generation_calls
                 .saturating_sub(earlier.legal_move_generation_calls),
@@ -73,7 +77,12 @@ impl ProfilingSnapshot {
 #[cfg(feature = "profiling")]
 mod enabled {
     use super::ProfilingSnapshot;
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    thread_local! {
+        static POSITION_KEY_GENERATION_CALLS: Cell<u64> = const { Cell::new(0) };
+    }
 
     pub static LEGAL_CALLS: AtomicU64 = AtomicU64::new(0);
     pub static DROP_CALLS: AtomicU64 = AtomicU64::new(0);
@@ -96,6 +105,7 @@ mod enabled {
     pub fn snapshot() -> ProfilingSnapshot {
         let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
         ProfilingSnapshot {
+            position_key_generation_calls: POSITION_KEY_GENERATION_CALLS.get(),
             legal_move_generation_calls: load(&LEGAL_CALLS),
             drop_generation_calls: load(&DROP_CALLS),
             attack_map_generation_calls: load(&ATTACK_CALLS),
@@ -110,6 +120,11 @@ mod enabled {
             evaluation_calls: load(&EVALUATION_CALLS),
             action_application_calls: load(&ACTION_APPLICATION_CALLS),
         }
+    }
+
+    pub fn record_position_key_generation(value: u64) {
+        POSITION_KEY_GENERATION_CALLS
+            .set(POSITION_KEY_GENERATION_CALLS.get().saturating_add(value));
     }
 }
 
@@ -130,6 +145,12 @@ recorder!(record_cache_hit, CACHE_HITS);
 recorder!(record_cache_rebuild, CACHE_REBUILDS);
 recorder!(record_evaluation, EVALUATION_CALLS);
 recorder!(record_action_application, ACTION_APPLICATION_CALLS);
+pub(crate) fn record_position_key_generation(value: u64) {
+    #[cfg(feature = "profiling")]
+    enabled::record_position_key_generation(value);
+    #[cfg(not(feature = "profiling"))]
+    let _ = value;
+}
 
 #[cfg(feature = "profiling")]
 pub(crate) fn record_legal_moves(duration: Duration, candidates: usize) {

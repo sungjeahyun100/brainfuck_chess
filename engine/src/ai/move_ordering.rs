@@ -1,7 +1,10 @@
 use std::cmp::Ordering;
 
 use crate::ai::types::AiAction;
-use crate::types::{GameState, PlayerId};
+use crate::types::{
+    ActionEffects, CooldownUpdate, GameState, GlobalStateUpdate, PieceStateUpdate, PieceStateValue,
+    PieceTypeTransition, PlayerId,
+};
 
 fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
     match action {
@@ -44,7 +47,7 @@ fn canonical_action_cmp(left: &AiAction, right: &AiAction) -> Ordering {
             .then_with(|| left.promotion.cmp(&right.promotion))
             .then_with(|| left.move_option_id.cmp(&right.move_option_id))
             .then_with(|| left.source_layer_ids.cmp(&right.source_layer_ids))
-            .then_with(|| format!("{:?}", left.effects).cmp(&format!("{:?}", right.effects))),
+            .then_with(|| action_effects_cmp(&left.effects, &right.effects)),
         (AiAction::Drop(left), AiAction::Drop(right)) => left
             .piece_id
             .cmp(&right.piece_id)
@@ -74,6 +77,92 @@ fn canonical_action_cmp(left: &AiAction, right: &AiAction) -> Ordering {
         (AiAction::Drop(_), AiAction::Move(_)) => Ordering::Greater,
         (AiAction::Drop(_), AiAction::Ability(_)) => Ordering::Less,
         (AiAction::Ability(_), _) => Ordering::Greater,
+    }
+}
+
+fn action_effects_cmp(left: &ActionEffects, right: &ActionEffects) -> Ordering {
+    slice_cmp_by(
+        &left.global_state_updates,
+        &right.global_state_updates,
+        global_state_update_cmp,
+    )
+    .then_with(|| {
+        slice_cmp_by(
+            &left.piece_state_updates,
+            &right.piece_state_updates,
+            piece_state_update_cmp,
+        )
+    })
+    .then_with(|| {
+        slice_cmp_by(
+            &left.cooldown_updates,
+            &right.cooldown_updates,
+            cooldown_update_cmp,
+        )
+    })
+    .then_with(|| {
+        option_cmp_by(
+            left.piece_type_transition.as_ref(),
+            right.piece_type_transition.as_ref(),
+            piece_type_transition_cmp,
+        )
+    })
+}
+
+fn global_state_update_cmp(left: &GlobalStateUpdate, right: &GlobalStateUpdate) -> Ordering {
+    left.key
+        .cmp(&right.key)
+        .then_with(|| left.value.cmp(&right.value))
+}
+
+fn piece_state_update_cmp(left: &PieceStateUpdate, right: &PieceStateUpdate) -> Ordering {
+    left.piece_id
+        .cmp(&right.piece_id)
+        .then_with(|| left.key.cmp(&right.key))
+        .then_with(|| piece_state_value_cmp(&left.value, &right.value))
+}
+
+fn piece_state_value_cmp(left: &PieceStateValue, right: &PieceStateValue) -> Ordering {
+    match (left, right) {
+        (PieceStateValue::Integer(left), PieceStateValue::Integer(right)) => left.cmp(right),
+        (PieceStateValue::Boolean(left), PieceStateValue::Boolean(right)) => left.cmp(right),
+        (PieceStateValue::Text(left), PieceStateValue::Text(right)) => left.cmp(right),
+        (PieceStateValue::Integer(_), _) => Ordering::Less,
+        (PieceStateValue::Boolean(_), PieceStateValue::Integer(_)) => Ordering::Greater,
+        (PieceStateValue::Boolean(_), PieceStateValue::Text(_)) => Ordering::Less,
+        (PieceStateValue::Text(_), _) => Ordering::Greater,
+    }
+}
+
+fn cooldown_update_cmp(left: &CooldownUpdate, right: &CooldownUpdate) -> Ordering {
+    left.piece_id
+        .cmp(&right.piece_id)
+        .then_with(|| left.move_option_id.cmp(&right.move_option_id))
+        .then_with(|| left.remaining.cmp(&right.remaining))
+}
+
+fn piece_type_transition_cmp(left: &PieceTypeTransition, right: &PieceTypeTransition) -> Ordering {
+    left.piece_id
+        .cmp(&right.piece_id)
+        .then_with(|| left.target_type_id.cmp(&right.target_type_id))
+}
+
+fn slice_cmp_by<T>(left: &[T], right: &[T], cmp: fn(&T, &T) -> Ordering) -> Ordering {
+    left.iter()
+        .zip(right)
+        .find_map(|(left, right)| {
+            let ordering = cmp(left, right);
+            (ordering != Ordering::Equal).then_some(ordering)
+        })
+        .unwrap_or_else(|| left.len().cmp(&right.len()))
+}
+
+fn option_cmp_by<T>(left: Option<&T>, right: Option<&T>, cmp: fn(&T, &T) -> Ordering) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => cmp(left, right),
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
     }
 }
 

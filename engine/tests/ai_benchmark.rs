@@ -425,7 +425,60 @@ fn benchmark_positions_match_with_transposition_table_enabled_and_disabled() {
         );
         assert_eq!(with.action, without.action, "{} action", position.name);
         assert_eq!(with.score, without.score, "{} score", position.name);
+        assert_eq!(
+            without.stats.tt_probes, 0,
+            "{} TT-off probes",
+            position.name
+        );
+        assert_eq!(without.stats.tt_hits, 0, "{} TT-off hits", position.name);
+        assert_eq!(
+            without.stats.tt_cutoffs, 0,
+            "{} TT-off cutoffs",
+            position.name
+        );
+        assert_eq!(
+            without.stats.tt_stores, 0,
+            "{} TT-off stores",
+            position.name
+        );
     }
+}
+
+#[cfg(feature = "profiling")]
+#[test]
+fn position_keys_are_generated_only_when_transposition_table_is_enabled() {
+    let position = benchmark_positions().into_iter().next().unwrap();
+    let limits = SearchLimits {
+        max_depth_actions: 2,
+        max_nodes: 100_000,
+        soft_time_ms: 10_000,
+        hard_time_ms: 20_000,
+    };
+    let run = |use_transposition_table| {
+        let before = profiling::snapshot();
+        let decision = choose_bot_action_with_limits_and_options(
+            &position.state,
+            &"white".into(),
+            BotDifficulty::Normal,
+            limits,
+            SearchOptions {
+                use_transposition_table,
+            },
+        )
+        .unwrap();
+        (decision, profiling::snapshot().since(before))
+    };
+
+    let (without, without_counters) = run(false);
+    assert_eq!(without_counters.position_key_generation_calls, 0);
+    assert_eq!(without.stats.tt_probes, 0);
+    assert_eq!(without.stats.tt_hits, 0);
+    assert_eq!(without.stats.tt_cutoffs, 0);
+    assert_eq!(without.stats.tt_stores, 0);
+
+    let (with, with_counters) = run(true);
+    assert!(with_counters.position_key_generation_calls > 0);
+    assert!(with.stats.tt_probes > 0);
 }
 
 #[test]
@@ -457,7 +510,7 @@ fn run_search_baseline(options: SearchOptions) {
         let counters = profiling::snapshot().since(before);
         assert!(action_is_legal(&position.state, &decision.action));
         println!(
-            "position={} tt_enabled={} action={} score={} nodes={} reached_depth={} completed_depth={} beta_cutoffs={} tt_probes={} tt_hits={} tt_cutoffs={} tt_stores={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
+            "position={} tt_enabled={} action={} score={} nodes={} reached_depth={} completed_depth={} beta_cutoffs={} position_key_generations={} tt_probes={} tt_hits={} tt_cutoffs={} tt_stores={} elapsed_ms={:.3} legal_gen={} drop_gen={} attack_map_gen={} chessembly_runs={} evaluations={} action_applications={}",
             position.name,
             options.use_transposition_table,
             serde_json::to_string(&decision.action).unwrap(),
@@ -466,6 +519,7 @@ fn run_search_baseline(options: SearchOptions) {
             decision.depth_reached,
             decision.completed_depth,
             decision.stats.beta_cutoffs,
+            counters.position_key_generation_calls,
             decision.stats.tt_probes,
             decision.stats.tt_hits,
             decision.stats.tt_cutoffs,

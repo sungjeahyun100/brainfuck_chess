@@ -43,6 +43,7 @@ struct PlayerKey {
 
 impl PositionKey {
     pub(crate) fn from_state(state: &GameState) -> Self {
+        crate::profiling::record_position_key_generation(1);
         let mut board = state
             .board
             .squares

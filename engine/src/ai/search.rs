@@ -120,10 +120,19 @@ fn alpha_beta(
     context.stats.depth_reached = context.stats.depth_reached.max(ply);
     let original_alpha = alpha;
     let original_beta = beta;
-    let position_key = PositionKey::from_state(&state);
+    let position_key = context
+        .transposition_table
+        .is_some()
+        .then(|| PositionKey::from_state(&state));
     let table_entry = context.transposition_table.as_ref().and_then(|table| {
         context.stats.tt_probes += 1;
-        table.get(&position_key).cloned()
+        table
+            .get(
+                position_key
+                    .as_ref()
+                    .expect("enabled TT must have a position key"),
+            )
+            .cloned()
     });
     if let Some(entry) = table_entry.as_ref() {
         context.stats.tt_hits += 1;
@@ -227,12 +236,17 @@ fn alpha_beta(
     SearchOutcome::Complete(score)
 }
 
-fn store_table_entry(context: &mut SearchContext<'_>, key: PositionKey, entry: TranspositionEntry) {
-    if context
-        .transposition_table
-        .as_mut()
-        .is_some_and(|table| table.store(key, entry))
-    {
+fn store_table_entry(
+    context: &mut SearchContext<'_>,
+    key: Option<PositionKey>,
+    entry: TranspositionEntry,
+) {
+    if key.is_some_and(|key| {
+        context
+            .transposition_table
+            .as_mut()
+            .is_some_and(|table| table.store(key, entry))
+    }) {
         context.stats.tt_stores += 1;
     }
 }
