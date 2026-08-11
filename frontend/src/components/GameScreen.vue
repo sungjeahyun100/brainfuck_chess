@@ -149,6 +149,7 @@
           :selected-piece-id="visibleSelectedPieceId"
           :movable-squares="visibleMovableSquares"
           :attack-squares="visibleAttackSquares"
+          :threat-squares="visibleOpponentAttackSquares"
           :drop-squares="visibleDropSquares"
           :last-move="lastMove"
           :orientation="boardOrientation"
@@ -157,6 +158,21 @@
           @piece-drag-start="onBoardPieceDragStart"
           @square-drop="onSquareDrop"
         />
+
+        <div class="board-tools">
+          <button
+            class="threat-toggle"
+            :class="{ active: opponentAttacksVisible }"
+            type="button"
+            :aria-pressed="opponentAttacksVisible"
+            @click="toggleOpponentAttacks"
+          >
+            {{ opponentAttackButtonLabel }}
+          </button>
+          <small v-if="opponentAttacksVisible">
+            {{ playerName(opponentPlayer) }}의 공격 가능 칸 {{ opponentAttackSquares.length }}개
+          </small>
+        </div>
 
         <div v-if="selectedPieceId && selectedPieceDefinition" class="selected-piece-panel" :class="{ active: abilityMode }">
           <div>
@@ -278,6 +294,9 @@ const activeAbilityId = ref<string | null>(null)
 const legalTargetSquares = ref<Square[]>([])
 const movableSquares = ref<Square[]>([])
 const attackSquares = ref<Square[]>([])
+const opponentAttackSquares = ref<Square[]>([])
+const opponentAttacksVisible = ref(false)
+const opponentAttacksLoading = ref(false)
 const dropSquares = ref<Square[]>([])
 const error = ref<string | null>(null)
 const botError = ref<string | null>(null)
@@ -298,6 +317,7 @@ const botPreviewAttackSquares = ref<Square[]>([])
 const botPreviewDropSquares = ref<Square[]>([])
 const botReplayState = ref<GameState | null>(null)
 let botRunSerial = 0
+let opponentAttackRequestSerial = 0
 
 const BOT_ACTION_PREVIEW_MS = 520
 const BOT_ACTION_SETTLE_MS = 340
@@ -353,6 +373,9 @@ const visibleMovableSquares = computed(() => (
 const visibleAttackSquares = computed(() => (
   botReplaying.value ? botPreviewAttackSquares.value : attackSquares.value
 ))
+const visibleOpponentAttackSquares = computed(() => (
+  botReplaying.value || !opponentAttacksVisible.value ? [] : opponentAttackSquares.value
+))
 const visibleDropSquares = computed(() => (
   botReplaying.value ? botPreviewDropSquares.value : dropSquares.value
 ))
@@ -363,6 +386,11 @@ const lastMove = computed(() => {
   return action?.type === 'move' ? { from: action.from, to: action.to } : null
 })
 const boardOrientation = computed(() => props.localPlayer ?? viewState.value.current_player)
+const opponentPlayer = computed<PlayerId>(() => otherPlayer(props.localPlayer ?? props.state.current_player))
+const opponentAttackButtonLabel = computed(() => {
+  if (opponentAttacksLoading.value) return '상대 공격 범위 불러오는 중…'
+  return opponentAttacksVisible.value ? '상대 공격 범위 숨기기' : '상대 공격 범위 보기'
+})
 const selectedPiece = computed(() => (
   selectedPieceId.value ? props.state.pieces[selectedPieceId.value] ?? null : null
 ))
@@ -440,6 +468,42 @@ function squareId(square: Square): string {
 
 function otherPlayer(player: PlayerId): PlayerId {
   return player === 'white' ? 'black' : 'white'
+}
+
+async function loadOpponentAttacks() {
+  const requestId = ++opponentAttackRequestSerial
+  const player = opponentPlayer.value
+  opponentAttacksLoading.value = true
+  try {
+    const { squares } = await api.getPlayerAttacks(props.state.id, player)
+    if (requestId === opponentAttackRequestSerial && opponentAttacksVisible.value && player === opponentPlayer.value) {
+      opponentAttackSquares.value = squares
+    }
+  } catch (e: unknown) {
+    if (requestId === opponentAttackRequestSerial) {
+      opponentAttacksVisible.value = false
+      opponentAttackSquares.value = []
+      error.value = e instanceof Error ? e.message : String(e)
+    }
+  } finally {
+    if (requestId === opponentAttackRequestSerial) {
+      opponentAttacksLoading.value = false
+    }
+  }
+}
+
+function toggleOpponentAttacks() {
+  error.value = null
+  if (opponentAttacksVisible.value) {
+    opponentAttacksVisible.value = false
+    opponentAttackSquares.value = []
+    opponentAttacksLoading.value = false
+    opponentAttackRequestSerial += 1
+    return
+  }
+
+  opponentAttacksVisible.value = true
+  void loadOpponentAttacks()
 }
 
 function clearBotPreview() {
@@ -702,6 +766,13 @@ watch(
     if (isBotTurn.value) void runBotTurn()
   },
   { immediate: true },
+)
+
+watch(
+  () => [props.state.id, props.state.turn_number, props.state.current_player, props.localPlayer],
+  () => {
+    if (opponentAttacksVisible.value) void loadOpponentAttacks()
+  },
 )
 
 const PIECE_SYMBOLS: Record<string, string> = {
@@ -1330,6 +1401,33 @@ async function onResign() {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.board-tools {
+  width: min(80vw, 80vh);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.board-tools small {
+  color: #a8b1c2;
+}
+
+.threat-toggle {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 125, 125, 0.55);
+  border-radius: 7px;
+  background: rgba(198, 40, 40, 0.12);
+  color: #ffd1d1;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.threat-toggle.active {
+  background: #a61f1f;
+  color: white;
 }
 
 .selected-piece-panel {

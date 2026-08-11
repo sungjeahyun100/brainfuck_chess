@@ -21,6 +21,7 @@ use stores::RoomStore;
 use brainfuck_chess_engine::{
     actions::submit_action as submit_engine_action,
     ai::{play_bot_turn_detailed, AiAction, BotDifficulty},
+    attack_map::generate_attack_map,
     custom_pieces::{install_runtime_catalog, CustomPiecePackage},
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
@@ -1719,6 +1720,39 @@ async fn get_piece_attacks(
     }
 }
 
+async fn get_player_attacks(
+    State(app): State<AppState>,
+    Path((id, player_id)): Path<(String, String)>,
+) -> Result<Json<PieceAttacksResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if player_id != "white" && player_id != "black" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "플레이어는 white 또는 black이어야 합니다.".into(),
+            }),
+        ));
+    }
+
+    match app.games.get(&id) {
+        Some(state) => {
+            let attack_map = generate_attack_map(&state, &player_id, &HashMap::new());
+            let mut squares = attack_map
+                .attacked_squares
+                .into_iter()
+                .map(|square_id| square_id.to_square())
+                .collect::<Vec<_>>();
+            squares.sort_by_key(|square| (square.rank, square.file));
+            Ok(Json(PieceAttacksResponse { squares }))
+        }
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "게임을 찾을 수 없습니다.".into(),
+            }),
+        )),
+    }
+}
+
 async fn get_piece_options(
     State(app): State<AppState>,
     Path((id, piece_id)): Path<(String, String)>,
@@ -1997,6 +2031,28 @@ mod tests {
 
         assert!(!response.moves.is_empty());
         assert!(response.moves.iter().all(|m| m.piece_id == piece_id));
+    }
+
+    #[tokio::test]
+    async fn player_attacks_returns_the_requested_players_full_attack_map() {
+        let (app, game_id) = test_app_with_game();
+
+        let response =
+            match get_player_attacks(State(app), Path((game_id, "black".to_string()))).await {
+                Ok(Json(response)) => response,
+                Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+            };
+
+        assert_eq!(
+            response.squares,
+            vec![
+                Square::new(3, 6),
+                Square::new(4, 6),
+                Square::new(5, 6),
+                Square::new(3, 7),
+                Square::new(5, 7),
+            ]
+        );
     }
 
     #[tokio::test]

@@ -116,6 +116,7 @@ const props = defineProps<{
   selectedPieceId: string | null
   movableSquares: Square[]
   attackSquares: Square[]
+  threatSquares?: Square[]
   dropSquares: Square[]
   lastMove?: { from: Square; to: Square } | null
   orientation?: PlayerId
@@ -170,6 +171,7 @@ const allSquares = computed((): SquareInfo[] => {
 
 const movableSquareIds = computed(() => new Set(props.movableSquares.map(squareIdFromSquare)))
 const attackSquareIds = computed(() => new Set(props.attackSquares.map(squareIdFromSquare)))
+const threatSquareIds = computed(() => new Set((props.threatSquares ?? []).map(squareIdFromSquare)))
 const dropSquareIds = computed(() => new Set(props.dropSquares.map(squareIdFromSquare)))
 const lastMoveSquareIds = computed(() => {
   if (!props.lastMove) return new Set<string>()
@@ -242,6 +244,9 @@ function squareClasses(sq: SquareInfo) {
 
   if (lastMoveSquareIds.value.has(sq.id)) {
     classes.push('last-move')
+  }
+  if (threatSquareIds.value.has(sq.id)) {
+    classes.push('opponent-threat')
   }
   if (sq.piece && sq.piece.id === props.selectedPieceId) {
     classes.push('selected')
@@ -615,6 +620,16 @@ function pieceAlt(piece: Piece): string {
 .square.light { background: #f0d9b5; }
 .square.dark  { background: #b58863; }
 .square.last-move { background: #f2d34f; }
+
+.square.opponent-threat::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: rgba(198, 40, 40, 0.27);
+  box-shadow: inset 0 0 0 2px rgba(145, 20, 20, 0.42);
+}
 
 .board-coordinate {
   position: absolute;

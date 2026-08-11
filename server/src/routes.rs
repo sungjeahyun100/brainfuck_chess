@@ -20,6 +20,10 @@ pub(crate) fn api(state: AppState) -> Router {
         .route("/games/:id/legal-moves", get(get_legal_moves))
         .route("/games/:id/piece-attacks/:piece_id", get(get_piece_attacks))
         .route(
+            "/games/:id/players/:player_id/attacks",
+            get(get_player_attacks),
+        )
+        .route(
             "/games/:id/pieces/:piece_id/options",
             get(get_piece_options),
         )

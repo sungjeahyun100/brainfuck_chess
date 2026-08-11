@@ -213,6 +213,7 @@ import { pieceAsset } from '../pieceAssets'
 import { customPieceApi } from '../api/customPieceApi'
 import type { DeckPieceType, SavedDeck } from '../types/deck'
 import {
+  baseZoneDepth,
   boardSizes,
   canUseInPocket,
   catalogCategoryLabels,
@@ -340,7 +341,10 @@ const catalogSections = computed(() => {
     pieces,
   }))
 })
-const baseZoneSquares = computed(() => [1, 0].flatMap(rank => Array.from({ length: deck.value.boardSize }, (_, file) => ({ file, rank }))))
+const baseZoneSquares = computed(() => Array.from(
+  { length: baseZoneDepth(deck.value.boardSize) },
+  (_, index) => baseZoneDepth(deck.value.boardSize) - index - 1,
+).flatMap(rank => Array.from({ length: deck.value.boardSize }, (_, file) => ({ file, rank }))))
 
 function fileLabel(file: number): string {
   return String.fromCharCode(97 + file)

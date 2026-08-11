@@ -13,6 +13,10 @@ import type { CustomPieceRecord } from '../types/customPiece'
 
 export const boardSizes = [8, 9, 10, 11, 12] as const
 
+export function baseZoneDepth(boardSize: number): number {
+  return boardSize >= 10 ? 3 : 2
+}
+
 export const pieceCatalog = reactive<PieceCatalogItem[]>([
   { id: 'king', name: 'King', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
   { id: 'queen', name: 'Queen', score: 0, category: 'major', canPocket: true },
@@ -274,7 +278,8 @@ export function calculateDeckScore(deck: LobbyDeck): number {
 function isInBaseZone(piece: LobbyPlacement, boardSize: number): boolean {
   return piece.square.file >= 0
     && piece.square.file < boardSize
-    && (piece.square.rank === 0 || piece.square.rank === 1)
+    && piece.square.rank >= 0
+    && piece.square.rank < baseZoneDepth(boardSize)
 }
 
 export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '덱'): DeckSummary {

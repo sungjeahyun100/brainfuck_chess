@@ -97,13 +97,14 @@ pub fn validate_deck(
 }
 
 /// Return the base zone squares for a player.
-/// White: rank 0, rank 1
-/// Black: rank n-2, rank n-1
+/// Boards smaller than 10 use two ranks; boards 10 or larger use three.
+/// White starts from rank 0, while Black starts from the opposite edge.
 pub fn get_base_zone_squares(player_id: &PlayerId, board_size: i32) -> Vec<Square> {
+    let zone_depth = if board_size >= 10 { 3 } else { 2 };
     let ranks: Vec<i32> = if player_id == "white" {
-        vec![0, 1]
+        (0..zone_depth).collect()
     } else {
-        vec![board_size - 2, board_size - 1]
+        (board_size - zone_depth..board_size).collect()
     };
     let mut squares = Vec::new();
     for rank in ranks {

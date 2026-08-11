@@ -199,6 +199,10 @@ export const api = {
     return request(`${BASE}/${id}/piece-attacks/${pieceId}`)
   },
 
+  getPlayerAttacks(id: string, playerId: PlayerId): Promise<{ squares: Square[] }> {
+    return request(`${BASE}/${id}/players/${encodeURIComponent(playerId)}/attacks`)
+  },
+
   getPieceOptions(id: string, pieceId: string, moveOptionId?: string | null): Promise<PieceOptionsResponse> {
     const query = moveOptionId ? `?move_option_id=${encodeURIComponent(moveOptionId)}` : ''
     return request(`${BASE}/${id}/pieces/${pieceId}/options${query}`)

@@ -537,6 +537,30 @@ fn test_black_base_zone_8x8() {
 }
 
 #[test]
+fn test_base_zone_stays_two_ranks_on_9x9() {
+    let white_zones = get_base_zone_squares(&"white".to_string(), 9);
+    let black_zones = get_base_zone_squares(&"black".to_string(), 9);
+
+    assert_eq!(white_zones.len(), 18);
+    assert!(!white_zones.contains(&Square::new(0, 2)));
+    assert_eq!(black_zones.len(), 18);
+    assert!(!black_zones.contains(&Square::new(0, 6)));
+}
+
+#[test]
+fn test_base_zone_uses_three_ranks_on_10x10() {
+    let white_zones = get_base_zone_squares(&"white".to_string(), 10);
+    let black_zones = get_base_zone_squares(&"black".to_string(), 10);
+
+    assert_eq!(white_zones.len(), 30);
+    assert!(white_zones.contains(&Square::new(9, 2)));
+    assert!(!white_zones.contains(&Square::new(0, 3)));
+    assert_eq!(black_zones.len(), 30);
+    assert!(black_zones.contains(&Square::new(0, 7)));
+    assert!(!black_zones.contains(&Square::new(0, 6)));
+}
+
+#[test]
 fn test_deck_validation_no_king() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "p1", "white", "pawn-white", 0, 0);

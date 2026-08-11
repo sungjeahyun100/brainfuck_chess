@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { savedDeckToPlayerDeckRequest } from './useDeckSerialization.ts'
 import {
+  baseZoneDepth,
   customDeckPieceType,
   deactivateCustomPieceCatalog,
   pieceCatalog,
@@ -141,4 +142,23 @@ test('saving a new version replaces the previous live catalog item but preserves
   deactivateCustomPieceCatalog(record.id)
   assert.equal(versions[0].custom?.active, false)
   assert.match(validateSavedDeck(deck(customDeckPieceType(record))).errors.join(' '), /비활성화/)
+})
+
+test('base zone expands to three ranks starting at board size 10', () => {
+  assert.equal(baseZoneDepth(9), 2)
+  assert.equal(baseZoneDepth(10), 3)
+
+  const rankThreeDeck: SavedDeck = {
+    ...deck('pawn'),
+    boardSize: 10,
+    starting: [
+      { pieceType: 'king', square: { file: 4, rank: 2 } },
+      { pieceType: 'pawn', square: { file: 2, rank: 1 } },
+    ],
+    pocket: {},
+    customPieces: [],
+  }
+
+  assert.equal(validateSavedDeck(rankThreeDeck).valid, true)
+  assert.equal(validateSavedDeck({ ...rankThreeDeck, boardSize: 9 }).valid, false)
 })
