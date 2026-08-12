@@ -859,7 +859,7 @@ select {
 .pocket-chip {
   min-height: 64px;
   display: grid;
-  grid-template-columns: 42px minmax(90px, 0.8fr) minmax(110px, 1fr) 30px;
+  grid-template-columns: 42px minmax(90px, 0.8fr) minmax(110px, 1fr) 30px 30px;
   align-items: center;
   gap: 10px;
   padding: 10px;
@@ -911,7 +911,8 @@ select {
   text-align: right;
 }
 
-.pocket-remove-button {
+.pocket-remove-button,
+.pocket-add-button {
   width: 30px;
   height: 30px;
   border: none;
@@ -927,6 +928,11 @@ select {
 .pocket-remove-button:hover {
   background: rgba(255, 125, 125, 0.18);
   color: #ffc1c1;
+}
+
+.pocket-add-button:hover {
+  background: rgba(125, 255, 172, 0.18);
+  color: #c1ffd8;
 }
 
 .validation-list {

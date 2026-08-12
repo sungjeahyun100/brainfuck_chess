@@ -196,6 +196,7 @@
               <strong>{{ deck.pocket[piece.id] ?? 0 }}</strong>
             </span>
             <button class="pocket-remove-button" aria-label="포켓 기물 제거" @click="changePocketCount(piece.id, -1)">-</button>
+            <button class="pocket-add-button" aria-label="포켓 기물 추가" @click="changePocketCount(piece.id, 1)">+</button>
           </div>
         </div>
         <div v-if="deckSummary.errors.length > 0" class="validation-list">
