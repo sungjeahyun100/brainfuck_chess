@@ -270,6 +270,7 @@ import type {
   SubmitDropAction,
   SubmitMoveAction,
 } from '../types/game'
+import { moveOptionTargets, usesMoveSubmission } from '../moveOptionUi'
 import { api } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import Board from './Board.vue'
@@ -910,12 +911,10 @@ async function loadPieceOptions(pieceId: string, abilityId: string | null = null
   if (pending) return pending
 
   const request = api.getPieceOptions(props.state.id, pieceId, abilityId).then(({ moves, ability_actions }) => {
-    const abilityTargets = ability_actions.flatMap(action => action.to ? [action.to] : [])
+    const targets = moveOptionTargets(moves, ability_actions)
     const options: LegalPieceOptions = {
       abilityId,
-      legalTargets: [...moves.map(move => move.to), ...abilityTargets],
-      movable: abilityId ? abilityTargets : moves.filter(move => !move.captured_piece_id).map(move => move.to),
-      captures: abilityId ? [] : moves.filter(move => Boolean(move.captured_piece_id)).map(move => move.to),
+      ...targets,
       moves,
       abilityActions: ability_actions,
     }
@@ -1231,7 +1230,11 @@ async function onSquareClick(sq: Square) {
   // ── Move mode: selected piece → move to target ──
   if (selectedPieceId.value) {
     if (abilityMode.value) {
-      await submitAbility(selectedPieceId.value, sq)
+      if (usesMoveSubmission(selectedAbility.value)) {
+        await submitMove(selectedPieceId.value, sq)
+      } else {
+        await submitAbility(selectedPieceId.value, sq)
+      }
       return
     }
     if (pieceId && piece && piece.owner === currentPlayer && pieceId !== selectedPieceId.value) {

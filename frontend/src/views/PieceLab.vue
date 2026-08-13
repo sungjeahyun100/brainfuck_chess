@@ -340,6 +340,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, type PieceLabMoveOption } from '../api/gameApi'
+import { usesMoveSubmission } from '../moveOptionUi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import type { DeckPieceType } from '../types/deck'
 import type { AbilityAction, AbilityDeployment, DropAction, MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square } from '../types/game'
@@ -457,6 +458,9 @@ const displayAbilities = computed<PieceLabMoveOption[]>(() => {
   if (selectedLabPiece.value || selectedPocketPiece.value) return abilities.value
   return inspectedType.value ? staticAbilities(inspectedType.value) : []
 })
+const activeAbility = computed(() => (
+  abilities.value.find(ability => ability.id === activeAbilityId.value) ?? null
+))
 const abilitySummary = computed(() => {
   if (displayAbilities.value.length > 0) return `${displayAbilities.value.length}개 등록`
   return '없음'
@@ -597,7 +601,7 @@ function movementDescription(pieceType: string): string {
     king: '8방향으로 한 칸 이동하고 공격합니다. 실제 게임에서는 캐슬링도 지원됩니다.',
     queen: '가로, 세로, 대각선으로 막히기 전까지 이동하고 공격합니다.',
     rook: '가로와 세로로 막히기 전까지 이동하고 공격합니다.',
-    'cannon-rook': '기본은 Rook처럼 이동합니다. 특수능력으로 이번 선택 동안 장기의 포처럼 정확히 하나의 기물을 뛰어넘습니다.',
+    'cannon-rook': '기본은 Rook처럼 이동합니다. 특수능력으로 이번 선택 동안 아군 또는 상대 기물 정확히 하나를 뛰어넘습니다.',
     bishop: '대각선으로 막히기 전까지 이동하고 공격합니다.',
     knight: 'L자 형태로 도약하며 중간 기물에 막히지 않습니다.',
     pawn: 'White는 위로, Black은 아래로 전진합니다. 대각선 전방을 공격하고 시작 위치에서는 2칸 전진할 수 있습니다.',
@@ -628,7 +632,7 @@ function staticAbilities(pieceType: string): PieceLabMoveOption[] {
     return [{
       id: 'cannon_move',
       name: '포 이동',
-      description: '이번 이동 동안 장기의 포처럼 정확히 하나의 기물을 뛰어넘어 이동합니다. 사용 후 3턴 동안 다시 사용할 수 없습니다.',
+      description: '이번 이동 동안 장기의 포처럼 아군 또는 상대 기물 정확히 하나를 뛰어넘어 이동합니다. 사용 후 3턴 동안 다시 사용할 수 없습니다.',
       available: false,
       kind: 'ability',
       execution_mode: 'move_modifier',
@@ -904,8 +908,13 @@ async function tryMovePlacedPiece(pieceId: string, file: number, rank: number): 
 async function onSquareClick(file: number, rank: number) {
   const existing = pieceAt(file, rank)
   if (activeAbilityId.value && selectedLabPiece.value) {
-    if (!tryLabAbility({ file, rank })) {
-      optionsError.value = '특수능력을 사용할 수 없는 대상입니다.'
+    const used = usesMoveSubmission(activeAbility.value)
+      ? await tryMovePlacedPiece(selectedLabPiece.value.id, file, rank)
+      : tryLabAbility({ file, rank })
+    if (!used) {
+      optionsError.value = usesMoveSubmission(activeAbility.value)
+        ? '선택한 특수 이동으로 갈 수 없는 칸입니다.'
+        : '특수능력을 사용할 수 없는 대상입니다.'
     }
     return
   }

@@ -144,7 +144,7 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
             MoveOptionDefinition {
                 id: "cannon_move".into(),
                 name: "포 이동".into(),
-                description: "장기의 포처럼 정확히 하나의 기물을 뛰어넘습니다. 사용 후 소유자의 다음 3개 턴 동안 사용할 수 없습니다.".into(),
+                description: "장기의 포처럼 아군 또는 상대 기물 정확히 하나를 뛰어넘습니다. 사용 후 소유자의 다음 3개 턴 동안 사용할 수 없습니다.".into(),
                 kind: MoveOptionKind::Ability,
                 layer_ids: vec!["cannon_move".into()],
                 execution_mode: MoveOptionExecutionMode::MoveModifier,

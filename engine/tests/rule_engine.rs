@@ -1298,6 +1298,8 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
     add_piece(&mut state, "enemy", "black", "pawn-black", 3, 6);
     add_piece(&mut state, "screen2", "black", "pawn-black", 5, 3);
     add_piece(&mut state, "blocked", "white", "pawn-white", 6, 3);
+    add_piece(&mut state, "enemy-screen", "black", "pawn-black", 2, 3);
+    add_piece(&mut state, "enemy-behind-screen", "black", "pawn-black", 0, 3);
 
     let base_moves = generate_piece_legal_move_actions(&state, &"cr".into());
     assert!(base_moves
@@ -1322,6 +1324,20 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
             && action.captured_piece_id.as_ref().map(|id| id.as_str()) == Some("enemy")
             && action.move_option_id == "cannon_move"
     }));
+    assert!(cannon_moves.iter().any(|action| {
+        action.to == Square::new(1, 3)
+            && action.captured_piece_id.is_none()
+            && action.move_option_id == "cannon_move"
+    }));
+    assert!(cannon_moves.iter().any(|action| {
+        action.to == Square::new(0, 3)
+            && action.captured_piece_id.as_ref().map(|id| id.as_str())
+                == Some("enemy-behind-screen")
+            && action.move_option_id == "cannon_move"
+    }));
+    assert!(!cannon_moves
+        .iter()
+        .any(|action| action.to == Square::new(2, 3)));
     assert!(!cannon_moves
         .iter()
         .any(|action| action.to == Square::new(4, 3)));
