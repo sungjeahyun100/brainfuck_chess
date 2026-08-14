@@ -89,9 +89,10 @@ npm --prefix frontend run build
    `PieceDefinition.chessembly_code`와 각
    `MoveLayerDefinition.chessembly_code`에 `String`으로 저장된다.
 2. **[확인]** 기본 기물은
-   `engine/src/pieces/default_pieces.rs:26-706`에서 Rust 값으로 정의되고,
-   `all_default_definitions()`이 이를 모은다. 즉 현재 기본 기물도 체섬블리
-   코드를 행마의 원천으로 사용한다.
+   `engine/src/pieces/default_pieces/*.rs`의 기물별 모듈에서 Rust 값과 독립된
+   체섬블리 행마 코드로 정의된다. `engine/src/pieces/default_pieces.rs`는
+   모듈을 재노출하고 `all_default_definitions()`으로 기존 등록 순서대로
+   모은다. 즉 현재 기본 기물도 체섬블리 코드를 행마의 원천으로 사용한다.
 3. **[확인]** 파싱 진입점은 `engine/src/chessembly/parser.rs:11-29`의
    `parse(&str) -> Program`이다.
 4. **[확인]** AST는 `engine/src/chessembly/ast.rs:12-104`의

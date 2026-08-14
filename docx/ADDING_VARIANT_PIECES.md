@@ -32,20 +32,24 @@ Brainfuck Chess의 기물 행마는 기본적으로 `PieceDefinition`의 Chessem
 
 ## 2. 엔진에 기물 정의 추가
 
-기본 기물 정의 파일:
+기본 기물 정의는 기물별 모듈과 레지스트리로 나뉜다.
 
 ```text
-engine/src/pieces/default_pieces.rs
+engine/src/pieces/default_pieces/<piece_name>.rs  # 기물 정의와 행마 코드
+engine/src/pieces/default_pieces.rs               # 모듈 등록/재노출/전체 목록
 ```
 
-새 함수 하나를 추가하고 `all_default_definitions()`에 넣는다.
+새 기물은 반드시 자기 파일을 만든다. 다른 기물의 `*_definition()`에서
+`chessembly_code`를 가져오지 말고, 합성 기물이라도 자신의 행마 문자열을
+파일 안에 직접 둔다. 그래야 한 기물의 행마 변경이 다른 기물에 조용히
+전파되지 않는다.
 
-프로모션이나 능력을 쓰는 기물이 있으면 import도 함께 확인한다.
+단순한 단일 행마 기물은 레지스트리의 `legacy_piece_definition!` 매크로를
+사용할 수 있다. 이 매크로는 빈 상태 스키마와 기본 이동 레이어/`normal`
+옵션, 기본 시각 자산 키를 정규화 단계에서 채운다.
 
 ```rust
-use crate::types::{
-    AbilityDuration, PieceAbilityDefinition, PieceDefinition, PromotionCondition, PromotionRule,
-};
+use crate::types::*;
 ```
 
 예시: Wazir
@@ -53,7 +57,7 @@ use crate::types::{
 ```rust
 /// Wazir: one step orthogonally.
 pub fn wazir_definition() -> PieceDefinition {
-    PieceDefinition {
+    legacy_piece_definition! {
         id: "wazir".into(),
         name: "Wazir".into(),
         score: 2,
@@ -69,12 +73,18 @@ take-move(0, -1);"
         is_king: false,
         promotion: None,
         promotion_pool: Vec::new(),
-        abilities: Vec::new(),
     }
 }
 ```
 
-그리고 목록에 추가한다.
+그리고 `default_pieces.rs`에 모듈과 기존 공개 경로를 등록한다.
+
+```rust
+mod wazir;
+pub use wazir::wazir_definition;
+```
+
+마지막으로 기존 순서를 바꾸지 않고 전체 목록에 추가한다.
 
 ```rust
 pub fn all_default_definitions() -> Vec<PieceDefinition> {
@@ -103,7 +113,11 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
 - `is_king`: 이 기물을 잡으면 즉시 게임이 끝나는 왕족 기물 여부다. 일반 변형기물은 `false`.
 - `promotion`: 이 기물이 언제 진급할 수 있는지 정한다. 진급하지 않는 기물은 `None`.
 - `promotion_pool`: 진급 가능한 대상 타입 ID 목록이다. 진급하지 않는 기물은 `Vec::new()`.
-- `abilities`: 이 기물이 발동할 수 있는 능력 목록이다. 없으면 `Vec::new()`.
+- `state_schema`: 기물 인스턴스별 상태의 키와 초기값이다.
+- `move_layers`: 독립적으로 실행할 Chessembly 프로그램과 활성 조건이다.
+- `move_options`: 사용자가 선택할 일반/특수 이동과 참조 레이어다.
+- `visual`: 기본 자산 키와 상태별 시각 변형이다.
+- `can_capture_on_drop`: 포켓 착수로 상대 기물을 잡을 수 있는지 여부다.
 
 주의: `is_king: true`는 단순히 "중요한 기물" 표시가 아니라 승리 조건에 직접 연결된다. 새 왕족 기물을 추가하는 경우 덱 검증의 "King 1개" 정책도 함께 재검토해야 한다.
 
@@ -127,7 +141,7 @@ promotion_pool: vec!["queen".into(), "rook".into(), "bishop".into(), "knight".in
 
 ```rust
 pub fn promoter_definition() -> PieceDefinition {
-    PieceDefinition {
+    legacy_piece_definition! {
         id: "promoter".into(),
         name: "Promoter".into(),
         score: 2,
@@ -140,7 +154,6 @@ pub fn promoter_definition() -> PieceDefinition {
             condition: PromotionCondition::LastRank,
         }),
         promotion_pool: vec!["queen".into(), "knight".into()],
-        abilities: Vec::new(),
     }
 }
 ```
@@ -156,61 +169,64 @@ pub fn promoter_definition() -> PieceDefinition {
 
 ---
 
-## 3. 능력 추가
+## 3. 이동 옵션과 독립 행동 추가
 
-기물 능력은 기본 행마와 별도의 Chessembly 코드로 정의한다. Rust 룰 엔진은 기본 코드와 능력 코드를 합치지 않는다.
-
-```text
-Piece.active_ability == None
-→ PieceDefinition.chessembly_code 실행
-
-Piece.active_ability == Some(...)
-→ PieceDefinition.abilities 안의 해당 ability.chessembly_code 실행
-```
-
-기본 예시는 Bishop의 `bounce_mode`다. 평소에는 Bishop 코드가 실행되고, 능력이 활성화된 동안에는 Bouncing Bishop 코드가 실행된다.
+선택 가능한 행마 능력은 `move_layers`와 `move_options`로 정의한다.
+각 레이어가 자기 Chessembly 코드를 가지며, 옵션은 실행할 레이어 ID를
+참조한다. 예를 들어 Cannon Rook은 `rook_move`와 `cannon_move` 레이어를
+같은 기물 파일 안에 직접 정의한다.
 
 ```rust
-abilities: vec![PieceAbilityDefinition {
-    id: "bounce_mode".into(),
-    name: "Reflective Movement".into(),
-    description: "Moves like a Bouncing Bishop until this turn ends.".into(),
-    chessembly_code: bouncing_bishop_definition().chessembly_code,
-    duration: AbilityDuration::UntilTurnEnd,
-    once_per_turn: true,
-}],
+move_layers: vec![
+    MoveLayerDefinition {
+        id: "normal_move".into(),
+        chessembly_code: normal_code,
+        enabled_when: Vec::new(),
+        on_commit: Vec::new(),
+    },
+    MoveLayerDefinition {
+        id: "special_move".into(),
+        chessembly_code: special_code,
+        enabled_when: Vec::new(),
+        on_commit: Vec::new(),
+    },
+],
+move_options: vec![
+    MoveOptionDefinition {
+        id: "normal".into(),
+        name: "일반 이동".into(),
+        description: String::new(),
+        kind: MoveOptionKind::Normal,
+        layer_ids: vec!["normal_move".into()],
+        execution_mode: MoveOptionExecutionMode::MoveModifier,
+        contributes_to_attack_map: true,
+        cooldown: None,
+    },
+    MoveOptionDefinition {
+        id: "special".into(),
+        name: "특수 이동".into(),
+        description: String::new(),
+        kind: MoveOptionKind::Ability,
+        layer_ids: vec!["special_move".into()],
+        execution_mode: MoveOptionExecutionMode::MoveModifier,
+        contributes_to_attack_map: true,
+        cooldown: Some(CooldownDefinition {
+            turns: 3,
+            clock: CooldownClock::OwnerTurns,
+        }),
+    },
+],
 ```
 
-능력 필드:
-
-- `id`: 기물 타입 안에서 능력을 식별하는 문자열이다.
-- `name`: UI 표시용 이름이다.
-- `description`: UI 설명용 텍스트다.
-- `chessembly_code`: 능력이 켜져 있을 때 사용할 이동/공격 범위 코드다.
-- `duration`: `UntilTurnEnd`, `UntilPieceMoves`, `Permanent`, `Turns(u32)` 중 하나다. 현재 `Turns(u32)`는 구조만 준비되어 있고 만료 정책은 TODO다.
-- `once_per_turn`: `true`면 같은 턴에 같은 기물이 같은 능력을 두 번 발동할 수 없다.
-
-능력 발동은 `TurnAction::ActivateAbility`로 제출한다.
-
-```json
-{
-  "action": {
-    "type": "activate_ability",
-    "player_id": "white",
-    "piece_id": "white_bishop_1",
-    "ability_id": "bounce_mode"
-  }
-}
-```
-
-주의할 점:
-
-- 능력 발동은 Move 모드 행동이다. Drop 모드가 선택된 턴에는 발동할 수 없다.
-- 한 기물은 동시에 하나의 `active_ability`만 가질 수 있다.
-- 능력 발동은 `turn_state.actions`에 기록되며, 이후 이동 또는 착수를 완료하면 턴이 자동으로 넘어간다.
-- 능력이 활성화되면 legal move와 attack map 모두 같은 능력 Chessembly 코드를 기준으로 계산된다.
-- 기물의 `type_id`는 능력 발동으로 바뀌지 않는다.
-- 기본 행마에 능력 행마를 더하는 기능은 아직 없다. 그런 조합은 Chessembly 코드 자체로 표현하거나 별도 설계가 필요하다.
+- `MoveModifier`는 선택한 레이어로 합법 이동과 공격 범위를 계산하고,
+  생성된 `MoveAction.move_option_id`로 서버가 선택을 검증한다.
+- `enabled_when`과 `on_commit`은 `state_schema`에 선언된 기물별 상태만
+  참조해야 한다.
+- `contributes_to_attack_map: false`인 옵션은 공격 맵에 포함되지 않는다.
+- `StandaloneAction`은 Chessembly 이동이 아니라 `TurnAction::Ability`로
+  처리한다. 현재 일반화된 플러그인 지점이 아니며, 새 독립 행동을 추가할
+  때는 `legal_moves.rs`, `actions.rs`, `endgame.rs`의 canonical 생성·검증·적용
+  경계를 함께 구현하고 테스트해야 한다.
 
 ---
 
@@ -310,12 +326,12 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
 
 ## 6. 프론트엔드 카탈로그와 심볼 추가
 
-로비의 덱 빌더는 기물 목록을 하드코딩한다.
+덱 빌더와 기물 실험실이 공유하는 기본 기물 목록을 갱신한다.
 
 수정 파일:
 
 ```text
-frontend/src/App.vue
+frontend/src/composables/useDeckValidation.ts
 ```
 
 `pieceCatalog`에 항목을 추가한다.
@@ -324,13 +340,8 @@ frontend/src/App.vue
 { id: 'wazir', name: 'Wazir', score: 2, category: 'minor', canPocket: true },
 ```
 
-`DeckPieceType` 유니언 타입에 새 ID가 필요하면 함께 추가한다. `pieceLabels`나 카테고리 필터가 새 ID를 전제로 한다면 해당 맵도 같이 갱신한다.
-
-로비 심볼은 `displayPieceSymbol()`에서 추가한다.
-
-```ts
-wazir: 'W',
-```
+카탈로그 타입이나 카테고리 필터가 새 ID를 전제로 한다면 관련 타입과 맵도
+같이 갱신한다.
 
 게임 화면과 보드의 실제 표시 심볼도 각각 추가한다.
 
@@ -365,7 +376,10 @@ Rust 쪽 `PieceDefinition`도 이미 커스텀 기물을 담을 수 있다.
 engine/src/types.rs
 ```
 
-별도 필드가 필요한 상태성 기물이 아니라면 `types.rs` 수정은 보통 필요 없다. 프로모션은 `promotion`과 `promotion_pool`로 설정하고, 단순한 "발동 중에는 다른 행마 코드를 쓴다" 능력은 `abilities`와 `Piece.active_ability` 모델로 설정할 수 있다.
+별도 필드가 필요한 상태성 기물이 아니라면 `types.rs` 수정은 보통 필요
+없다. 프로모션은 `promotion`과 `promotion_pool`로 설정하고, 선택형 행마는
+`move_layers`와 `move_options`로 설정한다. 기물별 지속 상태가 필요하면
+`state_schema`, 레이어의 `enabled_when`과 `on_commit`을 사용한다.
 
 ---
 
@@ -470,7 +484,7 @@ cargo test -p brainfuck-chess-engine
 전체 Rust 워크스페이스 테스트:
 
 ```bash
-cargo test
+cargo test --workspace
 ```
 
 프론트 타입/빌드 확인:
@@ -488,12 +502,15 @@ npm run build
 
 - 기물 ID를 정했다. 예: `wazir`, `knightrider`, `archbishop`
 - 점수와 포켓 허용 여부를 정했다.
-- `engine/src/pieces/default_pieces.rs`에 `PieceDefinition` 함수를 추가했다.
+- `engine/src/pieces/default_pieces/<piece_name>.rs`에 독립된 정의와 행마 코드를 추가했다.
+- 다른 기물의 정의 함수나 행마 코드에 의존하지 않는지 확인했다.
+- `engine/src/pieces/default_pieces.rs`에 모듈 선언과 공개 재노출을 추가했다.
 - `all_default_definitions()`에 새 정의를 넣었다.
 - 진급 기물이라면 `promotion` 조건과 `promotion_pool` 후보를 설정했다.
-- 능력 기물이라면 `abilities`에 별도 Chessembly 코드와 지속 시간을 설정했다.
+- 선택형 행마라면 `move_layers`와 `move_options`를 설정했다.
+- 독립 행동이라면 canonical 생성·검증·적용 경계를 구현했다.
 - `server/src/main.rs`의 `resolve_piece_type()`에 새 타입을 허용했다.
-- `frontend/src/App.vue`의 카탈로그, 라벨, 심볼을 갱신했다.
+- `frontend/src/composables/useDeckValidation.ts`의 카탈로그와 라벨을 갱신했다.
 - `frontend/src/components/GameScreen.vue`와 `frontend/src/components/Board.vue`의 `PIECE_SYMBOLS`를 갱신했다.
 - 순수 Chessembly로 표현되지 않는 효과가 있으면 `legal_moves.rs`와 `endgame.rs`의 액션 적용 모델을 확장했다.
 - Chessembly 단위 테스트를 추가했다.
@@ -505,11 +522,10 @@ npm run build
 
 ## 12. 작업 예시 요약: Wazir
 
-1. `default_pieces.rs`에 `wazir_definition()` 추가
-2. `all_default_definitions()`에 `wazir_definition()` 추가
+1. `default_pieces/wazir.rs`에 독립된 `wazir_definition()`과 행마 코드 추가
+2. `default_pieces.rs`에 `mod wazir`, `pub use`와 목록 등록 추가
 3. `server/src/main.rs`의 `resolve_piece_type()` match에 `"wazir"` 추가
-4. `frontend/src/App.vue`의 `pieceCatalog`에 `{ id: 'wazir', name: 'Wazir', score: 2, category: 'minor', canPocket: true }` 추가
-5. `App.vue`, `GameScreen.vue`, `Board.vue`의 심볼 맵에 `wazir: 'W'` 추가
-6. `engine/tests/chessembly_compat.rs`에 중심/가장자리 이동 테스트 추가
-7. `engine/tests/rule_engine.rs`에 실제 합법수와 포켓 착수 테스트 추가
-8. `cargo test -p brainfuck-chess-engine` 실행
+4. 프론트엔드 기물 카탈로그와 시각 자산/심볼 연결 추가
+5. `engine/tests/chessembly_compat.rs`에 중심/가장자리 이동 테스트 추가
+6. `engine/tests/rule_engine.rs`에 실제 합법수와 포켓 착수 테스트 추가
+7. `cargo test --workspace` 실행
