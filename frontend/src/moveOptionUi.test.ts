@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isImmediateAbilityAction, moveOptionTargets, usesMoveSubmission } from './moveOptionUi.ts'
+import {
+  activeCooldownRemaining,
+  isImmediateAbilityAction,
+  moveOptionTargets,
+  usesMoveSubmission,
+} from './moveOptionUi.ts'
 import type { AbilityAction, MoveAction } from './types/game.ts'
 
 const effectlessMove = (overrides: Partial<MoveAction>): MoveAction => ({
@@ -23,6 +28,12 @@ test('move-modifier abilities are submitted as moves', () => {
   assert.equal(usesMoveSubmission({ execution_mode: 'move_modifier' }), true)
   assert.equal(usesMoveSubmission({ execution_mode: 'standalone_action' }), false)
   assert.equal(usesMoveSubmission(null), false)
+})
+
+test('piece cooldown badge uses the largest active cooldown', () => {
+  assert.equal(activeCooldownRemaining(undefined), 0)
+  assert.equal(activeCooldownRemaining({ barrage: { remaining: 2 } }), 2)
+  assert.equal(activeCooldownRemaining({ first: { remaining: 1 }, second: { remaining: 3 } }), 3)
 })
 
 test('cannon move targets retain normal move and capture highlights', () => {

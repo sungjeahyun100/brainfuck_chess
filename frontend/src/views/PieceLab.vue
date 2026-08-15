@@ -184,6 +184,13 @@
                 draggable="false"
               />
               <span v-else>{{ displayPieceSymbol(pieceAt(square.file, square.rank)!.pieceType) }}</span>
+              <span
+                v-if="labPieceCooldown(pieceAt(square.file, square.rank)!) > 0"
+                class="lab-cooldown-badge"
+                :title="`쿨타임 ${labPieceCooldown(pieceAt(square.file, square.rank)!)}턴`"
+              >
+                {{ labPieceCooldown(pieceAt(square.file, square.rank)!) }}
+              </span>
             </span>
           </button>
           <svg
@@ -340,7 +347,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, type PieceLabMoveOption } from '../api/gameApi'
-import { usesMoveSubmission } from '../moveOptionUi'
+import { activeCooldownRemaining, usesMoveSubmission } from '../moveOptionUi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import type { DeckPieceType } from '../types/deck'
 import type { AbilityAction, AbilityDeployment, DropAction, MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square } from '../types/game'
@@ -559,6 +566,10 @@ function placedPieceAsset(piece: PieceLabPiece): string | undefined {
     move_option_cooldowns: piece.moveOptionCooldowns,
   }
   return renderedPieceAsset(renderPiece, labDefinitions.value[piece.pieceType])
+}
+
+function labPieceCooldown(piece: PieceLabPiece): number {
+  return activeCooldownRemaining(piece.moveOptionCooldowns)
 }
 
 function initialPieceState(pieceType: string): Record<string, PieceStateValue> {
@@ -817,7 +828,31 @@ function applyLabDrop(action: DropAction) {
 
 function applyLabAbility(action: AbilityAction) {
   if (!action.to) return
-  if (action.ability_id === 'relieve' && action.target_piece_id && action.pocket_piece_id) {
+  const abilityActor = pieces.value.find(piece => piece.id === action.piece_id)
+  const cooldown = abilityActor
+    ? labDefinitions.value[abilityActor.pieceType]?.move_options
+      .find(option => option.id === action.ability_id)?.cooldown
+    : undefined
+  if (action.ability_id === 'mortar-barrage') {
+    const affectedSquares = new Set([
+      action.to,
+      { file: action.to.file + 1, rank: action.to.rank },
+      { file: action.to.file - 1, rank: action.to.rank },
+      { file: action.to.file, rank: action.to.rank + 1 },
+      { file: action.to.file, rank: action.to.rank - 1 },
+    ].map(squareId))
+    pieces.value = pieces.value.filter(piece => !affectedSquares.has(squareId(piece.square)))
+  } else if (action.ability_id === 'machine-gun-barrage') {
+    if (!abilityActor) return
+    const forward = abilityActor.owner === 'white' ? 1 : -1
+    const affectedSquares = new Set(
+      [1, 2].flatMap(depth => [-1, 0, 1].map(fileOffset => squareId({
+        file: abilityActor.square.file + fileOffset,
+        rank: abilityActor.square.rank + forward * depth,
+      }))),
+    )
+    pieces.value = pieces.value.filter(piece => !affectedSquares.has(squareId(piece.square)))
+  } else if (action.ability_id === 'relieve' && action.target_piece_id && action.pocket_piece_id) {
     const target = pieces.value.find(piece => piece.id === action.target_piece_id)
     const reserve = pocketPieces.value.find(piece => piece.id === action.pocket_piece_id)
     if (!target || !reserve) return
@@ -836,11 +871,35 @@ function applyLabAbility(action: AbilityAction) {
     pieces.value = pieces.value.filter(piece => piece.id !== target.id)
     pocketPieces.value = [...pocketPieces.value, { ...target, square: undefined } as PieceLabPocketPiece]
   }
+  const survivingActor = pieces.value.find(piece => piece.id === action.piece_id)
+  const newlySetCooldown = Boolean(survivingActor && cooldown && cooldown.turns > 0)
+  if (survivingActor && cooldown && cooldown.turns > 0) {
+    survivingActor.moveOptionCooldowns = {
+      ...survivingActor.moveOptionCooldowns,
+      [action.ability_id]: { remaining: cooldown.turns },
+    }
+  }
+  for (const piece of pieces.value) {
+    const definition = labDefinitions.value[piece.pieceType]
+    const nextCooldowns = { ...piece.moveOptionCooldowns }
+    for (const [optionId, state] of Object.entries(nextCooldowns)) {
+      if (newlySetCooldown && piece.id === action.piece_id && optionId === action.ability_id) continue
+      const clock = definition?.move_options.find(option => option.id === optionId)?.cooldown?.clock
+      const shouldTick = clock === 'global_turns'
+        || (clock === 'owner_turns' && piece.owner === action.player_id)
+      if (!shouldTick) continue
+      const remaining = Math.max(0, state.remaining - 1)
+      if (remaining === 0) delete nextCooldowns[optionId]
+      else nextCooldowns[optionId] = { remaining }
+    }
+    piece.moveOptionCooldowns = nextCooldowns
+  }
   activeAbilityId.value = null
   abilitySquares.value = []
   legalAbilityActions.value = []
   loadedOptionsPieceId.value = null
   optionsError.value = null
+  if (!pieces.value.some(piece => piece.id === selectedPieceId.value)) selectedPieceId.value = null
 }
 
 function tryLabAbility(to: Square): boolean {
@@ -1746,6 +1805,27 @@ onBeforeUnmount(() => {
 
 .lab-piece:active {
   cursor: grabbing;
+}
+
+.lab-cooldown-badge {
+  position: absolute;
+  right: -5%;
+  bottom: -5%;
+  z-index: 5;
+  display: inline-flex;
+  min-width: 1.45em;
+  height: 1.45em;
+  padding: 0 0.28em;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  background: #b4232f;
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  font-size: clamp(10px, 1.45vw, 15px);
+  font-weight: 800;
+  line-height: 1;
 }
 
 .inspector-heading {

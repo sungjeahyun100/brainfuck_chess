@@ -2,7 +2,8 @@ use crate::types::*;
 
 pub const MACHINE_GUN_BARRAGE_ABILITY_ID: &str = "machine-gun-barrage";
 
-/// Machine Gunner: takes one orthogonal step and can clear its three forward files.
+/// Machine Gunner: takes one orthogonal step and clears the 2x3 area directly
+/// ahead of it.
 pub fn machine_gunner_definition() -> PieceDefinition {
     let movement = "\
 take-move(1, 0);
@@ -44,12 +45,15 @@ take-move(0, -1);"
             MoveOptionDefinition {
                 id: MACHINE_GUN_BARRAGE_ABILITY_ID.into(),
                 name: "기관총 사격".into(),
-                description: "자신과 양옆 파일에서 전방에 있는 모든 기물을 제거합니다.".into(),
+                description: "능력을 선택한 뒤 자기 자신을 눌러, 바로 앞의 2x3 영역에 있는 모든 기물을 제거합니다. 사용 후 소유자의 다음 2개 턴 동안 사용할 수 없습니다.".into(),
                 kind: MoveOptionKind::Ability,
                 layer_ids: Vec::new(),
                 execution_mode: MoveOptionExecutionMode::StandaloneAction,
                 contributes_to_attack_map: false,
-                cooldown: None,
+                cooldown: Some(CooldownDefinition {
+                    turns: 2,
+                    clock: CooldownClock::OwnerTurns,
+                }),
             },
         ],
         visual: PieceVisualDefinition {

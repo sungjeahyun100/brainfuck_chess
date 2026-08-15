@@ -36,6 +36,13 @@
             draggable="false"
           />
           <span v-else>{{ pieceSymbol(sq.piece.type_id) }}</span>
+          <span
+            v-if="activeCooldownRemaining(sq.piece.move_option_cooldowns) > 0"
+            class="piece-cooldown-badge"
+            :title="`쿨타임 ${activeCooldownRemaining(sq.piece.move_option_cooldowns)}턴`"
+          >
+            {{ activeCooldownRemaining(sq.piece.move_option_cooldowns) }}
+          </span>
         </span>
       </div>
       <svg
@@ -85,6 +92,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Board, Piece, PieceDefinition, PlayerId, Square } from '../types/game'
+import { activeCooldownRemaining } from '../moveOptionUi'
 import { renderedPieceAsset, resolvePieceAssetKey } from '../pieceAssets'
 
 interface SquareInfo {
@@ -761,6 +769,28 @@ function pieceAlt(piece: Piece): string {
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.piece-cooldown-badge {
+  position: absolute;
+  right: -4%;
+  bottom: -4%;
+  z-index: 5;
+  display: inline-flex;
+  min-width: 1.4em;
+  height: 1.4em;
+  padding: 0 0.28em;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  background: #b4232f;
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  font-size: clamp(10px, 1.45vw, 16px);
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: none;
 }
 
 .square.dragging .piece {

@@ -221,7 +221,12 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
             .iter()
             .map(|update| (update.piece_id.clone(), update.move_option_id.clone()))
             .collect(),
-        _ => Default::default(),
+        TurnAction::Ability(action) => std::iter::once((
+            action.piece_id.clone(),
+            action.ability_id.clone(),
+        ))
+        .collect(),
+        TurnAction::Drop(_) => Default::default(),
     };
 
     game_state = match action.clone() {
@@ -250,12 +255,33 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
 }
 
 pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> GameState {
+    let cooldown_turns = state
+        .pieces
+        .get(&action.piece_id)
+        .and_then(|piece| state.piece_definitions.get(&piece.type_id))
+        .and_then(|definition| {
+            definition
+                .move_options
+                .iter()
+                .find(|option| option.id == action.ability_id)
+        })
+        .and_then(|option| option.cooldown.as_ref())
+        .map(|cooldown| cooldown.turns)
+        .filter(|turns| *turns > 0);
+    if let (Some(piece), Some(remaining)) =
+        (state.pieces.get_mut(&action.piece_id), cooldown_turns)
+    {
+        piece.move_option_cooldowns.insert(
+            action.ability_id.clone(),
+            CooldownState { remaining },
+        );
+    }
+
     match action.ability_id.as_str() {
         MORTAR_BARRAGE_ABILITY_ID => {
-            let targets = state
-                .pieces
-                .get(&action.piece_id)
-                .map(|actor| mortar_barrage_targets(&state, actor))
+            let targets = action
+                .to
+                .map(|target| mortar_barrage_targets(&state, target))
                 .unwrap_or_default();
             let mut removed_enemy_king = false;
             let mut removed_friendly_king = false;

@@ -662,19 +662,46 @@ pub fn generate_piece_legal_ability_actions(
     let Some(origin) = actor.current_square else {
         return Vec::new();
     };
+    let ability_is_available = game_state
+        .piece_definitions
+        .get(&actor.type_id)
+        .and_then(|definition| {
+            definition
+                .move_options
+                .iter()
+                .find(|option| option.id == ability_id)
+        })
+        .is_some_and(|option| {
+            option.execution_mode == MoveOptionExecutionMode::StandaloneAction
+                && actor
+                    .move_option_cooldowns
+                    .get(ability_id)
+                    .is_none_or(|cooldown| cooldown.remaining == 0)
+        });
+    if !ability_is_available {
+        return Vec::new();
+    }
     let mut actions = Vec::new();
     let adjacent = neighboring_pieces(game_state, actor);
     match (actor.type_id.as_str(), ability_id) {
         ("mortar", MORTAR_BARRAGE_ABILITY_ID) => {
-            actions.push(AbilityAction {
-                player_id: actor.owner.clone(),
-                piece_id: piece_id.clone(),
-                ability_id: ability_id.into(),
-                target_piece_id: None,
-                pocket_piece_id: None,
-                to: None,
-                deployments: Vec::new(),
-            });
+            for file_offset in -1..=1 {
+                let file = origin.file + file_offset;
+                for rank in 0..game_state.board.size {
+                    let target = Square::new(file, rank);
+                    if game_state.board.is_in_bounds(&target) {
+                        actions.push(AbilityAction {
+                            player_id: actor.owner.clone(),
+                            piece_id: piece_id.clone(),
+                            ability_id: ability_id.into(),
+                            target_piece_id: None,
+                            pocket_piece_id: None,
+                            to: Some(target),
+                            deployments: Vec::new(),
+                        });
+                    }
+                }
+            }
         }
         ("machine-gunner", MACHINE_GUN_BARRAGE_ABILITY_ID) => {
             actions.push(AbilityAction {
@@ -683,7 +710,7 @@ pub fn generate_piece_legal_ability_actions(
                 ability_id: ability_id.into(),
                 target_piece_id: None,
                 pocket_piece_id: None,
-                to: None,
+                to: Some(origin),
                 deployments: Vec::new(),
             });
         }
@@ -770,49 +797,35 @@ pub fn generate_piece_legal_ability_actions(
     actions
 }
 
-/// Mortar targets in its file and adjacent files strictly ahead of it.
-pub(crate) fn mortar_barrage_targets(game_state: &GameState, actor: &Piece) -> Vec<PieceId> {
-    let Some(origin) = actor.current_square else {
-        return Vec::new();
-    };
-    let forward = player_forward_direction(&actor.owner);
-    let mut targets = Vec::new();
-    for file_offset in -1..=1 {
-        let file = origin.file + file_offset;
-        let mut rank = origin.rank + forward;
-        loop {
-            let square = Square::new(file, rank);
-            if !game_state.board.is_in_bounds(&square) {
-                break;
-            }
-            if let Some(piece_id) = game_state.board.get_piece_at(&square) {
-                targets.push(piece_id.clone());
-            }
-            rank += forward;
-        }
-    }
-    targets
+/// Mortar removes pieces on the selected point and its four orthogonally
+/// adjacent squares. Target-square range validation is handled by canonical
+/// ability generation before an action can be submitted.
+pub(crate) fn mortar_barrage_targets(game_state: &GameState, target: Square) -> Vec<PieceId> {
+    [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .filter_map(|(file_offset, rank_offset)| {
+            let square = Square::new(target.file + file_offset, target.rank + rank_offset);
+            game_state.board.get_piece_at(&square).cloned()
+        })
+        .collect()
 }
 
-/// Machine Gunner targets in its file and adjacent files strictly ahead of it.
+/// Machine Gunner removes pieces in the 2x3 rectangle immediately ahead of it.
 pub(crate) fn machine_gun_barrage_targets(game_state: &GameState, actor: &Piece) -> Vec<PieceId> {
     let Some(origin) = actor.current_square else {
         return Vec::new();
     };
     let forward = player_forward_direction(&actor.owner);
     let mut targets = Vec::new();
-    for file_offset in -1..=1 {
-        let file = origin.file + file_offset;
-        let mut rank = origin.rank + forward;
-        loop {
-            let square = Square::new(file, rank);
-            if !game_state.board.is_in_bounds(&square) {
-                break;
-            }
+    for rank_offset in 1..=2 {
+        for file_offset in -1..=1 {
+            let square = Square::new(
+                origin.file + file_offset,
+                origin.rank + forward * rank_offset,
+            );
             if let Some(piece_id) = game_state.board.get_piece_at(&square) {
                 targets.push(piece_id.clone());
             }
-            rank += forward;
         }
     }
     targets

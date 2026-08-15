@@ -172,51 +172,143 @@ fn machine_gunner_uses_orthogonal_take_moves() {
 }
 
 #[test]
-fn white_mortar_barrage_removes_both_sides_only_in_three_forward_files() {
+fn mortar_barrage_removes_selected_point_and_orthogonal_neighbors() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "actor", "white", "mortar", 3, 3);
-    add_piece(&mut state, "own-file", "black", "bishop", 3, 6);
-    add_piece(&mut state, "left-file", "white", "knight", 2, 4);
-    add_piece(&mut state, "right-file", "black", "rook", 4, 7);
-    add_piece(&mut state, "behind", "black", "bishop", 3, 2);
-    add_piece(&mut state, "same-rank", "black", "bishop", 2, 3);
-    add_piece(&mut state, "outside-files", "black", "bishop", 5, 5);
+    add_piece(&mut state, "center", "black", "bishop", 4, 5);
+    add_piece(&mut state, "left", "white", "knight", 3, 5);
+    add_piece(&mut state, "right", "black", "rook", 5, 5);
+    add_piece(&mut state, "above", "black", "bishop", 4, 6);
+    add_piece(&mut state, "below", "white", "bishop", 4, 4);
+    add_piece(&mut state, "diagonal", "black", "bishop", 5, 6);
+    add_piece(&mut state, "farther", "black", "bishop", 4, 7);
 
     let actions = generate_piece_legal_ability_actions(&state, &"actor".into(), "mortar-barrage");
-    assert_eq!(actions.len(), 1);
-    let state = submit_action(state, TurnAction::Ability(actions[0].clone())).unwrap();
+    assert_eq!(actions.len(), 24);
+    assert!(actions.iter().all(|action| {
+        action
+            .to
+            .is_some_and(|target| (2..=4).contains(&target.file))
+    }));
+    let action = actions
+        .into_iter()
+        .find(|action| action.to == Some(Square::new(4, 5)))
+        .unwrap();
+    let state = submit_action(state, TurnAction::Ability(action)).unwrap();
 
-    for id in ["own-file", "left-file", "right-file"] {
+    for id in ["center", "left", "right", "above", "below"] {
         assert!(state.pieces[id].captured, "{id} should be removed");
         assert_eq!(state.pieces[id].current_square, None);
     }
-    for id in ["behind", "same-rank", "outside-files"] {
+    for id in ["diagonal", "farther"] {
         assert!(!state.pieces[id].captured, "{id} should remain");
     }
-    assert_eq!(state.players["white"].captured_pieces.len(), 3);
+    assert_eq!(state.players["white"].captured_pieces.len(), 5);
     assert_eq!(state.history.len(), 1);
+    assert_eq!(state.current_player.as_str(), "black");
 }
 
 #[test]
-fn black_machine_gun_barrage_uses_opposite_direction_and_clips_at_file_edge() {
+fn black_machine_gun_barrage_removes_only_the_immediate_two_by_three_area() {
     let mut state = make_game_state(8);
     state.current_player = "black".into();
-    add_piece(&mut state, "actor", "black", "machine-gunner", 0, 4);
-    add_piece(&mut state, "own-file", "white", "bishop", 0, 1);
-    add_piece(&mut state, "right-file", "black", "knight", 1, 3);
-    add_piece(&mut state, "behind", "white", "rook", 0, 5);
-    add_piece(&mut state, "same-rank", "white", "bishop", 1, 4);
+    add_piece(&mut state, "actor", "black", "machine-gunner", 3, 4);
+    add_piece(&mut state, "near-left", "white", "bishop", 2, 3);
+    add_piece(&mut state, "near-center", "black", "knight", 3, 3);
+    add_piece(&mut state, "near-right", "white", "rook", 4, 3);
+    add_piece(&mut state, "far-left", "white", "bishop", 2, 2);
+    add_piece(&mut state, "far-center", "white", "bishop", 3, 2);
+    add_piece(&mut state, "far-right", "black", "bishop", 4, 2);
+    add_piece(&mut state, "third-rank", "white", "rook", 3, 1);
+    add_piece(&mut state, "outside-width", "white", "bishop", 1, 3);
+    add_piece(&mut state, "behind", "white", "rook", 3, 5);
 
     let action =
         generate_piece_legal_ability_actions(&state, &"actor".into(), "machine-gun-barrage")
             .pop()
             .unwrap();
+    assert_eq!(action.to, Some(Square::new(3, 4)));
     let state = submit_action(state, TurnAction::Ability(action)).unwrap();
 
-    assert!(state.pieces["own-file"].captured);
-    assert!(state.pieces["right-file"].captured);
-    assert!(!state.pieces["behind"].captured);
-    assert!(!state.pieces["same-rank"].captured);
+    for id in [
+        "near-left",
+        "near-center",
+        "near-right",
+        "far-left",
+        "far-center",
+        "far-right",
+    ] {
+        assert!(state.pieces[id].captured, "{id} should be removed");
+    }
+    for id in ["third-rank", "outside-width", "behind"] {
+        assert!(!state.pieces[id].captured, "{id} should remain");
+    }
+}
+
+#[test]
+fn barrage_abilities_have_two_owner_turn_cooldowns() {
+    for (piece_type, ability_id) in [
+        ("mortar", "mortar-barrage"),
+        ("machine-gunner", "machine-gun-barrage"),
+    ] {
+        let mut state = make_game_state(8);
+        add_piece(&mut state, "wk", "white", "king", 0, 0);
+        add_piece(&mut state, "bk", "black", "king", 7, 7);
+        add_piece(&mut state, "actor", "white", piece_type, 3, 3);
+
+        let ability = generate_piece_legal_ability_actions(
+            &state,
+            &"actor".into(),
+            ability_id,
+        )
+        .pop()
+        .unwrap();
+        state = submit_action(state, TurnAction::Ability(ability)).unwrap();
+        assert_eq!(
+            state.pieces["actor"].move_option_cooldowns[ability_id].remaining,
+            2
+        );
+
+        let black_move = generate_piece_legal_move_actions(&state, &"bk".into())
+            .into_iter()
+            .next()
+            .unwrap();
+        state = submit_action(state, TurnAction::Move(black_move)).unwrap();
+        assert!(generate_piece_legal_ability_actions(
+            &state,
+            &"actor".into(),
+            ability_id
+        )
+        .is_empty());
+
+        for expected_remaining in [1, 0] {
+            let white_move = generate_piece_legal_move_actions(&state, &"wk".into())
+                .into_iter()
+                .next()
+                .unwrap();
+            state = submit_action(state, TurnAction::Move(white_move)).unwrap();
+            assert_eq!(
+                state.pieces["actor"]
+                    .move_option_cooldowns
+                    .get(ability_id)
+                    .map_or(0, |cooldown| cooldown.remaining),
+                expected_remaining
+            );
+
+            let black_move = generate_piece_legal_move_actions(&state, &"bk".into())
+                .into_iter()
+                .next()
+                .unwrap();
+            state = submit_action(state, TurnAction::Move(black_move)).unwrap();
+        }
+
+        assert!(!generate_piece_legal_ability_actions(
+            &state,
+            &"actor".into(),
+            ability_id
+        )
+        .is_empty());
+    }
 }
 
 #[test]
@@ -225,7 +317,8 @@ fn mortar_barrage_king_removal_uses_normal_game_end_state() {
     add_piece(&mut state, "actor", "white", "mortar", 3, 3);
     add_piece(&mut state, "enemy-king", "black", "king", 3, 7);
     let action = generate_piece_legal_ability_actions(&state, &"actor".into(), "mortar-barrage")
-        .pop()
+        .into_iter()
+        .find(|action| action.to == Some(Square::new(3, 6)))
         .unwrap();
 
     let state = submit_action(state, TurnAction::Ability(action)).unwrap();

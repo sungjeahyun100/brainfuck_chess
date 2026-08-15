@@ -2,6 +2,15 @@ import type { AbilityAction, MoveAction, MoveOptionDefinition, Square } from './
 
 type MoveOptionExecution = Pick<MoveOptionDefinition, 'execution_mode'> | null | undefined
 
+export function activeCooldownRemaining(
+  cooldowns: Record<string, { remaining: number }> | null | undefined,
+): number {
+  return Object.values(cooldowns ?? {}).reduce(
+    (largest, cooldown) => Math.max(largest, cooldown.remaining),
+    0,
+  )
+}
+
 export function usesMoveSubmission(option: MoveOptionExecution): boolean {
   return option?.execution_mode === 'move_modifier'
 }
