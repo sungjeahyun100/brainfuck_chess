@@ -1,7 +1,7 @@
 import {
   deactivateCustomPieceCatalog,
   upsertCustomPieceCatalog,
-} from '../composables/useDeckValidation'
+} from '../composables/useDeckValidation.ts'
 import type { TurnAction } from '../types/game'
 import type {
   CustomPieceImageAsset,

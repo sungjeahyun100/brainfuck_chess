@@ -11,7 +11,7 @@ import {
   parseCustomPiecePackage,
   serializeCustomPiecePackage,
   type CustomPiecePackageDocument,
-} from './useCustomPieceDraft'
+} from './useCustomPieceDraft.ts'
 
 export type EditableValueType = 'number' | 'boolean' | 'text'
 

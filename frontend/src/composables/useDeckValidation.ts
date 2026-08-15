@@ -325,7 +325,10 @@ export function createPresetDeck(boardSize: number, presetId = 'classic'): Lobby
 
 export function calculateDeckScore(deck: LobbyDeck): number {
   return deck.starting.reduce((sum, piece) => sum + pieceScore(piece.pieceType), 0)
-    + Object.entries(deck.pocket).reduce((sum, [pieceType, count]) => sum + pieceScore(pieceType) * count, 0)
+    + Object.entries(deck.pocket).reduce(
+      (sum, [pieceType, count]) => sum + (Number.isInteger(count) && count >= 0 ? pieceScore(pieceType) * count : 0),
+      0,
+    )
 }
 
 function isInBaseZone(piece: LobbyPlacement, boardSize: number): boolean {
@@ -373,6 +376,21 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
     errors.push('덱 이름은 비어 있을 수 없습니다.')
   }
 
+  if (!(boardSizes as readonly number[]).includes(boardSize)) {
+    errors.push('지원하지 않는 보드 크기입니다.')
+  }
+
+  const occupiedSquares = new Set<string>()
+  for (const piece of deck.starting) {
+    if (!Number.isInteger(piece.square.file) || !Number.isInteger(piece.square.rank)) {
+      errors.push('시작 기물 좌표는 정수여야 합니다.')
+      continue
+    }
+    const squareKey = `${piece.square.file}:${piece.square.rank}`
+    if (occupiedSquares.has(squareKey)) errors.push('같은 칸에 여러 시작 기물을 배치할 수 없습니다.')
+    occupiedSquares.add(squareKey)
+  }
+
   const kingCount = deck.starting.filter(piece => piece.pieceType === 'king').length
   if (kingCount !== 1) {
     errors.push('King은 시작 기물에 정확히 1개 있어야 합니다.')
@@ -380,6 +398,15 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
 
   if ((deck.pocket.king ?? 0) > 0) {
     errors.push('King은 포켓에 들어갈 수 없습니다.')
+  }
+
+  for (const [pieceType, count] of Object.entries(deck.pocket)) {
+    if (!Number.isInteger(count) || count < 0) {
+      errors.push(`${pieceLabel(pieceType)}의 포켓 수량이 올바르지 않습니다.`)
+    }
+    if (count > 0 && !canUseInPocket(pieceType)) {
+      errors.push(`${pieceLabel(pieceType)}은 포켓에 넣을 수 없습니다.`)
+    }
   }
 
   if (totalScore > limit) {
@@ -393,6 +420,11 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
     const restriction = placementRestriction(piece.pieceType, piece.square.rank, boardSize)
     if (restriction) {
       errors.push(`${pieceLabel(piece.pieceType)} (${piece.square.file + 1}, ${piece.square.rank + 1}): ${restriction}`)
+    }
+  }
+  for (const pieceType of new Set(deck.starting.map(piece => piece.pieceType))) {
+    if (isUniqueStartingPiece(pieceType) && deck.starting.filter(piece => piece.pieceType === pieceType).length > 1) {
+      errors.push(`${pieceLabel(pieceType)}은 시작 기물에 1개만 배치할 수 있습니다.`)
     }
   }
   const usedTypes = [

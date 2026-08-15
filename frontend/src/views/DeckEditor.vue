@@ -6,7 +6,12 @@
         <p class="eyebrow">Deck Editor</p>
         <h1>{{ deck.name || '이름 없는 덱' }}</h1>
       </div>
-      <button class="btn-start" :disabled="!canSaveDeck" @click="save">덱 저장</button>
+      <div class="deck-editor-actions">
+        <button class="btn-secondary" :disabled="!canSaveDeck" @click="copyDeckCode">덱 코드 복사</button>
+        <button class="btn-secondary" @click="openImportDialog">덱 코드 불러오기</button>
+        <button class="btn-secondary danger" @click="resetDeck">전체 초기화</button>
+        <button class="btn-start" :disabled="!canSaveDeck" @click="save">덱 저장</button>
+      </div>
     </div>
 
     <section class="card editor-topbar">
@@ -24,6 +29,9 @@
       </label>
     </section>
     <p v-if="saveError" class="error">{{ saveError }}</p>
+    <p v-if="deckCodeNotice" class="deck-code-notice" :class="{ error: deckCodeNoticeIsError }" role="status">
+      {{ deckCodeNotice }}
+    </p>
     <p v-if="catalogLoadError" class="error">{{ catalogLoadError }}</p>
 
     <section class="card preset-panel">
@@ -227,6 +235,49 @@
         </div>
       </section>
     </div>
+
+    <div v-if="importDialogOpen" class="deck-code-modal-backdrop" @click.self="closeImportDialog">
+      <section class="card deck-code-modal" role="dialog" aria-modal="true" aria-labelledby="deck-code-dialog-title">
+        <div class="section-header">
+          <p class="section-kicker">Deck Code</p>
+          <h2 id="deck-code-dialog-title">덱 코드 불러오기</h2>
+        </div>
+
+        <template v-if="!importCandidate">
+          <label class="deck-code-input-label" for="deck-code-input">
+            다른 사용자가 공유한 DC1 덱 코드를 입력하세요.
+          </label>
+          <textarea
+            id="deck-code-input"
+            v-model="importCode"
+            class="text-input deck-code-input"
+            rows="6"
+            maxlength="65536"
+            placeholder="DC1.xxxxxxxxxxxxxxxxxx"
+            autofocus
+          ></textarea>
+          <p v-if="importError" class="error" role="alert">{{ importError }}</p>
+          <div class="deck-code-modal-actions">
+            <button class="btn-secondary" @click="closeImportDialog">취소</button>
+            <button class="btn-start" :disabled="!importCode.trim()" @click="prepareImport">불러오기</button>
+          </div>
+        </template>
+
+        <template v-else>
+          <p>덱 코드를 현재 규칙으로 검증했습니다. 적용하기 전 내용을 확인해 주세요.</p>
+          <dl class="deck-code-preview">
+            <div><dt>보드 크기</dt><dd>{{ importCandidate.deck.boardSize }} x {{ importCandidate.deck.boardSize }}</dd></div>
+            <div><dt>점수</dt><dd>{{ importCandidate.totalScore }} / {{ importCandidate.scoreLimit }}</dd></div>
+            <div><dt>시작 기물</dt><dd>{{ importCandidate.deck.starting.length }}</dd></div>
+            <div><dt>포켓 기물</dt><dd>{{ totalPocketCount(importCandidate.deck) }}</dd></div>
+          </dl>
+          <div class="deck-code-modal-actions">
+            <button class="btn-secondary" @click="importCandidate = null">뒤로</button>
+            <button class="btn-start" @click="applyImportedDeck">현재 덱에 적용</button>
+          </div>
+        </template>
+      </section>
+    </div>
   </main>
 </template>
 
@@ -242,6 +293,7 @@ import {
   canUseInPocket,
   createPresetDeck,
   deckPresets,
+  emptyPocket,
   frontmostBaseRank,
   isUniqueStartingPiece,
   pieceCatalog,
@@ -250,10 +302,13 @@ import {
   placementRestriction,
   presetLayoutForBoard,
   scoreLimit,
+  totalPocketCount,
   validateSavedDeck,
   replaceCustomPieceCatalog,
 } from '../composables/useDeckValidation'
 import { createNewSavedDeck, useSavedDecks } from '../composables/useSavedDecks'
+import { encodeDeckCode } from '../composables/useDeckCodeCodec'
+import { importDeckCode, type DeckCodeImportResult } from '../composables/useDeckCode'
 
 const props = defineProps<{
   deckId?: string | null
@@ -276,6 +331,12 @@ const deck = ref<SavedDeck>(loadDeck())
 const catalogLoadError = ref<string | null>(null)
 const catalogRevision = ref(0)
 const latestCustomPieces = ref<Awaited<ReturnType<typeof customPieceApi.list>>['items']>([])
+const deckCodeNotice = ref<string | null>(null)
+const deckCodeNoticeIsError = ref(false)
+const importDialogOpen = ref(false)
+const importCode = ref('')
+const importError = ref<string | null>(null)
+const importCandidate = ref<Extract<DeckCodeImportResult, { ok: true }> | null>(null)
 
 onMounted(async () => {
   try {
@@ -461,6 +522,67 @@ function applyPreset(presetId: string) {
   const base = createPresetDeck(deck.value.boardSize, presetId)
   deck.value.starting = base.starting
   deck.value.pocket = base.pocket
+}
+
+function resetDeck() {
+  if (!window.confirm('시작 배치와 포켓 기물을 모두 비우시겠습니까?')) return
+  deck.value.starting = []
+  deck.value.pocket = emptyPocket()
+  deck.value.customPieces = []
+  placementError.value = null
+  saveError.value = null
+}
+
+async function copyDeckCode() {
+  deckCodeNotice.value = null
+  if (!deckSummary.value.valid) {
+    deckCodeNoticeIsError.value = true
+    deckCodeNotice.value = deckSummary.value.errors[0] ?? '유효한 덱만 공유할 수 있습니다.'
+    return
+  }
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+    await navigator.clipboard.writeText(encodeDeckCode(deck.value))
+    deckCodeNoticeIsError.value = false
+    deckCodeNotice.value = '덱 코드를 복사했습니다.'
+  } catch {
+    deckCodeNoticeIsError.value = true
+    deckCodeNotice.value = '클립보드에 복사하지 못했습니다. 브라우저 권한을 확인해 주세요.'
+  }
+}
+
+function openImportDialog() {
+  importCode.value = ''
+  importError.value = null
+  importCandidate.value = null
+  importDialogOpen.value = true
+}
+
+function closeImportDialog() {
+  importDialogOpen.value = false
+  importError.value = null
+  importCandidate.value = null
+}
+
+function prepareImport() {
+  importError.value = null
+  const result = importDeckCode(importCode.value, deck.value)
+  if (!result.ok) {
+    importError.value = result.message
+    return
+  }
+  importCandidate.value = result
+}
+
+function applyImportedDeck() {
+  if (!importCandidate.value) return
+  deck.value = cloneSavedDeck(importCandidate.value.deck)
+  placementTool.value = 'king'
+  placementError.value = null
+  saveError.value = null
+  closeImportDialog()
+  deckCodeNoticeIsError.value = false
+  deckCodeNotice.value = '덱 코드를 현재 편집기에 적용했습니다. 저장하기 전까지 기존 저장본은 유지됩니다.'
 }
 
 function pieceAt(file: number, rank: number): DeckPieceType | null {
