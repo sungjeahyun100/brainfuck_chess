@@ -3,6 +3,7 @@ use crate::types::*;
 /// White Tempest Pawn with independent movement and promotion configuration.
 pub fn tempest_pawn_white_definition() -> PieceDefinition {
     legacy_piece_definition! {
+        deployment_zone: DeploymentZone::Front,
         id: "tempest-pawn-white".into(),
         name: "Tempest Pawn".into(),
         score: 1,

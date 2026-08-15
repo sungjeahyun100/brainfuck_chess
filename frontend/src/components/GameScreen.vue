@@ -270,7 +270,7 @@ import type {
   SubmitDropAction,
   SubmitMoveAction,
 } from '../types/game'
-import { moveOptionTargets, usesMoveSubmission } from '../moveOptionUi'
+import { isImmediateAbilityAction, moveOptionTargets, usesMoveSubmission } from '../moveOptionUi'
 import { api } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import Board from './Board.vue'
@@ -995,10 +995,30 @@ async function toggleAbilityMode(abilityId: string) {
     airdropSelectedPieceId.value = airdropEligiblePieceIds.value[0] ?? null
     airdropOpen.value = true
   }
+  const immediateActions = options.abilityActions.filter(isImmediateAbilityAction)
+  if (immediateActions.length === 1) {
+    await submitImmediateAbility(immediateActions[0])
+    return
+  }
   if (selectedPieceId.value === pieceId && abilityMode.value && activeAbilityId.value === abilityId) {
     legalTargetSquares.value = options.legalTargets
     movableSquares.value = options.movable
     attackSquares.value = options.captures
+  }
+}
+
+async function submitImmediateAbility(action: import('../types/game').AbilityAction) {
+  try {
+    const newState = await api.submitAction(props.state.id, {
+      type: 'ability',
+      piece_id: action.piece_id,
+      ability_id: action.ability_id,
+    })
+    emit('stateUpdate', newState)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    clearSelection()
   }
 }
 

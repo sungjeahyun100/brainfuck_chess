@@ -3,6 +3,7 @@ use crate::types::*;
 /// Black Pawn: mirror of White Pawn (rank direction reversed).
 pub fn pawn_black_definition() -> PieceDefinition {
     legacy_piece_definition! {
+        deployment_zone: DeploymentZone::Front,
         id: "pawn-black".into(),
         name: "Pawn".into(),
         score: 1,

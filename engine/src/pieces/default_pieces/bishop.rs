@@ -6,6 +6,7 @@ pub fn bishop_definition() -> PieceDefinition {
         id: "bishop".into(),
         name: "Bishop".into(),
         score: 3,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 1) repeat(1);
 take-move(1, -1) repeat(1);

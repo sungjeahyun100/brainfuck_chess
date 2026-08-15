@@ -6,6 +6,7 @@ pub fn king_definition() -> PieceDefinition {
         id: "king".into(),
         name: "King".into(),
         score: 0,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 0);
 take-move(-1, 0);

@@ -67,6 +67,7 @@ fn test_wazir_center() {
         id: "wazir".into(),
         name: "Wazir".into(),
         score: 1,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 0);
 take-move(-1, 0);
@@ -161,6 +162,7 @@ fn test_knightrider_slide() {
         id: "knightrider".into(),
         name: "Knightrider".into(),
         score: 5,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 2) repeat(1);
 take-move(2, 1) repeat(1);
@@ -444,6 +446,7 @@ fn test_scope_block_y_move() {
         id: "test".into(),
         name: "Test".into(),
         score: 1,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "move(0, 1) { move(1, 1) } move(-1, 1);".into(),
         chessembly_version: "1.0".into(),
         dialect: None,
@@ -480,6 +483,7 @@ fn test_catch_scans_and_marks_threatened_squares() {
         id: "cannon".into(),
         name: "Cannon".into(),
         score: 4,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "catch(1, 0) repeat(1);".into(),
         chessembly_version: "1.0".into(),
         dialect: None,

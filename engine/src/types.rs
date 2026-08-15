@@ -166,6 +166,9 @@ pub struct PieceDefinition {
     pub name: String,
     /// Point cost for deck building (King is excluded from scoring)
     pub score: u32,
+    /// Setup rank reserved for this piece before the game begins.
+    #[serde(default)]
+    pub deployment_zone: DeploymentZone,
     pub chessembly_code: String,
     pub chessembly_version: String,
     pub dialect: Option<ChessemblyDialect>,
@@ -193,6 +196,14 @@ pub struct PieceDefinition {
     /// Logical asset selection derived from per-piece state.
     #[serde(default)]
     pub visual: PieceVisualDefinition,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentZone {
+    Front,
+    #[default]
+    Back,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

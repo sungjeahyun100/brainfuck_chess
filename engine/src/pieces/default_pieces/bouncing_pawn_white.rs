@@ -2,6 +2,7 @@ use crate::types::*;
 
 pub fn bouncing_pawn_white_definition() -> PieceDefinition {
     legacy_piece_definition! {
+        deployment_zone: DeploymentZone::Front,
         id: "bouncing-pawn-white".into(),
         name: "Bouncing Pawn".into(),
         score: 2,

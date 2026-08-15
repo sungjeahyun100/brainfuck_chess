@@ -1,23 +1,19 @@
 use crate::types::*;
 
-/// Alternating Soldier: moves one square in any direction and can exchange an
-/// adjacent friendly piece with one of its owner's pocket pieces.
-pub fn alternating_soldier_definition() -> PieceDefinition {
+pub const MACHINE_GUN_BARRAGE_ABILITY_ID: &str = "machine-gun-barrage";
+
+/// Machine Gunner: takes one orthogonal step and can clear its three forward files.
+pub fn machine_gunner_definition() -> PieceDefinition {
     let movement = "\
 take-move(1, 0);
 take-move(-1, 0);
 take-move(0, 1);
-take-move(0, -1);
-take-move(1, 1);
-take-move(1, -1);
-take-move(-1, 1);
-take-move(-1, -1);"
+take-move(0, -1);"
         .to_string();
-
     PieceDefinition {
-        id: "alternating-soldier".into(),
-        name: "교대병".into(),
-        score: 4,
+        id: "machine-gunner".into(),
+        name: "기관총 사수".into(),
+        score: 8,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: movement.clone(),
         chessembly_version: "1.0".into(),
@@ -29,7 +25,7 @@ take-move(-1, -1);"
         promotion_pool: Vec::new(),
         state_schema: Vec::new(),
         move_layers: vec![MoveLayerDefinition {
-            id: "king_step".into(),
+            id: "machine_gunner_step".into(),
             chessembly_code: movement,
             enabled_when: Vec::new(),
             on_commit: Vec::new(),
@@ -38,17 +34,17 @@ take-move(-1, -1);"
             MoveOptionDefinition {
                 id: "normal".into(),
                 name: "일반 이동".into(),
-                description: "왕처럼 한 칸 이동합니다.".into(),
+                description: "상하좌우로 한 칸 이동하거나 포획합니다.".into(),
                 kind: MoveOptionKind::Normal,
-                layer_ids: vec!["king_step".into()],
+                layer_ids: vec!["machine_gunner_step".into()],
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
                 contributes_to_attack_map: true,
                 cooldown: None,
             },
             MoveOptionDefinition {
-                id: "relieve".into(),
-                name: "교대".into(),
-                description: "주변 8칸의 기물 하나와 자신의 포켓 기물 하나를 교대합니다.".into(),
+                id: MACHINE_GUN_BARRAGE_ABILITY_ID.into(),
+                name: "기관총 사격".into(),
+                description: "자신과 양옆 파일에서 전방에 있는 모든 기물을 제거합니다.".into(),
                 kind: MoveOptionKind::Ability,
                 layer_ids: Vec::new(),
                 execution_mode: MoveOptionExecutionMode::StandaloneAction,
@@ -57,10 +53,10 @@ take-move(-1, -1);"
             },
         ],
         visual: PieceVisualDefinition {
-            default_asset_key: "alternating-soldier".into(),
+            default_asset_key: "paratrooper".into(),
             variants: Vec::new(),
         },
     }
     .normalize_and_validate()
-    .expect("alternating soldier definition must be valid")
+    .expect("machine gunner definition must be valid")
 }

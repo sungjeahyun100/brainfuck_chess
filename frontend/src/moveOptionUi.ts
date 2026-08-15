@@ -6,6 +6,13 @@ export function usesMoveSubmission(option: MoveOptionExecution): boolean {
   return option?.execution_mode === 'move_modifier'
 }
 
+export function isImmediateAbilityAction(action: AbilityAction): boolean {
+  return !action.to
+    && !action.target_piece_id
+    && !action.pocket_piece_id
+    && action.deployments.length === 0
+}
+
 export function moveOptionTargets(moves: MoveAction[], abilityActions: AbilityAction[]): {
   legalTargets: Square[]
   movable: Square[]

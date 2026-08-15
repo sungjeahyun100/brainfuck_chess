@@ -1,3 +1,5 @@
+use crate::legal_moves::{machine_gun_barrage_targets, mortar_barrage_targets};
+use crate::pieces::default_pieces::{MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID};
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -249,6 +251,78 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
 
 pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> GameState {
     match action.ability_id.as_str() {
+        MORTAR_BARRAGE_ABILITY_ID => {
+            let targets = state
+                .pieces
+                .get(&action.piece_id)
+                .map(|actor| mortar_barrage_targets(&state, actor))
+                .unwrap_or_default();
+            let mut removed_enemy_king = false;
+            let mut removed_friendly_king = false;
+            for target_id in targets {
+                let target_owner = state
+                    .pieces
+                    .get(&target_id)
+                    .map(|piece| piece.owner.clone());
+                let was_king = remove_captured_piece(&mut state, &target_id, &action.player_id);
+                if was_king {
+                    if target_owner.as_ref() == Some(&action.player_id) {
+                        removed_friendly_king = true;
+                    } else {
+                        removed_enemy_king = true;
+                    }
+                }
+            }
+            if removed_enemy_king || removed_friendly_king {
+                state.phase = GamePhase::Ended;
+                state.result = Some(GameResult {
+                    winner: if removed_enemy_king {
+                        Some(action.player_id.clone())
+                    } else if action.player_id == "white" {
+                        Some("black".into())
+                    } else {
+                        Some("white".into())
+                    },
+                    reason: GameEndReason::KingCapture,
+                });
+            }
+        }
+        MACHINE_GUN_BARRAGE_ABILITY_ID => {
+            let targets = state
+                .pieces
+                .get(&action.piece_id)
+                .map(|actor| machine_gun_barrage_targets(&state, actor))
+                .unwrap_or_default();
+            let mut removed_enemy_king = false;
+            let mut removed_friendly_king = false;
+            for target_id in targets {
+                let target_owner = state
+                    .pieces
+                    .get(&target_id)
+                    .map(|piece| piece.owner.clone());
+                let was_king = remove_captured_piece(&mut state, &target_id, &action.player_id);
+                if was_king {
+                    if target_owner.as_ref() == Some(&action.player_id) {
+                        removed_friendly_king = true;
+                    } else {
+                        removed_enemy_king = true;
+                    }
+                }
+            }
+            if removed_enemy_king || removed_friendly_king {
+                state.phase = GamePhase::Ended;
+                state.result = Some(GameResult {
+                    winner: if removed_enemy_king {
+                        Some(action.player_id.clone())
+                    } else if action.player_id == "white" {
+                        Some("black".into())
+                    } else {
+                        Some("white".into())
+                    },
+                    reason: GameEndReason::KingCapture,
+                });
+            }
+        }
         "relieve" => {
             let Some(target_id) = action.target_piece_id else {
                 return state;
@@ -320,6 +394,37 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
     state
 }
 
+/// Normalized piece-removal path shared by capture-like actions. It updates the
+/// board, concrete piece state, and capture record, and reports royal removal.
+fn remove_captured_piece(
+    game_state: &mut GameState,
+    piece_id: &PieceId,
+    record_for_player: &PlayerId,
+) -> bool {
+    let Some(piece) = game_state.pieces.get(piece_id) else {
+        return false;
+    };
+    let square = piece.current_square;
+    let is_king = game_state
+        .piece_definitions
+        .get(&piece.type_id)
+        .is_some_and(is_royal_piece);
+    if let Some(square) = square {
+        game_state.board.squares.insert(square.to_id(), None);
+    }
+    if let Some(piece) = game_state.pieces.get_mut(piece_id) {
+        piece.captured = true;
+        piece.current_square = None;
+        piece.in_pocket = false;
+    }
+    if let Some(player) = game_state.players.get_mut(record_for_player) {
+        if !player.captured_pieces.contains(piece_id) {
+            player.captured_pieces.push(piece_id.clone());
+        }
+    }
+    is_king
+}
+
 fn tick_move_option_cooldowns(
     game_state: &mut GameState,
     acting_player: &PlayerId,
@@ -363,22 +468,10 @@ fn tick_move_option_cooldowns(
 
 /// Apply a DropAction: move a pocket piece onto the board.
 pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameState {
-    let captured_is_king = action.captured_piece_id.as_ref().is_some_and(|id| {
-        game_state
-            .pieces
-            .get(id)
-            .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
-            .is_some_and(is_royal_piece)
-    });
-    if let Some(captured_id) = &action.captured_piece_id {
-        if let Some(captured) = game_state.pieces.get_mut(captured_id) {
-            captured.captured = true;
-            captured.current_square = None;
-        }
-        if let Some(player) = game_state.players.get_mut(&action.player_id) {
-            player.captured_pieces.push(captured_id.clone());
-        }
-    }
+    let captured_is_king = action
+        .captured_piece_id
+        .as_ref()
+        .is_some_and(|id| remove_captured_piece(&mut game_state, id, &action.player_id));
     // Remove from pocket list
     if let Some(player) = game_state.players.get_mut(&action.player_id) {
         player
@@ -441,21 +534,13 @@ fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameSt
     }
 
     if let Some(captured_id) = game_state.board.get_piece_at(&capture_square).cloned() {
-        game_state
-            .board
-            .squares
-            .insert(capture_square.to_id(), None);
-        if let Some(captured) = game_state.pieces.get_mut(&captured_id) {
-            captured.captured = true;
-            captured.current_square = None;
-        }
-        if let Some(opponent) = game_state
+        let record_for_player = game_state
             .players
-            .values_mut()
+            .values()
             .find(|p| p.id != action.player_id)
-        {
-            opponent.captured_pieces.push(captured_id);
-        }
+            .map(|player| player.id.clone())
+            .unwrap_or_else(|| action.player_id.clone());
+        remove_captured_piece(&mut game_state, &captured_id, &record_for_player);
     }
 
     if is_castling {

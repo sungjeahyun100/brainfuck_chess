@@ -58,6 +58,20 @@ test('new custom piece defaults only ask for user-facing fields', () => {
   assert.equal(simple.abilities.length, 0)
   assert.match(simple.movementCode, /move/)
   assert.equal(JSON.parse(newCustomPieceScript()).definitions[0].id, 'main')
+  assert.equal(JSON.parse(newCustomPieceScript()).definitions[0].deployment_zone, 'back')
+})
+
+test('custom deployment zones round-trip and legacy definitions default to back', () => {
+  const document = parseCustomPiecePackage(newCustomPieceScript())
+  document.definitions[0].deployment_zone = 'front'
+  assert.equal(
+    parseCustomPiecePackage(serializeCustomPiecePackage(document)).definitions[0].deployment_zone,
+    'front',
+  )
+
+  const legacy = JSON.parse(newCustomPieceScript())
+  delete legacy.definitions[0].deployment_zone
+  assert.equal(parseCustomPiecePackage(JSON.stringify(legacy)).definitions[0].deployment_zone, 'back')
 })
 
 test('the structured editor package round-trips without changing the server envelope', () => {

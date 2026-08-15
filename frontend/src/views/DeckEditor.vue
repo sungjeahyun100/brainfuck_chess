@@ -63,9 +63,17 @@
         </div>
         <input v-model.trim="pieceSearch" class="piece-search" type="search" placeholder="기물 검색" />
         <div class="piece-catalog">
-          <div v-for="section in catalogSections" :key="section.id" class="catalog-section">
+          <section
+            v-for="section in catalogSections"
+            :key="section.id"
+            class="catalog-section catalog-zone-chunk"
+            :class="`catalog-zone-${section.id}`"
+          >
             <div class="catalog-section-title">
-              <span>{{ section.label }}</span>
+              <div>
+                <span>{{ section.label }}</span>
+                <small class="catalog-zone-description">{{ section.description }}</small>
+              </div>
               <small>{{ section.pieces.length }}</small>
             </div>
             <div class="piece-palette">
@@ -112,7 +120,7 @@
                 <button class="piece-test-button" @click="emitTestPiece(piece.id)">테스트</button>
               </div>
             </div>
-          </div>
+          </section>
         </div>
       </section>
 
@@ -134,29 +142,44 @@
             <strong>{{ selectedToolLabel }}</strong>
           </div>
         </div>
-        <div class="placement-board" :style="{ '--board-size': deck.boardSize }">
-          <button
-            v-for="square in baseZoneSquares"
-            :key="`${square.file}_${square.rank}`"
-            class="placement-square"
-            :class="squareClass(square.file, square.rank)"
-            @click="onPlacementSquareClick(square.file, square.rank)"
-            @dragover.prevent="onPlacementDragOver"
-            @drop.prevent="onPlacementDrop($event, square.file, square.rank)"
+        <p v-if="placementError" class="error">{{ placementError }}</p>
+        <div class="placement-zone-list">
+          <section
+            v-for="zone in placementZoneSections"
+            :key="zone.id"
+            class="placement-zone-chunk"
+            :class="`placement-zone-${zone.id}`"
           >
-            <span class="square-label">{{ fileLabel(square.file) }}{{ square.rank + 1 }}</span>
-            <span v-if="pieceAt(square.file, square.rank)" class="square-piece">
-              <img
-                v-if="displayPieceAsset(pieceAt(square.file, square.rank)!)"
-                class="piece-icon"
-                :src="displayPieceAsset(pieceAt(square.file, square.rank)!)"
-                :alt="pieceLabel(pieceAt(square.file, square.rank)!)"
-                draggable="false"
-              />
-              <span v-else>{{ displayPieceSymbol(pieceAt(square.file, square.rank)!) }}</span>
-            </span>
-            <span v-else class="square-empty">+</span>
-          </button>
+            <div class="placement-zone-header">
+              <strong>{{ zone.label }}</strong>
+              <span>{{ zone.description }}</span>
+            </div>
+            <div class="placement-board" :style="{ '--board-size': deck.boardSize }">
+              <button
+                v-for="square in zone.squares"
+                :key="`${square.file}_${square.rank}`"
+                class="placement-square"
+                :class="squareClass(square.file, square.rank)"
+                :title="squareRestriction(square.rank) ?? undefined"
+                @click="onPlacementSquareClick(square.file, square.rank)"
+                @dragover.prevent="onPlacementDragOver"
+                @drop.prevent="onPlacementDrop($event, square.file, square.rank)"
+              >
+                <span class="square-label">{{ fileLabel(square.file) }}{{ square.rank + 1 }}</span>
+                <span v-if="pieceAt(square.file, square.rank)" class="square-piece">
+                  <img
+                    v-if="displayPieceAsset(pieceAt(square.file, square.rank)!)"
+                    class="piece-icon"
+                    :src="displayPieceAsset(pieceAt(square.file, square.rank)!)"
+                    :alt="pieceLabel(pieceAt(square.file, square.rank)!)"
+                    draggable="false"
+                  />
+                  <span v-else>{{ displayPieceSymbol(pieceAt(square.file, square.rank)!) }}</span>
+                </span>
+                <span v-else class="square-empty">+</span>
+              </button>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -214,16 +237,17 @@ import { pieceAsset } from '../pieceAssets'
 import { customPieceApi } from '../api/customPieceApi'
 import type { DeckPieceType, SavedDeck } from '../types/deck'
 import {
-  baseZoneDepth,
+  baseZoneRanks,
   boardSizes,
   canUseInPocket,
-  catalogCategoryLabels,
   createPresetDeck,
   deckPresets,
+  frontmostBaseRank,
   isUniqueStartingPiece,
   pieceCatalog,
   pieceLabel,
   pieceScore,
+  placementRestriction,
   presetLayoutForBoard,
   scoreLimit,
   validateSavedDeck,
@@ -247,6 +271,7 @@ const pieceSearch = ref('')
 const placementTool = ref<DeckPieceType>('king')
 const draggedPiece = ref<DeckPieceType | null>(null)
 const saveError = ref<string | null>(null)
+const placementError = ref<string | null>(null)
 const deck = ref<SavedDeck>(loadDeck())
 const catalogLoadError = ref<string | null>(null)
 const catalogRevision = ref(0)
@@ -303,7 +328,7 @@ const deckSummary = computed(() => {
   catalogRevision.value
   return validateSavedDeck(deck.value)
 })
-const canSaveDeck = computed(() => deck.value.name.trim().length > 0)
+const canSaveDeck = computed(() => deckSummary.value.valid)
 const activePresets = computed(() => deckPresets.filter(preset => presetLayoutForBoard(preset, deck.value.boardSize)))
 const selectedToolLabel = computed(() => placementTool.value === eraseTool ? '지우개' : pieceLabel(placementTool.value))
 const scoreFillWidth = computed(() => `${Math.min(100, Math.round((deckSummary.value.totalScore / deckSummary.value.scoreLimit) * 100))}%`)
@@ -332,20 +357,34 @@ const filteredPieceCatalog = computed(() => {
   return pieceCatalog.filter(piece => [piece.id, piece.name, piece.category, ...(piece.aliases ?? [])].join(' ').toLowerCase().includes(query))
 })
 const catalogSections = computed(() => {
-  const groups = new Map<string, typeof pieceCatalog>()
-  for (const piece of filteredPieceCatalog.value) {
-    groups.set(piece.category, [...(groups.get(piece.category) ?? []), piece])
-  }
-  return Array.from(groups.entries()).map(([id, pieces]) => ({
-    id,
-    label: catalogCategoryLabels[id] ?? id,
-    pieces,
-  }))
+  return (['front', 'back'] as const)
+    .map(id => ({
+      id,
+      label: id === 'front' ? '앞줄 배치 기물' : '그 외 배치 기물',
+      description: id === 'front'
+        ? '상대와 가까운 시작 줄 전용'
+        : '나머지 시작 배치 줄 전용',
+      pieces: filteredPieceCatalog.value.filter(piece => piece.deploymentZone === id),
+    }))
+    .filter(section => section.pieces.length > 0)
 })
-const baseZoneSquares = computed(() => Array.from(
-  { length: baseZoneDepth(deck.value.boardSize) },
-  (_, index) => baseZoneDepth(deck.value.boardSize) - index - 1,
-).flatMap(rank => Array.from({ length: deck.value.boardSize }, (_, file) => ({ file, rank }))))
+const placementZoneSections = computed(() => {
+  const frontRank = frontmostBaseRank(deck.value.boardSize)
+  const ranks = baseZoneRanks(deck.value.boardSize).reverse()
+  return (['front', 'back'] as const).map(id => {
+    const zoneRanks = ranks.filter(rank => id === 'front' ? rank === frontRank : rank !== frontRank)
+    return {
+      id,
+      label: id === 'front' ? '앞줄' : '뒷줄',
+      description: id === 'front'
+        ? 'Front 기물 전용 배치 구역'
+        : 'Back 기물 전용 배치 구역',
+      squares: zoneRanks.flatMap(rank => (
+        Array.from({ length: deck.value.boardSize }, (_, file) => ({ file, rank }))
+      )),
+    }
+  })
+})
 
 function fileLabel(file: number): string {
   return String.fromCharCode(97 + file)
@@ -442,14 +481,27 @@ function pocketFillWidth(pieceType: DeckPieceType): string {
 }
 
 function squareClass(file: number, rank: number): string[] {
+  const activePiece = draggedPiece.value ?? (placementTool.value === eraseTool ? null : placementTool.value)
   return [
     (file + rank) % 2 === 1 ? 'light' : 'dark',
     pieceAt(file, rank) ? 'occupied' : 'empty',
     draggedPiece.value ? 'drop-ready' : '',
+    activePiece && placementRestriction(activePiece, rank, deck.value.boardSize) ? 'restricted' : '',
   ].filter(Boolean)
 }
 
+function squareRestriction(rank: number): string | null {
+  const activePiece = draggedPiece.value ?? (placementTool.value === eraseTool ? null : placementTool.value)
+  return activePiece ? placementRestriction(activePiece, rank, deck.value.boardSize) : null
+}
+
 function placePieceAt(pieceType: DeckPieceType, file: number, rank: number) {
+  const restriction = placementRestriction(pieceType, rank, deck.value.boardSize)
+  if (restriction) {
+    placementError.value = restriction
+    return
+  }
+  placementError.value = null
   const existing = pieceAt(file, rank)
   if (existing === pieceType) {
     deck.value.starting = deck.value.starting.filter(piece => piece.square.file !== file || piece.square.rank !== rank)
@@ -525,8 +577,8 @@ function emitTestPiece(pieceType: DeckPieceType) {
 
 function save() {
   saveError.value = null
-  if (!canSaveDeck.value) {
-    saveError.value = '덱 이름은 비어 있을 수 없습니다.'
+  if (!deckSummary.value.valid) {
+    saveError.value = deckSummary.value.errors.join(' ')
     return
   }
   try {

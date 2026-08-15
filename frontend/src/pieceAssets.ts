@@ -73,6 +73,8 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   'alternating-soldier': { white: guardWhite, black: guardBlack },
   airborne: { white: airborneWhite, black: airborneBlack },
   'green-camp': { white: greenCampWhite, black: greenCampBlack },
+  mortar: { white: cannonRookWhite, black: cannonRookBlack },
+  'machine-gunner': { white: paratrooperWhite, black: paratrooperBlack },
   'pawn-white': { white: pawnWhite, black: pawnBlack },
   'pawn-black': { white: pawnWhite, black: pawnBlack },
   'tempest-pawn': { white: tempestPawnWhite, black: tempestPawnBlack },

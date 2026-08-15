@@ -5,6 +5,7 @@ pub fn tempest_queen_definition() -> PieceDefinition {
         id: "tempest-queen".into(),
         name: "Tempest Queen".into(),
         score: 10,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
         # 템페스트 룩 부분
     {

@@ -7,6 +7,8 @@ use crate::chessembly::run_chessembly_layer_for_piece;
 use crate::interaction::{
     destination_is_blocked_by_interaction, neighboring_pieces, resolve_piece_interactions,
 };
+use crate::pieces::default_pieces::{MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID};
+use crate::rules::player_forward_direction;
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -663,6 +665,28 @@ pub fn generate_piece_legal_ability_actions(
     let mut actions = Vec::new();
     let adjacent = neighboring_pieces(game_state, actor);
     match (actor.type_id.as_str(), ability_id) {
+        ("mortar", MORTAR_BARRAGE_ABILITY_ID) => {
+            actions.push(AbilityAction {
+                player_id: actor.owner.clone(),
+                piece_id: piece_id.clone(),
+                ability_id: ability_id.into(),
+                target_piece_id: None,
+                pocket_piece_id: None,
+                to: None,
+                deployments: Vec::new(),
+            });
+        }
+        ("machine-gunner", MACHINE_GUN_BARRAGE_ABILITY_ID) => {
+            actions.push(AbilityAction {
+                player_id: actor.owner.clone(),
+                piece_id: piece_id.clone(),
+                ability_id: ability_id.into(),
+                target_piece_id: None,
+                pocket_piece_id: None,
+                to: None,
+                deployments: Vec::new(),
+            });
+        }
         ("alternating-soldier", "relieve") => {
             let Some(player) = game_state.players.get(&actor.owner) else {
                 return Vec::new();
@@ -744,6 +768,54 @@ pub fn generate_piece_legal_ability_actions(
         _ => {}
     }
     actions
+}
+
+/// Mortar targets in its file and adjacent files strictly ahead of it.
+pub(crate) fn mortar_barrage_targets(game_state: &GameState, actor: &Piece) -> Vec<PieceId> {
+    let Some(origin) = actor.current_square else {
+        return Vec::new();
+    };
+    let forward = player_forward_direction(&actor.owner);
+    let mut targets = Vec::new();
+    for file_offset in -1..=1 {
+        let file = origin.file + file_offset;
+        let mut rank = origin.rank + forward;
+        loop {
+            let square = Square::new(file, rank);
+            if !game_state.board.is_in_bounds(&square) {
+                break;
+            }
+            if let Some(piece_id) = game_state.board.get_piece_at(&square) {
+                targets.push(piece_id.clone());
+            }
+            rank += forward;
+        }
+    }
+    targets
+}
+
+/// Machine Gunner targets in its file and adjacent files strictly ahead of it.
+pub(crate) fn machine_gun_barrage_targets(game_state: &GameState, actor: &Piece) -> Vec<PieceId> {
+    let Some(origin) = actor.current_square else {
+        return Vec::new();
+    };
+    let forward = player_forward_direction(&actor.owner);
+    let mut targets = Vec::new();
+    for file_offset in -1..=1 {
+        let file = origin.file + file_offset;
+        let mut rank = origin.rank + forward;
+        loop {
+            let square = Square::new(file, rank);
+            if !game_state.board.is_in_bounds(&square) {
+                break;
+            }
+            if let Some(piece_id) = game_state.board.get_piece_at(&square) {
+                targets.push(piece_id.clone());
+            }
+            rank += forward;
+        }
+    }
+    targets
 }
 
 /// Validate a submitted ability against canonical candidates. Airborne is a

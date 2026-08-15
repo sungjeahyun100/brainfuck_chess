@@ -4,16 +4,27 @@ import test from 'node:test'
 import { savedDeckToPlayerDeckRequest } from './useDeckSerialization.ts'
 import {
   baseZoneDepth,
+  applyPieceMetadata,
+  canPieceBePlacedAtStart,
+  frontmostBaseRank,
   customDeckPieceType,
+  createPresetDeck,
   deactivateCustomPieceCatalog,
   pieceCatalog,
   pocketCatalog,
   replaceCustomPieceCatalog,
+  placementRestriction,
   upsertCustomPieceCatalog,
   validateSavedDeck,
 } from './useDeckValidation.ts'
 import type { SavedDeck } from '../types/deck.ts'
 import type { CustomPieceRecord } from '../types/customPiece.ts'
+
+const frontPieceTypes = new Set(['pawn', 'tempest-pawn', 'bouncing-pawn', 'dozer'])
+applyPieceMetadata(Object.fromEntries(pieceCatalog.map(piece => [piece.id, {
+  score: piece.id === 'dozer' ? 3 : piece.id === 'knight' ? 1 : piece.score,
+  deployment_zone: frontPieceTypes.has(piece.id) ? 'front' : 'back',
+}])))
 
 const record: CustomPieceRecord = {
   id: 'package-one',
@@ -41,7 +52,7 @@ function deck(pieceType: string): SavedDeck {
     boardSize: 8,
     starting: [
       { pieceType: 'king', square: { file: 4, rank: 0 } },
-      { pieceType, square: { file: 2, rank: 1 } },
+      { pieceType, square: { file: 2, rank: 0 } },
     ],
     pocket: { [pieceType]: 1 },
     customPieces: [{
@@ -76,7 +87,7 @@ test('deck serialization sends immutable references and never sends source or sc
     exposed_piece_key: record.exposed_piece_key,
   }
 
-  assert.deepEqual(request.starting[1], { ...custom, square: { file: 2, rank: 1 } })
+  assert.deepEqual(request.starting[1], { ...custom, square: { file: 2, rank: 0 } })
   assert.deepEqual(request.pocket, [custom])
   assert.equal(JSON.stringify(request).includes('raw_script'), false)
   assert.equal(JSON.stringify(request).includes('"score"'), false)
@@ -152,8 +163,8 @@ test('base zone expands to three ranks starting at board size 10', () => {
     ...deck('pawn'),
     boardSize: 10,
     starting: [
-      { pieceType: 'king', square: { file: 4, rank: 2 } },
-      { pieceType: 'pawn', square: { file: 2, rank: 1 } },
+      { pieceType: 'king', square: { file: 4, rank: 1 } },
+      { pieceType: 'pawn', square: { file: 2, rank: 2 } },
     ],
     pocket: {},
     customPieces: [],
@@ -161,4 +172,51 @@ test('base zone expands to three ranks starting at board size 10', () => {
 
   assert.equal(validateSavedDeck(rankThreeDeck).valid, true)
   assert.equal(validateSavedDeck({ ...rankThreeDeck, boardSize: 9 }).valid, false)
+})
+
+test('presets place their pawn line on each board size frontmost setup rank', () => {
+  for (const [boardSize, expectedRank] of [[8, 1], [9, 1], [10, 2], [11, 2], [12, 2]]) {
+    const preset = createPresetDeck(boardSize)
+    const pawns = preset.starting.filter(piece => piece.pieceType === 'pawn')
+    assert.ok(pawns.length > 0)
+    assert.ok(pawns.every(piece => piece.square.rank === expectedRank))
+    assert.equal(validateSavedDeck({
+      ...preset,
+      id: `preset-${boardSize}`,
+      name: 'Preset',
+      boardSize,
+      customPieces: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }).valid, true)
+  }
+})
+
+test('deployment zones replace score-based front-rank placement', () => {
+  assert.equal(frontmostBaseRank(8, 'white'), 1)
+  assert.equal(frontmostBaseRank(8, 'black'), 6)
+  assert.equal(frontmostBaseRank(10, 'white'), 2)
+  assert.equal(frontmostBaseRank(10, 'black'), 7)
+
+  for (const pieceType of frontPieceTypes) {
+    assert.equal(canPieceBePlacedAtStart(pieceType, 1, 8), true)
+    assert.equal(canPieceBePlacedAtStart(pieceType, 0, 8), false)
+  }
+  for (const pieceType of ['knight', 'bishop', 'rook', 'queen', 'king', 'paratrooper']) {
+    assert.equal(canPieceBePlacedAtStart(pieceType, 1, 8), false)
+    assert.equal(canPieceBePlacedAtStart(pieceType, 0, 8), true)
+  }
+
+  assert.equal(pieceCatalog.find(piece => piece.id === 'dozer')?.score, 3)
+  assert.equal(placementRestriction('dozer', 1, 8), null)
+  assert.equal(pieceCatalog.find(piece => piece.id === 'knight')?.score, 1)
+  assert.match(placementRestriction('knight', 1, 8) ?? '', /배치할 수 없습니다/)
+
+  const validFront = deck('dozer')
+  validFront.starting[1].square.rank = 1
+  assert.equal(validateSavedDeck(validFront).valid, true)
+
+  const invalidBack = deck('knight')
+  invalidBack.starting[1].square.rank = 1
+  assert.match(validateSavedDeck(invalidBack).errors.join(' '), /배치할 수 없습니다/)
 })

@@ -6,6 +6,7 @@ pub fn knight_definition() -> PieceDefinition {
         id: "knight".into(),
         name: "Knight".into(),
         score: 3,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 2);
 take-move(2, 1);

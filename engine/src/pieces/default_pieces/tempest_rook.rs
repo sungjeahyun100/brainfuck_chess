@@ -6,6 +6,7 @@ pub fn tempest_rook_definition() -> PieceDefinition {
         id: "tempest-rook".into(),
         name: "Tempest Rook".into(),
         score: 8,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 {
     take-move(1, 1)

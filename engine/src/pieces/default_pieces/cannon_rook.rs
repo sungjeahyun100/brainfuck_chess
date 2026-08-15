@@ -20,6 +20,7 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
         id: "cannon-rook".into(),
         name: "Cannon Rook".into(),
         score: 7,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: rook_code.clone(),
         chessembly_version: "1.0".into(),
         dialect: None,

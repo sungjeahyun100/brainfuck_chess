@@ -19,6 +19,7 @@ take-move(0, -1) repeat(1);"
         id: "windmill".into(),
         name: "Windmill".into(),
         score: 4, // TODO: balance value
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: bishop_code.clone(),
         chessembly_version: "1.0".into(),
         dialect: None,

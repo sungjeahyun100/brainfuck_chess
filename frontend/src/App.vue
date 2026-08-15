@@ -671,10 +671,41 @@ select {
 .catalog-section-title {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.catalog-zone-chunk {
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(7, 12, 20, 0.42);
+}
+
+.catalog-zone-front {
+  border-color: rgba(217, 164, 65, 0.42);
+  background: linear-gradient(145deg, rgba(217, 164, 65, 0.12), rgba(7, 12, 20, 0.46));
+}
+
+.catalog-zone-back {
+  border-color: rgba(103, 137, 176, 0.34);
+  background: linear-gradient(145deg, rgba(66, 103, 145, 0.12), rgba(7, 12, 20, 0.46));
+}
+
+.catalog-section-title > div {
+  display: grid;
+  gap: 3px;
+}
+
+.catalog-zone-description {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .palette-piece {
@@ -797,6 +828,47 @@ select {
   gap: 6px;
 }
 
+.placement-zone-list {
+  display: grid;
+  gap: 14px;
+}
+
+.placement-zone-chunk {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}
+
+.placement-zone-front {
+  border-color: rgba(217, 164, 65, 0.48);
+  background: rgba(217, 164, 65, 0.09);
+}
+
+.placement-zone-back {
+  border-color: rgba(103, 137, 176, 0.4);
+  background: rgba(66, 103, 145, 0.09);
+}
+
+.placement-zone-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.placement-zone-header strong {
+  color: #f4dfb0;
+  font-size: 14px;
+}
+
+.placement-zone-header span {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
 .placement-square {
   min-height: 74px;
   border-radius: 8px;
@@ -810,6 +882,10 @@ select {
 .placement-square.dark { background: #b7844d; color: #fff8ef; }
 .placement-square.occupied { outline: 2px solid rgba(217, 164, 65, 0.48); }
 .placement-square.drop-ready { outline: 2px dashed rgba(244, 223, 176, 0.7); }
+.placement-square.restricted {
+  cursor: not-allowed;
+  box-shadow: inset 0 0 0 3px rgba(183, 28, 28, 0.72);
+}
 
 .square-label {
   position: absolute;

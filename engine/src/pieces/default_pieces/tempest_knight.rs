@@ -5,6 +5,7 @@ pub fn tempest_knight_definition() -> PieceDefinition {
         id: "tempest-knight".into(),
         name: "Tempest Knight".into(),
         score: 5,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
         {
             take-move(1, 1)

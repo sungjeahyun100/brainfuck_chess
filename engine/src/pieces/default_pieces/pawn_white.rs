@@ -3,6 +3,7 @@ use crate::types::*;
 /// White Pawn: moves forward, attacks diagonally, and promotes on the last rank.
 pub fn pawn_white_definition() -> PieceDefinition {
     legacy_piece_definition! {
+        deployment_zone: DeploymentZone::Front,
         id: "pawn-white".into(),
         name: "Pawn".into(),
         score: 1,

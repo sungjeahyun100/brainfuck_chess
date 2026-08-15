@@ -3,6 +3,7 @@ use crate::types::*;
 /// Black Dozer: mirrored White Dozer movement and first-rank promotion.
 pub fn dozer_black_definition() -> PieceDefinition {
     legacy_piece_definition! {
+        deployment_zone: DeploymentZone::Front,
         id: "dozer-black".into(),
         name: "Dozer".into(),
         score: 2,

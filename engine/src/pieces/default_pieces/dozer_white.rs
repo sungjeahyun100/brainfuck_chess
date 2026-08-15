@@ -3,6 +3,7 @@ use crate::types::*;
 /// White Dozer: advances one rank across a five-file-wide front.
 pub fn dozer_white_definition() -> PieceDefinition {
     legacy_piece_definition! {
+        deployment_zone: DeploymentZone::Front,
         id: "dozer-white".into(),
         name: "Dozer".into(),
         score: 2,

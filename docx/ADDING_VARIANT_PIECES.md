@@ -61,6 +61,7 @@ pub fn wazir_definition() -> PieceDefinition {
         id: "wazir".into(),
         name: "Wazir".into(),
         score: 2,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 0);
 take-move(-1, 0);
@@ -106,6 +107,9 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
 - `id`: 서버/프론트/덱에서 쓰는 타입 ID다. 소문자 kebab-case를 권장한다.
 - `name`: UI 표시명과 테스트 가독성에 쓰인다.
 - `score`: 덱 점수. King이 아니면 점수 합산 대상이다.
+- `deployment_zone`: 게임 시작 시 `Front`(상대와 가까운 폰 시작 줄) 또는
+  `Back`(나머지 시작 줄)에 놓이는지를 정한다. 서버 덱 검증과 덱 빌더 UI가
+  이 정의를 함께 사용하므로 기물 이름이나 점수 기반 예외 목록을 추가하지 않는다.
 - `chessembly_code`: 행마 정의.
 - `chessembly_version`: 현재 기본값은 `"1.0"`이다.
 - `dialect`: 기본 Chessembly만 쓰면 `None`, Brainfuck Chess 확장 문법 의존 시 `Some(ChessemblyDialect::BrainfuckChess)`.

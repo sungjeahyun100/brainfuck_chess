@@ -1305,7 +1305,7 @@ mod tests {
                 },
                 crate::StartingPieceSpec {
                     piece: custom_ref.clone(),
-                    square: Square::new(2, 1),
+                    square: Square::new(2, 0),
                 },
             ],
             pocket: vec![custom_ref],
@@ -1335,7 +1335,7 @@ mod tests {
         let custom_board_piece = state
             .pieces
             .values()
-            .find(|piece| piece.current_square == Some(Square::new(2, 1)))
+            .find(|piece| piece.current_square == Some(Square::new(2, 0)))
             .unwrap();
         assert!(!generate_piece_legal_move_actions_with_options(
             &state,

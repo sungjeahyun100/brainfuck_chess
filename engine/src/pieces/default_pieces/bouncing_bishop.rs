@@ -6,6 +6,7 @@ pub fn bouncing_bishop_definition() -> PieceDefinition {
         id: "bouncing-bishop".into(),
         name: "Bouncing Bishop".into(),
         score: 7,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: bouncing_bishop_chessembly_code().to_string(),
         chessembly_version: "1.0".into(),
         dialect: None,

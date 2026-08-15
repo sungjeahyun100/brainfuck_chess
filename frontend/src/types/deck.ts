@@ -3,6 +3,7 @@ import type { CustomPieceImage } from './customPiece'
 
 export type LobbyPlayer = 'white' | 'black'
 export type DeckPieceType = string
+export type DeploymentZone = 'front' | 'back'
 export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop'
 
 export interface PieceCatalogItem {
@@ -11,6 +12,7 @@ export interface PieceCatalogItem {
   score: number
   category: string
   canPocket: boolean
+  deploymentZone: DeploymentZone
   uniqueStarting?: boolean
   aliases?: string[]
   custom?: {
@@ -22,6 +24,11 @@ export interface PieceCatalogItem {
     assetKey?: string
     active: boolean
   }
+}
+
+export interface PieceCatalogMetadata {
+  score: number
+  deployment_zone: DeploymentZone
 }
 
 export interface LobbyPlacement {

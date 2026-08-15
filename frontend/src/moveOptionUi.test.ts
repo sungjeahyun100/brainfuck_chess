@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { moveOptionTargets, usesMoveSubmission } from './moveOptionUi.ts'
+import { isImmediateAbilityAction, moveOptionTargets, usesMoveSubmission } from './moveOptionUi.ts'
 import type { AbilityAction, MoveAction } from './types/game.ts'
 
 const effectlessMove = (overrides: Partial<MoveAction>): MoveAction => ({
@@ -56,4 +56,17 @@ test('standalone ability targets remain selectable', () => {
     movable: [{ file: 4, rank: 4 }],
     captures: [],
   })
+})
+
+test('targetless standalone abilities are recognized as immediate actions', () => {
+  const action = {
+    type: 'ability',
+    player_id: 'white',
+    piece_id: 'actor',
+    ability_id: 'mortar-barrage',
+    deployments: [],
+  } satisfies AbilityAction
+
+  assert.equal(isImmediateAbilityAction(action), true)
+  assert.equal(isImmediateAbilityAction({ ...action, to: { file: 3, rank: 3 } }), false)
 })

@@ -132,6 +132,108 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
 }
 
 #[test]
+fn mortar_uses_orthogonal_take_moves() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "actor", "white", "mortar", 3, 3);
+    add_piece(&mut state, "enemy", "black", "bishop", 4, 3);
+    add_piece(&mut state, "friend", "white", "bishop", 2, 3);
+
+    let moves = generate_piece_legal_move_actions(&state, &"actor".into());
+    let destinations = moves.iter().map(|action| action.to).collect::<Vec<_>>();
+    assert!(destinations.contains(&Square::new(3, 4)));
+    assert!(destinations.contains(&Square::new(3, 2)));
+    assert!(moves.iter().any(|action| {
+        action.to == Square::new(4, 3)
+            && action.captured_piece_id.as_ref().map(PieceId::as_str) == Some("enemy")
+    }));
+    assert!(!destinations.contains(&Square::new(2, 3)));
+    assert!(!destinations.contains(&Square::new(4, 4)));
+    assert!(!destinations.contains(&Square::new(3, 5)));
+}
+
+#[test]
+fn machine_gunner_uses_orthogonal_take_moves() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "actor", "white", "machine-gunner", 3, 3);
+    add_piece(&mut state, "enemy", "black", "bishop", 4, 3);
+    add_piece(&mut state, "friend", "white", "bishop", 2, 3);
+
+    let moves = generate_piece_legal_move_actions(&state, &"actor".into());
+    let destinations = moves.iter().map(|action| action.to).collect::<Vec<_>>();
+    assert!(destinations.contains(&Square::new(3, 4)));
+    assert!(destinations.contains(&Square::new(3, 2)));
+    assert!(moves.iter().any(|action| {
+        action.to == Square::new(4, 3)
+            && action.captured_piece_id.as_ref().map(PieceId::as_str) == Some("enemy")
+    }));
+    assert!(!destinations.contains(&Square::new(2, 3)));
+    assert!(!destinations.contains(&Square::new(4, 4)));
+    assert!(!destinations.contains(&Square::new(3, 5)));
+}
+
+#[test]
+fn white_mortar_barrage_removes_both_sides_only_in_three_forward_files() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "actor", "white", "mortar", 3, 3);
+    add_piece(&mut state, "own-file", "black", "bishop", 3, 6);
+    add_piece(&mut state, "left-file", "white", "knight", 2, 4);
+    add_piece(&mut state, "right-file", "black", "rook", 4, 7);
+    add_piece(&mut state, "behind", "black", "bishop", 3, 2);
+    add_piece(&mut state, "same-rank", "black", "bishop", 2, 3);
+    add_piece(&mut state, "outside-files", "black", "bishop", 5, 5);
+
+    let actions = generate_piece_legal_ability_actions(&state, &"actor".into(), "mortar-barrage");
+    assert_eq!(actions.len(), 1);
+    let state = submit_action(state, TurnAction::Ability(actions[0].clone())).unwrap();
+
+    for id in ["own-file", "left-file", "right-file"] {
+        assert!(state.pieces[id].captured, "{id} should be removed");
+        assert_eq!(state.pieces[id].current_square, None);
+    }
+    for id in ["behind", "same-rank", "outside-files"] {
+        assert!(!state.pieces[id].captured, "{id} should remain");
+    }
+    assert_eq!(state.players["white"].captured_pieces.len(), 3);
+    assert_eq!(state.history.len(), 1);
+}
+
+#[test]
+fn black_machine_gun_barrage_uses_opposite_direction_and_clips_at_file_edge() {
+    let mut state = make_game_state(8);
+    state.current_player = "black".into();
+    add_piece(&mut state, "actor", "black", "machine-gunner", 0, 4);
+    add_piece(&mut state, "own-file", "white", "bishop", 0, 1);
+    add_piece(&mut state, "right-file", "black", "knight", 1, 3);
+    add_piece(&mut state, "behind", "white", "rook", 0, 5);
+    add_piece(&mut state, "same-rank", "white", "bishop", 1, 4);
+
+    let action =
+        generate_piece_legal_ability_actions(&state, &"actor".into(), "machine-gun-barrage")
+            .pop()
+            .unwrap();
+    let state = submit_action(state, TurnAction::Ability(action)).unwrap();
+
+    assert!(state.pieces["own-file"].captured);
+    assert!(state.pieces["right-file"].captured);
+    assert!(!state.pieces["behind"].captured);
+    assert!(!state.pieces["same-rank"].captured);
+}
+
+#[test]
+fn mortar_barrage_king_removal_uses_normal_game_end_state() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "actor", "white", "mortar", 3, 3);
+    add_piece(&mut state, "enemy-king", "black", "king", 3, 7);
+    let action = generate_piece_legal_ability_actions(&state, &"actor".into(), "mortar-barrage")
+        .pop()
+        .unwrap();
+
+    let state = submit_action(state, TurnAction::Ability(action)).unwrap();
+    assert_eq!(state.phase, GamePhase::Ended);
+    assert_eq!(state.result.unwrap().winner, Some("white".into()));
+}
+
+#[test]
 fn alternating_soldier_replaces_adjacent_friendly_piece_from_pocket() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "actor", "white", "alternating-soldier", 3, 3);
@@ -398,6 +500,7 @@ fn layers_with_same_destination_and_different_effects_stay_distinct() {
         id: "layered".into(),
         name: "Layered".into(),
         score: 1,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: String::new(),
         chessembly_version: "1.0".into(),
         dialect: None,
@@ -472,6 +575,7 @@ fn chessembly_set_state_remains_global_and_separate_from_piece_state() {
         id: "global-writer".into(),
         name: "Global writer".into(),
         score: 1,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "set-state(flag, 7) move(1, 0);".into(),
         chessembly_version: "1.0".into(),
         dialect: None,
@@ -601,6 +705,119 @@ fn test_deck_score_over_limit() {
     let result = validate_deck(&player.deck, 8, &state.pieces, &state.piece_definitions);
     assert!(!result.valid);
     assert!(result.errors.iter().any(|e| e.contains("점수")));
+}
+
+#[test]
+fn deployment_zone_classifies_every_builtin_and_both_player_orientations() {
+    let definitions = all_default_definitions()
+        .into_iter()
+        .map(|definition| (definition.id.clone(), definition))
+        .collect::<HashMap<_, _>>();
+    let front_types = [
+        "pawn-white",
+        "pawn-black",
+        "tempest-pawn-white",
+        "tempest-pawn-black",
+        "bouncing-pawn-white",
+        "bouncing-pawn-black",
+        "dozer-white",
+        "dozer-black",
+    ];
+
+    for definition in definitions.values() {
+        let expected = if front_types.contains(&definition.id.as_str()) {
+            DeploymentZone::Front
+        } else {
+            DeploymentZone::Back
+        };
+        assert_eq!(definition.deployment_zone, expected, "{}", definition.id);
+    }
+
+    for (owner, front_rank, back_rank) in [("white", 1, 0), ("black", 6, 7)] {
+        for type_id in front_types {
+            let definition = &definitions[type_id];
+            assert!(can_piece_be_placed_at_start(
+                definition,
+                &owner.into(),
+                Square::new(0, front_rank),
+                8,
+            ));
+            assert!(!can_piece_be_placed_at_start(
+                definition,
+                &owner.into(),
+                Square::new(0, back_rank),
+                8,
+            ));
+        }
+        for type_id in ["knight", "bishop", "rook", "queen", "king", "paratrooper"] {
+            let definition = &definitions[type_id];
+            assert!(!can_piece_be_placed_at_start(
+                definition,
+                &owner.into(),
+                Square::new(0, front_rank),
+                8,
+            ));
+            assert!(can_piece_be_placed_at_start(
+                definition,
+                &owner.into(),
+                Square::new(0, back_rank),
+                8,
+            ));
+        }
+    }
+}
+
+#[test]
+fn deployment_zone_is_independent_of_score_and_uses_frontmost_large_board_rank() {
+    let mut front_state = make_game_state(10);
+    front_state
+        .piece_definitions
+        .get_mut("dozer-white")
+        .unwrap()
+        .score = 3;
+    add_piece(&mut front_state, "king", "white", "king", 4, 0);
+    add_piece(&mut front_state, "dozer", "white", "dozer-white", 3, 2);
+    assert!(
+        validate_deck(
+            &front_state.players["white"].deck,
+            10,
+            &front_state.pieces,
+            &front_state.piece_definitions,
+        )
+        .valid
+    );
+
+    let mut back_state = make_game_state(10);
+    back_state
+        .piece_definitions
+        .get_mut("knight")
+        .unwrap()
+        .score = 1;
+    add_piece(&mut back_state, "king", "white", "king", 4, 0);
+    add_piece(&mut back_state, "knight", "white", "knight", 3, 2);
+    let result = validate_deck(
+        &back_state.players["white"].deck,
+        10,
+        &back_state.pieces,
+        &back_state.piece_definitions,
+    );
+    assert!(!result.valid);
+    assert!(result.errors.iter().any(|error| error.contains("뒷줄")));
+    assert_eq!(get_frontmost_base_rank(&"white".into(), 10), Some(2));
+    assert_eq!(get_frontmost_base_rank(&"black".into(), 10), Some(7));
+}
+
+#[test]
+fn legacy_piece_definition_json_defaults_to_back_deployment() {
+    let definition = all_default_definitions()
+        .into_iter()
+        .find(|definition| definition.id == "knight")
+        .unwrap();
+    let mut json = serde_json::to_value(definition).unwrap();
+    json.as_object_mut().unwrap().remove("deployment_zone");
+
+    let restored: PieceDefinition = serde_json::from_value(json).unwrap();
+    assert_eq!(restored.deployment_zone, DeploymentZone::Back);
 }
 
 #[test]
@@ -1051,6 +1268,7 @@ fn test_custom_piece_definition_can_generate_promotion_choices() {
         id: "promoter".into(),
         name: "Promoter".into(),
         score: 2,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "move(0, 1);".into(),
         chessembly_version: "1.0".into(),
         dialect: None,

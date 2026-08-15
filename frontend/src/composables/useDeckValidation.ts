@@ -7,9 +7,11 @@ import type {
   LobbyDeck,
   LobbyPlacement,
   PieceCatalogItem,
+  PieceCatalogMetadata,
   SavedDeck,
 } from '../types/deck'
 import type { CustomPieceRecord } from '../types/customPiece'
+import { parseCustomPiecePackage } from './useCustomPieceDraft.ts'
 
 export const boardSizes = [8, 9, 10, 11, 12] as const
 
@@ -17,7 +19,23 @@ export function baseZoneDepth(boardSize: number): number {
   return boardSize >= 10 ? 3 : 2
 }
 
-export const pieceCatalog = reactive<PieceCatalogItem[]>([
+export type SetupSide = 'white' | 'black'
+
+export function baseZoneRanks(boardSize: number, side: SetupSide = 'white'): number[] {
+  const depth = baseZoneDepth(boardSize)
+  return Array.from(
+    { length: depth },
+    (_, index) => side === 'white' ? index : boardSize - 1 - index,
+  )
+}
+
+export function frontmostBaseRank(boardSize: number, side: SetupSide = 'white'): number {
+  const forward = side === 'white' ? 1 : -1
+  return baseZoneRanks(boardSize, side)
+    .reduce((front, rank) => rank * forward > front * forward ? rank : front)
+}
+
+const builtInPieceCatalog: Omit<PieceCatalogItem, 'deploymentZone'>[] = [
   { id: 'king', name: 'King', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
   { id: 'queen', name: 'Queen', score: 0, category: 'major', canPocket: true },
   { id: 'cannon-rook', name: 'Cannon Rook', score: 0, category: 'variant', canPocket: true, aliases: ['cannon', 'po rook', '포 룩'] },
@@ -42,8 +60,14 @@ export const pieceCatalog = reactive<PieceCatalogItem[]>([
   { id: 'alternating-soldier', name: '교대병', score: 0, category: 'variant', canPocket: true },
   { id: 'airborne', name: '공수부대', score: 0, category: 'variant', canPocket: true },
   { id: 'green-camp', name: '그린캠프', score: 0, category: 'variant', canPocket: true },
+  { id: 'mortar', name: '박격포병', score: 0, category: 'variant', canPocket: true },
+  { id: 'machine-gunner', name: '기관총 사수', score: 0, category: 'variant', canPocket: true },
   { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
-])
+]
+
+export const pieceCatalog = reactive<PieceCatalogItem[]>(
+  builtInPieceCatalog.map(piece => ({ ...piece, deploymentZone: 'back' })),
+)
 
 const archivedCustomCatalog = new Map<DeckPieceType, PieceCatalogItem>()
 
@@ -66,12 +90,23 @@ export function customDeckPieceType(piece: Pick<CustomPieceRecord, 'id' | 'versi
 }
 
 function customCatalogItem(record: CustomPieceRecord): PieceCatalogItem {
+  let deploymentZone: PieceCatalogItem['deploymentZone'] = 'back'
+  try {
+    const document = parseCustomPiecePackage(record.raw_script)
+    deploymentZone = document.definitions.find(
+      definition => definition.id === record.exposed_piece_key,
+    )?.deployment_zone ?? 'back'
+  } catch {
+    // The server has already validated stored packages. Archived legacy test
+    // fixtures and records without this metadata remain safely back-only.
+  }
   return {
     id: customDeckPieceType(record),
     name: record.name,
     score: record.score,
     category: 'custom',
     canPocket: true,
+    deploymentZone,
     aliases: [record.description, record.exposed_piece_key],
     custom: {
       id: record.id,
@@ -135,6 +170,23 @@ export function applyPieceScores(scores: Record<string, number>): void {
       throw new Error(`엔진 기물 점수가 누락되었거나 잘못되었습니다: ${piece.id}`)
     }
     piece.score = score
+  }
+}
+
+export function applyPieceMetadata(metadata: Record<string, PieceCatalogMetadata>): void {
+  for (const piece of pieceCatalog) {
+    if (piece.custom) continue
+    const definition = metadata[piece.id]
+    if (
+      !definition
+      || !Number.isInteger(definition.score)
+      || definition.score < 0
+      || !['front', 'back'].includes(definition.deployment_zone)
+    ) {
+      throw new Error(`엔진 기물 정보가 누락되었거나 잘못되었습니다: ${piece.id}`)
+    }
+    piece.score = definition.score
+    piece.deploymentZone = definition.deployment_zone
   }
 }
 
@@ -236,6 +288,7 @@ export function presetLayoutForBoard(preset: DeckPreset, boardSize: number): Dec
 
 export function createPresetStarting(boardSize: number, layout: DeckPresetLayout): LobbyPlacement[] {
   const offset = Math.max(0, Math.floor((boardSize - layout.backline.length) / 2))
+  const frontRank = frontmostBaseRank(boardSize)
 
   return [
     ...layout.backline
@@ -247,7 +300,7 @@ export function createPresetStarting(boardSize: number, layout: DeckPresetLayout
     ...layout.pawns
       .map((pieceType, index) => {
         const file = offset + index
-        return pieceType && file < boardSize ? { pieceType, square: { file, rank: 1 } } : null
+        return pieceType && file < boardSize ? { pieceType, square: { file, rank: frontRank } } : null
       })
       .filter((placement): placement is LobbyPlacement => placement !== null),
   ]
@@ -282,6 +335,34 @@ function isInBaseZone(piece: LobbyPlacement, boardSize: number): boolean {
     && piece.square.rank < baseZoneDepth(boardSize)
 }
 
+export function placementRestriction(
+  pieceType: DeckPieceType,
+  rank: number,
+  boardSize: number,
+  side: SetupSide = 'white',
+): string | null {
+  const piece = findPieceCatalogItem(pieceType)
+  if (!piece) return '기물의 초기 배치 정보를 찾을 수 없습니다.'
+  const isFrontRank = rank === frontmostBaseRank(boardSize, side)
+  if (piece.deploymentZone === 'front' && !isFrontRank) {
+    return '이 기물은 가장 앞쪽 시작 배치 줄에만 배치할 수 있습니다.'
+  }
+  if (piece.deploymentZone === 'back' && isFrontRank) {
+    return '이 기물은 가장 앞쪽 시작 배치 줄에 배치할 수 없습니다.'
+  }
+  return null
+}
+
+export function canPieceBePlacedAtStart(
+  pieceType: DeckPieceType,
+  rank: number,
+  boardSize: number,
+  side: SetupSide = 'white',
+): boolean {
+  return baseZoneRanks(boardSize, side).includes(rank)
+    && placementRestriction(pieceType, rank, boardSize, side) === null
+}
+
 export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '덱'): DeckSummary {
   const totalScore = calculateDeckScore(deck)
   const limit = scoreLimit(boardSize)
@@ -307,6 +388,12 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
 
   if (deck.starting.some(piece => !isInBaseZone(piece, boardSize))) {
     errors.push('시작 기물은 해당 보드 크기의 기본 진영 안에만 배치할 수 있습니다.')
+  }
+  for (const piece of deck.starting) {
+    const restriction = placementRestriction(piece.pieceType, piece.square.rank, boardSize)
+    if (restriction) {
+      errors.push(`${pieceLabel(piece.pieceType)} (${piece.square.file + 1}, ${piece.square.rank + 1}): ${restriction}`)
+    }
   }
   const usedTypes = [
     ...deck.starting.map(piece => piece.pieceType),

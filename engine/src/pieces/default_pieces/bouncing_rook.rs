@@ -6,6 +6,7 @@ pub fn bouncing_rook_definition() -> PieceDefinition {
         id: "bouncing-rook".into(),
         name: "Bouncing Rook".into(),
         score: 6,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: bouncing_rook_chessembly_code(),
         chessembly_version: "1.0".into(),
         dialect: None,

@@ -6,6 +6,7 @@ pub fn bouncing_queen_definition() -> PieceDefinition {
         id: "bouncing-queen".into(),
         name: "Bouncing Queen".into(),
         score: 13,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 do
 take-move(1, 1)

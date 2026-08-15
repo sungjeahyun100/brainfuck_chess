@@ -66,6 +66,7 @@ export function newCustomPieceDefinition(id = 'main'): PieceDefinition {
     id,
     name: id === 'main' ? '' : id,
     score: 1,
+    deployment_zone: 'back',
     chessembly_code: 'move(0, 1);\ntake(1, 1);\ntake(-1, 1);',
     chessembly_version: '1.0',
     is_king: false,
@@ -144,6 +145,7 @@ export function simpleDraftFromInput(input: CustomPieceInput): SimpleCustomPiece
   const definition = document.definitions[0]
   if (
     definition.id !== input.exposed_piece_key || definition.move_layers.length > 0
+    || definition.deployment_zone !== 'back'
     || definition.move_options.length > 0 || (definition.promotion_pool?.length ?? 0) > 0
     || definition.promotion || (definition.extensions?.length ?? 0) > 0
     || definition.visual.variants.length > 0
@@ -187,6 +189,7 @@ function normalizeCustomPieceDefinition(value: PieceDefinition, index: number): 
     id: typeof value.id === 'string' ? value.id : fallback.id,
     name: typeof value.name === 'string' ? value.name : fallback.name,
     score: typeof value.score === 'number' ? value.score : fallback.score,
+    deployment_zone: value.deployment_zone === 'front' ? 'front' : 'back',
     chessembly_code: typeof value.chessembly_code === 'string' ? value.chessembly_code : '',
     chessembly_version: typeof value.chessembly_version === 'string' ? value.chessembly_version : '1.0',
     extensions: Array.isArray(value.extensions) ? value.extensions : [],

@@ -6,6 +6,7 @@ pub fn amazon_definition() -> PieceDefinition {
         id: "amazon".into(),
         name: "Amazon".into(),
         score: 13,
+        deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 0) repeat(1);
 take-move(-1, 0) repeat(1);

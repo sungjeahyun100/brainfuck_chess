@@ -89,6 +89,28 @@ pub fn validate_deck(
         ));
     }
 
+    for piece in deck
+        .starting_pieces
+        .iter()
+        .filter_map(|piece_id| pieces.get(piece_id))
+    {
+        if let (Some(square), Some(definition)) =
+            (piece.current_square, definitions.get(&piece.type_id))
+        {
+            if !can_piece_be_placed_at_start(definition, &deck.player_id, square, board_size) {
+                errors.push(format!(
+                    "{}은(는) {} 초기 배치 구역에만 배치할 수 있습니다: {}",
+                    definition.name,
+                    match definition.deployment_zone {
+                        DeploymentZone::Front => "앞줄",
+                        DeploymentZone::Back => "뒷줄",
+                    },
+                    square.to_id()
+                ));
+            }
+        }
+    }
+
     if errors.is_empty() {
         ValidationResult::ok()
     } else {
@@ -113,4 +135,42 @@ pub fn get_base_zone_squares(player_id: &PlayerId, board_size: i32) -> Vec<Squar
         }
     }
     squares
+}
+
+/// Rank in the setup zone closest to the opposing side (the ordinary pawn rank).
+/// This is derived from the setup zone and player orientation rather than board
+/// coordinates so it also follows wider setup zones on larger boards.
+pub fn get_frontmost_base_rank(player_id: &PlayerId, board_size: i32) -> Option<i32> {
+    let forward = if player_id == "white" { 1 } else { -1 };
+    get_base_zone_squares(player_id, board_size)
+        .into_iter()
+        .map(|square| square.rank)
+        .max_by_key(|rank| rank * forward)
+}
+
+/// Apply the piece definition's setup-zone contract to one starting square.
+pub fn can_piece_be_placed_at_start(
+    definition: &PieceDefinition,
+    player_id: &PlayerId,
+    square: Square,
+    board_size: i32,
+) -> bool {
+    let base_zone = get_base_zone_squares(player_id, board_size);
+    if !base_zone.contains(&square) {
+        return false;
+    }
+    let is_front = get_frontmost_base_rank(player_id, board_size) == Some(square.rank);
+    matches!(
+        (definition.deployment_zone, is_front),
+        (DeploymentZone::Front, true) | (DeploymentZone::Back, false)
+    )
+}
+
+/// Direction in which a player's pieces advance toward the opposing side.
+pub fn player_forward_direction(player_id: &PlayerId) -> i32 {
+    if player_id == "white" {
+        1
+    } else {
+        -1
+    }
 }

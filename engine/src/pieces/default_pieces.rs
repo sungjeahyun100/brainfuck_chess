@@ -38,6 +38,8 @@ mod green_camp;
 mod guhang;
 mod king;
 mod knight;
+mod machine_gunner;
+mod mortar;
 mod nightrider;
 mod paratrooper;
 mod pawn_black;
@@ -68,6 +70,10 @@ pub use green_camp::green_camp_definition;
 pub use guhang::guhang_definition;
 pub use king::king_definition;
 pub use knight::knight_definition;
+pub use machine_gunner::machine_gunner_definition;
+pub(crate) use machine_gunner::MACHINE_GUN_BARRAGE_ABILITY_ID;
+pub use mortar::mortar_definition;
+pub(crate) use mortar::MORTAR_BARRAGE_ABILITY_ID;
 pub use nightrider::nightrider_definition;
 pub use paratrooper::paratrooper_definition;
 pub use pawn_black::pawn_black_definition;
@@ -96,6 +102,8 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         alternating_soldier_definition(),
         airborne_definition(),
         green_camp_definition(),
+        mortar_definition(),
+        machine_gunner_definition(),
         amazon_definition(),
         guhang_definition(),
         cannon_rook_definition(),

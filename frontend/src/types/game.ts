@@ -4,6 +4,7 @@ export type PlayerId = 'white' | 'black'
 export type SquareId = string
 export type PieceId = string
 export type PieceTypeId = string
+export type DeploymentZone = 'front' | 'back'
 
 export interface Square {
   file: number
@@ -22,6 +23,7 @@ export interface PieceDefinition {
   id: PieceTypeId
   name: string
   score: number
+  deployment_zone: DeploymentZone
   chessembly_code: string
   chessembly_version: string
   dialect?: ChessemblyDialect

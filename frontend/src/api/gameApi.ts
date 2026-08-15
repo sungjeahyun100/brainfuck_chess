@@ -12,6 +12,7 @@ import type {
   Square,
   SubmitAction,
 } from '../types/game'
+import type { PieceCatalogMetadata } from '../types/deck'
 
 const BASE = '/api/games'
 const ROOM_BASE = '/api/rooms'
@@ -145,6 +146,10 @@ function getClientId(): string {
 export const api = {
   getPieceScores(): Promise<Record<string, number>> {
     return request('/api/piece-scores')
+  },
+
+  getPieceCatalog(): Promise<Record<string, PieceCatalogMetadata>> {
+    return request('/api/piece-catalog')
   },
 
   createGame(

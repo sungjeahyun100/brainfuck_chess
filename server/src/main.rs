@@ -339,7 +339,10 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
         | "paratrooper"
         | "alternating-soldier"
         | "airborne"
-        | "green-camp" => Some(raw_piece_type.replace('_', "-")),
+        | "green-camp"
+        | "mortar"
+        | "machine-gunner"
+        | "machine_gunner" => Some(raw_piece_type.replace('_', "-")),
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
             "pawn-white".into()
         } else {
@@ -1020,27 +1023,51 @@ async fn health() -> Json<serde_json::Value> {
 }
 
 async fn get_piece_scores() -> Json<HashMap<PieceTypeId, u32>> {
-    let mut scores: HashMap<PieceTypeId, u32> = all_default_definitions()
+    Json(
+        default_piece_catalog()
+            .into_iter()
+            .map(|(piece_type, metadata)| (piece_type, metadata.score))
+            .collect(),
+    )
+}
+
+#[derive(Clone, Copy, Serialize)]
+struct PieceCatalogMetadata {
+    score: u32,
+    deployment_zone: DeploymentZone,
+}
+
+fn default_piece_catalog() -> HashMap<PieceTypeId, PieceCatalogMetadata> {
+    let mut catalog: HashMap<PieceTypeId, PieceCatalogMetadata> = all_default_definitions()
         .into_iter()
-        .map(|definition| (definition.id, definition.score))
+        .map(|definition| {
+            (
+                definition.id,
+                PieceCatalogMetadata {
+                    score: definition.score,
+                    deployment_zone: definition.deployment_zone,
+                },
+            )
+        })
         .collect();
 
     // The deck builder uses color-neutral pawn IDs while the engine keeps
     // direction-specific definitions.
-    if let Some(score) = scores.get("pawn-white").copied() {
-        scores.insert("pawn".into(), score);
+    for (neutral, white) in [
+        ("pawn", "pawn-white"),
+        ("tempest-pawn", "tempest-pawn-white"),
+        ("bouncing-pawn", "bouncing-pawn-white"),
+        ("dozer", "dozer-white"),
+    ] {
+        if let Some(metadata) = catalog.get(white).copied() {
+            catalog.insert(neutral.into(), metadata);
+        }
     }
-    if let Some(score) = scores.get("tempest-pawn-white").copied() {
-        scores.insert("tempest-pawn".into(), score);
-    }
-    if let Some(score) = scores.get("bouncing-pawn-white").copied() {
-        scores.insert("bouncing-pawn".into(), score);
-    }
-    if let Some(score) = scores.get("dozer-white").copied() {
-        scores.insert("dozer".into(), score);
-    }
+    catalog
+}
 
-    Json(scores)
+async fn get_piece_catalog() -> Json<HashMap<PieceTypeId, PieceCatalogMetadata>> {
+    Json(default_piece_catalog())
 }
 
 fn app_env() -> &'static str {
@@ -2003,6 +2030,8 @@ mod tests {
         );
         assert_eq!(scores.get("dozer"), Some(&2));
         assert_eq!(scores.get("dozer"), scores.get("dozer-white"));
+        assert_eq!(scores.get("mortar"), Some(&8));
+        assert_eq!(scores.get("machine-gunner"), Some(&8));
         assert_eq!(
             resolve_piece_type("white", "dozer").as_deref(),
             Some("dozer-white")
@@ -2011,6 +2040,81 @@ mod tests {
             resolve_piece_type("black", "dozer").as_deref(),
             Some("dozer-black")
         );
+    }
+
+    #[tokio::test]
+    async fn piece_catalog_serves_deployment_zones_from_engine_definitions() {
+        let Json(catalog) = get_piece_catalog().await;
+
+        for piece_type in ["pawn", "tempest-pawn", "bouncing-pawn", "dozer"] {
+            assert_eq!(catalog[piece_type].deployment_zone, DeploymentZone::Front);
+        }
+        for piece_type in ["knight", "bishop", "rook", "queen", "king", "paratrooper"] {
+            assert_eq!(catalog[piece_type].deployment_zone, DeploymentZone::Back);
+        }
+    }
+
+    #[test]
+    fn game_creation_rejects_deployment_zone_mismatches_for_both_players() {
+        let valid_white = PlayerDeckSpec {
+            starting: vec![StartingPieceSpec {
+                piece: built_in("king"),
+                square: Square::new(4, 0),
+            }],
+            pocket: vec![],
+        };
+        let valid_black = PlayerDeckSpec {
+            starting: vec![StartingPieceSpec {
+                piece: built_in("king"),
+                square: Square::new(4, 7),
+            }],
+            pocket: vec![],
+        };
+
+        let mut back_on_white_front = valid_white.clone();
+        back_on_white_front.starting.push(StartingPieceSpec {
+            piece: built_in("paratrooper"),
+            square: Square::new(3, 1),
+        });
+        let error = build_game_state(
+            "invalid-white".into(),
+            8,
+            &back_on_white_front,
+            &valid_black,
+            vec![],
+        )
+        .unwrap_err();
+        assert!(error.contains("뒷줄"));
+
+        let mut back_on_black_front = valid_black.clone();
+        back_on_black_front.starting.push(StartingPieceSpec {
+            piece: built_in("paratrooper"),
+            square: Square::new(3, 6),
+        });
+        let error = build_game_state(
+            "invalid-black".into(),
+            8,
+            &valid_white,
+            &back_on_black_front,
+            vec![],
+        )
+        .unwrap_err();
+        assert!(error.contains("뒷줄"));
+
+        let mut front_on_back = valid_white.clone();
+        front_on_back.starting.push(StartingPieceSpec {
+            piece: built_in("dozer"),
+            square: Square::new(3, 0),
+        });
+        let error = build_game_state(
+            "front-on-back".into(),
+            8,
+            &front_on_back,
+            &valid_black,
+            vec![],
+        )
+        .unwrap_err();
+        assert!(error.contains("앞줄"));
     }
 
     #[tokio::test]
@@ -2327,7 +2431,7 @@ mod tests {
                 },
                 StartingPieceSpec {
                     piece: built_in("windmill"),
-                    square: Square::new(3, 1),
+                    square: Square::new(3, 0),
                 },
             ],
             pocket: vec![],
@@ -2353,7 +2457,7 @@ mod tests {
             Json(SubmitActionRequest {
                 action: SubmitAction::Move(SubmitMoveRequest {
                     piece_id: "white_windmill_1".into(),
-                    to: Square::new(4, 2),
+                    to: Square::new(4, 1),
                     promotion: None,
                     move_option_id: None,
                 }),
