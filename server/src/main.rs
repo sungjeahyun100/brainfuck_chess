@@ -2014,6 +2014,7 @@ mod tests {
         assert_eq!(scores.get("bouncing-rook"), Some(&6));
         assert_eq!(scores.get("bouncing-queen"), Some(&13));
         assert_eq!(scores.get("pawn"), scores.get("pawn-white"));
+        assert_eq!(scores.get("tempest-pawn"), Some(&2));
         assert_eq!(scores.get("tempest-pawn"), scores.get("tempest-pawn-white"));
         assert_eq!(scores.get("bouncing-pawn"), Some(&2));
         assert_eq!(

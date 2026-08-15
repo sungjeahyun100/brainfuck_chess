@@ -6,7 +6,7 @@ pub fn tempest_pawn_white_definition() -> PieceDefinition {
         deployment_zone: DeploymentZone::Front,
         id: "tempest-pawn-white".into(),
         name: "Tempest Pawn".into(),
-        score: 1,
+        score: 2,
         chessembly_code: "\
 move(0, 1);
 move(1, 0);

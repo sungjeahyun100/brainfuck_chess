@@ -212,8 +212,8 @@ fn test_variant_piece_definitions_are_registered() {
     assert_eq!(find("nightrider").score, 5);
     assert_eq!(find("dozer-white").score, 2);
     assert_eq!(find("dozer-black").score, 2);
-    assert_eq!(find("tempest-pawn-white").score, 1);
-    assert_eq!(find("tempest-pawn-black").score, 1);
+    assert_eq!(find("tempest-pawn-white").score, 2);
+    assert_eq!(find("tempest-pawn-black").score, 2);
 }
 
 #[test]
