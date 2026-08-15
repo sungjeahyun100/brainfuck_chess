@@ -245,11 +245,11 @@ export const deckPresets: DeckPreset[] = [
     name: '포켓 덱',
     description: '시작 기물을 줄이고 포켓 운용을 늘린 덱입니다.',
     layouts: {
-      8: createPresetLayout([null, null, null, 'king', null, null, null, null], 4, { rook: 2, bishop: 2, knight: 2, queen: 1, pawn: 4 }),
-      9: createPresetLayout([null, null, null, null, 'king', null, null, null, null], 5, { rook: 2, bishop: 2, knight: 2, queen: 1, pawn: 8 }),
-      10: createPresetLayout([null, null, null, null, 'king', null, null, null, null, null], 6, { rook: 2, bishop: 2, knight: 2, queen: 2, pawn: 10 }),
-      11: createPresetLayout([null, null, null, null, null, 'king', null, null, null, null, null], 7, { rook: 3, bishop: 2, knight: 2, queen: 2, pawn: 14 }),
-      12: createPresetLayout([null, null, null, null, null, 'king', null, null, null, null, null, null], 8, { rook: 3, bishop: 3, knight: 3, queen: 2, amazon: 1, pawn: 18 }),
+      8: createPresetLayout([null, null, null, 'king', null, null, null, null], 8, { rook: 2, bishop: 2, knight: 2, queen: 1 }),
+      9: createPresetLayout([null, null, null, null, 'king', null, null, null, null], 9, { rook: 2, bishop: 2, knight: 2, queen: 1, pawn: 4 }),
+      10: createPresetLayout([null, null, null, null, 'king', null, null, null, null, null], 10, { rook: 2, bishop: 2, knight: 2, queen: 2, pawn: 6 }),
+      11: createPresetLayout([null, null, null, null, null, 'king', null, null, null, null, null], 11, { rook: 3, bishop: 2, knight: 2, queen: 2, pawn: 10 }),
+      12: createPresetLayout([null, null, null, null, null, 'king', null, null, null, null, null, null], 12, { rook: 3, bishop: 3, knight: 3, queen: 2, amazon: 1, pawn: 14 }),
     },
   },
 ]
@@ -421,6 +421,15 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
     if (restriction) {
       errors.push(`${pieceLabel(piece.pieceType)} (${piece.square.file + 1}, ${piece.square.rank + 1}): ${restriction}`)
     }
+  }
+  const frontRank = frontmostBaseRank(boardSize)
+  const occupiedFrontFiles = new Set(
+    deck.starting
+      .filter(piece => piece.square.rank === frontRank && piece.square.file >= 0 && piece.square.file < boardSize)
+      .map(piece => piece.square.file),
+  )
+  if (occupiedFrontFiles.size !== boardSize) {
+    errors.push(`덱의 앞줄은 모든 칸에 기물이 배치되어야 합니다. (${occupiedFrontFiles.size}/${boardSize})`)
   }
   for (const pieceType of new Set(deck.starting.map(piece => piece.pieceType))) {
     if (isUniqueStartingPiece(pieceType) && deck.starting.filter(piece => piece.pieceType === pieceType).length > 1) {

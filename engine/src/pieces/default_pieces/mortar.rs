@@ -45,7 +45,7 @@ take-move(0, -1);"
             MoveOptionDefinition {
                 id: MORTAR_BARRAGE_ABILITY_ID.into(),
                 name: "박격포 사격".into(),
-                description: "자신의 파일과 양옆 파일에서 한 지점을 선택해, 그 지점과 상하좌우에 인접한 모든 기물을 제거합니다. 사용 후 소유자의 다음 2개 턴 동안 사용할 수 없습니다.".into(),
+                description: "아군 기물이 있는 파일에서 한 지점을 선택해, 그 지점과 상하좌우에 인접한 모든 기물을 제거합니다. 상대의 초기 진영은 조준할 수 없습니다. 사용 후 소유자의 다음 2개 턴 동안 사용할 수 없습니다.".into(),
                 kind: MoveOptionKind::Ability,
                 layer_ids: Vec::new(),
                 execution_mode: MoveOptionExecutionMode::StandaloneAction,

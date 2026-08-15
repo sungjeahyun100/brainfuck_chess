@@ -1971,29 +1971,75 @@ mod tests {
         }
     }
 
+    fn starting_with_front_line(
+        side: &str,
+        mut back_rank: Vec<StartingPieceSpec>,
+    ) -> Vec<StartingPieceSpec> {
+        let rank = if side == "white" { 1 } else { 6 };
+        back_rank.extend((0..8).map(|file| StartingPieceSpec {
+            piece: built_in("pawn"),
+            square: Square::new(file, rank),
+        }));
+        back_rank
+    }
+
+    fn remove_front_line_after_validation(state: &mut GameState) {
+        let front_piece_ids = state
+            .pieces
+            .values()
+            .filter(|piece| {
+                piece.type_id.starts_with("pawn-")
+                    && piece.current_square.is_some_and(|square| {
+                        square.rank == if piece.owner == "white" { 1 } else { 6 }
+                    })
+            })
+            .map(|piece| piece.id.clone())
+            .collect::<HashSet<_>>();
+        for piece_id in &front_piece_ids {
+            if let Some(square) = state.pieces[piece_id].current_square {
+                state.board.squares.insert(square.to_id(), None);
+            }
+            state.pieces.remove(piece_id);
+        }
+        for player in state.players.values_mut() {
+            player
+                .deck
+                .starting_pieces
+                .retain(|piece_id| !front_piece_ids.contains(piece_id));
+        }
+    }
+
     fn test_app_with_game() -> (AppState, String) {
         let game_id = "test-game".to_string();
         let white_deck = PlayerDeckSpec {
-            starting: vec![
-                StartingPieceSpec {
-                    piece: built_in("king"),
-                    square: Square::new(4, 0),
-                },
-                StartingPieceSpec {
-                    piece: built_in("rook"),
-                    square: Square::new(0, 0),
-                },
-            ],
+            starting: starting_with_front_line(
+                "white",
+                vec![
+                    StartingPieceSpec {
+                        piece: built_in("king"),
+                        square: Square::new(4, 0),
+                    },
+                    StartingPieceSpec {
+                        piece: built_in("rook"),
+                        square: Square::new(0, 0),
+                    },
+                ],
+            ),
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
-            starting: vec![StartingPieceSpec {
-                piece: built_in("king"),
-                square: Square::new(4, 7),
-            }],
+            starting: starting_with_front_line(
+                "black",
+                vec![StartingPieceSpec {
+                    piece: built_in("king"),
+                    square: Square::new(4, 7),
+                }],
+            ),
             pocket: vec![],
         };
-        let state = build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
+        let mut state =
+            build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
+        remove_front_line_after_validation(&mut state);
         let app = AppState {
             games: Arc::new(DashMap::new()),
             rooms: Arc::new(DashMap::new()),
@@ -2058,25 +2104,28 @@ mod tests {
     #[test]
     fn game_creation_rejects_deployment_zone_mismatches_for_both_players() {
         let valid_white = PlayerDeckSpec {
-            starting: vec![StartingPieceSpec {
-                piece: built_in("king"),
-                square: Square::new(4, 0),
-            }],
+            starting: starting_with_front_line(
+                "white",
+                vec![StartingPieceSpec {
+                    piece: built_in("king"),
+                    square: Square::new(4, 0),
+                }],
+            ),
             pocket: vec![],
         };
         let valid_black = PlayerDeckSpec {
-            starting: vec![StartingPieceSpec {
-                piece: built_in("king"),
-                square: Square::new(4, 7),
-            }],
+            starting: starting_with_front_line(
+                "black",
+                vec![StartingPieceSpec {
+                    piece: built_in("king"),
+                    square: Square::new(4, 7),
+                }],
+            ),
             pocket: vec![],
         };
 
         let mut back_on_white_front = valid_white.clone();
-        back_on_white_front.starting.push(StartingPieceSpec {
-            piece: built_in("paratrooper"),
-            square: Square::new(3, 1),
-        });
+        back_on_white_front.starting[4].piece = built_in("paratrooper");
         let error = build_game_state(
             "invalid-white".into(),
             8,
@@ -2088,10 +2137,7 @@ mod tests {
         assert!(error.contains("뒷줄"));
 
         let mut back_on_black_front = valid_black.clone();
-        back_on_black_front.starting.push(StartingPieceSpec {
-            piece: built_in("paratrooper"),
-            square: Square::new(3, 6),
-        });
+        back_on_black_front.starting[4].piece = built_in("paratrooper");
         let error = build_game_state(
             "invalid-black".into(),
             8,
@@ -2425,26 +2471,34 @@ mod tests {
     async fn submit_move_action_applies_canonical_piece_state_effect() {
         let game_id = "windmill-game".to_string();
         let white_deck = PlayerDeckSpec {
-            starting: vec![
-                StartingPieceSpec {
-                    piece: built_in("king"),
-                    square: Square::new(4, 0),
-                },
-                StartingPieceSpec {
-                    piece: built_in("windmill"),
-                    square: Square::new(3, 0),
-                },
-            ],
+            starting: starting_with_front_line(
+                "white",
+                vec![
+                    StartingPieceSpec {
+                        piece: built_in("king"),
+                        square: Square::new(4, 0),
+                    },
+                    StartingPieceSpec {
+                        piece: built_in("windmill"),
+                        square: Square::new(3, 0),
+                    },
+                ],
+            ),
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
-            starting: vec![StartingPieceSpec {
-                piece: built_in("king"),
-                square: Square::new(4, 7),
-            }],
+            starting: starting_with_front_line(
+                "black",
+                vec![StartingPieceSpec {
+                    piece: built_in("king"),
+                    square: Square::new(4, 7),
+                }],
+            ),
             pocket: vec![],
         };
-        let state = build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
+        let mut state =
+            build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
+        remove_front_line_after_validation(&mut state);
         let app = AppState {
             games: Arc::new(DashMap::new()),
             rooms: Arc::new(DashMap::new()),

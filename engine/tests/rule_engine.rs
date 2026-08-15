@@ -131,6 +131,24 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         .push(id.into());
 }
 
+fn add_front_pawn_line(state: &mut GameState, owner: &str, board_size: i32) {
+    let rank = get_frontmost_base_rank(&owner.to_string(), board_size).unwrap();
+    for file in 0..board_size {
+        add_piece(
+            state,
+            &format!("{owner}-front-{file}"),
+            owner,
+            if owner == "white" {
+                "pawn-white"
+            } else {
+                "pawn-black"
+            },
+            file,
+            rank,
+        );
+    }
+}
+
 #[test]
 fn mortar_uses_orthogonal_take_moves() {
     let mut state = make_game_state(8);
@@ -172,7 +190,7 @@ fn machine_gunner_uses_orthogonal_take_moves() {
 }
 
 #[test]
-fn mortar_barrage_removes_selected_point_and_orthogonal_neighbors() {
+fn mortar_barrage_targets_friendly_files_and_removes_orthogonal_neighbors() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "actor", "white", "mortar", 3, 3);
     add_piece(&mut state, "center", "black", "bishop", 4, 5);
@@ -184,12 +202,15 @@ fn mortar_barrage_removes_selected_point_and_orthogonal_neighbors() {
     add_piece(&mut state, "farther", "black", "bishop", 4, 7);
 
     let actions = generate_piece_legal_ability_actions(&state, &"actor".into(), "mortar-barrage");
-    assert_eq!(actions.len(), 24);
+    assert_eq!(actions.len(), 12);
     assert!(actions.iter().all(|action| {
         action
             .to
-            .is_some_and(|target| (2..=4).contains(&target.file))
+            .is_some_and(|target| matches!(target.file, 3 | 4))
     }));
+    assert!(actions
+        .iter()
+        .all(|action| action.to.is_none_or(|target| target.file != 5)));
     let action = actions
         .into_iter()
         .find(|action| action.to == Some(Square::new(4, 5)))
@@ -206,6 +227,39 @@ fn mortar_barrage_removes_selected_point_and_orthogonal_neighbors() {
     assert_eq!(state.players["white"].captured_pieces.len(), 5);
     assert_eq!(state.history.len(), 1);
     assert_eq!(state.current_player.as_str(), "black");
+}
+
+#[test]
+fn mortar_cannot_target_the_opponents_base_zone() {
+    for (board_size, owner, allowed_ranks, blocked_ranks) in [
+        (8, "white", 0..=5, vec![6, 7]),
+        (8, "black", 2..=7, vec![0, 1]),
+        (9, "white", 0..=6, vec![7, 8]),
+        (9, "black", 2..=8, vec![0, 1]),
+        (10, "white", 0..=6, vec![7, 8, 9]),
+        (10, "black", 3..=9, vec![0, 1, 2]),
+    ] {
+        let mut state = make_game_state(board_size);
+        state.current_player = owner.into();
+        add_piece(&mut state, "actor", owner, "mortar", 3, 3);
+
+        let actions =
+            generate_piece_legal_ability_actions(&state, &"actor".into(), "mortar-barrage");
+        assert_eq!(
+            actions.len(),
+            (board_size - blocked_ranks.len() as i32) as usize
+        );
+        assert!(actions.iter().all(|action| {
+            action
+                .to
+                .is_some_and(|target| allowed_ranks.contains(&target.rank))
+        }));
+        assert!(blocked_ranks.iter().all(|blocked_rank| {
+            actions
+                .iter()
+                .all(|action| action.to.is_none_or(|target| target.rank != *blocked_rank))
+        }));
+    }
 }
 
 #[test]
@@ -315,10 +369,10 @@ fn barrage_abilities_have_two_owner_turn_cooldowns() {
 fn mortar_barrage_king_removal_uses_normal_game_end_state() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "actor", "white", "mortar", 3, 3);
-    add_piece(&mut state, "enemy-king", "black", "king", 3, 7);
+    add_piece(&mut state, "enemy-king", "black", "king", 3, 6);
     let action = generate_piece_legal_ability_actions(&state, &"actor".into(), "mortar-barrage")
         .into_iter()
-        .find(|action| action.to == Some(Square::new(3, 6)))
+        .find(|action| action.to == Some(Square::new(3, 5)))
         .unwrap();
 
     let state = submit_action(state, TurnAction::Ability(action)).unwrap();
@@ -771,9 +825,49 @@ fn test_deck_validation_no_king() {
 fn test_deck_validation_king_in_starting() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "k1", "white", "king", 4, 0);
+    add_front_pawn_line(&mut state, "white", 8);
     let player = state.players.get("white").unwrap();
     let result = validate_deck(&player.deck, 8, &state.pieces, &state.piece_definitions);
     assert!(result.valid, "errors: {:?}", result.errors);
+}
+
+#[test]
+fn test_deck_validation_requires_every_front_rank_square() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "k1", "white", "king", 4, 0);
+    for file in 0..7 {
+        add_piece(
+            &mut state,
+            &format!("p{file}"),
+            "white",
+            "pawn-white",
+            file,
+            1,
+        );
+    }
+
+    let result = validate_deck(
+        &state.players["white"].deck,
+        8,
+        &state.pieces,
+        &state.piece_definitions,
+    );
+    assert!(!result.valid);
+    assert!(result
+        .errors
+        .iter()
+        .any(|error| error.contains("앞줄") && error.contains("7/8")));
+
+    add_piece(&mut state, "p7", "white", "pawn-white", 7, 1);
+    assert!(
+        validate_deck(
+            &state.players["white"].deck,
+            8,
+            &state.pieces,
+            &state.piece_definitions,
+        )
+        .valid
+    );
 }
 
 #[test]
@@ -869,6 +963,18 @@ fn deployment_zone_is_independent_of_score_and_uses_frontmost_large_board_rank()
         .unwrap()
         .score = 3;
     add_piece(&mut front_state, "king", "white", "king", 4, 0);
+    add_front_pawn_line(&mut front_state, "white", 10);
+    let displaced_pawn = front_state.board.squares[&Square::new(3, 2).to_id()]
+        .clone()
+        .unwrap();
+    front_state
+        .players
+        .get_mut("white")
+        .unwrap()
+        .deck
+        .starting_pieces
+        .retain(|id| id != &displaced_pawn);
+    front_state.pieces.remove(&displaced_pawn);
     add_piece(&mut front_state, "dozer", "white", "dozer-white", 3, 2);
     assert!(
         validate_deck(

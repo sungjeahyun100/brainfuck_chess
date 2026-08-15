@@ -8,7 +8,7 @@ use crate::interaction::{
     destination_is_blocked_by_interaction, neighboring_pieces, resolve_piece_interactions,
 };
 use crate::pieces::default_pieces::{MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID};
-use crate::rules::player_forward_direction;
+use crate::rules::{get_base_zone_squares, player_forward_direction};
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -685,11 +685,25 @@ pub fn generate_piece_legal_ability_actions(
     let adjacent = neighboring_pieces(game_state, actor);
     match (actor.type_id.as_str(), ability_id) {
         ("mortar", MORTAR_BARRAGE_ABILITY_ID) => {
-            for file_offset in -1..=1 {
-                let file = origin.file + file_offset;
+            let opponent_id = if actor.owner == "white" {
+                "black".into()
+            } else {
+                "white".into()
+            };
+            let opponent_base_zone = get_base_zone_squares(&opponent_id, game_state.board.size);
+            for file in 0..game_state.board.size {
+                let has_friendly_piece = game_state.pieces.values().any(|piece| {
+                    piece.owner == actor.owner
+                        && piece
+                            .current_square
+                            .is_some_and(|square| square.file == file)
+                });
+                if !has_friendly_piece {
+                    continue;
+                }
                 for rank in 0..game_state.board.size {
                     let target = Square::new(file, rank);
-                    if game_state.board.is_in_bounds(&target) {
+                    if !opponent_base_zone.contains(&target) {
                         actions.push(AbilityAction {
                             player_id: actor.owner.clone(),
                             piece_id: piece_id.clone(),

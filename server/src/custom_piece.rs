@@ -1188,6 +1188,17 @@ mod tests {
         headers
     }
 
+    fn front_pawn_line(rank: i32) -> Vec<crate::StartingPieceSpec> {
+        (0..8)
+            .map(|file| crate::StartingPieceSpec {
+                piece: crate::DeckPieceRef::BuiltIn {
+                    piece_type: "pawn".into(),
+                },
+                square: Square::new(file, rank),
+            })
+            .collect()
+    }
+
     fn source(code: &str) -> String {
         let mut definition = all_default_definitions()
             .into_iter()
@@ -1307,7 +1318,10 @@ mod tests {
                     piece: custom_ref.clone(),
                     square: Square::new(2, 0),
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(front_pawn_line(1))
+            .collect(),
             pocket: vec![custom_ref],
         };
         let black = crate::PlayerDeckSpec {
@@ -1316,7 +1330,10 @@ mod tests {
                     piece_type: "king".into(),
                 },
                 square: Square::new(4, 7),
-            }],
+            }]
+            .into_iter()
+            .chain(front_pawn_line(6))
+            .collect(),
             pocket: vec![],
         };
         let packages =
@@ -1343,7 +1360,7 @@ mod tests {
             &MoveGenerationOptions::default(),
         )
         .is_empty());
-        assert_eq!(state.players["white"].deck.total_score, 14);
+        assert_eq!(state.players["white"].deck.total_score, 22);
         assert!(crate::resolve_custom_packages(&app, &[("mallory", &white)]).is_err());
 
         let mut changed = input("move(0, 1);");
@@ -1361,7 +1378,7 @@ mod tests {
         .unwrap();
         let pinned = crate::resolve_custom_packages(&app, &[("alice", &white)]).unwrap();
         assert_eq!(pinned[0].version, 1);
-        assert_eq!(state.players["white"].deck.total_score, 14);
+        assert_eq!(state.players["white"].deck.total_score, 22);
 
         let mut room = crate::MultiplayerRoom {
             id: "ROOM01".into(),
@@ -1379,7 +1396,10 @@ mod tests {
                         piece_type: "king".into(),
                     },
                     square: Square::new(4, 0),
-                }],
+                }]
+                .into_iter()
+                .chain(front_pawn_line(1))
+                .collect(),
                 pocket: vec![],
             }),
             host_ready: true,

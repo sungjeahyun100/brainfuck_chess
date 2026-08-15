@@ -61,7 +61,7 @@ function validPayload(): Record<string, unknown> {
     boardSize: 8,
     starting: [
       { pieceId: 'king', file: 4, rank: 0 },
-      { pieceId: 'pawn', file: 0, rank: 1 },
+      ...Array.from({ length: 8 }, (_, file) => ({ pieceId: 'pawn', file, rank: 1 })),
     ],
     pocket: [{ pieceId: 'knight', count: 2 }],
   }
@@ -71,7 +71,7 @@ test('DC1 export and import round-trip preserves board, placement, and pocket on
   const original = savedDeck()
   original.starting = [
     { pieceType: 'king', square: { file: 4, rank: 0 } },
-    { pieceType: 'pawn', square: { file: 0, rank: 1 } },
+    ...Array.from({ length: 7 }, (_, file) => ({ pieceType: 'pawn', square: { file, rank: 1 } })),
     { pieceType: 'dozer', square: { file: 7, rank: 1 } },
   ]
   original.pocket = { knight: 2, bishop: 1 }

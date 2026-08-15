@@ -53,6 +53,10 @@ function deck(pieceType: string): SavedDeck {
     starting: [
       { pieceType: 'king', square: { file: 4, rank: 0 } },
       { pieceType, square: { file: 2, rank: 0 } },
+      ...Array.from({ length: 8 }, (_, file) => ({
+        pieceType: 'pawn',
+        square: { file, rank: 1 },
+      })),
     ],
     pocket: { [pieceType]: 1 },
     customPieces: [{
@@ -164,7 +168,10 @@ test('base zone expands to three ranks starting at board size 10', () => {
     boardSize: 10,
     starting: [
       { pieceType: 'king', square: { file: 4, rank: 1 } },
-      { pieceType: 'pawn', square: { file: 2, rank: 2 } },
+      ...Array.from({ length: 10 }, (_, file) => ({
+        pieceType: 'pawn',
+        square: { file, rank: 2 },
+      })),
     ],
     pocket: {},
     customPieces: [],
@@ -192,6 +199,35 @@ test('presets place their pawn line on each board size frontmost setup rank', ()
   }
 })
 
+test('deck validation requires every square in the front setup rank', () => {
+  const complete = createPresetDeck(8)
+  assert.equal(validateSavedDeck({
+    ...complete,
+    id: 'complete-front-rank',
+    name: 'Complete',
+    boardSize: 8,
+    customPieces: [],
+    createdAt: 1,
+    updatedAt: 1,
+  }).valid, true)
+
+  const incomplete = {
+    ...complete,
+    starting: complete.starting.filter(piece => piece.square.file !== 7 || piece.square.rank !== 1),
+  }
+  const summary = validateSavedDeck({
+    ...incomplete,
+    id: 'incomplete-front-rank',
+    name: 'Incomplete',
+    boardSize: 8,
+    customPieces: [],
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  assert.equal(summary.valid, false)
+  assert.match(summary.errors.join(' '), /앞줄.*7\/8/)
+})
+
 test('deployment zones replace score-based front-rank placement', () => {
   assert.equal(frontmostBaseRank(8, 'white'), 1)
   assert.equal(frontmostBaseRank(8, 'black'), 6)
@@ -213,6 +249,9 @@ test('deployment zones replace score-based front-rank placement', () => {
   assert.match(placementRestriction('knight', 1, 8) ?? '', /배치할 수 없습니다/)
 
   const validFront = deck('dozer')
+  validFront.starting = validFront.starting.filter(
+    piece => piece.square.rank !== 1 || piece.square.file !== 2,
+  )
   validFront.starting[1].square.rank = 1
   assert.equal(validateSavedDeck(validFront).valid, true)
 

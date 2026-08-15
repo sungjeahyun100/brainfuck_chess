@@ -38,7 +38,7 @@ pub fn calculate_deck_score(
 /// - Exactly one King in starting pieces
 /// - No King in pocket
 /// - Total score ≤ score limit
-/// - At least one piece besides King
+/// - Every square in the frontmost setup rank is occupied
 pub fn validate_deck(
     deck: &Deck,
     board_size: i32,
@@ -78,6 +78,28 @@ pub fn validate_deck(
 
     if pocket_king_count > 0 {
         errors.push("King은 포켓에 넣을 수 없습니다.".into());
+    }
+
+    let occupied_front_files = get_frontmost_base_rank(&deck.player_id, board_size)
+        .map(|front_rank| {
+            deck.starting_pieces
+                .iter()
+                .filter_map(|piece_id| pieces.get(piece_id))
+                .filter_map(|piece| piece.current_square)
+                .filter(|square| {
+                    square.rank == front_rank && square.file >= 0 && square.file < board_size
+                })
+                .map(|square| square.file)
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+        })
+        .unwrap_or(0);
+    if occupied_front_files != board_size.max(0) as usize {
+        errors.push(format!(
+            "덱의 앞줄은 모든 칸에 기물이 배치되어야 합니다. ({}/{})",
+            occupied_front_files,
+            board_size.max(0)
+        ));
     }
 
     // Score check
