@@ -57,7 +57,7 @@ take-move(0, -1);"
             },
         ],
         visual: PieceVisualDefinition {
-            default_asset_key: "cannon-rook".into(),
+            default_asset_key: "mortar".into(),
             variants: Vec::new(),
         },
     }

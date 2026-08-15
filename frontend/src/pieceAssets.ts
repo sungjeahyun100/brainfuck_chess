@@ -12,6 +12,10 @@ import bouncingPawnBlack from './assets/pieces/bouncing-pawn-black.svg'
 import bouncingPawnWhite from './assets/pieces/bouncing-pawn-white.svg'
 import cannonRookBlack from './assets/pieces/cannon-rook-black.svg'
 import cannonRookWhite from './assets/pieces/cannon-rook-white.svg'
+import machineGunnerBlack from './assets/pieces/machine-gunner-black.svg'
+import machineGunnerWhite from './assets/pieces/machine-gunner-white.svg'
+import mortarBlack from './assets/pieces/mortar-black.svg'
+import mortarWhite from './assets/pieces/mortar-white.svg'
 import dozerBlack from './assets/pieces/dozer-black.svg'
 import dozerWhite from './assets/pieces/dozer-white.svg'
 import kingBlack from './assets/pieces/king-black.svg'
@@ -73,8 +77,8 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   'alternating-soldier': { white: guardWhite, black: guardBlack },
   airborne: { white: airborneWhite, black: airborneBlack },
   'green-camp': { white: greenCampWhite, black: greenCampBlack },
-  mortar: { white: cannonRookWhite, black: cannonRookBlack },
-  'machine-gunner': { white: paratrooperWhite, black: paratrooperBlack },
+  mortar: { white: mortarWhite, black: mortarBlack },
+  'machine-gunner': { white: machineGunnerWhite, black: machineGunnerBlack },
   'pawn-white': { white: pawnWhite, black: pawnBlack },
   'pawn-black': { white: pawnWhite, black: pawnBlack },
   'tempest-pawn': { white: tempestPawnWhite, black: tempestPawnBlack },

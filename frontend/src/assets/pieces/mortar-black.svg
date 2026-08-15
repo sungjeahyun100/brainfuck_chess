@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">박격포병</title>
+  <desc id="desc">검은색 박격포 포신과 양각대, 받침판을 흰 윤곽선으로 그린 픽토그램</desc>
+  <g fill="#111" stroke="#fff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <!-- angled mortar tube -->
+    <path d="M166 345 L282 148 L338 181 L222 378 Z"/>
+    <path d="M272 139 L344 182 L363 151 L291 108 Z"/>
+    <path d="M291 108 L363 151 L347 176 L275 133 Z"/>
+    <!-- adjustment collar and elevation handle -->
+    <path d="M202 295 L252 325 L235 354 L185 324 Z"/>
+    <path d="M235 310 L282 283" fill="none"/>
+    <circle cx="291" cy="278" r="13"/>
+    <!-- bipod -->
+    <circle cx="218" cy="358" r="22"/>
+    <path d="M204 374 L133 434" fill="none" stroke-width="20"/>
+    <path d="M232 374 L319 434" fill="none" stroke-width="20"/>
+    <path d="M111 440 H158" fill="none" stroke-width="20"/>
+    <path d="M297 440 H344" fill="none" stroke-width="20"/>
+    <!-- base plate -->
+    <path d="M151 432 Q256 397 361 432 L387 468 H125 Z"/>
+    <path d="M164 438 H348" fill="none"/>
+  </g>
+</svg>

@@ -57,7 +57,7 @@ take-move(0, -1);"
             },
         ],
         visual: PieceVisualDefinition {
-            default_asset_key: "paratrooper".into(),
+            default_asset_key: "machine-gunner".into(),
             variants: Vec::new(),
         },
     }
