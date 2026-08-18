@@ -281,7 +281,12 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
         MORTAR_BARRAGE_ABILITY_ID => {
             let targets = action
                 .to
-                .map(|target| mortar_barrage_targets(&state, target))
+                .and_then(|target| {
+                    state
+                        .pieces
+                        .get(&action.piece_id)
+                        .map(|actor| mortar_barrage_targets(&state, actor, target))
+                })
                 .unwrap_or_default();
             let mut removed_enemy_king = false;
             let mut removed_friendly_king = false;

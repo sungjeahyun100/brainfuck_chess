@@ -48,6 +48,7 @@ export function importDeckCode(code: string, currentDeck: SavedDeck): DeckCodeIm
 
   const candidate: SavedDeck = {
     ...currentDeck,
+    mapId: decoded.value.mapId,
     boardSize: decoded.value.boardSize,
     starting: decoded.value.starting.map(piece => ({
       pieceType: piece.pieceId,

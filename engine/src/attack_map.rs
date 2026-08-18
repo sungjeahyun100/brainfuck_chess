@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::chessembly::run_chessembly_layer_for_piece;
 use crate::interaction::{destination_is_blocked_by_interaction, resolve_piece_interactions};
+use crate::terrain::can_affect_square;
 use crate::types::*;
 
 /// Compute the full attack map for a player: the union of attackSquares from
@@ -60,11 +61,15 @@ pub fn generate_attack_map(
 
                 option_attacks.extend(chessembly_result.attack_squares.into_iter().filter(|sq| {
                     !destination_is_blocked_by_interaction(game_state, piece, *sq, &option.id)
+                        && can_affect_square(game_state, piece, *sq)
                 }));
             }
 
             option_attacks.extend(
-                resolve_piece_interactions(game_state, piece, &option.id).attack_squares,
+                resolve_piece_interactions(game_state, piece, &option.id)
+                    .attack_squares
+                    .into_iter()
+                    .filter(|square| can_affect_square(game_state, piece, *square)),
             );
 
             for sq in option_attacks {

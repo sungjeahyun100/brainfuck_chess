@@ -24,7 +24,7 @@
         <div class="deck-card-main" @click="$emit('edit', deck.id)">
           <p class="summary-title">{{ summary(deck).valid ? '사용 가능' : '수정 필요' }}</p>
           <h2>{{ deck.name }}</h2>
-          <p>{{ deck.boardSize }} x {{ deck.boardSize }}</p>
+          <p>{{ boardMapLabel(deck.mapId) }}</p>
           <strong>{{ summary(deck).totalScore }} / {{ summary(deck).scoreLimit }}점</strong>
           <span>{{ deck.starting.length }} 시작 기물 · {{ totalPocketCount(deck) }} 포켓 기물</span>
           <p class="summary-status">{{ summary(deck).valid ? '유효한 덱입니다.' : summary(deck).errors[0] }}</p>
@@ -44,6 +44,7 @@ import { onMounted, ref } from 'vue'
 import type { SavedDeck } from '../types/deck'
 import { createNewSavedDeck, useSavedDecks } from '../composables/useSavedDecks'
 import { totalPocketCount, validateSavedDeck } from '../composables/useDeckValidation'
+import { boardMapLabel } from '../boardMaps'
 
 const emit = defineEmits<{
   back: []

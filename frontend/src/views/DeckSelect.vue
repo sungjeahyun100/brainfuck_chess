@@ -42,7 +42,7 @@
           <select v-model="primaryDeckId" class="text-input">
             <option value="">선택 안 함</option>
             <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
-              {{ deck.name }} · {{ deck.boardSize }}x{{ deck.boardSize }}
+              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }}
             </option>
           </select>
           <p v-if="primaryDeck">{{ deckInfo(primaryDeck) }}</p>
@@ -53,7 +53,7 @@
           <select v-model="secondaryDeckId" class="text-input">
             <option value="">선택 안 함</option>
             <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
-              {{ deck.name }} · {{ deck.boardSize }}x{{ deck.boardSize }}
+              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }}
             </option>
           </select>
           <p v-if="secondaryDeck">{{ deckInfo(secondaryDeck) }}</p>
@@ -74,6 +74,7 @@ import type { BotDifficulty } from '../types/game'
 import type { BotDeckSelection, DeckSelectMode, LobbyPlayer, SavedDeck, SingleDeckSelection } from '../types/deck'
 import { useSavedDecks } from '../composables/useSavedDecks'
 import { totalPocketCount, validateSavedDeck } from '../composables/useDeckValidation'
+import { boardMapLabel } from '../boardMaps'
 
 const props = defineProps<{
   mode: DeckSelectMode
@@ -97,13 +98,17 @@ const validDecks = computed(() => decks.value.filter(deck => validateSavedDeck(d
 const invalidDecks = computed(() => decks.value.filter(deck => !validateSavedDeck(deck).valid))
 const primaryDeck = computed(() => decks.value.find(deck => deck.id === primaryDeckId.value) ?? null)
 const secondaryDeck = computed(() => decks.value.find(deck => deck.id === secondaryDeckId.value) ?? null)
-const sameBoardSize = computed(() => Boolean(primaryDeck.value && secondaryDeck.value && primaryDeck.value.boardSize === secondaryDeck.value.boardSize))
+const sameMap = computed(() => Boolean(primaryDeck.value && secondaryDeck.value && primaryDeck.value.mapId === secondaryDeck.value.mapId))
 const errorMessage = computed(() => {
   if (!primaryDeck.value || !secondaryDeck.value) return null
-  if (!sameBoardSize.value) return '선택한 두 덱의 보드 크기가 다릅니다. 같은 보드 크기의 덱을 선택하세요.'
+  if (!sameMap.value) return '선택한 두 덱의 맵이 다릅니다. 같은 맵 전용 덱을 선택하세요.'
   return null
 })
-const canStart = computed(() => Boolean(primaryDeck.value && secondaryDeck.value && sameBoardSize.value))
+const canStart = computed(() => Boolean(
+  primaryDeck.value
+  && secondaryDeck.value
+  && sameMap.value,
+))
 
 function refresh() {
   decks.value = savedDecks.loadDecks()

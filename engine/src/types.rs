@@ -12,6 +12,15 @@ use crate::custom_pieces::CustomPieceManifestEntry;
 
 pub type PlayerId = String;
 pub type PieceTypeId = String;
+pub type TerrainTypeId = String;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BoardVariant {
+    #[default]
+    Plain,
+    CentralHighGround,
+}
 
 /// Stable external piece id with allocation-free clones inside the engine.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -142,6 +151,14 @@ pub struct Board {
     pub size: i32,
     /// Maps SquareId → PieceId (None means empty)
     pub squares: HashMap<SquareId, Option<PieceId>>,
+    /// Static terrain attached to squares independently from piece occupancy.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub terrain: HashMap<SquareId, TerrainCell>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerrainCell {
+    pub type_id: TerrainTypeId,
 }
 
 impl Board {

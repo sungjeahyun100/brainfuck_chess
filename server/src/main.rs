@@ -30,8 +30,8 @@ use brainfuck_chess_engine::{
     },
     pieces::default_pieces::all_default_definitions,
     rules::{
-        calculate_deck_score, calculate_score_limit, create_board, get_base_zone_squares,
-        validate_deck,
+        board_map_definition, calculate_deck_score, calculate_score_limit, create_board,
+        create_board_with_variant, get_base_zone_squares, standard_board_map_id, validate_deck,
     },
     types::*,
 };
@@ -41,6 +41,10 @@ use brainfuck_chess_engine::{
 #[derive(Deserialize)]
 struct CreateGameRequest {
     board_size: i32,
+    #[serde(default)]
+    map_id: Option<String>,
+    #[serde(default)]
+    board_variant: BoardVariant,
     white_deck: PlayerDeckSpec,
     black_deck: PlayerDeckSpec,
 }
@@ -49,6 +53,9 @@ struct CreateGameRequest {
 struct MultiplayerRoom {
     id: String,
     board_size: i32,
+    map_id: String,
+    #[serde(default)]
+    board_variant: BoardVariant,
     host_side: PlayerId,
     guest_side: PlayerId,
     #[serde(skip_serializing)]
@@ -69,9 +76,37 @@ struct MultiplayerRoom {
 #[derive(Deserialize)]
 struct CreateRoomRequest {
     board_size: i32,
+    #[serde(default)]
+    map_id: Option<String>,
+    #[serde(default)]
+    board_variant: BoardVariant,
     host_side: PlayerId,
     client_id: String,
     deck: PlayerDeckSpec,
+}
+
+fn resolve_board_map(
+    map_id: Option<&str>,
+    board_size: i32,
+    legacy_variant: BoardVariant,
+) -> Result<(String, BoardVariant), String> {
+    if let Some(map_id) = map_id {
+        let map = board_map_definition(map_id)
+            .ok_or_else(|| format!("지원하지 않는 맵입니다: {map_id}"))?;
+        if map.board_size != board_size {
+            return Err("맵과 덱의 보드 크기가 다릅니다.".into());
+        }
+        return Ok((map.id.into(), map.variant));
+    }
+    if legacy_variant == BoardVariant::CentralHighGround {
+        if board_size != 12 {
+            return Err("중앙 고지 보드는 12x12에서만 사용할 수 있습니다.".into());
+        }
+        return Ok(("central-high-ground-12x12".into(), legacy_variant));
+    }
+    let id = standard_board_map_id(board_size)
+        .ok_or_else(|| "지원하지 않는 보드 크기입니다.".to_string())?;
+    Ok((id.into(), BoardVariant::Plain))
 }
 
 #[derive(Deserialize)]
@@ -515,11 +550,29 @@ fn build_game_state(
     black_spec: &PlayerDeckSpec,
     packages: Vec<CustomPiecePackage>,
 ) -> Result<GameState, String> {
+    build_game_state_with_variant(
+        id,
+        board_size,
+        BoardVariant::Plain,
+        white_spec,
+        black_spec,
+        packages,
+    )
+}
+
+fn build_game_state_with_variant(
+    id: String,
+    board_size: i32,
+    board_variant: BoardVariant,
+    white_spec: &PlayerDeckSpec,
+    black_spec: &PlayerDeckSpec,
+    packages: Vec<CustomPiecePackage>,
+) -> Result<GameState, String> {
     if board_size < 8 {
         return Err("보드 크기는 최소 8이어야 합니다.".into());
     }
 
-    let board = create_board(board_size);
+    let board = create_board_with_variant(board_size, board_variant)?;
     let defs: HashMap<String, PieceDefinition> = all_default_definitions()
         .into_iter()
         .map(|d| (d.id.clone(), d))
@@ -970,9 +1023,10 @@ fn start_room_game(
         .ok_or_else(|| "참가자 인증 정보가 없습니다.".to_string())?;
     let packages =
         resolve_custom_packages(app, &[(host_owner, host_spec), (guest_owner, guest_spec)])?;
-    let state = build_game_state(
+    let state = build_game_state_with_variant(
         game_id.clone(),
         room.board_size,
+        room.board_variant,
         white_deck,
         black_deck,
         packages,
@@ -1108,10 +1162,16 @@ async fn create_game(
             Json(ErrorResponse { error }),
         )
     })?;
+    let (_, board_variant) = resolve_board_map(
+        req.map_id.as_deref(),
+        req.board_size,
+        req.board_variant,
+    ).map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let id = Uuid::new_v4().to_string();
-    let state = build_game_state(
+    let state = build_game_state_with_variant(
         id.clone(),
         req.board_size,
+        board_variant,
         &req.white_deck,
         &req.black_deck,
         packages,
@@ -1135,6 +1195,13 @@ async fn create_room(
             }),
         ));
     }
+    let (map_id, board_variant) = resolve_board_map(
+        req.map_id.as_deref(),
+        req.board_size,
+        req.board_variant,
+    ).map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    create_board_with_variant(req.board_size, board_variant)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     if req.host_side != "white" && req.host_side != "black" {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1148,6 +1215,8 @@ async fn create_room(
     let room = MultiplayerRoom {
         id: id.clone(),
         board_size: req.board_size,
+        map_id,
+        board_variant,
         guest_side: opponent_side(&req.host_side),
         host_client_id: req.client_id,
         guest_client_id: None,
@@ -1964,6 +2033,31 @@ mod tests {
     use super::*;
     use dashmap::DashMap;
     use std::sync::Arc;
+
+    #[test]
+    fn map_id_selects_variant_and_rejects_size_mismatch() {
+        assert_eq!(
+            resolve_board_map(Some("central-high-ground-12x12"), 12, BoardVariant::Plain),
+            Ok(("central-high-ground-12x12".into(), BoardVariant::CentralHighGround)),
+        );
+        assert!(resolve_board_map(
+            Some("central-high-ground-12x12"),
+            8,
+            BoardVariant::Plain,
+        ).is_err());
+    }
+
+    #[test]
+    fn legacy_requests_resolve_to_the_equivalent_map() {
+        assert_eq!(
+            resolve_board_map(None, 8, BoardVariant::Plain),
+            Ok(("standard-8x8".into(), BoardVariant::Plain)),
+        );
+        assert_eq!(
+            resolve_board_map(None, 12, BoardVariant::CentralHighGround),
+            Ok(("central-high-ground-12x12".into(), BoardVariant::CentralHighGround)),
+        );
+    }
 
     fn built_in(piece_type: &str) -> DeckPieceRef {
         DeckPieceRef::BuiltIn {

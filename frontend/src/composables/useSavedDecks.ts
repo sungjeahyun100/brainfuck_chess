@@ -1,4 +1,6 @@
 import type { SavedDeck } from '../types/deck'
+import type { BoardMapId } from '../types/game'
+import { findBoardMap, normalizeBoardMapId } from '../boardMaps.ts'
 import { createPresetDeck } from './useDeckValidation'
 
 const STORAGE_KEY = 'brainfuck_chess_saved_decks_v1'
@@ -11,10 +13,15 @@ function readStorage(): SavedDeck[] {
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(isSavedDeck).map(deck => ({
-      ...deck,
-      customPieces: Array.isArray(deck.customPieces) ? deck.customPieces : [],
-    }))
+    return parsed.filter(isSavedDeck).flatMap(deck => {
+      const mapId = normalizeBoardMapId(deck.mapId, deck.boardSize)
+      if (!mapId) return []
+      return [{
+        ...deck,
+        mapId,
+        customPieces: Array.isArray(deck.customPieces) ? deck.customPieces : [],
+      }]
+    })
   } catch {
     return []
   }
@@ -51,15 +58,18 @@ function createDeckName(existing: SavedDeck[]): string {
   return name
 }
 
-export function createNewSavedDeck(boardSize = 8): SavedDeck {
+export function createNewSavedDeck(mapId: BoardMapId = 'standard-8x8'): SavedDeck {
+  const map = findBoardMap(mapId)
+  if (!map) throw new Error(`지원하지 않는 맵입니다: ${mapId}`)
   const now = Date.now()
-  const baseDeck = createPresetDeck(boardSize)
+  const baseDeck = createPresetDeck(map.boardSize)
   const existing = readStorage()
 
   return {
     id: nextId(),
     name: createDeckName(existing),
-    boardSize,
+    mapId: map.id,
+    boardSize: map.boardSize,
     starting: baseDeck.starting,
     pocket: baseDeck.pocket,
     createdAt: now,
@@ -76,8 +86,11 @@ export function useSavedDecks() {
   function saveDeck(deck: SavedDeck): void {
     const decks = readStorage()
     const now = Date.now()
+    const mapId = normalizeBoardMapId(deck.mapId, deck.boardSize)
+    if (!mapId) throw new Error('덱의 맵 정보가 올바르지 않습니다.')
     const normalized: SavedDeck = {
       ...deck,
+      mapId,
       name: deck.name.trim(),
       updatedAt: now,
       createdAt: deck.createdAt || now,

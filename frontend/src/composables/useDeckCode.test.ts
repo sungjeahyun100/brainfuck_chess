@@ -37,6 +37,7 @@ function savedDeck(): SavedDeck {
     ...preset,
     id: 'deck-1',
     name: '공유 테스트',
+    mapId: 'standard-8x8',
     boardSize: 8,
     createdAt: 10,
     updatedAt: 20,
@@ -67,7 +68,7 @@ function validPayload(): Record<string, unknown> {
   }
 }
 
-test('DC1 export and import round-trip preserves board, placement, and pocket only', () => {
+test('DC2 export and import round-trip preserves map, board, placement, and pocket only', () => {
   const original = savedDeck()
   original.starting = [
     { pieceType: 'king', square: { file: 4, rank: 0 } },
@@ -77,7 +78,7 @@ test('DC1 export and import round-trip preserves board, placement, and pocket on
   original.pocket = { knight: 2, bishop: 1 }
 
   const code = encodeDeckCode(original)
-  assert.match(code, /^DC1\.[A-Za-z0-9_-]+$/u)
+  assert.match(code, /^DC2\.[A-Za-z0-9_-]+$/u)
   const decoded = decodeDeckCode(code)
   assert.equal(decoded.ok, true)
   if (!decoded.ok) return
@@ -88,6 +89,7 @@ test('DC1 export and import round-trip preserves board, placement, and pocket on
   assert.equal(imported.ok, true)
   if (!imported.ok) return
   assert.equal(imported.deck.boardSize, original.boardSize)
+  assert.equal(imported.deck.mapId, original.mapId)
   assert.deepEqual(
     [...imported.deck.starting].sort((a, b) => a.square.rank - b.square.rank || a.square.file - b.square.file),
     [...original.starting].sort((a, b) => a.square.rank - b.square.rank || a.square.file - b.square.file),
@@ -106,11 +108,22 @@ test('decoder accepts harmless whitespace around or inside a copied code', () =>
   assert.equal(decodeDeckCode(wrapped).ok, true)
 })
 
+test('DC2 preserves a terrain map separately from board size', () => {
+  const deck = savedDeck()
+  deck.mapId = 'central-high-ground-12x12'
+  deck.boardSize = 12
+  const decoded = decodeDeckCode(encodeDeckCode(deck))
+  assert.equal(decoded.ok, true)
+  if (!decoded.ok) return
+  assert.equal(decoded.value.mapId, 'central-high-ground-12x12')
+  assert.equal(decoded.value.boardSize, 12)
+})
+
 test('decoder returns explicit failures for malformed envelopes and payloads', () => {
   assert.deepEqual(decodeDeckCode(''), { ok: false, error: 'empty' })
   assert.deepEqual(decodeDeckCode('not-a-code'), { ok: false, error: 'invalid_format' })
   assert.deepEqual(decodeDeckCode('XX1.aaaa'), { ok: false, error: 'invalid_format' })
-  assert.deepEqual(decodeDeckCode('DC2.aaaa'), { ok: false, error: 'unsupported_version' })
+  assert.deepEqual(decodeDeckCode('DC3.aaaa'), { ok: false, error: 'unsupported_version' })
   assert.deepEqual(decodeDeckCode('DC1.%%%'), { ok: false, error: 'invalid_payload' })
   assert.deepEqual(decodeDeckCode(`DC1.${base64Url('not json')}`), { ok: false, error: 'invalid_payload' })
   assert.deepEqual(decodeDeckCode(`DC1.${base64Url('{"v":1')}`), { ok: false, error: 'invalid_payload' })
@@ -174,7 +187,7 @@ test('import reuses current validation for squares, placement zones, score, and 
     ['unsupported board size', {
       ...validPayload(),
       boardSize: 99,
-    }, /지원하지 않는 보드/],
+    }, /데이터 구조/],
   ]
 
   for (const [name, payload, expected] of cases) {

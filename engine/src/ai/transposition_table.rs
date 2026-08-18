@@ -7,6 +7,7 @@ use crate::types::{GameEndReason, GamePhase, GameState, PieceId, PieceStateValue
 pub(crate) struct PositionKey {
     board_size: i32,
     board: Vec<(i32, i32, Option<PieceId>)>,
+    terrain: Vec<(i32, i32, String)>,
     current_player: String,
     phase: u8,
     result: Option<(Option<String>, u8)>,
@@ -55,6 +56,14 @@ impl PositionKey {
             })
             .collect::<Vec<_>>();
         board.sort();
+
+        let mut terrain = state
+            .board
+            .terrain
+            .iter()
+            .map(|(square, cell)| (square.file, square.rank, cell.type_id.clone()))
+            .collect::<Vec<_>>();
+        terrain.sort();
 
         let mut pieces = state
             .pieces
@@ -120,6 +129,7 @@ impl PositionKey {
         Self {
             board_size: state.board.size,
             board,
+            terrain,
             current_player: state.current_player.clone(),
             phase: phase_tag(&state.phase),
             result: state
@@ -408,6 +418,15 @@ mod tests {
 
         let mut changed = base.clone();
         changed.global_state.insert("weather".into(), 1);
+        assert_changed(changed);
+
+        let mut changed = base.clone();
+        changed.board.terrain.insert(
+            Square::new(3, 3).to_id(),
+            crate::types::TerrainCell {
+                type_id: crate::rules::HIGH_GROUND_TERRAIN_ID.into(),
+            },
+        );
         assert_changed(changed);
 
         let mut changed = base.clone();

@@ -1383,6 +1383,8 @@ mod tests {
         let mut room = crate::MultiplayerRoom {
             id: "ROOM01".into(),
             board_size: 8,
+            map_id: "standard-8x8".into(),
+            board_variant: BoardVariant::Plain,
             host_side: "white".into(),
             guest_side: "black".into(),
             host_client_id: "host-client".into(),

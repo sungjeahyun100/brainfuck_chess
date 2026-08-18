@@ -24,7 +24,7 @@
               <select v-model="selectedDeckId" class="text-input" :disabled="Boolean(currentRoom?.game_id)">
                 <option value="">선택 안 함</option>
                 <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
-                  {{ deck.name }} · {{ deck.boardSize }}x{{ deck.boardSize }}
+                  {{ deck.name }} · {{ boardMapLabel(deck.mapId) }}
                 </option>
               </select>
             </label>
@@ -52,9 +52,9 @@
           <div class="room-state">
             <span class="limit-label">현재 방</span>
             <strong>{{ currentRoom ? currentRoom.id : '없음' }}</strong>
-            <p v-if="selectedDeck">선택 덱: {{ selectedDeck.name }} · {{ selectedDeck.boardSize }} x {{ selectedDeck.boardSize }}</p>
+            <p v-if="selectedDeck">선택 덱: {{ selectedDeck.name }} · {{ boardMapLabel(selectedDeck.mapId) }}</p>
             <p v-if="currentRoom">
-              방 보드: {{ currentRoom.board_size }} x {{ currentRoom.board_size }} · 방장 {{ playerLabel(currentRoom.host_side) }}
+              방 맵: {{ boardMapLabel(currentRoom.map_id) }} · 방장 {{ playerLabel(currentRoom.host_side) }}
             </p>
             <p v-if="currentRoom">
               준비 상태: Host {{ currentRoom.host_ready ? 'Ready' : 'Not Ready' }} · Guest {{ currentRoom.guest_ready ? 'Ready' : 'Not Ready' }}
@@ -78,6 +78,7 @@ import { api, type MultiplayerRoom } from '../api/gameApi'
 import { useSavedDecks } from '../composables/useSavedDecks'
 import { savedDeckToPlayerDeckRequest } from '../composables/useDeckSerialization'
 import { validateSavedDeck } from '../composables/useDeckValidation'
+import { boardMapLabel } from '../boardMaps'
 
 const emit = defineEmits<{
   back: []
@@ -145,6 +146,7 @@ async function createRoom() {
       selectedDeck.value.boardSize,
       hostSide,
       savedDeckToPlayerDeckRequest(selectedDeck.value),
+      selectedDeck.value.mapId,
     )
     currentRoom.value = room
     localPlayer.value = hostSide
@@ -176,8 +178,8 @@ async function applySelectedDeckToRoom() {
   if (!selectedDeck.value || !currentRoom.value) return
   error.value = null
   try {
-    if (selectedDeck.value.boardSize !== currentRoom.value.board_size) {
-      error.value = '방의 보드 크기와 선택한 덱의 보드 크기가 다릅니다.'
+    if (selectedDeck.value.mapId !== currentRoom.value.map_id) {
+      error.value = '방의 맵과 선택한 덱의 전용 맵이 다릅니다.'
       return
     }
     currentRoom.value = await api.selectRoomDeck(
@@ -213,8 +215,8 @@ async function joinRoom() {
   status.value = null
   try {
     const room = await api.getRoom(roomCodeInput.value.toUpperCase())
-    if (room.board_size !== selectedDeck.value.boardSize) {
-      error.value = '방의 보드 크기와 선택한 덱의 보드 크기가 다릅니다.'
+    if (room.map_id !== selectedDeck.value.mapId) {
+      error.value = '방의 맵과 선택한 덱의 전용 맵이 다릅니다.'
       return
     }
     const { state } = await api.joinRoom(room.id, savedDeckToPlayerDeckRequest(selectedDeck.value))

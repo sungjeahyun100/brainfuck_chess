@@ -20,10 +20,10 @@
         <input v-model.trim="deck.name" class="text-input" placeholder="덱 이름" />
       </label>
       <label>
-        <span class="limit-label">보드 크기</span>
-        <select v-model.number="deck.boardSize" class="text-input" @change="resetToClassic">
-          <option v-for="size in boardSizes" :key="size" :value="size">
-            {{ size }} x {{ size }} (최대 {{ scoreLimit(size) }}점)
+        <span class="limit-label">전용 맵</span>
+        <select v-model="deck.mapId" class="text-input" @change="changeMap">
+          <option v-for="map in boardMaps" :key="map.id" :value="map.id">
+            {{ map.name }} (최대 {{ scoreLimit(map.boardSize) }}점)
           </option>
         </select>
       </label>
@@ -64,73 +64,135 @@
     </section>
 
     <div class="builder-grid">
-      <section class="card piece-list-panel">
-        <div class="section-header">
-          <p class="section-kicker">기물 목록</p>
-          <h2>Arsenal</h2>
-        </div>
-        <input v-model.trim="pieceSearch" class="piece-search" type="search" placeholder="기물 검색" />
-        <div class="piece-catalog">
-          <section
-            v-for="section in catalogSections"
-            :key="section.id"
-            class="catalog-section catalog-zone-chunk"
-            :class="`catalog-zone-${section.id}`"
-          >
-            <div class="catalog-section-title">
-              <div>
-                <span>{{ section.label }}</span>
-                <small class="catalog-zone-description">{{ section.description }}</small>
+      <div class="piece-catalog-column">
+        <section class="card piece-list-panel">
+          <div class="section-header">
+            <p class="section-kicker">공식 기물 목록</p>
+            <h2>Arsenal</h2>
+          </div>
+          <input v-model.trim="arsenalPieceSearch" class="piece-search" type="search" placeholder="공식 기물 검색" />
+          <div class="piece-catalog">
+            <section
+              v-for="section in arsenalCatalogSections"
+              :key="section.id"
+              class="catalog-section catalog-zone-chunk"
+              :class="`catalog-zone-${section.id}`"
+            >
+              <div class="catalog-section-title">
+                <div>
+                  <span>{{ section.label }}</span>
+                  <small class="catalog-zone-description">{{ section.description }}</small>
+                </div>
+                <small>{{ section.pieces.length }}</small>
               </div>
-              <small>{{ section.pieces.length }}</small>
-            </div>
-            <div class="piece-palette">
-              <div
-                v-for="piece in section.pieces"
-                :key="piece.id"
-                class="palette-piece-row"
-              >
-                <button
-                  class="palette-piece"
-                  :class="{ active: placementTool === piece.id }"
-                  draggable="true"
-                  @click="placementTool = piece.id"
-                  @dragstart="onPieceDragStart($event, piece.id)"
-                  @dragend="draggedPiece = null"
+              <div class="piece-palette">
+                <div
+                  v-for="piece in section.pieces"
+                  :key="piece.id"
+                  class="palette-piece-row"
                 >
-                  <span class="symbol">
-                    <img
-                      v-if="displayPieceAsset(piece.id)"
-                      class="piece-icon"
-                      :src="displayPieceAsset(piece.id)"
-                      :alt="piece.name"
-                      draggable="false"
-                    />
-                    <span v-else>{{ displayPieceSymbol(piece.id) }}</span>
-                  </span>
-                  <span class="meta">
-                    <strong>{{ piece.name }}</strong>
-                    <small>{{ piece.score === 0 ? '점수 제외' : `${piece.score}점` }}</small>
-                    <small v-if="piece.custom">
-                      커스텀 · v{{ piece.custom.version }} · 버전 고정
-                      <template v-if="!piece.custom.active"> · 비활성화됨</template>
-                    </small>
-                  </span>
-                  <span class="piece-count">{{ pieceCount(piece.id) }}</span>
-                </button>
-                <button
-                  v-if="piece.custom && latestCustomVersion(piece.custom.id, piece.custom.version)"
-                  class="piece-test-button"
-                  @click="updatePinnedVersion(piece.id, piece.custom.id)"
-                >
-                  최신 버전으로 업데이트
-                </button>
-                <button class="piece-test-button" @click="emitTestPiece(piece.id)">테스트</button>
+                  <button
+                    class="palette-piece"
+                    :class="{ active: placementTool === piece.id }"
+                    draggable="true"
+                    @click="placementTool = piece.id"
+                    @dragstart="onPieceDragStart($event, piece.id)"
+                    @dragend="draggedPiece = null"
+                  >
+                    <span class="symbol">
+                      <img
+                        v-if="displayPieceAsset(piece.id)"
+                        class="piece-icon"
+                        :src="displayPieceAsset(piece.id)"
+                        :alt="piece.name"
+                        draggable="false"
+                      />
+                      <span v-else>{{ displayPieceSymbol(piece.id) }}</span>
+                    </span>
+                    <span class="meta">
+                      <strong>{{ piece.name }}</strong>
+                      <small>{{ piece.score === 0 ? '점수 제외' : `${piece.score}점` }}</small>
+                    </span>
+                    <span class="piece-count">{{ pieceCount(piece.id) }}</span>
+                  </button>
+                  <button class="piece-test-button" @click="emitTestPiece(piece.id)">테스트</button>
+                </div>
               </div>
-            </div>
-          </section>
-        </div>
-      </section>
+            </section>
+          </div>
+        </section>
+
+        <section class="card custom-piece-list-panel">
+          <div class="section-header">
+            <p class="section-kicker">사용자 제작 기물</p>
+            <h2>내 커스텀 기물</h2>
+          </div>
+          <input v-model.trim="customPieceSearch" class="piece-search" type="search" placeholder="커스텀 기물 검색" />
+          <p v-if="customCatalogSections.length === 0" class="catalog-empty">
+            {{ customPieceSearch ? '검색 결과가 없습니다.' : '사용할 수 있는 커스텀 기물이 없습니다.' }}
+          </p>
+          <div v-else class="piece-catalog custom-piece-catalog">
+            <section
+              v-for="section in customCatalogSections"
+              :key="section.id"
+              class="catalog-section catalog-zone-chunk"
+              :class="`catalog-zone-${section.id}`"
+            >
+              <div class="catalog-section-title">
+                <div>
+                  <span>{{ section.label }}</span>
+                  <small class="catalog-zone-description">{{ section.description }}</small>
+                </div>
+                <small>{{ section.pieces.length }}</small>
+              </div>
+              <div class="piece-palette">
+                <div
+                  v-for="piece in section.pieces"
+                  :key="piece.id"
+                  class="palette-piece-row"
+                >
+                  <button
+                    class="palette-piece"
+                    :class="{ active: placementTool === piece.id }"
+                    draggable="true"
+                    @click="placementTool = piece.id"
+                    @dragstart="onPieceDragStart($event, piece.id)"
+                    @dragend="draggedPiece = null"
+                  >
+                    <span class="symbol">
+                      <img
+                        v-if="displayPieceAsset(piece.id)"
+                        class="piece-icon"
+                        :src="displayPieceAsset(piece.id)"
+                        :alt="piece.name"
+                        draggable="false"
+                      />
+                      <span v-else>{{ displayPieceSymbol(piece.id) }}</span>
+                    </span>
+                    <span class="meta">
+                      <strong>{{ piece.name }}</strong>
+                      <small>{{ piece.score === 0 ? '점수 제외' : `${piece.score}점` }}</small>
+                      <small v-if="piece.custom">
+                        v{{ piece.custom.version }} · 버전 고정
+                        <template v-if="!piece.custom.active"> · 비활성화됨</template>
+                      </small>
+                    </span>
+                    <span class="piece-count">{{ pieceCount(piece.id) }}</span>
+                  </button>
+                  <button
+                    v-if="piece.custom && latestCustomVersion(piece.custom.id, piece.custom.version)"
+                    class="piece-test-button"
+                    @click="piece.custom && updatePinnedVersion(piece.id, piece.custom.id)"
+                  >
+                    최신 버전으로 업데이트
+                  </button>
+                  <button class="piece-test-button" @click="emitTestPiece(piece.id)">테스트</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
 
       <section class="card board-panel">
         <div class="section-header">
@@ -289,7 +351,6 @@ import { customPieceApi } from '../api/customPieceApi'
 import type { DeckPieceType, SavedDeck } from '../types/deck'
 import {
   baseZoneRanks,
-  boardSizes,
   canUseInPocket,
   createPresetDeck,
   deckPresets,
@@ -309,6 +370,7 @@ import {
 import { createNewSavedDeck, useSavedDecks } from '../composables/useSavedDecks'
 import { encodeDeckCode } from '../composables/useDeckCodeCodec'
 import { importDeckCode, type DeckCodeImportResult } from '../composables/useDeckCode'
+import { boardMaps, findBoardMap } from '../boardMaps'
 
 const props = defineProps<{
   deckId?: string | null
@@ -322,7 +384,8 @@ const emit = defineEmits<{
 
 const savedDecks = useSavedDecks()
 const eraseTool = '__erase__'
-const pieceSearch = ref('')
+const arsenalPieceSearch = ref('')
+const customPieceSearch = ref('')
 const placementTool = ref<DeckPieceType>('king')
 const draggedPiece = ref<DeckPieceType | null>(null)
 const saveError = ref<string | null>(null)
@@ -366,6 +429,7 @@ function cloneSavedDeck(source: SavedDeck): SavedDeck {
   return {
     id: source.id,
     name: source.name,
+    mapId: source.mapId,
     boardSize: source.boardSize,
     starting: source.starting.map(piece => ({
       pieceType: piece.pieceType,
@@ -379,6 +443,13 @@ function cloneSavedDeck(source: SavedDeck): SavedDeck {
     updatedAt: source.updatedAt,
     customPieces: [...(source.customPieces ?? [])],
   }
+}
+
+function changeMap() {
+  const map = findBoardMap(deck.value.mapId)
+  if (!map) return
+  deck.value.boardSize = map.boardSize
+  resetToClassic()
 }
 
 watch(() => props.deckId, () => {
@@ -411,13 +482,12 @@ const pocketDropMessage = computed(() => {
   if (!canUseInPocket(draggedPiece.value)) return `${pieceLabel(draggedPiece.value)}은 포켓에 넣을 수 없습니다.`
   return `${pieceLabel(draggedPiece.value)} 포켓에 추가`
 })
-const filteredPieceCatalog = computed(() => {
-  catalogRevision.value
-  const query = pieceSearch.value.toLowerCase()
-  if (!query) return pieceCatalog
-  return pieceCatalog.filter(piece => [piece.id, piece.name, piece.category, ...(piece.aliases ?? [])].join(' ').toLowerCase().includes(query))
-})
-const catalogSections = computed(() => {
+function matchesPieceSearch(piece: (typeof pieceCatalog)[number], search: string): boolean {
+  const query = search.toLowerCase()
+  return !query || [piece.id, piece.name, piece.category, ...(piece.aliases ?? [])].join(' ').toLowerCase().includes(query)
+}
+
+function catalogSectionsFor(pieces: typeof pieceCatalog) {
   return (['front', 'back'] as const)
     .map(id => ({
       id,
@@ -425,10 +495,21 @@ const catalogSections = computed(() => {
       description: id === 'front'
         ? '상대와 가까운 시작 줄 전용'
         : '나머지 시작 배치 줄 전용',
-      pieces: filteredPieceCatalog.value.filter(piece => piece.deploymentZone === id),
+      pieces: pieces.filter(piece => piece.deploymentZone === id),
     }))
     .filter(section => section.pieces.length > 0)
+}
+
+const filteredArsenalCatalog = computed(() => {
+  catalogRevision.value
+  return pieceCatalog.filter(piece => !piece.custom && matchesPieceSearch(piece, arsenalPieceSearch.value))
 })
+const filteredCustomCatalog = computed(() => {
+  catalogRevision.value
+  return pieceCatalog.filter(piece => piece.custom && matchesPieceSearch(piece, customPieceSearch.value))
+})
+const arsenalCatalogSections = computed(() => catalogSectionsFor(filteredArsenalCatalog.value))
+const customCatalogSections = computed(() => catalogSectionsFor(filteredCustomCatalog.value))
 const placementZoneSections = computed(() => {
   const frontRank = frontmostBaseRank(deck.value.boardSize)
   const ranks = baseZoneRanks(deck.value.boardSize).reverse()

@@ -9,6 +9,7 @@ use crate::interaction::{
 };
 use crate::pieces::default_pieces::{MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID};
 use crate::rules::{get_base_zone_squares, player_forward_direction};
+use crate::terrain::{can_affect_square, can_capture_piece};
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -87,6 +88,14 @@ fn push_move_or_promotions(
         to,
         &context.option.id,
     ) {
+        return;
+    }
+
+    if captured_piece_id
+        .as_ref()
+        .and_then(|piece_id| context.game_state.pieces.get(piece_id))
+        .is_some_and(|victim| !can_capture_piece(context.game_state, context.piece, victim))
+    {
         return;
     }
 
@@ -297,9 +306,15 @@ pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId)
         }
         option_attacked.retain(|to| {
             !destination_is_blocked_by_interaction(game_state, piece, *to, &option.id)
+                && can_affect_square(game_state, piece, *to)
         });
         attacked.extend(option_attacked);
-        attacked.extend(resolve_piece_interactions(game_state, piece, &option.id).attack_squares);
+        attacked.extend(
+            resolve_piece_interactions(game_state, piece, &option.id)
+                .attack_squares
+                .into_iter()
+                .filter(|square| can_affect_square(game_state, piece, *square)),
+        );
     }
     attacked.retain(|sq| game_state.board.is_in_bounds(sq));
     attacked.sort_by_key(|sq| (sq.rank, sq.file));
@@ -437,6 +452,7 @@ pub fn generate_piece_legal_move_actions_with_options(
                         if let Some(captured_piece) = game_state.pieces.get(captured_id) {
                             if captured_piece.owner != *player_id
                                 && is_pawn_type(&captured_piece.type_id)
+                                && can_capture_piece(game_state, piece, captured_piece)
                             {
                                 push_action_if_unique(
                                     &mut actions,
@@ -638,6 +654,13 @@ pub fn generate_piece_legal_drop_actions(
 
     crate::placement::get_piece_placement_squares(game_state, player_id, piece)
         .into_iter()
+        .filter(|sq| {
+            game_state
+                .board
+                .get_piece_at(sq)
+                .and_then(|target_id| game_state.pieces.get(target_id))
+                .is_none_or(|victim| can_capture_piece(game_state, piece, victim))
+        })
         .map(|sq| DropAction {
             player_id: player_id.clone(),
             piece_id: piece_id.clone(),
@@ -814,12 +837,26 @@ pub fn generate_piece_legal_ability_actions(
 /// Mortar removes pieces on the selected point and its four orthogonally
 /// adjacent squares. Target-square range validation is handled by canonical
 /// ability generation before an action can be submitted.
-pub(crate) fn mortar_barrage_targets(game_state: &GameState, target: Square) -> Vec<PieceId> {
+pub(crate) fn mortar_barrage_targets(
+    game_state: &GameState,
+    actor: &Piece,
+    target: Square,
+) -> Vec<PieceId> {
     [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
         .into_iter()
         .filter_map(|(file_offset, rank_offset)| {
             let square = Square::new(target.file + file_offset, target.rank + rank_offset);
-            game_state.board.get_piece_at(&square).cloned()
+            game_state
+                .board
+                .get_piece_at(&square)
+                .and_then(|piece_id| {
+                    game_state
+                        .pieces
+                        .get(piece_id)
+                        .map(|piece| (piece_id, piece))
+                })
+                .filter(|(_, victim)| can_capture_piece(game_state, actor, victim))
+                .map(|(piece_id, _)| piece_id.clone())
         })
         .collect()
 }
@@ -838,7 +875,13 @@ pub(crate) fn machine_gun_barrage_targets(game_state: &GameState, actor: &Piece)
                 origin.rank + forward * rank_offset,
             );
             if let Some(piece_id) = game_state.board.get_piece_at(&square) {
-                targets.push(piece_id.clone());
+                if game_state
+                    .pieces
+                    .get(piece_id)
+                    .is_some_and(|victim| can_capture_piece(game_state, actor, victim))
+                {
+                    targets.push(piece_id.clone());
+                }
             }
         }
     }

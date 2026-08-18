@@ -1,5 +1,7 @@
 import type {
   BotDifficulty,
+  BoardVariant,
+  BoardMapId,
   BotTurnResponse,
   DropAction,
   GameState,
@@ -47,6 +49,8 @@ export interface PlayerDeckRequest {
 export interface MultiplayerRoom {
   id: string
   board_size: number
+  map_id: BoardMapId
+  board_variant: BoardVariant
   host_side: 'white' | 'black'
   guest_side: 'white' | 'black'
   host_deck?: PlayerDeckRequest | null
@@ -156,11 +160,13 @@ export const api = {
     boardSize: number,
     whiteDeck: PlayerDeckRequest,
     blackDeck: PlayerDeckRequest,
+    mapId: BoardMapId,
   ): Promise<{ id: string; state: GameState }> {
     return request(`${BASE}`, {
       method: 'POST',
       body: JSON.stringify({
         board_size: boardSize,
+        map_id: mapId,
         white_deck: whiteDeck,
         black_deck: blackDeck,
       }),
@@ -228,11 +234,13 @@ export const api = {
     boardSize: number,
     hostSide: 'white' | 'black',
     deck: PlayerDeckRequest,
+    mapId: BoardMapId,
   ): Promise<MultiplayerRoom> {
     return request(`${ROOM_BASE}`, {
       method: 'POST',
       body: JSON.stringify({
         board_size: boardSize,
+        map_id: mapId,
         host_side: hostSide,
         client_id: getClientId(),
         deck,
