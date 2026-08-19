@@ -11,6 +11,10 @@ mod custom_piece_image;
 pub(crate) fn api(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/auth/session", post(crate::auth::session))
+        .route("/auth/me", get(crate::auth::me))
+        .route("/auth/google", post(crate::auth::google_login))
+        .route("/auth/logout", post(crate::auth::logout))
         .route("/piece-scores", get(get_piece_scores))
         .route("/piece-catalog", get(get_piece_catalog))
         .route("/games", post(create_game))

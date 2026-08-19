@@ -14,6 +14,15 @@ function resolveAppEnv(defaultEnv: AppEnv): AppEnv {
 }
 
 function appConfigPlugin(): Plugin {
+  const runtimeConfig = (defaultEnv: AppEnv) => JSON.stringify({
+    appEnv: resolveAppEnv(defaultEnv),
+    firebase: {
+      apiKey: process.env.FIREBASE_API_KEY ?? '',
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN ?? '',
+      projectId: process.env.IDENTITY_PLATFORM_PROJECT_ID ?? '',
+      appId: process.env.FIREBASE_APP_ID ?? '',
+    },
+  }).replaceAll('<', '\\u003c')
   return {
     name: 'brainfuck-chess-app-config',
     configureServer(server) {
@@ -24,7 +33,7 @@ function appConfigPlugin(): Plugin {
         }
 
         res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
-        res.end(`window.APP_CONFIG = Object.freeze({ appEnv: '${resolveAppEnv('local')}' });\n`)
+        res.end(`window.APP_CONFIG = Object.freeze(${runtimeConfig('local')});\n`)
       })
     },
     configurePreviewServer(server) {
@@ -35,7 +44,7 @@ function appConfigPlugin(): Plugin {
         }
 
         res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
-        res.end(`window.APP_CONFIG = Object.freeze({ appEnv: '${resolveAppEnv('local')}' });\n`)
+        res.end(`window.APP_CONFIG = Object.freeze(${runtimeConfig('local')});\n`)
       })
     },
   }

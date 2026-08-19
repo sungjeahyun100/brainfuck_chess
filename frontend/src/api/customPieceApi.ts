@@ -14,7 +14,6 @@ import type {
 } from '../types/customPiece'
 
 const BASE = '/api/custom-pieces'
-const PROTOTYPE_USER = 'browser-prototype-user'
 export const CUSTOM_PIECES_CHANGED_EVENT = 'brainfuck-chess:custom-pieces-changed'
 
 const resolvedImageAssetCache = new Map<string, string>()
@@ -61,14 +60,22 @@ export function classifyCustomPieceError(status: number, code: string): CustomPi
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(url, {
+  const fetchRequest = () => fetch(url, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      'X-User-Id': PROTOTYPE_USER,
       ...options.headers,
     },
   })
+  let response = await fetchRequest()
+  if (response.status === 401) {
+    const session = await fetch('/api/auth/session', {
+      method: 'POST',
+      credentials: 'same-origin',
+    })
+    if (session.ok) response = await fetchRequest()
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as { error?: string; code?: string }
     const code = body.code ?? 'request_failed'

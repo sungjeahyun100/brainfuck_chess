@@ -8,6 +8,8 @@
       {{ envBannerLabel }}
     </div>
 
+    <AuthAccount />
+
     <GameScreen
       v-if="gameState"
       :state="gameState"
@@ -88,6 +90,7 @@ import DeckSelect from './views/DeckSelect.vue'
 import MultiplayerLobby from './views/MultiplayerLobby.vue'
 import PieceLab from './views/PieceLab.vue'
 import CustomPieceWorkshop from './views/CustomPieceWorkshop.vue'
+import AuthAccount from './components/AuthAccount.vue'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
 import { useSavedDecks } from './composables/useSavedDecks'
 import { serializeNeutralDeck } from './composables/useDeckSerialization'

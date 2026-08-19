@@ -13,3 +13,10 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 uuid = { version = "1", features = ["v4"] }
 dashmap = "6"
+async-trait = "0.1"
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "json", "migrate", "macros", "uuid"] }
+jsonwebtoken = "9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

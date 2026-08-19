@@ -124,13 +124,21 @@ export interface PieceLabOptionsResponse {
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const fetchRequest = () => fetch(url, {
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      'X-User-Id': 'browser-prototype-user',
     },
     ...options,
   })
+  let res = await fetchRequest()
+  if (res.status === 401) {
+    const session = await fetch('/api/auth/session', {
+      method: 'POST',
+      credentials: 'same-origin',
+    })
+    if (session.ok) res = await fetchRequest()
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(err.error ?? res.statusText)
