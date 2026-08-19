@@ -39,6 +39,20 @@
         <button type="button" :disabled="busy" aria-label="계정 설정 닫기" @click="closeSettings">닫기</button>
       </div>
       <label class="auth-field">
+        <span>표시 이름</span>
+        <input
+          v-model="displayNameDraft"
+          class="auth-text-input"
+          name="displayName"
+          type="text"
+          minlength="1"
+          maxlength="30"
+          autocomplete="nickname"
+          required
+        />
+      </label>
+      <p class="auth-muted">상단 계정 영역과 게임 내에서 표시할 이름입니다. 1~30자로 입력하세요.</p>
+      <label class="auth-field">
         <span>개인 ID</span>
         <div class="auth-id-input">
           <span aria-hidden="true">@</span>
@@ -52,7 +66,6 @@
             autocomplete="username"
             autocapitalize="none"
             spellcheck="false"
-            required
           />
         </div>
       </label>
@@ -60,7 +73,7 @@
       <p v-if="settingsError" class="auth-error" role="alert">{{ settingsError }}</p>
       <div class="auth-modal-actions">
         <button type="button" :disabled="busy" @click="closeSettings">취소</button>
-        <button type="submit" class="auth-primary" :disabled="busy || !publicIdValid">
+        <button type="submit" class="auth-primary" :disabled="busy || !settingsValid">
           {{ busy ? '저장 중…' : '변경사항 저장' }}
         </button>
       </div>
@@ -83,9 +96,20 @@ const error = ref<string | null>(null)
 const pendingToken = ref<string | null>(null)
 const settingsOpen = ref(false)
 const publicIdDraft = ref('')
+const displayNameDraft = ref('')
 const settingsError = ref<string | null>(null)
 const loginAvailable = computed(() => firebaseConfig !== null)
-const publicIdValid = computed(() => /^[a-z0-9][a-z0-9_]{2,19}$/.test(publicIdDraft.value.trim().toLowerCase()))
+const publicIdValid = computed(() => {
+  const value = publicIdDraft.value.trim().toLowerCase()
+  return value === '' || /^[a-z0-9][a-z0-9_]{2,19}$/.test(value)
+})
+const displayNameValid = computed(() => {
+  const value = displayNameDraft.value.trim()
+  return value.length > 0
+    && Array.from(value).length <= 30
+    && !/[\u0000-\u001f\u007f]/u.test(value)
+})
+const settingsValid = computed(() => publicIdValid.value && displayNameValid.value)
 
 function firebaseAuth(): Auth {
   if (!firebaseConfig) throw new Error('Google 로그인 설정이 없습니다.')
@@ -162,6 +186,7 @@ async function logout() {
 function openSettings() {
   if (!user.value) return
   publicIdDraft.value = user.value.publicId ?? ''
+  displayNameDraft.value = user.value.displayName ?? '덱 체스 사용자'
   settingsError.value = null
   settingsOpen.value = true
 }
@@ -173,13 +198,18 @@ function closeSettings() {
 }
 
 async function saveSettings() {
-  if (!publicIdValid.value) return
+  if (!settingsValid.value) return
   busy.value = true
   settingsError.value = null
   try {
-    const result = await authApi.updateProfile(publicIdDraft.value.trim().toLowerCase())
+    const normalizedPublicId = publicIdDraft.value.trim().toLowerCase()
+    const result = await authApi.updateProfile({
+      displayName: displayNameDraft.value.trim(),
+      ...(normalizedPublicId ? { publicId: normalizedPublicId } : {}),
+    })
     user.value = result.user
     publicIdDraft.value = result.user.publicId ?? ''
+    displayNameDraft.value = result.user.displayName ?? ''
     settingsOpen.value = false
   } catch (cause) {
     settingsError.value = cause instanceof Error ? cause.message : '계정 설정을 저장하지 못했습니다.'
@@ -218,6 +248,8 @@ onMounted(async () => {
 .auth-id-input { display: flex; align-items: center; gap: 5px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(9,15,24,.9); color: var(--muted); }
 .auth-id-input:focus-within { border-color: rgba(240,193,95,.7); box-shadow: 0 0 0 3px rgba(240,193,95,.1); }
 .auth-id-input input { width: 100%; min-width: 0; padding: 11px 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; }
+.auth-text-input { width: 100%; min-width: 0; box-sizing: border-box; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; outline: 0; background: rgba(9,15,24,.9); color: var(--text); font: inherit; }
+.auth-text-input:focus { border-color: rgba(240,193,95,.7); box-shadow: 0 0 0 3px rgba(240,193,95,.1); }
 .auth-modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
 .auth-modal .auth-primary { background: linear-gradient(135deg,#f0c15f,#c68a1b); color: #221a0d; font-weight: 800; }
 @media (max-width: 620px) { .auth-account { position: relative; top: auto; right: auto; align-self: flex-end; margin: 12px 12px 0; flex-wrap: wrap; } }

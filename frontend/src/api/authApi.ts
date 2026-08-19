@@ -51,11 +51,11 @@ export const authApi = {
     body: JSON.stringify({ idToken, importGuestData }),
   }).then(parse<AuthStateResponse & { importedGuestData: boolean }>),
 
-  updateProfile: (publicId: string) => fetch('/api/auth/profile', {
+  updateProfile: (input: { publicId?: string; displayName?: string }) => fetch('/api/auth/profile', {
     method: 'PATCH',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ publicId }),
+    body: JSON.stringify(input),
   }).then(parse<{ user: AuthUser }>),
 
   logout: () => fetch('/api/auth/logout', {

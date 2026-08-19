@@ -66,10 +66,11 @@ pub(crate) enum LoginResult {
 pub(crate) trait AccountRepository: Send + Sync {
     async fn ensure_guest(&self, user_id: &str) -> Result<(), &'static str>;
     async fn authenticated_user(&self, user_id: &str) -> Result<Option<UserProfile>, &'static str>;
-    async fn update_public_id(
+    async fn update_profile(
         &self,
         user_id: &str,
-        public_id: &str,
+        public_id: Option<&str>,
+        display_name: Option<&str>,
     ) -> Result<UserProfile, AccountUpdateError>;
     async fn complete_google_login(
         &self,
@@ -124,26 +125,33 @@ impl AccountRepository for InMemoryAccountRepository {
             .map(|user| user.profile.clone()))
     }
 
-    async fn update_public_id(
+    async fn update_profile(
         &self,
         user_id: &str,
-        public_id: &str,
+        public_id: Option<&str>,
+        display_name: Option<&str>,
     ) -> Result<UserProfile, AccountUpdateError> {
         let mut users = self
             .users
             .write()
             .map_err(|_| AccountUpdateError::Unavailable)?;
-        if users
-            .iter()
-            .any(|(id, user)| id != user_id && user.profile.public_id.as_deref() == Some(public_id))
-        {
+        if public_id.is_some_and(|public_id| {
+            users.iter().any(|(id, user)| {
+                id != user_id && user.profile.public_id.as_deref() == Some(public_id)
+            })
+        }) {
             return Err(AccountUpdateError::PublicIdTaken);
         }
         let user = users
             .get_mut(user_id)
             .filter(|user| user.registered)
             .ok_or(AccountUpdateError::NotFound)?;
-        user.profile.public_id = Some(public_id.to_owned());
+        if let Some(public_id) = public_id {
+            user.profile.public_id = Some(public_id.to_owned());
+        }
+        if let Some(display_name) = display_name {
+            user.profile.display_name = Some(display_name.to_owned());
+        }
         Ok(user.profile.clone())
     }
 
@@ -196,7 +204,9 @@ impl AccountRepository for InMemoryAccountRepository {
                     registered: true,
                 });
             user.registered = true;
-            user.profile.display_name = identity.display_name.clone();
+            if user.profile.display_name.is_none() {
+                user.profile.display_name = identity.display_name.clone();
+            }
             user.profile.avatar_url = identity.avatar_url.clone();
         }
         self.identities
@@ -267,19 +277,22 @@ impl AccountRepository for PostgresAccountRepository {
         row.map(profile_from_row).transpose()
     }
 
-    async fn update_public_id(
+    async fn update_profile(
         &self,
         user_id: &str,
-        public_id: &str,
+        public_id: Option<&str>,
+        display_name: Option<&str>,
     ) -> Result<UserProfile, AccountUpdateError> {
         let now = timestamp().map_err(|_| AccountUpdateError::Unavailable)?;
         let row = sqlx::query(
-            "UPDATE users SET public_id = $2, updated_at = $3 \
+            "UPDATE users SET public_id = COALESCE($2, public_id), \
+             display_name = COALESCE($3, display_name), updated_at = $4 \
              WHERE id = $1 AND account_kind = 'registered' AND status = 'active' \
              RETURNING id, public_id, display_name, avatar_url",
         )
         .bind(user_id)
         .bind(public_id)
+        .bind(display_name)
         .bind(now)
         .fetch_optional(&self.pool)
         .await
@@ -372,7 +385,8 @@ impl AccountRepository for PostgresAccountRepository {
         }
 
         sqlx::query(
-            "UPDATE users SET account_kind = 'registered', display_name = $2, avatar_url = $3, \
+            "UPDATE users SET account_kind = 'registered', \
+             display_name = COALESCE(display_name, $2), avatar_url = $3, \
              updated_at = $4 WHERE id = $1 AND status = 'active'",
         )
         .bind(&target_id)
@@ -439,6 +453,14 @@ pub(crate) fn normalize_public_id(value: &str) -> Result<String, ()> {
         return Err(());
     }
     Ok(normalized)
+}
+
+pub(crate) fn normalize_display_name(value: &str) -> Result<String, ()> {
+    let normalized = value.trim();
+    if !(1..=30).contains(&normalized.chars().count()) || normalized.chars().any(char::is_control) {
+        return Err(());
+    }
+    Ok(normalized.to_owned())
 }
 
 #[cfg(test)]
@@ -543,14 +565,14 @@ mod tests {
             .unwrap();
 
         let updated = repository
-            .update_public_id("account-a", "deck_player")
+            .update_profile("account-a", Some("deck_player"), None)
             .await
             .unwrap();
         assert_eq!(updated.id, "account-a");
         assert_eq!(updated.public_id.as_deref(), Some("deck_player"));
         assert!(matches!(
             repository
-                .update_public_id("account-b", "deck_player")
+                .update_profile("account-b", Some("deck_player"), None)
                 .await,
             Err(AccountUpdateError::PublicIdTaken)
         ));
@@ -576,5 +598,44 @@ mod tests {
                 "expected invalid: {invalid}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn edited_display_name_survives_a_later_google_login() {
+        let custom = Arc::new(InMemoryCustomPieceRepository::default());
+        let repository = InMemoryAccountRepository::new(custom);
+        repository
+            .complete_google_login("account-a", &google("google-a"), None)
+            .await
+            .unwrap();
+        repository
+            .update_profile("account-a", None, Some("새 닉네임"))
+            .await
+            .unwrap();
+
+        let mut changed_google = google("google-a");
+        changed_google.display_name = Some("Changed Google Name".into());
+        repository
+            .complete_google_login("guest-b", &changed_google, Some(false))
+            .await
+            .unwrap();
+
+        let profile = repository
+            .authenticated_user("account-a")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(profile.display_name.as_deref(), Some("새 닉네임"));
+    }
+
+    #[test]
+    fn display_name_validation_accepts_unicode_and_rejects_controls_or_excess_length() {
+        assert_eq!(
+            normalize_display_name("  새 닉네임  ").unwrap(),
+            "새 닉네임"
+        );
+        assert!(normalize_display_name("").is_err());
+        assert!(normalize_display_name("bad\nname").is_err());
+        assert!(normalize_display_name(&"a".repeat(31)).is_err());
     }
 }

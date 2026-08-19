@@ -16,7 +16,8 @@ use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::account::{
-    normalize_public_id, AccountUpdateError, LoginResult, UserProfile, VerifiedIdentity,
+    normalize_display_name, normalize_public_id, AccountUpdateError, LoginResult, UserProfile,
+    VerifiedIdentity,
 };
 use crate::app_state::AppState;
 
@@ -511,7 +512,10 @@ pub(crate) async fn me(State(app): State<AppState>, headers: HeaderMap) -> Respo
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UpdateProfileRequest {
-    public_id: String,
+    #[serde(default)]
+    public_id: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -538,14 +542,40 @@ pub(crate) async fn update_profile(
             "로그인이 필요합니다.",
         );
     };
-    let Ok(public_id) = normalize_public_id(&input.public_id) else {
+    if input.public_id.is_none() && input.display_name.is_none() {
         return auth_error(
             StatusCode::BAD_REQUEST,
-            "invalid_public_id",
-            "ID는 예약어를 제외한 영문 소문자, 숫자, 밑줄 3~20자이며 첫 글자는 영문 또는 숫자여야 합니다.",
+            "empty_profile_update",
+            "변경할 계정 정보를 입력해야 합니다.",
         );
+    }
+    let public_id = match input.public_id.as_deref().map(normalize_public_id) {
+        Some(Ok(value)) => Some(value),
+        Some(Err(())) => {
+            return auth_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_public_id",
+                "ID는 예약어를 제외한 영문 소문자, 숫자, 밑줄 3~20자이며 첫 글자는 영문 또는 숫자여야 합니다.",
+            )
+        }
+        None => None,
     };
-    match app.accounts.update_public_id(&user_id, &public_id).await {
+    let display_name = match input.display_name.as_deref().map(normalize_display_name) {
+        Some(Ok(value)) => Some(value),
+        Some(Err(())) => {
+            return auth_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_display_name",
+                "표시 이름은 제어 문자를 제외하고 1~30자로 입력해야 합니다.",
+            )
+        }
+        None => None,
+    };
+    match app
+        .accounts
+        .update_profile(&user_id, public_id.as_deref(), display_name.as_deref())
+        .await
+    {
         Ok(user) => Json(UpdateProfileResponse { user }).into_response(),
         Err(AccountUpdateError::NotFound) => auth_error(
             StatusCode::UNAUTHORIZED,
