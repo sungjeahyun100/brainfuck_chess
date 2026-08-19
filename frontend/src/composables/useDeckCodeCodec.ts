@@ -1,6 +1,8 @@
 import type { LobbyDeck } from '../types/deck'
+import type { BoardMapId } from '../types/game'
+import { findBoardMap, standardMapId } from '../boardMaps.ts'
 
-export const DECK_CODE_PREFIX = 'DC1.'
+export const DECK_CODE_PREFIX = 'DC2.'
 export const MAX_DECK_CODE_LENGTH = 65_536
 
 const MAX_STARTING_PIECES = 144
@@ -22,6 +24,10 @@ export interface DeckCodeV1 {
   }>
 }
 
+export interface DecodedDeckCode extends DeckCodeV1 {
+  mapId: BoardMapId
+}
+
 export type DeckCodeDecodeError =
   | 'empty'
   | 'too_large'
@@ -31,7 +37,7 @@ export type DeckCodeDecodeError =
   | 'invalid_schema'
 
 export type DeckCodeDecodeResult =
-  | { ok: true; value: DeckCodeV1 }
+  | { ok: true; value: DecodedDeckCode }
   | { ok: false; error: DeckCodeDecodeError }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -104,9 +110,10 @@ function decodeBase64Url(payload: string): string | null {
   }
 }
 
-export function encodeDeckCode(deck: LobbyDeck & { boardSize: number }): string {
-  const value: DeckCodeV1 = {
-    v: 1,
+export function encodeDeckCode(deck: LobbyDeck & { boardSize: number; mapId: BoardMapId }): string {
+  const value = {
+    v: 2,
+    mapId: deck.mapId,
     boardSize: deck.boardSize,
     starting: deck.starting
       .map(piece => ({
@@ -130,13 +137,27 @@ export function decodeDeckCode(input: string): DeckCodeDecodeResult {
 
   const match = /^DC(\d+)\.(.*)$/u.exec(code)
   if (!match) return { ok: false, error: 'invalid_format' }
-  if (match[1] !== '1') return { ok: false, error: 'unsupported_version' }
+  if (match[1] !== '1' && match[1] !== '2') return { ok: false, error: 'unsupported_version' }
 
   const json = decodeBase64Url(match[2])
   if (json === null) return { ok: false, error: 'invalid_payload' }
   try {
-    const value = parseV1(JSON.parse(json) as unknown)
-    return value ? { ok: true, value } : { ok: false, error: 'invalid_schema' }
+    const parsed = JSON.parse(json) as unknown
+    if (match[1] === '1') {
+      const value = parseV1(parsed)
+      const mapId = value ? standardMapId(value.boardSize) : null
+      return value && mapId ? { ok: true, value: { ...value, mapId } } : { ok: false, error: 'invalid_schema' }
+    }
+    if (!isRecord(parsed) || !hasExactlyKeys(parsed, ['v', 'mapId', 'boardSize', 'starting', 'pocket'])) {
+      return { ok: false, error: 'invalid_schema' }
+    }
+    const { mapId: _mapId, ...withoutMapId } = parsed
+    const legacyShape = { ...withoutMapId, v: 1 }
+    const value = parseV1(legacyShape)
+    const map = typeof parsed.mapId === 'string' ? findBoardMap(parsed.mapId) : null
+    return value && map && map.boardSize === value.boardSize
+      ? { ok: true, value: { ...value, mapId: map.id } }
+      : { ok: false, error: 'invalid_schema' }
   } catch {
     return { ok: false, error: 'invalid_payload' }
   }

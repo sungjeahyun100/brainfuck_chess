@@ -1,7 +1,15 @@
 export type AppEnv = 'local' | 'test' | 'prod'
 
+export interface FirebasePublicConfig {
+  apiKey: string
+  authDomain: string
+  projectId: string
+  appId: string
+}
+
 interface AppConfig {
   appEnv?: AppEnv
+  firebase?: FirebasePublicConfig
 }
 
 declare global {
@@ -25,3 +33,9 @@ export const envBannerLabel = appEnv === 'test'
   : appEnv === 'local'
     ? 'LOCAL DEV'
     : ''
+
+const firebase = window.APP_CONFIG?.firebase
+export const firebaseConfig = firebase?.apiKey && firebase.authDomain && firebase.projectId && firebase.appId
+  && ![firebase.apiKey, firebase.appId].some((value) => value.startsWith('configure-in-'))
+  ? firebase
+  : null

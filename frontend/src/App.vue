@@ -8,6 +8,8 @@
       {{ envBannerLabel }}
     </div>
 
+    <AuthAccount />
+
     <GameScreen
       v-if="gameState"
       :state="gameState"
@@ -88,6 +90,7 @@ import DeckSelect from './views/DeckSelect.vue'
 import MultiplayerLobby from './views/MultiplayerLobby.vue'
 import PieceLab from './views/PieceLab.vue'
 import CustomPieceWorkshop from './views/CustomPieceWorkshop.vue'
+import AuthAccount from './components/AuthAccount.vue'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
 import { useSavedDecks } from './composables/useSavedDecks'
 import { serializeNeutralDeck } from './composables/useDeckSerialization'
@@ -156,9 +159,9 @@ function getValidDeck(deckId: string) {
   return deck
 }
 
-function ensureSameBoardSize(whiteBoardSize: number, blackBoardSize: number) {
-  if (whiteBoardSize !== blackBoardSize) {
-    throw new Error('선택한 두 덱의 보드 크기가 다릅니다. 같은 보드 크기의 덱을 선택하세요.')
+function ensureSameMap(firstMapId: string, secondMapId: string) {
+  if (firstMapId !== secondMapId) {
+    throw new Error('선택한 두 덱의 맵이 다릅니다. 같은 맵 전용 덱을 선택하세요.')
   }
 }
 
@@ -168,12 +171,13 @@ async function startSingleGame(selection: SingleDeckSelection) {
   try {
     const whiteDeck = getValidDeck(selection.whiteDeckId)
     const blackDeck = getValidDeck(selection.blackDeckId)
-    ensureSameBoardSize(whiteDeck.boardSize, blackDeck.boardSize)
+    ensureSameMap(whiteDeck.mapId, blackDeck.mapId)
 
     const { state } = await api.createGame(
       whiteDeck.boardSize,
       serializeNeutralDeck(whiteDeck, 'white'),
       serializeNeutralDeck(blackDeck, 'black'),
+      whiteDeck.mapId,
     )
     localPlayer.value = null
     currentRoom.value = null
@@ -190,7 +194,7 @@ async function startBotGame(selection: BotDeckSelection) {
   try {
     const humanDeck = getValidDeck(selection.humanDeckId)
     const selectedBotDeck = getValidDeck(selection.botDeckId)
-    ensureSameBoardSize(humanDeck.boardSize, selectedBotDeck.boardSize)
+    ensureSameMap(humanDeck.mapId, selectedBotDeck.mapId)
 
     const whiteDeck = selection.humanSide === 'white' ? humanDeck : selectedBotDeck
     const blackDeck = selection.humanSide === 'black' ? humanDeck : selectedBotDeck
@@ -198,6 +202,7 @@ async function startBotGame(selection: BotDeckSelection) {
       humanDeck.boardSize,
       serializeNeutralDeck(whiteDeck, 'white'),
       serializeNeutralDeck(blackDeck, 'black'),
+      humanDeck.mapId,
     )
     localPlayer.value = selection.humanSide
     currentRoom.value = null
@@ -653,6 +658,7 @@ select {
 .preset-panel,
 .deck-score-panel,
 .piece-list-panel,
+.custom-piece-list-panel,
 .board-panel,
 .pocket-panel,
 .multiplayer-panel,
@@ -725,12 +731,37 @@ select {
   gap: 16px;
 }
 
+.piece-catalog-column {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
 .piece-list-panel,
+.custom-piece-list-panel,
 .board-panel,
 .pocket-panel {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.custom-piece-list-panel {
+  border-color: rgba(137, 104, 205, 0.38);
+  background: linear-gradient(145deg, rgba(112, 76, 171, 0.09), rgba(13, 18, 27, 0.96));
+}
+
+.custom-piece-catalog {
+  max-height: 420px;
+}
+
+.catalog-empty {
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .piece-catalog {

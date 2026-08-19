@@ -19,6 +19,13 @@
         @dragover.prevent
         @drop.prevent="onNativeDrop($event, sq)"
       >
+        <span
+          v-if="sq.terrain"
+          class="terrain-layer"
+          :class="`terrain-${sq.terrain.type_id}`"
+          :title="terrainLabel(sq.terrain.type_id)"
+          aria-hidden="true"
+        />
         <span v-if="showCoordinates && isFileLabelSquare(sq)" class="board-coordinate file-coordinate">
           {{ fileLabel(sq.file) }}
         </span>
@@ -91,7 +98,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { Board, Piece, PieceDefinition, PlayerId, Square } from '../types/game'
+import type { Board, Piece, PieceDefinition, PlayerId, Square, TerrainCell } from '../types/game'
 import { activeCooldownRemaining } from '../moveOptionUi'
 import { renderedPieceAsset, resolvePieceAssetKey } from '../pieceAssets'
 
@@ -100,6 +107,7 @@ interface SquareInfo {
   file: number
   rank: number
   piece?: Piece
+  terrain?: TerrainCell
   isLight: boolean
 }
 
@@ -165,11 +173,13 @@ const allSquares = computed((): SquareInfo[] => {
       const id = squareId(file, rank)
       const pieceId = props.board.squares[id] ?? null
       const piece = pieceId ? props.pieces[pieceId] : undefined
+      const terrain = props.board.terrain?.[id]
       squares.push({
         id,
         file,
         rank,
         piece,
+        terrain,
         isLight: (file + rank) % 2 === 1,
       })
     }
@@ -245,6 +255,10 @@ function isRankLabelSquare(square: SquareInfo) {
 
 function fileLabel(file: number) {
   return String.fromCharCode('a'.charCodeAt(0) + file)
+}
+
+function terrainLabel(typeId: string) {
+  return typeId === 'high-ground' ? '고지' : typeId
 }
 
 function squareClasses(sq: SquareInfo) {
@@ -628,6 +642,26 @@ function pieceAlt(piece: Piece): string {
 .square.light { background: #f0d9b5; }
 .square.dark  { background: #b58863; }
 .square.last-move { background: #f2d34f; }
+
+.terrain-layer {
+  position: absolute;
+  inset: 7%;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 16%;
+}
+
+.terrain-high-ground {
+  background:
+    radial-gradient(circle at 34% 30%, rgba(246, 224, 151, 0.62) 0 7%, transparent 8%),
+    radial-gradient(circle at 68% 62%, rgba(67, 54, 38, 0.36) 0 9%, transparent 10%),
+    linear-gradient(145deg, rgba(196, 166, 101, 0.94), rgba(102, 83, 55, 0.94));
+  border: 2px solid rgba(64, 49, 30, 0.72);
+  box-shadow:
+    inset 2px 2px 0 rgba(255, 239, 184, 0.35),
+    inset -3px -3px 0 rgba(48, 35, 21, 0.28),
+    0 2px 3px rgba(24, 17, 10, 0.35);
+}
 
 .square.opponent-threat::after {
   content: '';

@@ -551,6 +551,7 @@ fn test_create_board_8x8() {
     let board = create_board(8);
     assert_eq!(board.size, 8);
     assert_eq!(board.squares.len(), 64);
+    assert!(board.terrain.is_empty());
     for v in board.squares.values() {
         assert!(v.is_none());
     }
@@ -561,6 +562,116 @@ fn test_create_board_10x10() {
     let board = create_board(10);
     assert_eq!(board.size, 10);
     assert_eq!(board.squares.len(), 100);
+    assert!(board.terrain.is_empty());
+}
+
+#[test]
+fn test_create_board_12x12_has_four_central_high_ground_squares() {
+    let plain = create_board(12);
+    assert!(plain.terrain.is_empty());
+
+    let board = create_board_with_variant(12, BoardVariant::CentralHighGround).unwrap();
+    assert_eq!(board.size, 12);
+    assert_eq!(board.squares.len(), 144);
+    assert_eq!(board.terrain.len(), 4);
+    for square in [
+        Square::new(5, 5),
+        Square::new(6, 5),
+        Square::new(5, 6),
+        Square::new(6, 6),
+    ] {
+        assert_eq!(
+            board
+                .terrain
+                .get(&square.to_id())
+                .map(|cell| cell.type_id.as_str()),
+            Some(HIGH_GROUND_TERRAIN_ID)
+        );
+    }
+}
+
+#[test]
+fn central_high_ground_variant_rejects_non_12x12_boards() {
+    let error = create_board_with_variant(10, BoardVariant::CentralHighGround).unwrap_err();
+    assert!(error.contains("12x12"));
+}
+
+#[test]
+fn high_ground_blocks_uphill_capture_but_not_entry_or_downhill_capture() {
+    let mut uphill = make_game_state(12);
+    uphill.board = create_board_with_variant(12, BoardVariant::CentralHighGround).unwrap();
+    add_piece(&mut uphill, "rook", "white", "rook", 5, 4);
+    add_piece(&mut uphill, "target", "black", "knight", 5, 5);
+    assert!(!generate_piece_legal_move_actions(&uphill, &"rook".into())
+        .iter()
+        .any(|action| action.captured_piece_id.as_ref().map(PieceId::as_str) == Some("target")));
+    assert!(
+        !generate_attack_map(&uphill, &"white".into(), &HashMap::new())
+            .attacked_squares
+            .contains(&Square::new(5, 5).to_id())
+    );
+
+    let mut entry = make_game_state(12);
+    entry.board = create_board_with_variant(12, BoardVariant::CentralHighGround).unwrap();
+    add_piece(&mut entry, "rook", "white", "rook", 5, 4);
+    assert!(generate_piece_legal_move_actions(&entry, &"rook".into())
+        .iter()
+        .any(|action| action.to == Square::new(5, 5) && action.captured_piece_id.is_none()));
+
+    let mut downhill = make_game_state(12);
+    downhill.board = create_board_with_variant(12, BoardVariant::CentralHighGround).unwrap();
+    add_piece(&mut downhill, "rook", "white", "rook", 5, 5);
+    add_piece(&mut downhill, "target", "black", "knight", 5, 4);
+    assert!(generate_piece_legal_move_actions(&downhill, &"rook".into())
+        .iter()
+        .any(|action| action.captured_piece_id.as_ref().map(PieceId::as_str) == Some("target")));
+
+    let mut level = make_game_state(12);
+    level.board = create_board_with_variant(12, BoardVariant::CentralHighGround).unwrap();
+    add_piece(&mut level, "rook", "white", "rook", 5, 5);
+    add_piece(&mut level, "target", "black", "knight", 6, 5);
+    assert!(generate_piece_legal_move_actions(&level, &"rook".into())
+        .iter()
+        .any(|action| action.captured_piece_id.as_ref().map(PieceId::as_str) == Some("target")));
+}
+
+#[test]
+fn pocket_capture_cannot_take_a_piece_on_high_ground() {
+    let mut state = make_game_state(12);
+    state.board = create_board_with_variant(12, BoardVariant::CentralHighGround).unwrap();
+    add_pocket_piece(&mut state, "para", "white", "paratrooper");
+    add_piece(&mut state, "spotter", "white", "rook", 5, 6);
+    add_piece(&mut state, "target", "black", "knight", 5, 5);
+
+    assert!(!generate_piece_legal_drop_actions(&state, &"para".into())
+        .iter()
+        .any(|action| action.to == Square::new(5, 5)));
+}
+
+#[test]
+fn low_ground_barrage_does_not_remove_a_piece_on_high_ground() {
+    let mut state = make_game_state(12);
+    state.board = create_board_with_variant(12, BoardVariant::CentralHighGround).unwrap();
+    add_piece(&mut state, "mortar", "white", "mortar", 5, 3);
+    add_piece(&mut state, "target", "black", "knight", 5, 5);
+    let action = generate_piece_legal_ability_actions(
+        &state,
+        &"mortar".into(),
+        "mortar-barrage",
+    )
+    .into_iter()
+    .find(|action| action.to == Some(Square::new(5, 5)))
+    .unwrap();
+
+    let state = submit_action(state, TurnAction::Ability(action)).unwrap();
+    assert!(!state.pieces["target"].captured);
+    assert_eq!(
+        state
+            .board
+            .get_piece_at(&Square::new(5, 5))
+            .map(PieceId::as_str),
+        Some("target")
+    );
 }
 
 #[test]
@@ -1676,6 +1787,13 @@ fn test_square_id_is_copy_and_preserves_board_json_keys() {
     assert!(json.contains("\"3_5\":null"));
     let decoded: Board = serde_json::from_str(&json).unwrap();
     assert!(decoded.squares.contains_key(&id));
+
+    let legacy: Board = serde_json::from_value(serde_json::json!({
+        "size": 8,
+        "squares": { "3_5": null }
+    }))
+    .unwrap();
+    assert!(legacy.terrain.is_empty());
 }
 
 #[test]

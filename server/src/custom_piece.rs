@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -20,11 +21,12 @@ use brainfuck_chess_engine::rules::create_board;
 use brainfuck_chess_engine::types::*;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use sqlx::postgres::{PgPool, PgRow};
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::app_state::AppState;
 
-const USER_HEADER: &str = "x-user-id";
 const MAX_NAME_CHARS: usize = 80;
 const MAX_DESCRIPTION_CHARS: usize = 2_000;
 const MIN_SCORE: u32 = 1;
@@ -69,23 +71,12 @@ fn error(status: StatusCode, code: &'static str, message: impl Into<String>) -> 
     }
 }
 
-pub(crate) fn authenticated_owner(headers: &HeaderMap) -> Result<String, String> {
-    let value = headers
-        .get(USER_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| {
-            (1..=128).contains(&value.len())
-                && value
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-        })
-        .ok_or_else(|| "인증된 사용자 ID가 필요합니다.".to_string())?;
-    Ok(value.to_owned())
+pub(crate) fn authenticated_owner(app: &AppState, headers: &HeaderMap) -> Result<String, String> {
+    app.auth.authenticate(headers)
 }
 
-fn owner(headers: &HeaderMap) -> ApiResult<String> {
-    authenticated_owner(headers)
+fn owner(app: &AppState, headers: &HeaderMap) -> ApiResult<String> {
+    authenticated_owner(app, headers)
         .map_err(|message| error(StatusCode::UNAUTHORIZED, "authentication_required", message))
 }
 
@@ -138,145 +129,66 @@ pub(crate) struct StoredImage {
     bytes: Vec<u8>,
 }
 
-trait CustomPieceRepository: Send + Sync {
-    fn list(&self, owner: &str) -> Vec<CustomPieceRecord>;
-    fn latest(&self, owner: &str, id: &str) -> Option<StoredVersion>;
-    fn version(&self, owner: &str, id: &str, version: u32) -> Option<StoredVersion>;
-    fn create(&self, version: StoredVersion) -> Result<(), &'static str>;
-    fn replace(&self, expected_version: u32, version: StoredVersion) -> Result<(), &'static str>;
-    fn deactivate(&self, owner: &str, id: &str, expected_version: u32) -> Result<(), &'static str>;
-    fn count(&self, owner: &str) -> usize;
-    fn put_image(&self, image: StoredImage);
-    fn owns_image(&self, owner: &str, asset_id: &str) -> bool;
-}
-
-#[derive(Default)]
-pub(crate) struct InMemoryCustomPieceRepository {
-    pieces: RwLock<HashMap<String, Vec<StoredVersion>>>,
-    images: DashMap<String, StoredImage>,
-}
-
-impl CustomPieceRepository for InMemoryCustomPieceRepository {
-    fn list(&self, owner: &str) -> Vec<CustomPieceRecord> {
-        self.pieces
-            .read()
-            .expect("custom piece repository lock poisoned")
-            .values()
-            .filter_map(|versions| versions.last())
-            .filter(|stored| stored.record.owner_id == owner && stored.record.active)
-            .map(|stored| stored.record.clone())
-            .collect()
-    }
-
-    fn latest(&self, owner: &str, id: &str) -> Option<StoredVersion> {
-        self.pieces
-            .read()
-            .ok()?
-            .get(id)?
-            .last()
-            .filter(|stored| stored.record.owner_id == owner && stored.record.active)
-            .cloned()
-    }
-
-    fn version(&self, owner: &str, id: &str, version: u32) -> Option<StoredVersion> {
-        self.pieces
-            .read()
-            .ok()?
-            .get(id)?
-            .iter()
-            .find(|stored| stored.record.owner_id == owner && stored.record.version == version)
-            .cloned()
-    }
-
-    fn create(&self, version: StoredVersion) -> Result<(), &'static str> {
-        let mut pieces = self.pieces.write().map_err(|_| "unavailable")?;
-        if pieces.contains_key(&version.record.id) {
-            return Err("conflict");
-        }
-        pieces.insert(version.record.id.clone(), vec![version]);
-        Ok(())
-    }
-
-    fn replace(&self, expected_version: u32, version: StoredVersion) -> Result<(), &'static str> {
-        let mut pieces = self.pieces.write().map_err(|_| "unavailable")?;
-        let versions = pieces.get_mut(&version.record.id).ok_or("not_found")?;
-        let latest = versions.last().ok_or("not_found")?;
-        if latest.record.owner_id != version.record.owner_id || !latest.record.active {
-            return Err("not_found");
-        }
-        if latest.record.version != expected_version {
-            return Err("conflict");
-        }
-        versions.push(version);
-        Ok(())
-    }
-
-    fn deactivate(&self, owner: &str, id: &str, expected_version: u32) -> Result<(), &'static str> {
-        let mut pieces = self.pieces.write().map_err(|_| "unavailable")?;
-        let versions = pieces.get_mut(id).ok_or("not_found")?;
-        let latest = versions.last_mut().ok_or("not_found")?;
-        if latest.record.owner_id != owner || !latest.record.active {
-            return Err("not_found");
-        }
-        if latest.record.version != expected_version {
-            return Err("conflict");
-        }
-        latest.record.active = false;
-        latest.record.updated_at = now();
-        Ok(())
-    }
-
-    fn count(&self, owner: &str) -> usize {
-        self.list(owner).len()
-    }
-
-    fn put_image(&self, image: StoredImage) {
-        self.images.insert(image.metadata.asset_id.clone(), image);
-    }
-
-    fn owns_image(&self, owner: &str, asset_id: &str) -> bool {
-        self.images
-            .get(asset_id)
-            .is_some_and(|image| image.owner_id == owner)
-    }
-}
-
-impl InMemoryCustomPieceRepository {
-    /// Resolves an immutable version for a new deck/game. A soft-deleted
-    /// package remains available for existing game snapshots, but cannot be
-    /// selected for a new game.
-    pub(crate) fn resolve_active_version(
+#[async_trait]
+pub(crate) trait CustomPieceRepository: Send + Sync {
+    async fn list(&self, owner: &str) -> Result<Vec<CustomPieceRecord>, &'static str>;
+    async fn latest(&self, owner: &str, id: &str) -> Result<Option<StoredVersion>, &'static str>;
+    async fn version(
         &self,
         owner: &str,
         id: &str,
         version: u32,
-    ) -> Option<StoredVersion> {
-        let pieces = self.pieces.read().ok()?;
-        let versions = pieces.get(id)?;
-        let latest = versions.last()?;
-        if latest.record.owner_id != owner || !latest.record.active {
-            return None;
-        }
-        versions
-            .iter()
-            .find(|stored| stored.record.version == version)
-            .cloned()
+    ) -> Result<Option<StoredVersion>, &'static str>;
+    async fn create(&self, version: StoredVersion) -> Result<(), &'static str>;
+    async fn replace(
+        &self,
+        expected_version: u32,
+        version: StoredVersion,
+    ) -> Result<(), &'static str>;
+    async fn deactivate(
+        &self,
+        owner: &str,
+        id: &str,
+        expected_version: u32,
+    ) -> Result<(), &'static str>;
+    async fn count(&self, owner: &str) -> Result<usize, &'static str>;
+    async fn put_image(&self, image: StoredImage) -> Result<(), &'static str>;
+    async fn image(&self, owner: &str, asset_id: &str)
+        -> Result<Option<StoredImage>, &'static str>;
+    async fn has_owned_data(&self, owner: &str) -> Result<bool, &'static str>;
+    async fn transfer_owner(&self, source: &str, target: &str) -> Result<(), &'static str>;
+
+    async fn owns_image(&self, owner: &str, asset_id: &str) -> Result<bool, &'static str> {
+        Ok(self.image(owner, asset_id).await?.is_some())
     }
 
-    pub(crate) fn runtime_package(
+    async fn resolve_active_version(
         &self,
         owner: &str,
         id: &str,
         version: u32,
-    ) -> Option<CustomPiecePackage> {
-        let stored = self.resolve_active_version(owner, id, version)?;
+    ) -> Result<Option<StoredVersion>, &'static str> {
+        if self.latest(owner, id).await?.is_none() {
+            return Ok(None);
+        }
+        self.version(owner, id, version).await
+    }
+
+    async fn runtime_package(
+        &self,
+        owner: &str,
+        id: &str,
+        version: u32,
+    ) -> Result<Option<CustomPiecePackage>, &'static str> {
+        let Some(stored) = self.resolve_active_version(owner, id, version).await? else {
+            return Ok(None);
+        };
         let asset_key = match &stored.record.image {
             ImageRef::BuiltIn { asset_key } => asset_key.clone(),
             ImageRef::Uploaded { asset_id } => {
-                let image = self.images.get(asset_id)?;
-                if image.owner_id != owner {
-                    return None;
-                }
+                let Some(image) = self.image(owner, asset_id).await? else {
+                    return Ok(None);
+                };
                 format!(
                     "data:{};base64,{}",
                     image.metadata.media_type,
@@ -292,8 +204,592 @@ impl InMemoryCustomPieceRepository {
                 definition.name = stored.record.name.clone();
             }
         }
-        Some(package)
+        Ok(Some(package))
     }
+}
+
+#[derive(Default)]
+pub(crate) struct InMemoryCustomPieceRepository {
+    pieces: RwLock<HashMap<String, Vec<StoredVersion>>>,
+    images: DashMap<String, StoredImage>,
+}
+
+#[async_trait]
+impl CustomPieceRepository for InMemoryCustomPieceRepository {
+    async fn list(&self, owner: &str) -> Result<Vec<CustomPieceRecord>, &'static str> {
+        Ok(self
+            .pieces
+            .read()
+            .map_err(|_| "unavailable")?
+            .values()
+            .filter_map(|versions| versions.last())
+            .filter(|stored| stored.record.owner_id == owner && stored.record.active)
+            .map(|stored| stored.record.clone())
+            .collect())
+    }
+
+    async fn latest(&self, owner: &str, id: &str) -> Result<Option<StoredVersion>, &'static str> {
+        Ok(self
+            .pieces
+            .read()
+            .map_err(|_| "unavailable")?
+            .get(id)
+            .and_then(|versions| versions.last())
+            .filter(|stored| stored.record.owner_id == owner && stored.record.active)
+            .cloned())
+    }
+
+    async fn version(
+        &self,
+        owner: &str,
+        id: &str,
+        version: u32,
+    ) -> Result<Option<StoredVersion>, &'static str> {
+        Ok(self
+            .pieces
+            .read()
+            .map_err(|_| "unavailable")?
+            .get(id)
+            .and_then(|versions| {
+                versions.iter().find(|stored| {
+                    stored.record.owner_id == owner && stored.record.version == version
+                })
+            })
+            .cloned())
+    }
+
+    async fn create(&self, version: StoredVersion) -> Result<(), &'static str> {
+        let mut pieces = self.pieces.write().map_err(|_| "unavailable")?;
+        if pieces.contains_key(&version.record.id) {
+            return Err("conflict");
+        }
+        pieces.insert(version.record.id.clone(), vec![version]);
+        Ok(())
+    }
+
+    async fn replace(
+        &self,
+        expected_version: u32,
+        version: StoredVersion,
+    ) -> Result<(), &'static str> {
+        let mut pieces = self.pieces.write().map_err(|_| "unavailable")?;
+        let versions = pieces.get_mut(&version.record.id).ok_or("not_found")?;
+        let latest = versions.last().ok_or("not_found")?;
+        if latest.record.owner_id != version.record.owner_id || !latest.record.active {
+            return Err("not_found");
+        }
+        if latest.record.version != expected_version {
+            return Err("conflict");
+        }
+        versions.push(version);
+        Ok(())
+    }
+
+    async fn deactivate(
+        &self,
+        owner: &str,
+        id: &str,
+        expected_version: u32,
+    ) -> Result<(), &'static str> {
+        let mut pieces = self.pieces.write().map_err(|_| "unavailable")?;
+        let versions = pieces.get_mut(id).ok_or("not_found")?;
+        let latest = versions.last_mut().ok_or("not_found")?;
+        if latest.record.owner_id != owner || !latest.record.active {
+            return Err("not_found");
+        }
+        if latest.record.version != expected_version {
+            return Err("conflict");
+        }
+        latest.record.active = false;
+        latest.record.updated_at = now();
+        Ok(())
+    }
+
+    async fn count(&self, owner: &str) -> Result<usize, &'static str> {
+        Ok(self.list(owner).await?.len())
+    }
+
+    async fn put_image(&self, image: StoredImage) -> Result<(), &'static str> {
+        self.images.insert(image.metadata.asset_id.clone(), image);
+        Ok(())
+    }
+
+    async fn image(
+        &self,
+        owner: &str,
+        asset_id: &str,
+    ) -> Result<Option<StoredImage>, &'static str> {
+        Ok(self
+            .images
+            .get(asset_id)
+            .filter(|image| image.owner_id == owner)
+            .map(|image| image.clone()))
+    }
+
+    async fn has_owned_data(&self, owner: &str) -> Result<bool, &'static str> {
+        Ok(self
+            .pieces
+            .read()
+            .map_err(|_| "unavailable")?
+            .values()
+            .flatten()
+            .any(|stored| stored.record.owner_id == owner)
+            || self.images.iter().any(|image| image.owner_id == owner))
+    }
+
+    async fn transfer_owner(&self, source: &str, target: &str) -> Result<(), &'static str> {
+        let mut pieces = self.pieces.write().map_err(|_| "unavailable")?;
+        for stored in pieces.values_mut().flatten() {
+            if stored.record.owner_id == source {
+                stored.record.owner_id = target.to_owned();
+            }
+        }
+        drop(pieces);
+        for mut image in self.images.iter_mut() {
+            if image.owner_id == source {
+                image.owner_id = target.to_owned();
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(crate) struct PostgresCustomPieceRepository {
+    pool: PgPool,
+}
+
+impl PostgresCustomPieceRepository {
+    pub(crate) fn from_pool(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    #[cfg(test)]
+    async fn connect(database_url: &str) -> Result<Self, String> {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(database_url)
+            .await
+            .map_err(|error| format!("failed to connect to PostgreSQL: {error}"))?;
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .map_err(|error| format!("failed to run database migrations: {error}"))?;
+        Ok(Self { pool })
+    }
+}
+
+#[cfg(test)]
+impl InMemoryCustomPieceRepository {
+    pub(crate) fn seed_owner_for_account_test(&self, owner: &str) {
+        let asset_id = format!("test-asset-{}", Uuid::new_v4());
+        self.images.insert(
+            asset_id.clone(),
+            StoredImage {
+                owner_id: owner.to_owned(),
+                metadata: ImageAsset {
+                    asset_id,
+                    media_type: "image/png".into(),
+                    width: 1,
+                    height: 1,
+                    content_hash: "test".into(),
+                },
+                bytes: vec![0],
+            },
+        );
+    }
+}
+
+fn stored_from_row(row: PgRow) -> Result<StoredVersion, &'static str> {
+    let image = match row
+        .try_get::<String, _>("image_kind")
+        .map_err(|_| "unavailable")?
+        .as_str()
+    {
+        "built_in" => ImageRef::BuiltIn {
+            asset_key: row.try_get("image_value").map_err(|_| "unavailable")?,
+        },
+        "uploaded" => ImageRef::Uploaded {
+            asset_id: row.try_get("image_value").map_err(|_| "unavailable")?,
+        },
+        _ => return Err("unavailable"),
+    };
+    let package = row
+        .try_get::<sqlx::types::Json<CustomPiecePackage>, _>("package")
+        .map_err(|_| "unavailable")?
+        .0;
+    let version = u32::try_from(
+        row.try_get::<i32, _>("version")
+            .map_err(|_| "unavailable")?,
+    )
+    .map_err(|_| "unavailable")?;
+    let score = u32::try_from(row.try_get::<i32, _>("score").map_err(|_| "unavailable")?)
+        .map_err(|_| "unavailable")?;
+    let created_at = u64::try_from(
+        row.try_get::<i64, _>("created_at")
+            .map_err(|_| "unavailable")?,
+    )
+    .map_err(|_| "unavailable")?;
+    let updated_at = u64::try_from(
+        row.try_get::<i64, _>("updated_at")
+            .map_err(|_| "unavailable")?,
+    )
+    .map_err(|_| "unavailable")?;
+    Ok(StoredVersion {
+        record: CustomPieceRecord {
+            id: row.try_get("piece_id").map_err(|_| "unavailable")?,
+            owner_id: row.try_get("owner_id").map_err(|_| "unavailable")?,
+            name: row.try_get("name").map_err(|_| "unavailable")?,
+            description: row.try_get("description").map_err(|_| "unavailable")?,
+            score,
+            image,
+            raw_script: row.try_get("raw_script").map_err(|_| "unavailable")?,
+            exposed_piece_key: row
+                .try_get("exposed_piece_key")
+                .map_err(|_| "unavailable")?,
+            internal_piece_keys: row
+                .try_get::<sqlx::types::Json<Vec<String>>, _>("internal_piece_keys")
+                .map_err(|_| "unavailable")?
+                .0,
+            validation_status: "valid",
+            version,
+            content_hash: row.try_get("content_hash").map_err(|_| "unavailable")?,
+            created_at,
+            updated_at,
+            active: row.try_get("active").map_err(|_| "unavailable")?,
+        },
+        package,
+    })
+}
+
+fn image_parts(image: &ImageRef) -> (&'static str, &str) {
+    match image {
+        ImageRef::BuiltIn { asset_key } => ("built_in", asset_key),
+        ImageRef::Uploaded { asset_id } => ("uploaded", asset_id),
+    }
+}
+
+#[async_trait]
+impl CustomPieceRepository for PostgresCustomPieceRepository {
+    async fn list(&self, owner: &str) -> Result<Vec<CustomPieceRecord>, &'static str> {
+        let rows = sqlx::query(
+            "SELECT * FROM (SELECT DISTINCT ON (piece_id) * FROM custom_piece_versions \
+             WHERE owner_id = $1 ORDER BY piece_id, version DESC) latest \
+             WHERE active = TRUE ORDER BY updated_at DESC",
+        )
+        .bind(owner)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|_| "unavailable")?;
+        rows.into_iter()
+            .map(stored_from_row)
+            .map(|stored| stored.map(|stored| stored.record))
+            .collect()
+    }
+
+    async fn latest(&self, owner: &str, id: &str) -> Result<Option<StoredVersion>, &'static str> {
+        sqlx::query(
+            "SELECT * FROM custom_piece_versions WHERE owner_id = $1 AND piece_id = $2 \
+             ORDER BY version DESC LIMIT 1",
+        )
+        .bind(owner)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|_| "unavailable")?
+        .filter(|row| row.try_get::<bool, _>("active").unwrap_or(false))
+        .map(stored_from_row)
+        .transpose()
+    }
+
+    async fn version(
+        &self,
+        owner: &str,
+        id: &str,
+        version: u32,
+    ) -> Result<Option<StoredVersion>, &'static str> {
+        sqlx::query(
+            "SELECT * FROM custom_piece_versions \
+             WHERE owner_id = $1 AND piece_id = $2 AND version = $3",
+        )
+        .bind(owner)
+        .bind(id)
+        .bind(i32::try_from(version).map_err(|_| "unavailable")?)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|_| "unavailable")?
+        .map(stored_from_row)
+        .transpose()
+    }
+
+    async fn create(&self, stored: StoredVersion) -> Result<(), &'static str> {
+        let record = &stored.record;
+        ensure_guest_user(&self.pool, &record.owner_id).await?;
+        let (image_kind, image_value) = image_parts(&record.image);
+        sqlx::query(
+            "INSERT INTO custom_piece_versions \
+             (piece_id, version, owner_id, name, description, score, image_kind, image_value, \
+              raw_script, exposed_piece_key, internal_piece_keys, validation_status, content_hash, \
+              package, created_at, updated_at, active) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
+        )
+        .bind(&record.id)
+        .bind(i32::try_from(record.version).map_err(|_| "unavailable")?)
+        .bind(&record.owner_id)
+        .bind(&record.name)
+        .bind(&record.description)
+        .bind(i32::try_from(record.score).map_err(|_| "unavailable")?)
+        .bind(image_kind)
+        .bind(image_value)
+        .bind(&record.raw_script)
+        .bind(&record.exposed_piece_key)
+        .bind(sqlx::types::Json(&record.internal_piece_keys))
+        .bind(record.validation_status)
+        .bind(&record.content_hash)
+        .bind(sqlx::types::Json(&stored.package))
+        .bind(i64::try_from(record.created_at).map_err(|_| "unavailable")?)
+        .bind(i64::try_from(record.updated_at).map_err(|_| "unavailable")?)
+        .bind(record.active)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| {
+            if error
+                .as_database_error()
+                .is_some_and(|error| error.is_unique_violation())
+            {
+                "conflict"
+            } else {
+                "unavailable"
+            }
+        })?;
+        Ok(())
+    }
+
+    async fn replace(
+        &self,
+        expected_version: u32,
+        stored: StoredVersion,
+    ) -> Result<(), &'static str> {
+        let mut transaction = self.pool.begin().await.map_err(|_| "unavailable")?;
+        let latest = sqlx::query(
+            "SELECT owner_id, version, active FROM custom_piece_versions \
+             WHERE piece_id = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE",
+        )
+        .bind(&stored.record.id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| "unavailable")?
+        .ok_or("not_found")?;
+        if latest
+            .try_get::<String, _>("owner_id")
+            .map_err(|_| "unavailable")?
+            != stored.record.owner_id
+            || !latest
+                .try_get::<bool, _>("active")
+                .map_err(|_| "unavailable")?
+        {
+            return Err("not_found");
+        }
+        if latest
+            .try_get::<i32, _>("version")
+            .map_err(|_| "unavailable")?
+            != i32::try_from(expected_version).map_err(|_| "unavailable")?
+        {
+            return Err("conflict");
+        }
+        let record = &stored.record;
+        let (image_kind, image_value) = image_parts(&record.image);
+        sqlx::query(
+            "INSERT INTO custom_piece_versions \
+             (piece_id, version, owner_id, name, description, score, image_kind, image_value, \
+              raw_script, exposed_piece_key, internal_piece_keys, validation_status, content_hash, \
+              package, created_at, updated_at, active) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
+        )
+        .bind(&record.id)
+        .bind(i32::try_from(record.version).map_err(|_| "unavailable")?)
+        .bind(&record.owner_id)
+        .bind(&record.name)
+        .bind(&record.description)
+        .bind(i32::try_from(record.score).map_err(|_| "unavailable")?)
+        .bind(image_kind)
+        .bind(image_value)
+        .bind(&record.raw_script)
+        .bind(&record.exposed_piece_key)
+        .bind(sqlx::types::Json(&record.internal_piece_keys))
+        .bind(record.validation_status)
+        .bind(&record.content_hash)
+        .bind(sqlx::types::Json(&stored.package))
+        .bind(i64::try_from(record.created_at).map_err(|_| "unavailable")?)
+        .bind(i64::try_from(record.updated_at).map_err(|_| "unavailable")?)
+        .bind(record.active)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| {
+            if error
+                .as_database_error()
+                .is_some_and(|error| error.is_unique_violation())
+            {
+                "conflict"
+            } else {
+                "unavailable"
+            }
+        })?;
+        transaction.commit().await.map_err(|_| "unavailable")
+    }
+
+    async fn deactivate(
+        &self,
+        owner: &str,
+        id: &str,
+        expected_version: u32,
+    ) -> Result<(), &'static str> {
+        let mut transaction = self.pool.begin().await.map_err(|_| "unavailable")?;
+        let latest = sqlx::query(
+            "SELECT owner_id, version, active FROM custom_piece_versions \
+             WHERE piece_id = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| "unavailable")?
+        .ok_or("not_found")?;
+        if latest
+            .try_get::<String, _>("owner_id")
+            .map_err(|_| "unavailable")?
+            != owner
+            || !latest
+                .try_get::<bool, _>("active")
+                .map_err(|_| "unavailable")?
+        {
+            return Err("not_found");
+        }
+        if latest
+            .try_get::<i32, _>("version")
+            .map_err(|_| "unavailable")?
+            != i32::try_from(expected_version).map_err(|_| "unavailable")?
+        {
+            return Err("conflict");
+        }
+        sqlx::query(
+            "UPDATE custom_piece_versions SET active = FALSE, updated_at = $4 \
+             WHERE piece_id = $1 AND version = $2 AND owner_id = $3",
+        )
+        .bind(id)
+        .bind(i32::try_from(expected_version).map_err(|_| "unavailable")?)
+        .bind(owner)
+        .bind(i64::try_from(now()).map_err(|_| "unavailable")?)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| "unavailable")?;
+        transaction.commit().await.map_err(|_| "unavailable")
+    }
+
+    async fn count(&self, owner: &str) -> Result<usize, &'static str> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM (SELECT DISTINCT ON (piece_id) active \
+             FROM custom_piece_versions WHERE owner_id = $1 ORDER BY piece_id, version DESC) latest \
+             WHERE active = TRUE",
+        )
+        .bind(owner)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|_| "unavailable")?;
+        usize::try_from(count).map_err(|_| "unavailable")
+    }
+
+    async fn put_image(&self, image: StoredImage) -> Result<(), &'static str> {
+        ensure_guest_user(&self.pool, &image.owner_id).await?;
+        sqlx::query(
+            "INSERT INTO custom_piece_images \
+             (asset_id, owner_id, media_type, width, height, content_hash, bytes) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7)",
+        )
+        .bind(&image.metadata.asset_id)
+        .bind(&image.owner_id)
+        .bind(&image.metadata.media_type)
+        .bind(i32::try_from(image.metadata.width).map_err(|_| "unavailable")?)
+        .bind(i32::try_from(image.metadata.height).map_err(|_| "unavailable")?)
+        .bind(&image.metadata.content_hash)
+        .bind(&image.bytes)
+        .execute(&self.pool)
+        .await
+        .map_err(|_| "unavailable")?;
+        Ok(())
+    }
+
+    async fn image(
+        &self,
+        owner: &str,
+        asset_id: &str,
+    ) -> Result<Option<StoredImage>, &'static str> {
+        let Some(row) = sqlx::query(
+            "SELECT asset_id, owner_id, media_type, width, height, content_hash, bytes \
+             FROM custom_piece_images WHERE owner_id = $1 AND asset_id = $2",
+        )
+        .bind(owner)
+        .bind(asset_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|_| "unavailable")?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(StoredImage {
+            owner_id: row.try_get("owner_id").map_err(|_| "unavailable")?,
+            metadata: ImageAsset {
+                asset_id: row.try_get("asset_id").map_err(|_| "unavailable")?,
+                media_type: row.try_get("media_type").map_err(|_| "unavailable")?,
+                width: u32::try_from(row.try_get::<i32, _>("width").map_err(|_| "unavailable")?)
+                    .map_err(|_| "unavailable")?,
+                height: u32::try_from(row.try_get::<i32, _>("height").map_err(|_| "unavailable")?)
+                    .map_err(|_| "unavailable")?,
+                content_hash: row.try_get("content_hash").map_err(|_| "unavailable")?,
+            },
+            bytes: row.try_get("bytes").map_err(|_| "unavailable")?,
+        }))
+    }
+
+    async fn has_owned_data(&self, owner: &str) -> Result<bool, &'static str> {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM custom_piece_versions WHERE owner_id = $1) \
+             OR EXISTS (SELECT 1 FROM custom_piece_images WHERE owner_id = $1)",
+        )
+        .bind(owner)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|_| "unavailable")
+    }
+
+    async fn transfer_owner(&self, source: &str, target: &str) -> Result<(), &'static str> {
+        let mut transaction = self.pool.begin().await.map_err(|_| "unavailable")?;
+        sqlx::query("UPDATE custom_piece_versions SET owner_id = $1 WHERE owner_id = $2")
+            .bind(target)
+            .bind(source)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| "unavailable")?;
+        sqlx::query("UPDATE custom_piece_images SET owner_id = $1 WHERE owner_id = $2")
+            .bind(target)
+            .bind(source)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| "unavailable")?;
+        transaction.commit().await.map_err(|_| "unavailable")
+    }
+}
+
+async fn ensure_guest_user(pool: &PgPool, owner: &str) -> Result<(), &'static str> {
+    let timestamp = i64::try_from(now()).map_err(|_| "unavailable")?;
+    sqlx::query(
+        "INSERT INTO users (id, account_kind, status, created_at, updated_at) \
+         VALUES ($1, 'guest', 'active', $2, $2) ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(owner)
+    .bind(timestamp)
+    .execute(pool)
+    .await
+    .map_err(|_| "unavailable")?;
+    Ok(())
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
@@ -372,9 +868,13 @@ pub(crate) async fn list(
     State(app): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<ListResponse>> {
-    let owner = owner(&headers)?;
+    let owner = owner(&app, &headers)?;
     Ok(Json(ListResponse {
-        items: app.custom_pieces.list(&owner),
+        items: app
+            .custom_pieces
+            .list(&owner)
+            .await
+            .map_err(repository_error)?,
     }))
 }
 
@@ -383,9 +883,11 @@ pub(crate) async fn get(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> ApiResult<Json<CustomPieceRecord>> {
-    let owner = owner(&headers)?;
+    let owner = owner(&app, &headers)?;
     app.custom_pieces
         .latest(&owner, &id)
+        .await
+        .map_err(repository_error)?
         .map(|stored| Json(stored.record))
         .ok_or_else(not_found)
 }
@@ -395,18 +897,21 @@ pub(crate) async fn get_version(
     headers: HeaderMap,
     Path((id, version)): Path<(String, u32)>,
 ) -> ApiResult<Json<CustomPieceRecord>> {
-    let owner = owner(&headers)?;
+    let owner = owner(&app, &headers)?;
     app.custom_pieces
         .version(&owner, &id, version)
+        .await
+        .map_err(repository_error)?
         .map(|stored| Json(stored.record))
         .ok_or_else(not_found)
 }
 
 pub(crate) async fn validate(
+    State(app): State<AppState>,
     headers: HeaderMap,
     Json(input): Json<PieceInput>,
 ) -> ApiResult<Json<ValidationResponse>> {
-    owner(&headers)?;
+    owner(&app, &headers)?;
     validate_metadata(&input)?;
     Ok(Json(validation_response(build_package(
         "validation",
@@ -420,19 +925,28 @@ pub(crate) async fn create(
     headers: HeaderMap,
     Json(mut input): Json<PieceInput>,
 ) -> ApiResult<(StatusCode, Json<CustomPieceRecord>)> {
-    let owner = owner(&headers)?;
-    if app.custom_pieces.count(&owner) >= MAX_PIECES_PER_USER {
+    let owner = owner(&app, &headers)?;
+    if app
+        .custom_pieces
+        .count(&owner)
+        .await
+        .map_err(repository_error)?
+        >= MAX_PIECES_PER_USER
+    {
         return Err(error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "piece_limit_exceeded",
             "사용자별 커스텀 기물 수 제한을 초과했습니다.",
         ));
     }
-    normalize_and_validate(&app, &owner, &mut input)?;
+    normalize_and_validate(&app, &owner, &mut input).await?;
     let id = Uuid::new_v4().to_string();
     let stored = make_version(id, owner, input, 1, None)?;
     let response = stored.record.clone();
-    app.custom_pieces.create(stored).map_err(repository_error)?;
+    app.custom_pieces
+        .create(stored)
+        .await
+        .map_err(repository_error)?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -442,12 +956,14 @@ pub(crate) async fn update(
     Path(id): Path<String>,
     Json(mut input): Json<UpdateInput>,
 ) -> ApiResult<Json<CustomPieceRecord>> {
-    let owner = owner(&headers)?;
+    let owner = owner(&app, &headers)?;
     let previous = app
         .custom_pieces
         .latest(&owner, &id)
+        .await
+        .map_err(repository_error)?
         .ok_or_else(not_found)?;
-    normalize_and_validate(&app, &owner, &mut input.piece)?;
+    normalize_and_validate(&app, &owner, &mut input.piece).await?;
     let stored = make_version(
         id,
         owner,
@@ -458,6 +974,7 @@ pub(crate) async fn update(
     let response = stored.record.clone();
     app.custom_pieces
         .replace(input.expected_version, stored)
+        .await
         .map_err(repository_error)?;
     Ok(Json(response))
 }
@@ -468,17 +985,22 @@ pub(crate) async fn deactivate(
     Path(id): Path<String>,
     Json(input): Json<DeleteInput>,
 ) -> ApiResult<StatusCode> {
-    let owner = owner(&headers)?;
+    let owner = owner(&app, &headers)?;
     app.custom_pieces
         .deactivate(&owner, &id, input.expected_version)
+        .await
         .map_err(repository_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn normalize_and_validate(app: &AppState, owner: &str, input: &mut PieceInput) -> ApiResult<()> {
+async fn normalize_and_validate(
+    app: &AppState,
+    owner: &str,
+    input: &mut PieceInput,
+) -> ApiResult<()> {
     input.name = input.name.split_whitespace().collect::<Vec<_>>().join(" ");
     validate_metadata(input)?;
-    validate_image_reference(app, owner, &input.image)?;
+    validate_image_reference(app, owner, &input.image).await?;
     build_package("validation", 1, input).map_err(validation_error)?;
     Ok(())
 }
@@ -515,7 +1037,7 @@ fn validate_metadata(input: &PieceInput) -> ApiResult<()> {
     Ok(())
 }
 
-fn validate_image_reference(app: &AppState, owner: &str, image: &ImageRef) -> ApiResult<()> {
+async fn validate_image_reference(app: &AppState, owner: &str, image: &ImageRef) -> ApiResult<()> {
     match image {
         ImageRef::BuiltIn { asset_key }
             if matches!(
@@ -525,7 +1047,15 @@ fn validate_image_reference(app: &AppState, owner: &str, image: &ImageRef) -> Ap
         {
             Ok(())
         }
-        ImageRef::Uploaded { asset_id } if app.custom_pieces.owns_image(owner, asset_id) => Ok(()),
+        ImageRef::Uploaded { asset_id }
+            if app
+                .custom_pieces
+                .owns_image(owner, asset_id)
+                .await
+                .map_err(repository_error)? =>
+        {
+            Ok(())
+        }
         _ => Err(validation(
             "image_reference_invalid",
             "사용할 수 없는 이미지 참조입니다.",
@@ -706,7 +1236,7 @@ pub(crate) async fn upload_image(
     headers: HeaderMap,
     Json(input): Json<ImageUpload>,
 ) -> ApiResult<(StatusCode, Json<ImageAsset>)> {
-    let owner = owner(&headers)?;
+    let owner = owner(&app, &headers)?;
     let (media_type, width, height) = inspect_image(&input)?;
     let metadata = ImageAsset {
         asset_id: Uuid::new_v4().to_string(),
@@ -715,11 +1245,14 @@ pub(crate) async fn upload_image(
         height,
         content_hash: stable_hash(&input.bytes),
     };
-    app.custom_pieces.put_image(StoredImage {
-        owner_id: owner,
-        metadata: metadata.clone(),
-        bytes: input.bytes,
-    });
+    app.custom_pieces
+        .put_image(StoredImage {
+            owner_id: owner,
+            metadata: metadata.clone(),
+            bytes: input.bytes,
+        })
+        .await
+        .map_err(repository_error)?;
     Ok((StatusCode::CREATED, Json(metadata)))
 }
 
@@ -941,8 +1474,8 @@ pub(crate) async fn test_options(
     headers: HeaderMap,
     Json(input): Json<TestOptionsRequest>,
 ) -> ApiResult<Json<TestOptionsResponse>> {
-    let owner = owner(&headers)?;
-    let package = resolve_test_package(&app, &owner, input.definition)?;
+    let owner = owner(&app, &headers)?;
+    let package = resolve_test_package(&app, &owner, input.definition).await?;
     let state = build_test_state(input.board, &package)?;
     let piece_id = PieceId::from(input.selected_piece_id);
     let piece = state
@@ -988,8 +1521,8 @@ pub(crate) async fn test_action(
     headers: HeaderMap,
     Json(input): Json<TestActionRequest>,
 ) -> ApiResult<Json<TestOptionsResponse>> {
-    let owner = owner(&headers)?;
-    let package = resolve_test_package(&app, &owner, input.definition)?;
+    let owner = owner(&app, &headers)?;
+    let package = resolve_test_package(&app, &owner, input.definition).await?;
     let state = build_test_state(input.board, &package)?;
     let selected = match &input.action {
         TurnAction::Move(action) => action.piece_id.clone(),
@@ -1016,7 +1549,7 @@ pub(crate) async fn test_action(
     }))
 }
 
-fn resolve_test_package(
+async fn resolve_test_package(
     app: &AppState,
     owner: &str,
     definition: TestDefinition,
@@ -1032,6 +1565,8 @@ fn resolve_test_package(
         } => app
             .custom_pieces
             .version(owner, &custom_piece_id, version)
+            .await
+            .map_err(repository_error)?
             .map(|stored| stored.package)
             .ok_or_else(not_found),
     }
@@ -1184,7 +1719,7 @@ mod tests {
 
     fn headers(user: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(USER_HEADER, HeaderValue::from_str(user).unwrap());
+        headers.insert("x-user-id", HeaderValue::from_str(user).unwrap());
         headers
     }
 
@@ -1337,7 +1872,9 @@ mod tests {
             pocket: vec![],
         };
         let packages =
-            crate::resolve_custom_packages(&app, &[("alice", &white), ("alice", &black)]).unwrap();
+            crate::resolve_custom_packages(&app, &[("alice", &white), ("alice", &black)])
+                .await
+                .unwrap();
         let state =
             crate::build_game_state("custom-game".into(), 8, &white, &black, packages).unwrap();
 
@@ -1361,7 +1898,9 @@ mod tests {
         )
         .is_empty());
         assert_eq!(state.players["white"].deck.total_score, 22);
-        assert!(crate::resolve_custom_packages(&app, &[("mallory", &white)]).is_err());
+        assert!(crate::resolve_custom_packages(&app, &[("mallory", &white)])
+            .await
+            .is_err());
 
         let mut changed = input("move(0, 1);");
         changed.score = 11;
@@ -1376,13 +1915,17 @@ mod tests {
         )
         .await
         .unwrap();
-        let pinned = crate::resolve_custom_packages(&app, &[("alice", &white)]).unwrap();
+        let pinned = crate::resolve_custom_packages(&app, &[("alice", &white)])
+            .await
+            .unwrap();
         assert_eq!(pinned[0].version, 1);
         assert_eq!(state.players["white"].deck.total_score, 22);
 
         let mut room = crate::MultiplayerRoom {
             id: "ROOM01".into(),
             board_size: 8,
+            map_id: "standard-8x8".into(),
+            board_variant: BoardVariant::Plain,
             host_side: "white".into(),
             guest_side: "black".into(),
             host_client_id: "host-client".into(),
@@ -1406,7 +1949,10 @@ mod tests {
             guest_ready: true,
             game_id: None,
         };
-        let room_game = crate::start_room_game(&mut room, &app).unwrap().unwrap();
+        let room_game = crate::start_room_game(&mut room, &app)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(room_game.state.custom_piece_manifest.len(), 1);
         assert_eq!(room_game.state.custom_piece_manifest[0].version, 1);
 
@@ -1424,6 +1970,7 @@ mod tests {
             &app,
             &[("alice", room.host_deck.as_ref().unwrap())]
         )
+        .await
         .is_err());
         assert_eq!(room_game.state.custom_piece_manifest[0].version, 1);
     }
@@ -1476,14 +2023,86 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL pointing to an isolated PostgreSQL database"]
+    async fn postgres_repository_survives_reconnection() {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL is required for this ignored integration test");
+        let owner = format!("persistence-test-{}", Uuid::new_v4());
+        let id = Uuid::new_v4().to_string();
+        let asset_id = Uuid::new_v4().to_string();
+        let first = PostgresCustomPieceRepository::connect(&database_url)
+            .await
+            .unwrap();
+        first
+            .put_image(StoredImage {
+                owner_id: owner.clone(),
+                metadata: ImageAsset {
+                    asset_id: asset_id.clone(),
+                    media_type: "image/png".into(),
+                    width: 1,
+                    height: 1,
+                    content_hash: "test-image-hash".into(),
+                },
+                bytes: vec![1, 2, 3],
+            })
+            .await
+            .unwrap();
+        let mut persistent_input = input("move(1, 0);");
+        persistent_input.image = ImageRef::Uploaded {
+            asset_id: asset_id.clone(),
+        };
+        let stored = make_version(id.clone(), owner.clone(), persistent_input, 1, None).unwrap();
+        first.create(stored).await.unwrap();
+        drop(first);
+
+        let reconnected = PostgresCustomPieceRepository::connect(&database_url)
+            .await
+            .unwrap();
+        let restored = reconnected.latest(&owner, &id).await.unwrap().unwrap();
+        assert_eq!(restored.record.owner_id, owner);
+        assert_eq!(restored.record.version, 1);
+        let runtime = reconnected
+            .runtime_package(&owner, &id, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(runtime.definitions[0]
+            .visual
+            .default_asset_key
+            .starts_with("data:image/png;base64,"));
+
+        sqlx::query("DELETE FROM custom_piece_versions WHERE piece_id = $1")
+            .bind(&id)
+            .execute(&reconnected.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM custom_piece_images WHERE asset_id = $1")
+            .bind(asset_id)
+            .execute(&reconnected.pool)
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn cloud_sql_unix_socket_database_url_is_accepted() {
+        let parsed = "postgresql://deck_chess:password@localhost/deck_chess?host=/cloudsql/project:region:instance"
+            .parse::<sqlx::postgres::PgConnectOptions>();
+        assert!(parsed.is_ok());
+    }
+
+    #[tokio::test]
     async fn validation_reports_parse_missing_exposed_and_source_limits() {
+        let app = AppState::in_memory();
         let mut invalid = input("move(1, 0);");
         invalid.raw_script = "{".into();
-        let Json(response) = validate(headers("alice"), Json(invalid)).await.unwrap();
+        let Json(response) = validate(State(app.clone()), headers("alice"), Json(invalid))
+            .await
+            .unwrap();
         assert!(!response.valid);
         assert_eq!(response.diagnostics[0].code, "chessembly_parse_error");
 
         let Json(response) = validate(
+            State(app.clone()),
             headers("alice"),
             Json(input("move(1, 0);\nunsupported-command;")),
         )
@@ -1495,13 +2114,17 @@ mod tests {
 
         let mut missing = input("move(1, 0);");
         missing.exposed_piece_key = "missing".into();
-        let Json(response) = validate(headers("alice"), Json(missing)).await.unwrap();
+        let Json(response) = validate(State(app.clone()), headers("alice"), Json(missing))
+            .await
+            .unwrap();
         assert!(!response.valid);
         assert_eq!(response.diagnostics[0].code, "exposed_piece_missing");
 
         let mut long = input("move(1, 0);");
         long.raw_script = "x".repeat(MAX_CUSTOM_SOURCE_BYTES + 1);
-        let error = validate(headers("alice"), Json(long)).await.unwrap_err();
+        let error = validate(State(app), headers("alice"), Json(long))
+            .await
+            .unwrap_err();
         assert_eq!(error.code, "source_too_long");
     }
 

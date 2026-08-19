@@ -1,6 +1,14 @@
 // Types mirroring the Rust engine's JSON serialization.
 
 export type PlayerId = 'white' | 'black'
+export type BoardVariant = 'plain' | 'central-high-ground'
+export type BoardMapId =
+  | 'standard-8x8'
+  | 'standard-9x9'
+  | 'standard-10x10'
+  | 'standard-11x11'
+  | 'standard-12x12'
+  | 'central-high-ground-12x12'
 export type SquareId = string
 export type PieceId = string
 export type PieceTypeId = string
@@ -15,6 +23,12 @@ export interface Board {
   size: number
   /** SquareId → PieceId | null */
   squares: Record<SquareId, PieceId | null>
+  /** SquareId → terrain that remains on the square when pieces move. */
+  terrain?: Record<SquareId, TerrainCell>
+}
+
+export interface TerrainCell {
+  type_id: string
 }
 
 export type ChessemblyDialect = 'classic' | 'brainfuck-chess'

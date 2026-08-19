@@ -22,7 +22,7 @@ pub(crate) async fn get(
     headers: HeaderMap,
     Path((id, version)): Path<(String, u32)>,
 ) -> Result<Json<CustomPieceImageAssetResponse>, (StatusCode, Json<CustomPieceImageAssetError>)> {
-    let owner = custom_piece::authenticated_owner(&headers).map_err(|message| {
+    let owner = custom_piece::authenticated_owner(&app, &headers).map_err(|message| {
         (
             StatusCode::UNAUTHORIZED,
             Json(CustomPieceImageAssetError {
@@ -34,6 +34,16 @@ pub(crate) async fn get(
     let package = app
         .custom_pieces
         .runtime_package(&owner, &id, version)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(CustomPieceImageAssetError {
+                    error: "저장소를 사용할 수 없습니다.".into(),
+                    code: "repository_unavailable",
+                }),
+            )
+        })?
         .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,

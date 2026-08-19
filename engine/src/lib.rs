@@ -11,6 +11,7 @@ pub mod pieces;
 pub mod placement;
 pub mod profiling;
 pub mod rules;
+pub mod terrain;
 pub mod types;
 
 pub use context::{GameContext, PieceCatalog, RuntimeResources};

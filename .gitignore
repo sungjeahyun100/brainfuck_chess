@@ -2,3 +2,6 @@
 /frontend/dist
 /frontend/node_modules
 /reinstall-image.sh
+.env
+.env.*
+!.env.example

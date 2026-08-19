@@ -57,6 +57,7 @@ fn state_with_piece(type_id: &str) -> GameState {
     let mut board = Board {
         size: 8,
         squares: HashMap::new(),
+        terrain: HashMap::new(),
     };
     board
         .squares

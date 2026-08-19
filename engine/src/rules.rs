@@ -1,6 +1,32 @@
 use crate::types::*;
 use std::collections::HashMap;
 
+pub const HIGH_GROUND_TERRAIN_ID: &str = "high-ground";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoardMapDefinition {
+    pub id: &'static str,
+    pub board_size: i32,
+    pub variant: BoardVariant,
+}
+
+pub const BOARD_MAPS: [BoardMapDefinition; 6] = [
+    BoardMapDefinition { id: "standard-8x8", board_size: 8, variant: BoardVariant::Plain },
+    BoardMapDefinition { id: "standard-9x9", board_size: 9, variant: BoardVariant::Plain },
+    BoardMapDefinition { id: "standard-10x10", board_size: 10, variant: BoardVariant::Plain },
+    BoardMapDefinition { id: "standard-11x11", board_size: 11, variant: BoardVariant::Plain },
+    BoardMapDefinition { id: "standard-12x12", board_size: 12, variant: BoardVariant::Plain },
+    BoardMapDefinition { id: "central-high-ground-12x12", board_size: 12, variant: BoardVariant::CentralHighGround },
+];
+
+pub fn board_map_definition(id: &str) -> Option<BoardMapDefinition> {
+    BOARD_MAPS.iter().copied().find(|map| map.id == id)
+}
+
+pub fn standard_board_map_id(size: i32) -> Option<&'static str> {
+    BOARD_MAPS.iter().find(|map| map.board_size == size && map.variant == BoardVariant::Plain).map(|map| map.id)
+}
+
 /// Create an empty n×n board with all squares initialized to empty.
 pub fn create_board(size: i32) -> Board {
     assert!(size >= 8, "Board size must be at least 8");
@@ -11,7 +37,37 @@ pub fn create_board(size: i32) -> Board {
             squares.insert(sq.to_id(), None);
         }
     }
-    Board { size, squares }
+    Board {
+        size,
+        squares,
+        terrain: HashMap::new(),
+    }
+}
+
+pub fn create_board_with_variant(size: i32, variant: BoardVariant) -> Result<Board, String> {
+    let mut board = create_board(size);
+    match variant {
+        BoardVariant::Plain => {}
+        BoardVariant::CentralHighGround => {
+            if size != 12 {
+                return Err("중앙 고지 보드는 12x12에서만 사용할 수 있습니다.".into());
+            }
+            for square in [
+                Square::new(5, 5),
+                Square::new(6, 5),
+                Square::new(5, 6),
+                Square::new(6, 6),
+            ] {
+                board.terrain.insert(
+                    square.to_id(),
+                    TerrainCell {
+                        type_id: HIGH_GROUND_TERRAIN_ID.into(),
+                    },
+                );
+            }
+        }
+    }
+    Ok(board)
 }
 
 /// Deck score limit: scoreLimit = n*n - 25

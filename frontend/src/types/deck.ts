@@ -1,4 +1,4 @@
-import type { BotDifficulty, Square } from './game'
+import type { BoardMapId, BotDifficulty, Square } from './game'
 import type { CustomPieceImage } from './customPiece'
 
 export type LobbyPlayer = 'white' | 'black'
@@ -45,6 +45,7 @@ export interface LobbyDeck {
 export interface SavedDeck extends LobbyDeck {
   id: string
   name: string
+  mapId: BoardMapId
   boardSize: number
   createdAt: number
   updatedAt: number

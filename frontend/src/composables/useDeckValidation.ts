@@ -12,6 +12,7 @@ import type {
 } from '../types/deck'
 import type { CustomPieceRecord } from '../types/customPiece'
 import { parseCustomPiecePackage } from './useCustomPieceDraft.ts'
+import { findBoardMap, normalizeBoardMapId } from '../boardMaps.ts'
 
 export const boardSizes = [8, 9, 10, 11, 12] as const
 
@@ -458,7 +459,17 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
 }
 
 export function validateSavedDeck(deck: SavedDeck): DeckSummary {
-  return validateLobbyDeck(deck, deck.boardSize, deck.name)
+  const normalizedMapId = normalizeBoardMapId(deck.mapId, deck.boardSize)
+  const map = normalizedMapId ? findBoardMap(normalizedMapId) : null
+  const summary = validateLobbyDeck(deck, deck.boardSize, deck.name)
+  if (!map || map.boardSize !== deck.boardSize) {
+    return {
+      ...summary,
+      valid: false,
+      errors: [...summary.errors, '덱의 전용 맵 정보가 올바르지 않습니다.'],
+    }
+  }
+  return summary
 }
 
 export function validateDeckForGame(deck: SavedDeck, boardSize: number): DeckSummary {

@@ -1,27 +1,25 @@
 # 커스텀 기물 백엔드 계약
 
-상태: 3단계 시제품 구현  
-인증 임시 계약: 모든 API는 `X-User-Id` 헤더를 요구한다. 이 값은 계정
-미들웨어가 도입될 때 인증 principal extractor로 교체해야 하며, 클라이언트가
-임의로 정한 값을 운영 인증으로 간주해서는 안 된다.
+상태: PostgreSQL 영속 저장소 및 서버 서명 게스트 세션 구현
+인증 계약: `POST /auth/session`이 HttpOnly/SameSite 쿠키를 발급한다.
+서버는 `AUTH_SIGNING_KEY`로 서명을 검증한 principal만 소유자로 사용하며,
+클라이언트가 보낸 `X-User-Id`나 request body의 `ownerId`를 신뢰하지 않는다.
 
 ## 저장, 버전과 역방향 절차
 
-현재 프로젝트에는 DB, 계정 provider 또는 마이그레이션 도구가 없다. 따라서
-`CustomPieceRepository` 경계 뒤의 격리된 인메모리 저장소가 시제품
-구현이다. 서버 재시작 시 커스텀 기물과 업로드 이미지가 사라지는 것이
-알려진 제한이다. 브라우저 저장소에는 영속화하지 않는다.
+`DATABASE_URL`의 PostgreSQL에 커스텀 기물의 모든 불변 버전과 업로드
+이미지 바이트를 저장한다. 서버 시작 시 `sqlx` migration을 적용한다.
+`APP_ENV=prod`인데 `DATABASE_URL`이 없으면 휘발성 저장소로 강등하지 않고
+서버 시작을 차단한다. 로컬/테스트에서만 DB 미설정 시 인메모리를 허용한다.
 
 정의 수정은 기존 레코드를 덮어쓰지 않고 단조 증가하는 불변 버전을 추가한다.
 서버는 엔진이 원문으로 계산한 콘텐츠 해시를 저장하며 클라이언트 버전/해시는
 입력으로 받지 않는다. 삭제는 최신 기물을 목록과 최신 조회에서 숨기는 soft
 delete이며 과거 버전은 버전 API와 이후 덱/게임 복원을 위해 보존한다.
 
-현 단계에는 적용할 DB schema가 없으므로 DB migration 명령도 없다. 역방향
-절차는 새 라우트를 제거하고 `AppState.custom_pieces`를 제거하는 것이며 기존
-게임/방 데이터 형식에는 migration이 없다. 실제 DB adapter를 추가하는
-단계에서는 이 문서의 필드를 immutable version 및 image owner 테이블로
-옮기고 up/down migration을 함께 추가해야 한다.
+스키마는 `server/migrations/20260819000000_custom_piece_storage.sql`에 있다.
+기존 저장소는 프로세스 메모리뿐이어서 파일에서 이관할 데이터가 없다.
+아직 실행 중인 구버전 서버의 메모리 데이터를 자동 이관하는 경로는 제공하지 않는다.
 
 ## API
 

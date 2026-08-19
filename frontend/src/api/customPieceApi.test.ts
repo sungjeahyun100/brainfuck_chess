@@ -48,12 +48,13 @@ test('error categories keep conflict, image and execution failures distinct', ()
   assert.equal(classifyCustomPieceError(503, 'unavailable'), 'server')
 })
 
-test('CRUD requests include prototype principal and optimistic version', async () => {
+test('CRUD requests rely on the server session and include optimistic version', async () => {
   const calls = mockJson({ ...draft, id: 'piece-1', version: 2 })
   await customPieceApi.update('piece-1', draft, 1)
   assert.equal(calls[0]?.url, '/api/custom-pieces/piece-1')
   assert.equal(calls[0]?.init?.method, 'PUT')
-  assert.equal((calls[0]?.init?.headers as Record<string, string>)['X-User-Id'], 'browser-prototype-user')
+  assert.equal((calls[0]?.init?.headers as Record<string, string>)['X-User-Id'], undefined)
+  assert.equal(calls[0]?.init?.credentials, 'same-origin')
   assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), { ...draft, expected_version: 1 })
 
   mockJson({}, 204)
@@ -148,4 +149,30 @@ test('structured API failures are mapped to a safe typed error', async () => {
       && error.kind === 'conflict'
       && error.status === 409,
   )
+})
+
+test('an expired session is renewed once before retrying the request', async () => {
+  const calls: string[] = []
+  let attempt = 0
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    const path = String(url)
+    calls.push(path)
+    if (path === '/api/auth/session') {
+      return new Response(JSON.stringify({ user_id: 'guest-test' }), { status: 200 })
+    }
+    attempt += 1
+    return attempt === 1
+      ? new Response(JSON.stringify({ code: 'authentication_required' }), { status: 401 })
+      : new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+  }) as typeof fetch
+
+  assert.deepEqual(await customPieceApi.list(), { items: [] })
+  assert.deepEqual(calls, [
+    '/api/custom-pieces',
+    '/api/auth/session',
+    '/api/custom-pieces',
+  ])
 })

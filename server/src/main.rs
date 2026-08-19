@@ -10,8 +10,11 @@ use std::collections::{HashMap, HashSet};
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
+mod account;
 mod app_state;
+mod auth;
 mod custom_piece;
+mod request_guard;
 mod routes;
 mod stores;
 
@@ -30,8 +33,8 @@ use brainfuck_chess_engine::{
     },
     pieces::default_pieces::all_default_definitions,
     rules::{
-        calculate_deck_score, calculate_score_limit, create_board, get_base_zone_squares,
-        validate_deck,
+        board_map_definition, calculate_deck_score, calculate_score_limit, create_board,
+        create_board_with_variant, get_base_zone_squares, standard_board_map_id, validate_deck,
     },
     types::*,
 };
@@ -41,6 +44,10 @@ use brainfuck_chess_engine::{
 #[derive(Deserialize)]
 struct CreateGameRequest {
     board_size: i32,
+    #[serde(default)]
+    map_id: Option<String>,
+    #[serde(default)]
+    board_variant: BoardVariant,
     white_deck: PlayerDeckSpec,
     black_deck: PlayerDeckSpec,
 }
@@ -49,6 +56,9 @@ struct CreateGameRequest {
 struct MultiplayerRoom {
     id: String,
     board_size: i32,
+    map_id: String,
+    #[serde(default)]
+    board_variant: BoardVariant,
     host_side: PlayerId,
     guest_side: PlayerId,
     #[serde(skip_serializing)]
@@ -69,9 +79,37 @@ struct MultiplayerRoom {
 #[derive(Deserialize)]
 struct CreateRoomRequest {
     board_size: i32,
+    #[serde(default)]
+    map_id: Option<String>,
+    #[serde(default)]
+    board_variant: BoardVariant,
     host_side: PlayerId,
     client_id: String,
     deck: PlayerDeckSpec,
+}
+
+fn resolve_board_map(
+    map_id: Option<&str>,
+    board_size: i32,
+    legacy_variant: BoardVariant,
+) -> Result<(String, BoardVariant), String> {
+    if let Some(map_id) = map_id {
+        let map = board_map_definition(map_id)
+            .ok_or_else(|| format!("지원하지 않는 맵입니다: {map_id}"))?;
+        if map.board_size != board_size {
+            return Err("맵과 덱의 보드 크기가 다릅니다.".into());
+        }
+        return Ok((map.id.into(), map.variant));
+    }
+    if legacy_variant == BoardVariant::CentralHighGround {
+        if board_size != 12 {
+            return Err("중앙 고지 보드는 12x12에서만 사용할 수 있습니다.".into());
+        }
+        return Ok(("central-high-ground-12x12".into(), legacy_variant));
+    }
+    let id = standard_board_map_id(board_size)
+        .ok_or_else(|| "지원하지 않는 보드 크기입니다.".to_string())?;
+    Ok((id.into(), BoardVariant::Plain))
 }
 
 #[derive(Deserialize)]
@@ -508,9 +546,28 @@ fn build_player_deck(
     Ok(deck)
 }
 
+#[cfg(test)]
 fn build_game_state(
     id: String,
     board_size: i32,
+    white_spec: &PlayerDeckSpec,
+    black_spec: &PlayerDeckSpec,
+    packages: Vec<CustomPiecePackage>,
+) -> Result<GameState, String> {
+    build_game_state_with_variant(
+        id,
+        board_size,
+        BoardVariant::Plain,
+        white_spec,
+        black_spec,
+        packages,
+    )
+}
+
+fn build_game_state_with_variant(
+    id: String,
+    board_size: i32,
+    board_variant: BoardVariant,
     white_spec: &PlayerDeckSpec,
     black_spec: &PlayerDeckSpec,
     packages: Vec<CustomPiecePackage>,
@@ -519,7 +576,7 @@ fn build_game_state(
         return Err("보드 크기는 최소 8이어야 합니다.".into());
     }
 
-    let board = create_board(board_size);
+    let board = create_board_with_variant(board_size, board_variant)?;
     let defs: HashMap<String, PieceDefinition> = all_default_definitions()
         .into_iter()
         .map(|d| (d.id.clone(), d))
@@ -860,7 +917,7 @@ fn materialize_neutral_deck(
     }
 }
 
-fn resolve_custom_packages(
+async fn resolve_custom_packages(
     app: &AppState,
     decks: &[(&str, &PlayerDeckSpec)],
 ) -> Result<Vec<CustomPiecePackage>, String> {
@@ -893,6 +950,8 @@ fn resolve_custom_packages(
             let package = app
                 .custom_pieces
                 .runtime_package(owner, custom_piece_id, *version)
+                .await
+                .map_err(|_| "커스텀 기물 저장소를 사용할 수 없습니다.".to_string())?
                 .ok_or_else(|| "커스텀 기물이 없거나 사용할 권한이 없습니다.".to_string())?;
             if package.content_hash != *content_hash
                 || package.exposed_piece_key != *exposed_piece_key
@@ -928,7 +987,7 @@ fn generate_room_id(rooms: &RoomStore) -> String {
         .to_uppercase()
 }
 
-fn start_room_game(
+async fn start_room_game(
     room: &mut MultiplayerRoom,
     app: &AppState,
 ) -> Result<Option<GameResponse>, String> {
@@ -969,10 +1028,11 @@ fn start_room_game(
         .as_deref()
         .ok_or_else(|| "참가자 인증 정보가 없습니다.".to_string())?;
     let packages =
-        resolve_custom_packages(app, &[(host_owner, host_spec), (guest_owner, guest_spec)])?;
-    let state = build_game_state(
+        resolve_custom_packages(app, &[(host_owner, host_spec), (guest_owner, guest_spec)]).await?;
+    let state = build_game_state_with_variant(
         game_id.clone(),
         room.board_size,
+        room.board_variant,
         white_deck,
         black_deck,
         packages,
@@ -987,7 +1047,10 @@ fn start_room_game(
 
 #[tokio::main]
 async fn main() {
-    let state = AppState::in_memory();
+    let environment = app_env();
+    let state = AppState::from_env(environment)
+        .await
+        .unwrap_or_else(|error| panic!("server startup blocked: {error}"));
 
     // Static frontend directory — populated at Docker build time.
     // Falls back gracefully if the directory doesn't exist (dev mode).
@@ -1003,7 +1066,10 @@ async fn main() {
         .route_service("/", ServeFile::new(&index_fallback))
         .route("/config.js", get(config_js))
         .nest("/api", api)
-        .fallback_service(spa);
+        .fallback_service(spa)
+        .layer(axum::middleware::from_fn(
+            request_guard::block_sensitive_paths,
+        ));
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".into());
     let addr = format!("0.0.0.0:{}", port);
@@ -1071,24 +1137,42 @@ async fn get_piece_catalog() -> Json<HashMap<PieceTypeId, PieceCatalogMetadata>>
 }
 
 fn app_env() -> &'static str {
-    match std::env::var("APP_ENV").as_deref() {
-        Ok("local") => "local",
-        Ok("test") => "test",
-        Ok("prod") => "prod",
+    let configured = std::env::var("APP_ENV").ok();
+    resolve_app_env(configured.as_deref(), cfg!(debug_assertions))
+}
+
+fn resolve_app_env(configured: Option<&str>, debug_build: bool) -> &'static str {
+    match configured {
+        Some("local") => "local",
+        Some("test") => "test",
+        Some("prod") => "prod",
+        None if debug_build => "local",
         _ => "prod",
     }
 }
 
 async fn config_js() -> impl IntoResponse {
+    let config = serde_json::json!({
+        "appEnv": app_env(),
+        "firebase": {
+            "apiKey": std::env::var("FIREBASE_API_KEY").unwrap_or_default(),
+            "authDomain": std::env::var("FIREBASE_AUTH_DOMAIN").unwrap_or_default(),
+            "projectId": std::env::var("IDENTITY_PLATFORM_PROJECT_ID").unwrap_or_default(),
+            "appId": std::env::var("FIREBASE_APP_ID").unwrap_or_default(),
+        }
+    });
+    let serialized = serde_json::to_string(&config)
+        .unwrap_or_else(|_| "{\"appEnv\":\"prod\"}".into())
+        .replace('<', "\\u003c");
     (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        format!(
-            "window.APP_CONFIG = Object.freeze({{ appEnv: '{}' }});\n",
-            app_env()
-        ),
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        format!("window.APP_CONFIG = Object.freeze({serialized});\n"),
     )
 }
 
@@ -1097,21 +1181,26 @@ async fn create_game(
     headers: HeaderMap,
     Json(req): Json<CreateGameRequest>,
 ) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let owner = custom_piece::authenticated_owner(&headers).unwrap_or_default();
+    let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     let packages = resolve_custom_packages(
         &app,
         &[(&owner, &req.white_deck), (&owner, &req.black_deck)],
     )
+    .await
     .map_err(|error| {
         (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(ErrorResponse { error }),
         )
     })?;
+    let (_, board_variant) =
+        resolve_board_map(req.map_id.as_deref(), req.board_size, req.board_variant)
+            .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let id = Uuid::new_v4().to_string();
-    let state = build_game_state(
+    let state = build_game_state_with_variant(
         id.clone(),
         req.board_size,
+        board_variant,
         &req.white_deck,
         &req.black_deck,
         packages,
@@ -1126,7 +1215,7 @@ async fn create_room(
     headers: HeaderMap,
     Json(req): Json<CreateRoomRequest>,
 ) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
-    let owner = custom_piece::authenticated_owner(&headers).unwrap_or_default();
+    let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     if req.board_size < 8 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1135,6 +1224,11 @@ async fn create_room(
             }),
         ));
     }
+    let (map_id, board_variant) =
+        resolve_board_map(req.map_id.as_deref(), req.board_size, req.board_variant)
+            .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    create_board_with_variant(req.board_size, board_variant)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     if req.host_side != "white" && req.host_side != "black" {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1148,6 +1242,8 @@ async fn create_room(
     let room = MultiplayerRoom {
         id: id.clone(),
         board_size: req.board_size,
+        map_id,
+        board_variant,
         guest_side: opponent_side(&req.host_side),
         host_client_id: req.client_id,
         guest_client_id: None,
@@ -1188,7 +1284,7 @@ async fn join_room(
     Path(id): Path<String>,
     Json(req): Json<JoinRoomRequest>,
 ) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let owner = custom_piece::authenticated_owner(&headers).unwrap_or_default();
+    let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     let room_id = id.to_uppercase();
     let mut room = app.rooms.get_mut(&room_id).ok_or_else(|| {
         (
@@ -1228,6 +1324,7 @@ async fn join_room(
     room.guest_owner_id = Some(owner);
     room.guest_ready = true;
     let response = start_room_game(room.value_mut(), &app)
+        .await
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
         .ok_or_else(|| {
             (
@@ -1246,7 +1343,7 @@ async fn select_room_deck(
     Path(id): Path<String>,
     Json(req): Json<SelectDeckRequest>,
 ) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
-    let owner = custom_piece::authenticated_owner(&headers).unwrap_or_default();
+    let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     let room_id = id.to_uppercase();
     let mut room = app.rooms.get_mut(&room_id).ok_or_else(|| {
         (
@@ -1348,6 +1445,7 @@ async fn ready_room(
     }
 
     start_room_game(room.value_mut(), &app)
+        .await
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     Ok(Json(room.clone()))
 }
@@ -1828,7 +1926,7 @@ async fn get_lab_piece_options(
     let packages = if req.custom_pieces.is_empty() {
         Vec::new()
     } else {
-        let owner = custom_piece::authenticated_owner(&headers)
+        let owner = custom_piece::authenticated_owner(&app, &headers)
             .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
         let deck = PlayerDeckSpec {
             starting: req
@@ -1847,6 +1945,7 @@ async fn get_lab_piece_options(
             pocket: Vec::new(),
         };
         resolve_custom_packages(&app, &[(owner.as_str(), &deck)])
+            .await
             .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
     };
     let state = build_lab_game_state(&req, &packages)
@@ -1877,9 +1976,7 @@ async fn get_lab_piece_options(
     } else {
         req.move_option_id
             .as_deref()
-            .map(|ability_id| {
-                generate_piece_legal_ability_actions(&state, &piece_id, ability_id)
-            })
+            .map(|ability_id| generate_piece_legal_ability_actions(&state, &piece_id, ability_id))
             .unwrap_or_default()
     };
     let mut seen_moves = HashSet::new();
@@ -1924,9 +2021,7 @@ async fn get_lab_piece_options(
                         available: cooldown_remaining == 0
                             && (option.execution_mode == MoveOptionExecutionMode::MoveModifier
                                 || !generate_piece_legal_ability_actions(
-                                    &state,
-                                    &piece_id,
-                                    &option.id,
+                                    &state, &piece_id, &option.id,
                                 )
                                 .is_empty()),
                         kind: option.kind,
@@ -1962,8 +2057,43 @@ async fn get_lab_piece_options(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dashmap::DashMap;
-    use std::sync::Arc;
+
+    #[test]
+    fn missing_app_env_is_local_only_for_debug_builds() {
+        assert_eq!(resolve_app_env(None, true), "local");
+        assert_eq!(resolve_app_env(None, false), "prod");
+        assert_eq!(resolve_app_env(Some("prod"), true), "prod");
+        assert_eq!(resolve_app_env(Some("typo"), true), "prod");
+    }
+
+    #[test]
+    fn map_id_selects_variant_and_rejects_size_mismatch() {
+        assert_eq!(
+            resolve_board_map(Some("central-high-ground-12x12"), 12, BoardVariant::Plain),
+            Ok((
+                "central-high-ground-12x12".into(),
+                BoardVariant::CentralHighGround
+            )),
+        );
+        assert!(
+            resolve_board_map(Some("central-high-ground-12x12"), 8, BoardVariant::Plain,).is_err()
+        );
+    }
+
+    #[test]
+    fn legacy_requests_resolve_to_the_equivalent_map() {
+        assert_eq!(
+            resolve_board_map(None, 8, BoardVariant::Plain),
+            Ok(("standard-8x8".into(), BoardVariant::Plain)),
+        );
+        assert_eq!(
+            resolve_board_map(None, 12, BoardVariant::CentralHighGround),
+            Ok((
+                "central-high-ground-12x12".into(),
+                BoardVariant::CentralHighGround
+            )),
+        );
+    }
 
     fn built_in(piece_type: &str) -> DeckPieceRef {
         DeckPieceRef::BuiltIn {
@@ -2040,11 +2170,7 @@ mod tests {
         let mut state =
             build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
         remove_front_line_after_validation(&mut state);
-        let app = AppState {
-            games: Arc::new(DashMap::new()),
-            rooms: Arc::new(DashMap::new()),
-            custom_pieces: Default::default(),
-        };
+        let app = AppState::in_memory();
         app.games.insert(game_id.clone(), state);
         (app, game_id)
     }
@@ -2208,11 +2334,7 @@ mod tests {
 
     #[tokio::test]
     async fn lab_piece_options_uses_temporary_state_without_storing_game() {
-        let app = AppState {
-            games: Arc::new(DashMap::new()),
-            rooms: Arc::new(DashMap::new()),
-            custom_pieces: Default::default(),
-        };
+        let app = AppState::in_memory();
         let req = LabPieceOptionsRequest {
             board_size: 8,
             selected_piece_id: "lab_white_rook_1".into(),
@@ -2499,11 +2621,7 @@ mod tests {
         let mut state =
             build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
         remove_front_line_after_validation(&mut state);
-        let app = AppState {
-            games: Arc::new(DashMap::new()),
-            rooms: Arc::new(DashMap::new()),
-            custom_pieces: Default::default(),
-        };
+        let app = AppState::in_memory();
         app.games.insert(game_id.clone(), state);
 
         let response = match submit_action(
