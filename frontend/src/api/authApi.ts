@@ -1,5 +1,6 @@
 export interface AuthUser {
   id: string
+  publicId: string | null
   displayName: string | null
   avatarUrl: string | null
 }
@@ -49,6 +50,13 @@ export const authApi = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ idToken, importGuestData }),
   }).then(parse<AuthStateResponse & { importedGuestData: boolean }>),
+
+  updateProfile: (publicId: string) => fetch('/api/auth/profile', {
+    method: 'PATCH',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ publicId }),
+  }).then(parse<{ user: AuthUser }>),
 
   logout: () => fetch('/api/auth/logout', {
     method: 'POST',

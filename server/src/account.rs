@@ -9,12 +9,32 @@ use uuid::Uuid;
 
 use crate::stores::CustomPieceStore;
 
+const RESERVED_PUBLIC_IDS: &[&str] = &[
+    "admin",
+    "administrator",
+    "api",
+    "deckchess",
+    "mod",
+    "moderator",
+    "staff",
+    "support",
+    "system",
+];
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UserProfile {
     pub(crate) id: String,
+    pub(crate) public_id: Option<String>,
     pub(crate) display_name: Option<String>,
     pub(crate) avatar_url: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AccountUpdateError {
+    NotFound,
+    PublicIdTaken,
+    Unavailable,
 }
 
 #[derive(Clone, Debug)]
@@ -46,6 +66,11 @@ pub(crate) enum LoginResult {
 pub(crate) trait AccountRepository: Send + Sync {
     async fn ensure_guest(&self, user_id: &str) -> Result<(), &'static str>;
     async fn authenticated_user(&self, user_id: &str) -> Result<Option<UserProfile>, &'static str>;
+    async fn update_public_id(
+        &self,
+        user_id: &str,
+        public_id: &str,
+    ) -> Result<UserProfile, AccountUpdateError>;
     async fn complete_google_login(
         &self,
         current_user_id: &str,
@@ -80,6 +105,7 @@ impl AccountRepository for InMemoryAccountRepository {
             .or_insert_with(|| StoredUser {
                 profile: UserProfile {
                     id: user_id.to_owned(),
+                    public_id: None,
                     display_name: None,
                     avatar_url: None,
                 },
@@ -96,6 +122,29 @@ impl AccountRepository for InMemoryAccountRepository {
             .get(user_id)
             .filter(|user| user.registered)
             .map(|user| user.profile.clone()))
+    }
+
+    async fn update_public_id(
+        &self,
+        user_id: &str,
+        public_id: &str,
+    ) -> Result<UserProfile, AccountUpdateError> {
+        let mut users = self
+            .users
+            .write()
+            .map_err(|_| AccountUpdateError::Unavailable)?;
+        if users
+            .iter()
+            .any(|(id, user)| id != user_id && user.profile.public_id.as_deref() == Some(public_id))
+        {
+            return Err(AccountUpdateError::PublicIdTaken);
+        }
+        let user = users
+            .get_mut(user_id)
+            .filter(|user| user.registered)
+            .ok_or(AccountUpdateError::NotFound)?;
+        user.profile.public_id = Some(public_id.to_owned());
+        Ok(user.profile.clone())
     }
 
     async fn complete_google_login(
@@ -140,6 +189,7 @@ impl AccountRepository for InMemoryAccountRepository {
                 .or_insert_with(|| StoredUser {
                     profile: UserProfile {
                         id: target_id.clone(),
+                        public_id: None,
                         display_name: None,
                         avatar_url: None,
                     },
@@ -207,7 +257,7 @@ impl AccountRepository for PostgresAccountRepository {
 
     async fn authenticated_user(&self, user_id: &str) -> Result<Option<UserProfile>, &'static str> {
         let row = sqlx::query(
-            "SELECT id, display_name, avatar_url FROM users \
+            "SELECT id, public_id, display_name, avatar_url FROM users \
              WHERE id = $1 AND account_kind = 'registered' AND status = 'active'",
         )
         .bind(user_id)
@@ -215,6 +265,38 @@ impl AccountRepository for PostgresAccountRepository {
         .await
         .map_err(|_| "unavailable")?;
         row.map(profile_from_row).transpose()
+    }
+
+    async fn update_public_id(
+        &self,
+        user_id: &str,
+        public_id: &str,
+    ) -> Result<UserProfile, AccountUpdateError> {
+        let now = timestamp().map_err(|_| AccountUpdateError::Unavailable)?;
+        let row = sqlx::query(
+            "UPDATE users SET public_id = $2, updated_at = $3 \
+             WHERE id = $1 AND account_kind = 'registered' AND status = 'active' \
+             RETURNING id, public_id, display_name, avatar_url",
+        )
+        .bind(user_id)
+        .bind(public_id)
+        .bind(now)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| {
+            if error
+                .as_database_error()
+                .and_then(|database_error| database_error.code())
+                .as_deref()
+                == Some("23505")
+            {
+                AccountUpdateError::PublicIdTaken
+            } else {
+                AccountUpdateError::Unavailable
+            }
+        })?;
+        profile_from_row(row.ok_or(AccountUpdateError::NotFound)?)
+            .map_err(|_| AccountUpdateError::Unavailable)
     }
 
     async fn complete_google_login(
@@ -320,11 +402,12 @@ impl AccountRepository for PostgresAccountRepository {
         .await
         .map_err(|_| "unavailable")?;
 
-        let row = sqlx::query("SELECT id, display_name, avatar_url FROM users WHERE id = $1")
-            .bind(&target_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|_| "unavailable")?;
+        let row =
+            sqlx::query("SELECT id, public_id, display_name, avatar_url FROM users WHERE id = $1")
+                .bind(&target_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|_| "unavailable")?;
         let user = profile_from_row(row)?;
         tx.commit().await.map_err(|_| "unavailable")?;
         Ok(LoginResult::Complete {
@@ -337,9 +420,25 @@ impl AccountRepository for PostgresAccountRepository {
 fn profile_from_row(row: sqlx::postgres::PgRow) -> Result<UserProfile, &'static str> {
     Ok(UserProfile {
         id: row.try_get("id").map_err(|_| "unavailable")?,
+        public_id: row.try_get("public_id").map_err(|_| "unavailable")?,
         display_name: row.try_get("display_name").map_err(|_| "unavailable")?,
         avatar_url: row.try_get("avatar_url").map_err(|_| "unavailable")?,
     })
+}
+
+pub(crate) fn normalize_public_id(value: &str) -> Result<String, ()> {
+    let normalized = value.trim().to_ascii_lowercase();
+    let bytes = normalized.as_bytes();
+    if !(3..=20).contains(&bytes.len())
+        || !bytes[0].is_ascii_alphanumeric()
+        || !bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
+        || RESERVED_PUBLIC_IDS.contains(&normalized.as_str())
+    {
+        return Err(());
+    }
+    Ok(normalized)
 }
 
 #[cfg(test)]
@@ -428,5 +527,54 @@ mod tests {
         assert!(imported_guest_data);
         assert!(!custom.has_owned_data("guest-c").await.unwrap());
         assert!(custom.has_owned_data("account-a").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn public_id_is_unique_and_does_not_replace_the_internal_id() {
+        let custom = Arc::new(InMemoryCustomPieceRepository::default());
+        let repository = InMemoryAccountRepository::new(custom);
+        repository
+            .complete_google_login("account-a", &google("google-a"), None)
+            .await
+            .unwrap();
+        repository
+            .complete_google_login("account-b", &google("google-b"), None)
+            .await
+            .unwrap();
+
+        let updated = repository
+            .update_public_id("account-a", "deck_player")
+            .await
+            .unwrap();
+        assert_eq!(updated.id, "account-a");
+        assert_eq!(updated.public_id.as_deref(), Some("deck_player"));
+        assert!(matches!(
+            repository
+                .update_public_id("account-b", "deck_player")
+                .await,
+            Err(AccountUpdateError::PublicIdTaken)
+        ));
+    }
+
+    #[test]
+    fn public_id_validation_normalizes_and_rejects_unsafe_values() {
+        assert_eq!(
+            normalize_public_id("  Deck_Player  ").unwrap(),
+            "deck_player"
+        );
+        for invalid in [
+            "ab",
+            "_player",
+            "player-name",
+            "한글id",
+            "player name",
+            "admin",
+            "support",
+        ] {
+            assert!(
+                normalize_public_id(invalid).is_err(),
+                "expected invalid: {invalid}"
+            );
+        }
     }
 }

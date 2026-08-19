@@ -1,4 +1,4 @@
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 
 use crate::app_state::AppState;
@@ -13,6 +13,7 @@ pub(crate) fn api(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/auth/session", post(crate::auth::session))
         .route("/auth/me", get(crate::auth::me))
+        .route("/auth/profile", patch(crate::auth::update_profile))
         .route("/auth/google", post(crate::auth::google_login))
         .route("/auth/logout", post(crate::auth::logout))
         .route("/piece-scores", get(get_piece_scores))

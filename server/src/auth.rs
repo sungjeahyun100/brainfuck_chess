@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use uuid::Uuid;
 
-use crate::account::{LoginResult, UserProfile, VerifiedIdentity};
+use crate::account::{
+    normalize_public_id, AccountUpdateError, LoginResult, UserProfile, VerifiedIdentity,
+};
 use crate::app_state::AppState;
 
 const COOKIE_NAME: &str = "deck_chess_session";
@@ -499,6 +501,63 @@ pub(crate) async fn me(State(app): State<AppState>, headers: HeaderMap) -> Respo
         })
         .into_response(),
         Err(_) => auth_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "account_store_unavailable",
+            "계정 저장소를 사용할 수 없습니다.",
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UpdateProfileRequest {
+    public_id: String,
+}
+
+#[derive(Serialize)]
+struct UpdateProfileResponse {
+    user: UserProfile,
+}
+
+pub(crate) async fn update_profile(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<UpdateProfileRequest>,
+) -> Response {
+    if app.auth.validate_origin(&headers).is_err() {
+        return auth_error(
+            StatusCode::FORBIDDEN,
+            "origin_rejected",
+            "요청 origin이 허용되지 않습니다.",
+        );
+    }
+    let Ok(user_id) = app.auth.authenticate(&headers) else {
+        return auth_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "로그인이 필요합니다.",
+        );
+    };
+    let Ok(public_id) = normalize_public_id(&input.public_id) else {
+        return auth_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_public_id",
+            "ID는 예약어를 제외한 영문 소문자, 숫자, 밑줄 3~20자이며 첫 글자는 영문 또는 숫자여야 합니다.",
+        );
+    };
+    match app.accounts.update_public_id(&user_id, &public_id).await {
+        Ok(user) => Json(UpdateProfileResponse { user }).into_response(),
+        Err(AccountUpdateError::NotFound) => auth_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "로그인이 필요합니다.",
+        ),
+        Err(AccountUpdateError::PublicIdTaken) => auth_error(
+            StatusCode::CONFLICT,
+            "public_id_taken",
+            "이미 사용 중인 ID입니다.",
+        ),
+        Err(AccountUpdateError::Unavailable) => auth_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "account_store_unavailable",
             "계정 저장소를 사용할 수 없습니다.",

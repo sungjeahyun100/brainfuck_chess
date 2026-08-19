@@ -32,6 +32,9 @@ Google email은 user ID가 아니다. 모든 소유권은 Deck Chess `users.id`�
 - 기존 account에 연결된 identity로 login하고 guest data가 있으면 backend은 `guest_import_required` 409를 반환한다.
 - 가져오기를 선택해야만 모든 immutable version과 image ownership을 하나의 PostgreSQL transaction에서 이전한다.
 - 가져오지 않으면 guest row/data를 삭제하지 않는다. 단 account cookie로 교체된 후 해당 guest를 다시 열는 UI는 현재 없으므로, 기존 cookie/browser profile이 없으면 접근하기 어렵다.
+- `users.id`는 세션과 소유권 FK가 참조하는 내부 식별자이므로 사용자 설정에서 변경하지 않는다.
+- 사용자가 변경하는 개인 ID는 `users.public_id`에 별도로 저장한다. 영문 소문자, 숫자, 밑줄 3~20자이며 첫 글자는 영문 또는 숫자여야 하고, 시스템 예약어와 중복 ID는 허용하지 않는다.
+- 개인 ID 변경은 로그인된 동일 origin 요청인 `PATCH /api/auth/profile`로만 처리한다.
 
 ## 환경 변수
 

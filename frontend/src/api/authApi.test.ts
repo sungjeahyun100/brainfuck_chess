@@ -46,3 +46,22 @@ test('logout is a server request rather than a local-only state change', async (
   assert.equal(request?.method, 'POST')
   assert.equal(request?.credentials, 'same-origin')
 })
+
+test('profile update sends only the normalized public ID', async () => {
+  let url = ''
+  let request: RequestInit | undefined
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    url = String(input)
+    request = init
+    return new Response(JSON.stringify({
+      user: { id: 'internal-user', publicId: 'deck_player', displayName: 'Player', avatarUrl: null },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+
+  await authApi.updateProfile('deck_player')
+
+  assert.equal(url, '/api/auth/profile')
+  assert.equal(request?.method, 'PATCH')
+  assert.equal(request?.credentials, 'same-origin')
+  assert.deepEqual(JSON.parse(String(request?.body)), { publicId: 'deck_player' })
+})
