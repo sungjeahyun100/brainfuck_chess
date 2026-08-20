@@ -45,14 +45,20 @@ impl AuthState {
                     "AUTH_SIGNING_KEY must contain at least {MIN_SIGNING_KEY_BYTES} bytes"
                 ))
             }
-            Err(_) if app_env != "prod" => b"deck-chess-local-test-signing-key-only".to_vec(),
-            Err(_) => return Err("AUTH_SIGNING_KEY is required in production".into()),
+            Err(_) if app_env == "local" => b"deck-chess-local-test-signing-key-only".to_vec(),
+            Err(_) => {
+                return Err(format!(
+                    "AUTH_SIGNING_KEY is required for APP_ENV={app_env}"
+                ))
+            }
         };
         let project_id = std::env::var("IDENTITY_PLATFORM_PROJECT_ID")
             .ok()
             .filter(|value| !value.trim().is_empty());
-        if app_env == "prod" && project_id.is_none() {
-            return Err("IDENTITY_PLATFORM_PROJECT_ID is required in production".into());
+        if app_env != "local" && project_id.is_none() {
+            return Err(format!(
+                "IDENTITY_PLATFORM_PROJECT_ID is required for APP_ENV={app_env}"
+            ));
         }
         let token_verifier: Arc<dyn IdTokenVerifier> = match project_id {
             Some(project_id) => Arc::new(GoogleIdTokenVerifier::new(project_id)?),
@@ -65,7 +71,7 @@ impl AuthState {
             .unwrap_or(DEFAULT_SESSION_TTL_SECONDS);
         Ok(Self {
             signing_key: Arc::from(signing_key),
-            secure_cookie: app_env == "prod",
+            secure_cookie: app_env != "local",
             session_ttl: Duration::from_secs(session_ttl),
             token_verifier,
         })
@@ -790,9 +796,15 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::HOST, HeaderValue::from_static("deck.example"));
         headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
-        headers.insert(header::ORIGIN, HeaderValue::from_static("https://deck.example"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://deck.example"),
+        );
         assert!(auth.validate_origin(&headers).is_ok());
-        headers.insert(header::ORIGIN, HeaderValue::from_static("https://evil.example"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://evil.example"),
+        );
         assert!(auth.validate_origin(&headers).is_err());
         headers.remove(header::ORIGIN);
         assert!(auth.validate_origin(&headers).is_err());

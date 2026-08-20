@@ -3,6 +3,7 @@ use crate::{
     account::{InMemoryAccountRepository, PostgresAccountRepository},
     auth::AuthState,
     custom_piece::{InMemoryCustomPieceRepository, PostgresCustomPieceRepository},
+    database::{verify_database_contract, DataSchema},
 };
 use sqlx::postgres::PgPoolOptions;
 
@@ -31,6 +32,7 @@ impl AppState {
 
     pub(crate) async fn from_env(app_env: &str) -> Result<Self, String> {
         let auth = AuthState::from_env(app_env)?;
+        let data_schema = DataSchema::for_app_env(app_env)?;
         let (custom_pieces, accounts): (CustomPieceStore, AccountStore) =
             match std::env::var("DATABASE_URL") {
                 Ok(database_url) => {
@@ -40,16 +42,16 @@ impl AppState {
                         .connect(&database_url)
                         .await
                         .map_err(|error| format!("failed to connect to PostgreSQL: {error}"))?;
-                    sqlx::migrate!("./migrations")
-                        .run(&pool)
-                        .await
-                        .map_err(|error| format!("failed to run database migrations: {error}"))?;
+                    verify_database_contract(&pool, app_env, data_schema).await?;
                     (
-                        std::sync::Arc::new(PostgresCustomPieceRepository::from_pool(pool.clone())),
-                        std::sync::Arc::new(PostgresAccountRepository::new(pool)),
+                        std::sync::Arc::new(PostgresCustomPieceRepository::from_pool(
+                            pool.clone(),
+                            data_schema,
+                        )),
+                        std::sync::Arc::new(PostgresAccountRepository::new(pool, data_schema)),
                     )
                 }
-                Err(_) if app_env != "prod" => {
+                Err(_) if app_env == "local" => {
                     eprintln!(
                         "DATABASE_URL is not set; using non-persistent local custom-piece storage"
                     );
@@ -59,7 +61,7 @@ impl AppState {
                         std::sync::Arc::new(InMemoryAccountRepository::new(custom_pieces.clone()));
                     (custom_pieces, accounts)
                 }
-                Err(_) => return Err("DATABASE_URL is required in production".into()),
+                Err(_) => return Err(format!("DATABASE_URL is required for APP_ENV={app_env}")),
             };
         Ok(Self {
             games: Default::default(),

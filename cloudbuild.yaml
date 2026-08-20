@@ -39,6 +39,8 @@ steps:
       # instance so create/find/join requests see the same room store.
       - '--max-instances'
       - '1'
+      - '--min-instances'
+      - '0'
       - '--allow-unauthenticated'
       - '--set-env-vars'
       - 'APP_ENV=$_APP_ENV,IDENTITY_PLATFORM_PROJECT_ID=$PROJECT_ID,FIREBASE_API_KEY=$_FIREBASE_API_KEY,FIREBASE_AUTH_DOMAIN=$_FIREBASE_AUTH_DOMAIN,FIREBASE_APP_ID=$_FIREBASE_APP_ID'
@@ -49,8 +51,11 @@ substitutions:
   # Override these in the Cloud Build trigger settings
   _IMAGE_NAME: 'gcr.io/$PROJECT_ID/brainfuck-chess-server'
   _SERVICE_NAME: 'brainfuck-chess'
+  # The test trigger currently deploys in europe-west1 and must override this.
   _REGION: 'us-central1'
   _APP_ENV: 'prod'
+  # Test must override this with its test_app login Secret. Never share the
+  # production login URL merely because both services use the same database.
   _DATABASE_URL_SECRET: 'deck-chess-database-url'
   _AUTH_SIGNING_KEY_SECRET: 'deck-chess-auth-signing-key'
   _CLOUD_SQL_INSTANCE: '$PROJECT_ID:us-central1:deck-chess-postgres'

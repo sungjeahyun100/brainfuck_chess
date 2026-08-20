@@ -14,6 +14,7 @@ mod account;
 mod app_state;
 mod auth;
 mod custom_piece;
+mod database;
 mod request_guard;
 mod routes;
 mod stores;
