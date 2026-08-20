@@ -107,4 +107,42 @@ mod tests {
         assert_eq!(DataSchema::for_app_env("local"), Ok(DataSchema::Test));
         assert!(DataSchema::for_app_env("production").is_err());
     }
+
+    #[tokio::test]
+    #[ignore = "requires disposable PostgreSQL admin/prod/test URLs"]
+    async fn postgres_contract_rejects_opposite_schema_usage() {
+        let admin_url =
+            std::env::var("TEST_ADMIN_DATABASE_URL").expect("TEST_ADMIN_DATABASE_URL is required");
+        let prod_url =
+            std::env::var("TEST_PROD_DATABASE_URL").expect("TEST_PROD_DATABASE_URL is required");
+        let test_url =
+            std::env::var("TEST_APP_DATABASE_URL").expect("TEST_APP_DATABASE_URL is required");
+        let admin = PgPool::connect(&admin_url).await.unwrap();
+        let prod = PgPool::connect(&prod_url).await.unwrap();
+        let test = PgPool::connect(&test_url).await.unwrap();
+
+        verify_database_contract(&prod, "prod", DataSchema::Prod)
+            .await
+            .unwrap();
+        verify_database_contract(&test, "test", DataSchema::Test)
+            .await
+            .unwrap();
+
+        sqlx::query("GRANT USAGE ON SCHEMA prod TO deck_chess_test")
+            .execute(&admin)
+            .await
+            .unwrap();
+        let rejected = verify_database_contract(&test, "test", DataSchema::Test).await;
+        let cleanup = sqlx::query("REVOKE USAGE ON SCHEMA prod FROM deck_chess_test")
+            .execute(&admin)
+            .await;
+        cleanup.expect("temporary permission must be revoked");
+        assert!(rejected
+            .unwrap_err()
+            .contains("can access forbidden schema prod"));
+
+        verify_database_contract(&test, "test", DataSchema::Test)
+            .await
+            .unwrap();
+    }
 }

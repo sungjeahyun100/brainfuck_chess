@@ -42,7 +42,7 @@ deck_chess database
 ## 비파괴적 전환 절차
 
 `server/db/admin/20260820010000_split_shared_prod_test.sql`은 애플리케이션
-runtime이 아니라 기존 table owner가 한 번 실행하는 관리자 migration이다.
+runtime이 아니라 Cloud SQL 관리자가 승인된 DB release에서 실행하는 migration이다.
 새 Cloud SQL instance를 만들지 않는다.
 
 1. Cloud SQL on-demand backup과 복구 가능 상태를 확인한다.
@@ -70,6 +70,20 @@ runtime이 아니라 기존 table owner가 한 번 실행하는 관리자 migrat
    `SET SCHEMA`를 적용하므로 table OID, PK, index, FK와 모든 row가 유지된다.
    이동 전후 row count가 다르거나 일부 table만 이동된 상태이면 전체를
    rollback한다. `DROP`, `TRUNCATE`, production row 복사는 수행하지 않는다.
+
+   이어서 ownership 안정화 migration을 같은 관리 release에서 실행한다.
+
+   ```bash
+   psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 \
+     -f server/db/admin/20260820020000_stabilize_schema_ownership.sql
+   ```
+
+   Cloud SQL built-in login은 `cloudsqlsuperuser` 멤버이므로 그 group role이
+   격리 schema를 소유하면 prod/test login이 반대 schema `USAGE`를 상속한다.
+   두 번째 migration은 runtime에 부여하지 않는
+   `deck_chess_schema_owner NOLOGIN` role로 세 schema와 test table ownership을
+   옮긴다. ownership 전환에 필요한 database `CREATE`는 같은 transaction
+   안에서만 부여하고 즉시 회수한다.
 
 5. script는 기존 production/test login에 아래 group role 하나씩을 연결한다.
    실제 password는 Secret Manager에서만 관리한다.
@@ -109,6 +123,40 @@ runtime이 아니라 기존 table owner가 한 번 실행하는 관리자 migrat
 
 test의 마지막 두 count는 최초 전환 직후 `0`이어야 한다. production의 앞 네
 count는 preflight와 같아야 한다.
+
+### 재실행 특성
+
+이 migration은 완전히 적용된 상태에 한해 idempotent하다. 다시 실행하면 schema,
+test table/index, role과 grant가 `IF NOT EXISTS` 또는 반복 가능한 GRANT/REVOKE로
+확인되고 기존 row를 복사하거나 변경하지 않는다. `public`과 target에 application
+table이 일부씩 존재하는 partial 상태는 명시적으로 거부한다. 재실행 가능하더라도
+운영에서는 migration history를 우회하는 일반 복구 수단으로 사용하지 않는다.
+
+### PostgreSQL 16 실행 검증
+
+2026-08-21에 production과 연결되지 않은 tmpfs Docker `postgres:16` 환경
+(PostgreSQL 16.15)에서 다음을 확인했다.
+
+- repository의 기존 migration 3개로 실제 `public` 구조를 생성
+- 사용자 2, identity 2, custom-piece version 3, BYTEA image 3 fixture 적용
+- 관리자 migration 최초 실행과 동일 파일 재실행 모두 commit 성공
+- 네 기존 table의 OID와 owner, constraint OID, index OID, column default 유지
+- FK가 이동 후 동일한 `shared.users` table OID를 참조
+- PK/unique/check constraint 유지, serial/identity sequence는 기존 구조에 없음
+- display name, 내부 ID, owner ID, 모든 row와 image BYTEA hex가 동일
+- test custom-piece/image row는 최초 전환 후 0
+- 의도적 충돌 table로 index 생성 단계 실패를 유도했을 때 네 기존 table이 모두
+  `public`으로 rollback되고 새 `shared`/`prod` schema도 남지 않음
+- migration transaction 종료 후 advisory lock이 남지 않음
+- 실제 `deck_chess`/`deck_chess_test` login으로 허용 경로 성공 및 반대 schema의
+  SELECT/INSERT/DELETE가 `permission denied for schema`로 거부됨
+- test role에 prod `USAGE`를 임시 부여하면 startup contract가 거부하고, REVOKE 후
+  다시 성공함
+- shared identity/nickname, prod/test 기물·BYTEA image, 양 환경 guest import 격리
+  PostgreSQL integration test 5개 통과
+
+검증 중 기존 persistence integration test가 합성 `shared.users` row를 cleanup하지
+않는 문제를 발견해 수정했다. 운영 DB에는 이 검증을 실행하지 않았다.
 
 ## 권한 계약
 
@@ -158,3 +206,30 @@ commit 후 code rollback이 필요하면 새 revision 대신 직전 revision으�
 되돌려야 할 때는 maintenance 상태에서 검증된 backup restore 또는 별도 승인된
 역방향 `SET SCHEMA` change를 사용한다. 애플리케이션이 자동으로 schema를 되돌리거나
 Cloud SQL을 재시작하지 않는다.
+
+긴급 역방향 전환은
+`server/db/admin/rollback_20260820010000_split_shared_prod_test.sql`을 사용한다.
+이 파일은 shared account와 prod game-data table을 기존 `public` 위치로 되돌리고
+row count를 transaction 안에서 검증한다. `test.*` table과 그 안의 데이터는
+삭제하거나 public/prod에 병합하지 않고 그대로 격리 보존한다. 역방향 전환 뒤에는
+새 application이 schema contract 실패로 시작하지 않으므로 기존 revision으로만
+traffic을 전환해야 한다. production/test table이 일부씩 이동된 partial 상태에서는
+실행을 거부한다.
+
+## 운영 반영 체크리스트
+
+실제 운영 변경은 별도 승인 후 아래 순서로만 진행한다.
+
+1. Cloud SQL backup 확인 또는 생성
+2. production row count, FK와 주요 object baseline 기록
+3. Cloud SQL 관리자로 schema split migration 실행
+4. 같은 관리 release에서 schema ownership 안정화 migration 실행
+5. `verify_environment_isolation.sql` 실행
+6. migration 후 row count, FK, owner와 권한 확인
+7. 새 application revision 배포
+8. Google login smoke test
+9. nickname 공유 확인
+10. prod/test custom piece 격리 확인
+11. prod/test image 격리 확인
+
+test revision 배포 전 `AUTH_SIGNING_KEY` Secret mapping도 반드시 추가한다.

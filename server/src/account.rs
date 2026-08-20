@@ -492,6 +492,48 @@ mod tests {
         }
     }
 
+    async fn seed_postgres_guest_data(pool: &PgPool, schema: DataSchema, owner: &str, tag: &str) {
+        let images = schema.table("custom_piece_images");
+        sqlx::query(&format!(
+            "INSERT INTO {images} \
+             (asset_id, owner_id, media_type, width, height, content_hash, bytes) \
+             VALUES ($1,$2,'image/png',1,1,$1,'\\x01')"
+        ))
+        .bind(format!("guest-image-{tag}"))
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        let versions = schema.table("custom_piece_versions");
+        sqlx::query(&format!(
+            "INSERT INTO {versions} \
+             (piece_id,version,owner_id,name,description,score,image_kind,image_value,raw_script, \
+              exposed_piece_key,internal_piece_keys,validation_status,content_hash,package, \
+              created_at,updated_at,active) \
+             VALUES ($1,1,$2,'Guest Piece','',1,'built_in','pawn-white','move(1,0);', \
+                     'guest-piece','[]','valid',$1,'{{}}',1,1,TRUE)"
+        ))
+        .bind(format!("guest-piece-{tag}"))
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn owned_environment_rows(pool: &PgPool, schema: DataSchema, owner: &str) -> i64 {
+        let versions = schema.table("custom_piece_versions");
+        let images = schema.table("custom_piece_images");
+        sqlx::query_scalar::<_, i64>(&format!(
+            "SELECT (SELECT count(*) FROM {versions} WHERE owner_id=$1) \
+                  + (SELECT count(*) FROM {images} WHERE owner_id=$1)"
+        ))
+        .bind(owner)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn first_login_upgrades_the_existing_guest_id() {
         let custom = Arc::new(InMemoryCustomPieceRepository::default());
@@ -693,6 +735,97 @@ mod tests {
             .unwrap();
         sqlx::query("DELETE FROM shared.users WHERE id = ANY($1)")
             .bind(vec![first.id, test_guest])
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL with the split schema migration applied"]
+    async fn postgres_guest_import_moves_only_the_current_environment() {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL is required for this ignored integration test");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&database_url)
+            .await
+            .unwrap();
+        let prod = PostgresAccountRepository::new(pool.clone(), DataSchema::Prod);
+        let test = PostgresAccountRepository::new(pool.clone(), DataSchema::Test);
+        let suffix = Uuid::new_v4().to_string();
+
+        for (repository, schema, label) in [
+            (&prod, DataSchema::Prod, "prod"),
+            (&test, DataSchema::Test, "test"),
+        ] {
+            let account_id = format!("import-account-{label}-{suffix}");
+            let guest_id = format!("import-guest-{label}-{suffix}");
+            let identity = google(&format!("import-google-{label}-{suffix}"));
+            repository
+                .complete_google_login(&account_id, &identity, None)
+                .await
+                .unwrap();
+            repository.ensure_guest(&guest_id).await.unwrap();
+            seed_postgres_guest_data(&pool, schema, &guest_id, &format!("{label}-{suffix}")).await;
+
+            assert!(matches!(
+                repository
+                    .complete_google_login(&guest_id, &identity, None)
+                    .await
+                    .unwrap(),
+                LoginResult::ImportRequired
+            ));
+            let LoginResult::Complete {
+                user,
+                imported_guest_data,
+            } = repository
+                .complete_google_login(&guest_id, &identity, Some(true))
+                .await
+                .unwrap()
+            else {
+                panic!("guest import should complete")
+            };
+            assert!(imported_guest_data);
+            assert_eq!(user.id, account_id);
+            assert_eq!(owned_environment_rows(&pool, schema, &guest_id).await, 0);
+            assert_eq!(owned_environment_rows(&pool, schema, &account_id).await, 2);
+            let opposite = match schema {
+                DataSchema::Prod => DataSchema::Test,
+                DataSchema::Test => DataSchema::Prod,
+            };
+            assert_eq!(
+                owned_environment_rows(&pool, opposite, &account_id).await,
+                0
+            );
+        }
+
+        sqlx::query("DELETE FROM prod.custom_piece_versions WHERE piece_id LIKE $1")
+            .bind(format!("guest-piece-prod-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM prod.custom_piece_images WHERE asset_id LIKE $1")
+            .bind(format!("guest-image-prod-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM test.custom_piece_versions WHERE piece_id LIKE $1")
+            .bind(format!("guest-piece-test-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM test.custom_piece_images WHERE asset_id LIKE $1")
+            .bind(format!("guest-image-test-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM shared.auth_identities WHERE subject LIKE $1")
+            .bind(format!("import-google-%-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM shared.users WHERE id LIKE $1")
+            .bind(format!("import-%-{suffix}"))
             .execute(&pool)
             .await
             .unwrap();

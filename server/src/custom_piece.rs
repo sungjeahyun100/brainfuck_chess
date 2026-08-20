@@ -2096,6 +2096,11 @@ mod tests {
             .execute(&reconnected.pool)
             .await
             .unwrap();
+        sqlx::query("DELETE FROM shared.users WHERE id = $1")
+            .bind(owner)
+            .execute(&reconnected.pool)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -2112,6 +2117,8 @@ mod tests {
         let suffix = Uuid::new_v4().to_string();
         let owner = format!("isolation-owner-{suffix}");
         let asset_id = format!("isolation-image-{suffix}");
+        let prod_piece_id = format!("prod-piece-{suffix}");
+        let test_piece_id = format!("test-piece-{suffix}");
         let image = |bytes: Vec<u8>| StoredImage {
             owner_id: owner.clone(),
             metadata: ImageAsset {
@@ -2140,6 +2147,47 @@ mod tests {
             prod.image(&owner, &asset_id).await.unwrap().unwrap().bytes,
             vec![1]
         );
+
+        prod.create(
+            make_version(
+                prod_piece_id.clone(),
+                owner.clone(),
+                input("move(1, 0);"),
+                1,
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(prod.latest(&owner, &prod_piece_id).await.unwrap().is_some());
+        assert!(test.latest(&owner, &prod_piece_id).await.unwrap().is_none());
+
+        test.create(
+            make_version(
+                test_piece_id.clone(),
+                owner.clone(),
+                input("move(0, 1);"),
+                1,
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(test.latest(&owner, &test_piece_id).await.unwrap().is_some());
+        assert!(prod.latest(&owner, &test_piece_id).await.unwrap().is_none());
+
+        sqlx::query("DELETE FROM prod.custom_piece_versions WHERE piece_id = $1")
+            .bind(&prod_piece_id)
+            .execute(&prod.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM test.custom_piece_versions WHERE piece_id = $1")
+            .bind(&test_piece_id)
+            .execute(&prod.pool)
+            .await
+            .unwrap();
 
         sqlx::query("DELETE FROM prod.custom_piece_images WHERE asset_id = $1")
             .bind(&asset_id)

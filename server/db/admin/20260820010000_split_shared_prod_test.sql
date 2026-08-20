@@ -21,6 +21,12 @@ CREATE SCHEMA IF NOT EXISTS test;
 
 REVOKE ALL ON SCHEMA shared, prod, test FROM PUBLIC;
 
+-- Existing application tables are owned by deck_chess. The administrative
+-- session must be a member of that role, but schemas/test tables remain owned
+-- by the administrator rather than the production runtime role.
+GRANT USAGE, CREATE ON SCHEMA shared, prod TO deck_chess;
+SET LOCAL ROLE deck_chess;
+
 DO $migration$
 DECLARE
     public_count INTEGER;
@@ -69,6 +75,8 @@ BEGIN
     END IF;
 END
 $migration$;
+
+RESET ROLE;
 
 -- Test starts empty. It deliberately does not copy production rows.
 CREATE TABLE IF NOT EXISTS test.custom_piece_versions (
