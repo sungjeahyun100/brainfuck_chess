@@ -1,5 +1,7 @@
 <template>
   <main class="lobby home-view">
+    <AuthAccount />
+
     <section class="lobby-hero">
       <p class="eyebrow">Deck Chess Lobby</p>
       <h1>덱체스 <span class="hero-en">Deck Chess</span></h1>
@@ -17,6 +19,7 @@
 </template>
 
 <script setup lang="ts">
+import AuthAccount from '../components/AuthAccount.vue'
 import type { AppView } from '../types/deck'
 
 defineEmits<{

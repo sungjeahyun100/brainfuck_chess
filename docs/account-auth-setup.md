@@ -17,10 +17,10 @@ Browser -- Google popup --> Identity Platform
                 |
                 v
            PostgreSQL
-     users -> auth_identities
+ shared.users -> shared.auth_identities
        |       UNIQUE(issuer, subject)
-       +-> custom_piece_versions
-       +-> custom_piece_images
+       +-> prod/test.custom_piece_versions
+       +-> prod/test.custom_piece_images
 ```
 
 Google email은 user ID가 아니다. 모든 소유권은 Deck Chess `users.id`를 사용하고 Google identity는 `auth_identities(issuer, subject)`로 별도 저장한다. ID/access/refresh token은 DB에 저장하지 않는다.
@@ -145,8 +145,11 @@ Google은 secret env에 [Secret Manager version pinning](https://cloud.google.co
 
 ## Migration / deployment
 
-- startup의 `sqlx::migrate!` 실행이 migration 적용 상태를 관리한다.
-- production은 `DATABASE_URL`, `AUTH_SIGNING_KEY`, `IDENTITY_PLATFORM_PROJECT_ID`가 누락되면 startup을 차단한다.
+- startup migration은 실행하지 않는다. shared/prod/test 전환과 별도 release
+  절차는 [database-environment-isolation.md](database-environment-isolation.md)를 따른다.
+- production과 배포형 test는 `DATABASE_URL`, `AUTH_SIGNING_KEY`,
+  `IDENTITY_PLATFORM_PROJECT_ID`가 누락되면 startup을 차단한다. local만 명시적으로
+  개발용 fallback을 허용한다.
 - 현재 GCP trigger는 repository `cloudbuild.yaml`을 명시적으로 사용하는 trigger로 확인되지 않았다. Console source-deploy를 계속 쓰면 위 connection/env/secret을 Cloud Run revision에 직접 설정한다.
 - Production migration 전 backup을 확인하고 `DROP`, `TRUNCATE`, 전체 table 재생성을 하지 않는다.
 
@@ -179,7 +182,7 @@ Production smoke test:
 
 ## Troubleshooting
 
-- `DATABASE_URL is required in production`: Cloud Run secret mapping과 secret accessor IAM을 확인한다.
+- `DATABASE_URL is required for APP_ENV=...`: Cloud Run secret mapping과 secret accessor IAM을 확인한다.
 - `failed to connect to PostgreSQL`: Cloud SQL connection, `roles/cloudsql.client`, instance name, URL-encoded password를 확인한다.
 - Google button disabled: `/config.js`의 네 public field가 실제 값인지 확인한다.
 - `unauthorized-domain`: Identity Platform Authorized domains에 현재 hostname을 scheme 없이 추가한다.

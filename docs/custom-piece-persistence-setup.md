@@ -29,7 +29,9 @@ Google 계정, Identity Platform, guest 승격/import, `users` FK를 포함한 �
    cargo run -p brainfuck-chess-server
    ```
 
-4. 서버가 시작되면 migration이 자동 적용된다. 별도의 SQL 실행은 필요 없다.
+4. 격리 schema는 서버 시작 전에 관리자가 적용해야 한다. 서버는 migration을
+   자동 실행하지 않으며 schema 계약이 없으면 시작을 차단한다. 자세한 절차는
+   [database-environment-isolation.md](database-environment-isolation.md)를 따른다.
 5. 세션 발급은 브라우저가 첫 커스텀 기물 API의 401을 받을 때 자동으로 수행한다.
 
 ## Cloud Run에서 처음 설정
@@ -54,7 +56,8 @@ Google 계정, Identity Platform, guest 승격/import, `users` FK를 포함한 �
 5. Cloud Run runtime service account에 두 secret의 Secret Manager Secret Accessor 권한과 DB 접속에 필요한 권한을 준다.
 6. Cloud Build trigger의 substitution에서 실제 secret 이름이 다르면 `_DATABASE_URL_SECRET`, `_AUTH_SIGNING_KEY_SECRET`를 바꾼다. Cloud SQL connection name에 맞게 `_CLOUD_SQL_INSTANCE`도 바꾼다.
 7. 배포한다. `cloudbuild.yaml`이 두 secret을 Cloud Run 환경 변수로 매핑한다.
-8. Cloud Run revision 로그에 `server startup blocked` 오류가 없는지 확인한다. DB 연결/migration이 실패하면 안전하게 시작이 차단된다.
+8. Cloud Run revision 로그에 `server startup blocked` 오류가 없는지 확인한다.
+   DB 연결, schema 계약 또는 반대 환경 권한 검사가 실패하면 안전하게 시작이 차단된다.
 
 ## 재시작 영속성 검증
 

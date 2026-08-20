@@ -8,16 +8,19 @@
 ## 저장, 버전과 역방향 절차
 
 `DATABASE_URL`의 PostgreSQL에 커스텀 기물의 모든 불변 버전과 업로드
-이미지 바이트를 저장한다. 서버 시작 시 `sqlx` migration을 적용한다.
-`APP_ENV=prod`인데 `DATABASE_URL`이 없으면 휘발성 저장소로 강등하지 않고
-서버 시작을 차단한다. 로컬/테스트에서만 DB 미설정 시 인메모리를 허용한다.
+이미지 바이트를 저장한다. 서버 시작 시 migration을 적용하지 않고 승인된
+`shared` 및 현재 환경 schema가 준비되었는지 검사한다.
+`APP_ENV=prod` 또는 `test`인데 `DATABASE_URL`이 없으면 휘발성 저장소로
+강등하지 않고 서버 시작을 차단한다. 명시적인 `local`에서만 DB 미설정 시
+인메모리를 허용한다.
 
 정의 수정은 기존 레코드를 덮어쓰지 않고 단조 증가하는 불변 버전을 추가한다.
 서버는 엔진이 원문으로 계산한 콘텐츠 해시를 저장하며 클라이언트 버전/해시는
 입력으로 받지 않는다. 삭제는 최신 기물을 목록과 최신 조회에서 숨기는 soft
 delete이며 과거 버전은 버전 API와 이후 덱/게임 복원을 위해 보존한다.
 
-스키마는 `server/migrations/20260819000000_custom_piece_storage.sql`에 있다.
+초기 public 스키마는 `server/migrations/20260819000000_custom_piece_storage.sql`,
+환경 분리 migration은 `server/db/admin/20260820010000_split_shared_prod_test.sql`에 있다.
 기존 저장소는 프로세스 메모리뿐이어서 파일에서 이관할 데이터가 없다.
 아직 실행 중인 구버전 서버의 메모리 데이터를 자동 이관하는 경로는 제공하지 않는다.
 

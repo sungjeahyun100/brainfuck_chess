@@ -26,6 +26,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::app_state::AppState;
+use crate::database::DataSchema;
 
 const MAX_NAME_CHARS: usize = 80;
 const MAX_DESCRIPTION_CHARS: usize = 2_000;
@@ -356,25 +357,22 @@ impl CustomPieceRepository for InMemoryCustomPieceRepository {
 
 pub(crate) struct PostgresCustomPieceRepository {
     pool: PgPool,
+    data_schema: DataSchema,
 }
 
 impl PostgresCustomPieceRepository {
-    pub(crate) fn from_pool(pool: PgPool) -> Self {
-        Self { pool }
+    pub(crate) fn from_pool(pool: PgPool, data_schema: DataSchema) -> Self {
+        Self { pool, data_schema }
     }
 
     #[cfg(test)]
-    async fn connect(database_url: &str) -> Result<Self, String> {
+    async fn connect(database_url: &str, data_schema: DataSchema) -> Result<Self, String> {
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(2)
             .connect(database_url)
             .await
             .map_err(|error| format!("failed to connect to PostgreSQL: {error}"))?;
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .map_err(|error| format!("failed to run database migrations: {error}"))?;
-        Ok(Self { pool })
+        Ok(Self { pool, data_schema })
     }
 }
 
@@ -471,11 +469,12 @@ fn image_parts(image: &ImageRef) -> (&'static str, &str) {
 #[async_trait]
 impl CustomPieceRepository for PostgresCustomPieceRepository {
     async fn list(&self, owner: &str) -> Result<Vec<CustomPieceRecord>, &'static str> {
-        let rows = sqlx::query(
-            "SELECT * FROM (SELECT DISTINCT ON (piece_id) * FROM custom_piece_versions \
+        let versions = self.data_schema.table("custom_piece_versions");
+        let rows = sqlx::query(&format!(
+            "SELECT * FROM (SELECT DISTINCT ON (piece_id) * FROM {versions} \
              WHERE owner_id = $1 ORDER BY piece_id, version DESC) latest \
-             WHERE active = TRUE ORDER BY updated_at DESC",
-        )
+             WHERE active = TRUE ORDER BY updated_at DESC"
+        ))
         .bind(owner)
         .fetch_all(&self.pool)
         .await
@@ -487,10 +486,11 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
     }
 
     async fn latest(&self, owner: &str, id: &str) -> Result<Option<StoredVersion>, &'static str> {
-        sqlx::query(
-            "SELECT * FROM custom_piece_versions WHERE owner_id = $1 AND piece_id = $2 \
-             ORDER BY version DESC LIMIT 1",
-        )
+        let versions = self.data_schema.table("custom_piece_versions");
+        sqlx::query(&format!(
+            "SELECT * FROM {versions} WHERE owner_id = $1 AND piece_id = $2 \
+             ORDER BY version DESC LIMIT 1"
+        ))
         .bind(owner)
         .bind(id)
         .fetch_optional(&self.pool)
@@ -507,10 +507,11 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
         id: &str,
         version: u32,
     ) -> Result<Option<StoredVersion>, &'static str> {
-        sqlx::query(
-            "SELECT * FROM custom_piece_versions \
-             WHERE owner_id = $1 AND piece_id = $2 AND version = $3",
-        )
+        let versions = self.data_schema.table("custom_piece_versions");
+        sqlx::query(&format!(
+            "SELECT * FROM {versions} \
+             WHERE owner_id = $1 AND piece_id = $2 AND version = $3"
+        ))
         .bind(owner)
         .bind(id)
         .bind(i32::try_from(version).map_err(|_| "unavailable")?)
@@ -525,13 +526,14 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
         let record = &stored.record;
         ensure_guest_user(&self.pool, &record.owner_id).await?;
         let (image_kind, image_value) = image_parts(&record.image);
-        sqlx::query(
-            "INSERT INTO custom_piece_versions \
+        let versions = self.data_schema.table("custom_piece_versions");
+        sqlx::query(&format!(
+            "INSERT INTO {versions} \
              (piece_id, version, owner_id, name, description, score, image_kind, image_value, \
               raw_script, exposed_piece_key, internal_piece_keys, validation_status, content_hash, \
               package, created_at, updated_at, active) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
-        )
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)"
+        ))
         .bind(&record.id)
         .bind(i32::try_from(record.version).map_err(|_| "unavailable")?)
         .bind(&record.owner_id)
@@ -570,10 +572,11 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
         stored: StoredVersion,
     ) -> Result<(), &'static str> {
         let mut transaction = self.pool.begin().await.map_err(|_| "unavailable")?;
-        let latest = sqlx::query(
-            "SELECT owner_id, version, active FROM custom_piece_versions \
-             WHERE piece_id = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE",
-        )
+        let versions = self.data_schema.table("custom_piece_versions");
+        let latest = sqlx::query(&format!(
+            "SELECT owner_id, version, active FROM {versions} \
+             WHERE piece_id = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE"
+        ))
         .bind(&stored.record.id)
         .fetch_optional(&mut *transaction)
         .await
@@ -598,13 +601,13 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
         }
         let record = &stored.record;
         let (image_kind, image_value) = image_parts(&record.image);
-        sqlx::query(
-            "INSERT INTO custom_piece_versions \
+        sqlx::query(&format!(
+            "INSERT INTO {versions} \
              (piece_id, version, owner_id, name, description, score, image_kind, image_value, \
               raw_script, exposed_piece_key, internal_piece_keys, validation_status, content_hash, \
               package, created_at, updated_at, active) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
-        )
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)"
+        ))
         .bind(&record.id)
         .bind(i32::try_from(record.version).map_err(|_| "unavailable")?)
         .bind(&record.owner_id)
@@ -644,10 +647,11 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
         expected_version: u32,
     ) -> Result<(), &'static str> {
         let mut transaction = self.pool.begin().await.map_err(|_| "unavailable")?;
-        let latest = sqlx::query(
-            "SELECT owner_id, version, active FROM custom_piece_versions \
-             WHERE piece_id = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE",
-        )
+        let versions = self.data_schema.table("custom_piece_versions");
+        let latest = sqlx::query(&format!(
+            "SELECT owner_id, version, active FROM {versions} \
+             WHERE piece_id = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE"
+        ))
         .bind(id)
         .fetch_optional(&mut *transaction)
         .await
@@ -670,10 +674,10 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
         {
             return Err("conflict");
         }
-        sqlx::query(
-            "UPDATE custom_piece_versions SET active = FALSE, updated_at = $4 \
-             WHERE piece_id = $1 AND version = $2 AND owner_id = $3",
-        )
+        sqlx::query(&format!(
+            "UPDATE {versions} SET active = FALSE, updated_at = $4 \
+             WHERE piece_id = $1 AND version = $2 AND owner_id = $3"
+        ))
         .bind(id)
         .bind(i32::try_from(expected_version).map_err(|_| "unavailable")?)
         .bind(owner)
@@ -685,11 +689,12 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
     }
 
     async fn count(&self, owner: &str) -> Result<usize, &'static str> {
-        let count = sqlx::query_scalar::<_, i64>(
+        let versions = self.data_schema.table("custom_piece_versions");
+        let count = sqlx::query_scalar::<_, i64>(&format!(
             "SELECT COUNT(*) FROM (SELECT DISTINCT ON (piece_id) active \
-             FROM custom_piece_versions WHERE owner_id = $1 ORDER BY piece_id, version DESC) latest \
-             WHERE active = TRUE",
-        )
+             FROM {versions} WHERE owner_id = $1 ORDER BY piece_id, version DESC) latest \
+             WHERE active = TRUE"
+        ))
         .bind(owner)
         .fetch_one(&self.pool)
         .await
@@ -699,11 +704,12 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
 
     async fn put_image(&self, image: StoredImage) -> Result<(), &'static str> {
         ensure_guest_user(&self.pool, &image.owner_id).await?;
-        sqlx::query(
-            "INSERT INTO custom_piece_images \
+        let images = self.data_schema.table("custom_piece_images");
+        sqlx::query(&format!(
+            "INSERT INTO {images} \
              (asset_id, owner_id, media_type, width, height, content_hash, bytes) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7)",
-        )
+             VALUES ($1,$2,$3,$4,$5,$6,$7)"
+        ))
         .bind(&image.metadata.asset_id)
         .bind(&image.owner_id)
         .bind(&image.metadata.media_type)
@@ -722,10 +728,11 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
         owner: &str,
         asset_id: &str,
     ) -> Result<Option<StoredImage>, &'static str> {
-        let Some(row) = sqlx::query(
+        let images = self.data_schema.table("custom_piece_images");
+        let Some(row) = sqlx::query(&format!(
             "SELECT asset_id, owner_id, media_type, width, height, content_hash, bytes \
-             FROM custom_piece_images WHERE owner_id = $1 AND asset_id = $2",
-        )
+             FROM {images} WHERE owner_id = $1 AND asset_id = $2"
+        ))
         .bind(owner)
         .bind(asset_id)
         .fetch_optional(&self.pool)
@@ -750,10 +757,12 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
     }
 
     async fn has_owned_data(&self, owner: &str) -> Result<bool, &'static str> {
-        sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS (SELECT 1 FROM custom_piece_versions WHERE owner_id = $1) \
-             OR EXISTS (SELECT 1 FROM custom_piece_images WHERE owner_id = $1)",
-        )
+        let versions = self.data_schema.table("custom_piece_versions");
+        let images = self.data_schema.table("custom_piece_images");
+        sqlx::query_scalar::<_, bool>(&format!(
+            "SELECT EXISTS (SELECT 1 FROM {versions} WHERE owner_id = $1) \
+             OR EXISTS (SELECT 1 FROM {images} WHERE owner_id = $1)"
+        ))
         .bind(owner)
         .fetch_one(&self.pool)
         .await
@@ -762,18 +771,24 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
 
     async fn transfer_owner(&self, source: &str, target: &str) -> Result<(), &'static str> {
         let mut transaction = self.pool.begin().await.map_err(|_| "unavailable")?;
-        sqlx::query("UPDATE custom_piece_versions SET owner_id = $1 WHERE owner_id = $2")
-            .bind(target)
-            .bind(source)
-            .execute(&mut *transaction)
-            .await
-            .map_err(|_| "unavailable")?;
-        sqlx::query("UPDATE custom_piece_images SET owner_id = $1 WHERE owner_id = $2")
-            .bind(target)
-            .bind(source)
-            .execute(&mut *transaction)
-            .await
-            .map_err(|_| "unavailable")?;
+        let versions = self.data_schema.table("custom_piece_versions");
+        let images = self.data_schema.table("custom_piece_images");
+        sqlx::query(&format!(
+            "UPDATE {versions} SET owner_id = $1 WHERE owner_id = $2"
+        ))
+        .bind(target)
+        .bind(source)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| "unavailable")?;
+        sqlx::query(&format!(
+            "UPDATE {images} SET owner_id = $1 WHERE owner_id = $2"
+        ))
+        .bind(target)
+        .bind(source)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| "unavailable")?;
         transaction.commit().await.map_err(|_| "unavailable")
     }
 }
@@ -781,7 +796,7 @@ impl CustomPieceRepository for PostgresCustomPieceRepository {
 async fn ensure_guest_user(pool: &PgPool, owner: &str) -> Result<(), &'static str> {
     let timestamp = i64::try_from(now()).map_err(|_| "unavailable")?;
     sqlx::query(
-        "INSERT INTO users (id, account_kind, status, created_at, updated_at) \
+        "INSERT INTO shared.users (id, account_kind, status, created_at, updated_at) \
          VALUES ($1, 'guest', 'active', $2, $2) ON CONFLICT (id) DO NOTHING",
     )
     .bind(owner)
@@ -2030,7 +2045,7 @@ mod tests {
         let owner = format!("persistence-test-{}", Uuid::new_v4());
         let id = Uuid::new_v4().to_string();
         let asset_id = Uuid::new_v4().to_string();
-        let first = PostgresCustomPieceRepository::connect(&database_url)
+        let first = PostgresCustomPieceRepository::connect(&database_url, DataSchema::Test)
             .await
             .unwrap();
         first
@@ -2055,7 +2070,7 @@ mod tests {
         first.create(stored).await.unwrap();
         drop(first);
 
-        let reconnected = PostgresCustomPieceRepository::connect(&database_url)
+        let reconnected = PostgresCustomPieceRepository::connect(&database_url, DataSchema::Test)
             .await
             .unwrap();
         let restored = reconnected.latest(&owner, &id).await.unwrap().unwrap();
@@ -2071,14 +2086,122 @@ mod tests {
             .default_asset_key
             .starts_with("data:image/png;base64,"));
 
-        sqlx::query("DELETE FROM custom_piece_versions WHERE piece_id = $1")
+        sqlx::query("DELETE FROM test.custom_piece_versions WHERE piece_id = $1")
             .bind(&id)
             .execute(&reconnected.pool)
             .await
             .unwrap();
-        sqlx::query("DELETE FROM custom_piece_images WHERE asset_id = $1")
+        sqlx::query("DELETE FROM test.custom_piece_images WHERE asset_id = $1")
             .bind(asset_id)
             .execute(&reconnected.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM shared.users WHERE id = $1")
+            .bind(owner)
+            .execute(&reconnected.pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL with the split schema migration applied"]
+    async fn postgres_prod_and_test_images_are_isolated_with_the_same_owner() {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL is required for this ignored integration test");
+        let prod = PostgresCustomPieceRepository::connect(&database_url, DataSchema::Prod)
+            .await
+            .unwrap();
+        let test = PostgresCustomPieceRepository::connect(&database_url, DataSchema::Test)
+            .await
+            .unwrap();
+        let suffix = Uuid::new_v4().to_string();
+        let owner = format!("isolation-owner-{suffix}");
+        let asset_id = format!("isolation-image-{suffix}");
+        let prod_piece_id = format!("prod-piece-{suffix}");
+        let test_piece_id = format!("test-piece-{suffix}");
+        let image = |bytes: Vec<u8>| StoredImage {
+            owner_id: owner.clone(),
+            metadata: ImageAsset {
+                asset_id: asset_id.clone(),
+                media_type: "image/png".into(),
+                width: 1,
+                height: 1,
+                content_hash: "isolation-test".into(),
+            },
+            bytes,
+        };
+
+        prod.put_image(image(vec![1])).await.unwrap();
+        assert_eq!(
+            prod.image(&owner, &asset_id).await.unwrap().unwrap().bytes,
+            vec![1]
+        );
+        assert!(test.image(&owner, &asset_id).await.unwrap().is_none());
+
+        test.put_image(image(vec![2])).await.unwrap();
+        assert_eq!(
+            test.image(&owner, &asset_id).await.unwrap().unwrap().bytes,
+            vec![2]
+        );
+        assert_eq!(
+            prod.image(&owner, &asset_id).await.unwrap().unwrap().bytes,
+            vec![1]
+        );
+
+        prod.create(
+            make_version(
+                prod_piece_id.clone(),
+                owner.clone(),
+                input("move(1, 0);"),
+                1,
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(prod.latest(&owner, &prod_piece_id).await.unwrap().is_some());
+        assert!(test.latest(&owner, &prod_piece_id).await.unwrap().is_none());
+
+        test.create(
+            make_version(
+                test_piece_id.clone(),
+                owner.clone(),
+                input("move(0, 1);"),
+                1,
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(test.latest(&owner, &test_piece_id).await.unwrap().is_some());
+        assert!(prod.latest(&owner, &test_piece_id).await.unwrap().is_none());
+
+        sqlx::query("DELETE FROM prod.custom_piece_versions WHERE piece_id = $1")
+            .bind(&prod_piece_id)
+            .execute(&prod.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM test.custom_piece_versions WHERE piece_id = $1")
+            .bind(&test_piece_id)
+            .execute(&prod.pool)
+            .await
+            .unwrap();
+
+        sqlx::query("DELETE FROM prod.custom_piece_images WHERE asset_id = $1")
+            .bind(&asset_id)
+            .execute(&prod.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM test.custom_piece_images WHERE asset_id = $1")
+            .bind(&asset_id)
+            .execute(&prod.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM shared.users WHERE id = $1")
+            .bind(owner)
+            .execute(&prod.pool)
             .await
             .unwrap();
     }

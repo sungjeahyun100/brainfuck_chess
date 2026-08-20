@@ -7,6 +7,7 @@ use serde::Serialize;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use crate::database::DataSchema;
 use crate::stores::CustomPieceStore;
 
 const RESERVED_PUBLIC_IDS: &[&str] = &[
@@ -231,11 +232,12 @@ impl AccountRepository for InMemoryAccountRepository {
 
 pub(crate) struct PostgresAccountRepository {
     pool: PgPool,
+    data_schema: DataSchema,
 }
 
 impl PostgresAccountRepository {
-    pub(crate) fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub(crate) fn new(pool: PgPool, data_schema: DataSchema) -> Self {
+        Self { pool, data_schema }
     }
 }
 
@@ -254,7 +256,7 @@ impl AccountRepository for PostgresAccountRepository {
     async fn ensure_guest(&self, user_id: &str) -> Result<(), &'static str> {
         let now = timestamp()?;
         sqlx::query(
-            "INSERT INTO users (id, account_kind, status, created_at, updated_at) \
+            "INSERT INTO shared.users (id, account_kind, status, created_at, updated_at) \
              VALUES ($1, 'guest', 'active', $2, $2) ON CONFLICT (id) DO NOTHING",
         )
         .bind(user_id)
@@ -267,7 +269,7 @@ impl AccountRepository for PostgresAccountRepository {
 
     async fn authenticated_user(&self, user_id: &str) -> Result<Option<UserProfile>, &'static str> {
         let row = sqlx::query(
-            "SELECT id, public_id, display_name, avatar_url FROM users \
+            "SELECT id, public_id, display_name, avatar_url FROM shared.users \
              WHERE id = $1 AND account_kind = 'registered' AND status = 'active'",
         )
         .bind(user_id)
@@ -285,7 +287,7 @@ impl AccountRepository for PostgresAccountRepository {
     ) -> Result<UserProfile, AccountUpdateError> {
         let now = timestamp().map_err(|_| AccountUpdateError::Unavailable)?;
         let row = sqlx::query(
-            "UPDATE users SET public_id = COALESCE($2, public_id), \
+            "UPDATE shared.users SET public_id = COALESCE($2, public_id), \
              display_name = COALESCE($3, display_name), updated_at = $4 \
              WHERE id = $1 AND account_kind = 'registered' AND status = 'active' \
              RETURNING id, public_id, display_name, avatar_url",
@@ -321,7 +323,7 @@ impl AccountRepository for PostgresAccountRepository {
         let now = timestamp()?;
         let mut tx = self.pool.begin().await.map_err(|_| "unavailable")?;
         sqlx::query(
-            "INSERT INTO users (id, account_kind, status, created_at, updated_at) \
+            "INSERT INTO shared.users (id, account_kind, status, created_at, updated_at) \
              VALUES ($1, 'guest', 'active', $2, $2) ON CONFLICT (id) DO NOTHING",
         )
         .bind(current_user_id)
@@ -337,14 +339,14 @@ impl AccountRepository for PostgresAccountRepository {
             .map_err(|_| "unavailable")?;
 
         let current_kind = sqlx::query_scalar::<_, String>(
-            "SELECT account_kind FROM users WHERE id = $1 FOR UPDATE",
+            "SELECT account_kind FROM shared.users WHERE id = $1 FOR UPDATE",
         )
         .bind(current_user_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(|_| "unavailable")?;
         let target_id = sqlx::query_scalar::<_, String>(
-            "SELECT user_id FROM auth_identities WHERE issuer = $1 AND subject = $2 FOR UPDATE",
+            "SELECT user_id FROM shared.auth_identities WHERE issuer = $1 AND subject = $2 FOR UPDATE",
         )
         .bind(&identity.issuer)
         .bind(&identity.subject)
@@ -354,10 +356,12 @@ impl AccountRepository for PostgresAccountRepository {
         .unwrap_or_else(|| current_user_id.to_owned());
 
         let needs_import = if target_id != current_user_id && current_kind == "guest" {
-            sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS (SELECT 1 FROM custom_piece_versions WHERE owner_id = $1) \
-                 OR EXISTS (SELECT 1 FROM custom_piece_images WHERE owner_id = $1)",
-            )
+            let versions = self.data_schema.table("custom_piece_versions");
+            let images = self.data_schema.table("custom_piece_images");
+            sqlx::query_scalar::<_, bool>(&format!(
+                "SELECT EXISTS (SELECT 1 FROM {versions} WHERE owner_id = $1) \
+                 OR EXISTS (SELECT 1 FROM {images} WHERE owner_id = $1)"
+            ))
             .bind(current_user_id)
             .fetch_one(&mut *tx)
             .await
@@ -370,22 +374,28 @@ impl AccountRepository for PostgresAccountRepository {
         }
         let imported = needs_import && import_guest_data == Some(true);
         if imported {
-            sqlx::query("UPDATE custom_piece_versions SET owner_id = $1 WHERE owner_id = $2")
-                .bind(&target_id)
-                .bind(current_user_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|_| "unavailable")?;
-            sqlx::query("UPDATE custom_piece_images SET owner_id = $1 WHERE owner_id = $2")
-                .bind(&target_id)
-                .bind(current_user_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|_| "unavailable")?;
+            let versions = self.data_schema.table("custom_piece_versions");
+            sqlx::query(&format!(
+                "UPDATE {versions} SET owner_id = $1 WHERE owner_id = $2"
+            ))
+            .bind(&target_id)
+            .bind(current_user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| "unavailable")?;
+            let images = self.data_schema.table("custom_piece_images");
+            sqlx::query(&format!(
+                "UPDATE {images} SET owner_id = $1 WHERE owner_id = $2"
+            ))
+            .bind(&target_id)
+            .bind(current_user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| "unavailable")?;
         }
 
         sqlx::query(
-            "UPDATE users SET account_kind = 'registered', \
+            "UPDATE shared.users SET account_kind = 'registered', \
              display_name = COALESCE(display_name, $2), avatar_url = $3, \
              updated_at = $4 WHERE id = $1 AND status = 'active'",
         )
@@ -398,7 +408,7 @@ impl AccountRepository for PostgresAccountRepository {
         .map_err(|_| "unavailable")?;
 
         sqlx::query(
-            "INSERT INTO auth_identities \
+            "INSERT INTO shared.auth_identities \
              (id, user_id, issuer, subject, provider, email, email_verified, created_at, updated_at) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) \
              ON CONFLICT (issuer, subject) DO UPDATE SET email = EXCLUDED.email, \
@@ -416,12 +426,13 @@ impl AccountRepository for PostgresAccountRepository {
         .await
         .map_err(|_| "unavailable")?;
 
-        let row =
-            sqlx::query("SELECT id, public_id, display_name, avatar_url FROM users WHERE id = $1")
-                .bind(&target_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|_| "unavailable")?;
+        let row = sqlx::query(
+            "SELECT id, public_id, display_name, avatar_url FROM shared.users WHERE id = $1",
+        )
+        .bind(&target_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| "unavailable")?;
         let user = profile_from_row(row)?;
         tx.commit().await.map_err(|_| "unavailable")?;
         Ok(LoginResult::Complete {
@@ -479,6 +490,48 @@ mod tests {
             display_name: Some("Deck Player".into()),
             avatar_url: Some("https://example.com/avatar.png".into()),
         }
+    }
+
+    async fn seed_postgres_guest_data(pool: &PgPool, schema: DataSchema, owner: &str, tag: &str) {
+        let images = schema.table("custom_piece_images");
+        sqlx::query(&format!(
+            "INSERT INTO {images} \
+             (asset_id, owner_id, media_type, width, height, content_hash, bytes) \
+             VALUES ($1,$2,'image/png',1,1,$1,'\\x01')"
+        ))
+        .bind(format!("guest-image-{tag}"))
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        let versions = schema.table("custom_piece_versions");
+        sqlx::query(&format!(
+            "INSERT INTO {versions} \
+             (piece_id,version,owner_id,name,description,score,image_kind,image_value,raw_script, \
+              exposed_piece_key,internal_piece_keys,validation_status,content_hash,package, \
+              created_at,updated_at,active) \
+             VALUES ($1,1,$2,'Guest Piece','',1,'built_in','pawn-white','move(1,0);', \
+                     'guest-piece','[]','valid',$1,'{{}}',1,1,TRUE)"
+        ))
+        .bind(format!("guest-piece-{tag}"))
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn owned_environment_rows(pool: &PgPool, schema: DataSchema, owner: &str) -> i64 {
+        let versions = schema.table("custom_piece_versions");
+        let images = schema.table("custom_piece_images");
+        sqlx::query_scalar::<_, i64>(&format!(
+            "SELECT (SELECT count(*) FROM {versions} WHERE owner_id=$1) \
+                  + (SELECT count(*) FROM {images} WHERE owner_id=$1)"
+        ))
+        .bind(owner)
+        .fetch_one(pool)
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -626,6 +679,156 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(profile.display_name.as_deref(), Some("새 닉네임"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL with the split schema migration applied"]
+    async fn postgres_identity_and_profile_are_shared_between_prod_and_test() {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL is required for this ignored integration test");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&database_url)
+            .await
+            .unwrap();
+        let prod = PostgresAccountRepository::new(pool.clone(), DataSchema::Prod);
+        let test = PostgresAccountRepository::new(pool.clone(), DataSchema::Test);
+        let suffix = Uuid::new_v4().to_string();
+        let prod_guest = format!("prod-login-{suffix}");
+        let test_guest = format!("test-login-{suffix}");
+        let identity = google(&format!("google-{suffix}"));
+
+        let LoginResult::Complete { user: first, .. } = prod
+            .complete_google_login(&prod_guest, &identity, None)
+            .await
+            .unwrap()
+        else {
+            panic!("first login should complete")
+        };
+        let LoginResult::Complete { user: second, .. } = test
+            .complete_google_login(&test_guest, &identity, Some(false))
+            .await
+            .unwrap()
+        else {
+            panic!("second login should complete")
+        };
+        assert_eq!(first.id, second.id);
+
+        prod.update_profile(&first.id, None, Some("공유 닉네임"))
+            .await
+            .unwrap();
+        assert_eq!(
+            test.authenticated_user(&first.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .display_name
+                .as_deref(),
+            Some("공유 닉네임")
+        );
+
+        sqlx::query("DELETE FROM shared.auth_identities WHERE issuer = $1 AND subject = $2")
+            .bind(&identity.issuer)
+            .bind(&identity.subject)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM shared.users WHERE id = ANY($1)")
+            .bind(vec![first.id, test_guest])
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL with the split schema migration applied"]
+    async fn postgres_guest_import_moves_only_the_current_environment() {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL is required for this ignored integration test");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&database_url)
+            .await
+            .unwrap();
+        let prod = PostgresAccountRepository::new(pool.clone(), DataSchema::Prod);
+        let test = PostgresAccountRepository::new(pool.clone(), DataSchema::Test);
+        let suffix = Uuid::new_v4().to_string();
+
+        for (repository, schema, label) in [
+            (&prod, DataSchema::Prod, "prod"),
+            (&test, DataSchema::Test, "test"),
+        ] {
+            let account_id = format!("import-account-{label}-{suffix}");
+            let guest_id = format!("import-guest-{label}-{suffix}");
+            let identity = google(&format!("import-google-{label}-{suffix}"));
+            repository
+                .complete_google_login(&account_id, &identity, None)
+                .await
+                .unwrap();
+            repository.ensure_guest(&guest_id).await.unwrap();
+            seed_postgres_guest_data(&pool, schema, &guest_id, &format!("{label}-{suffix}")).await;
+
+            assert!(matches!(
+                repository
+                    .complete_google_login(&guest_id, &identity, None)
+                    .await
+                    .unwrap(),
+                LoginResult::ImportRequired
+            ));
+            let LoginResult::Complete {
+                user,
+                imported_guest_data,
+            } = repository
+                .complete_google_login(&guest_id, &identity, Some(true))
+                .await
+                .unwrap()
+            else {
+                panic!("guest import should complete")
+            };
+            assert!(imported_guest_data);
+            assert_eq!(user.id, account_id);
+            assert_eq!(owned_environment_rows(&pool, schema, &guest_id).await, 0);
+            assert_eq!(owned_environment_rows(&pool, schema, &account_id).await, 2);
+            let opposite = match schema {
+                DataSchema::Prod => DataSchema::Test,
+                DataSchema::Test => DataSchema::Prod,
+            };
+            assert_eq!(
+                owned_environment_rows(&pool, opposite, &account_id).await,
+                0
+            );
+        }
+
+        sqlx::query("DELETE FROM prod.custom_piece_versions WHERE piece_id LIKE $1")
+            .bind(format!("guest-piece-prod-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM prod.custom_piece_images WHERE asset_id LIKE $1")
+            .bind(format!("guest-image-prod-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM test.custom_piece_versions WHERE piece_id LIKE $1")
+            .bind(format!("guest-piece-test-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM test.custom_piece_images WHERE asset_id LIKE $1")
+            .bind(format!("guest-image-test-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM shared.auth_identities WHERE subject LIKE $1")
+            .bind(format!("import-google-%-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM shared.users WHERE id LIKE $1")
+            .bind(format!("import-%-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
     }
 
     #[test]
