@@ -190,30 +190,26 @@ fn machine_gunner_uses_orthogonal_take_moves() {
 }
 
 #[test]
-fn mortar_barrage_targets_friendly_files_and_removes_orthogonal_neighbors() {
+fn mortar_barrage_targets_only_its_own_file_and_removes_orthogonal_neighbors() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "actor", "white", "mortar", 3, 3);
-    add_piece(&mut state, "center", "black", "bishop", 4, 5);
-    add_piece(&mut state, "left", "white", "knight", 3, 5);
-    add_piece(&mut state, "right", "black", "rook", 5, 5);
-    add_piece(&mut state, "above", "black", "bishop", 4, 6);
-    add_piece(&mut state, "below", "white", "bishop", 4, 4);
-    add_piece(&mut state, "diagonal", "black", "bishop", 5, 6);
-    add_piece(&mut state, "farther", "black", "bishop", 4, 7);
+    add_piece(&mut state, "center", "black", "bishop", 3, 5);
+    add_piece(&mut state, "left", "white", "knight", 2, 5);
+    add_piece(&mut state, "right", "black", "rook", 4, 5);
+    add_piece(&mut state, "above", "black", "bishop", 3, 6);
+    add_piece(&mut state, "below", "white", "bishop", 3, 4);
+    add_piece(&mut state, "diagonal", "black", "bishop", 4, 6);
+    add_piece(&mut state, "farther", "black", "bishop", 3, 7);
+    add_piece(&mut state, "far-friend", "white", "knight", 6, 3);
 
     let actions = generate_piece_legal_ability_actions(&state, &"actor".into(), "mortar-barrage");
-    assert_eq!(actions.len(), 12);
-    assert!(actions.iter().all(|action| {
-        action
-            .to
-            .is_some_and(|target| matches!(target.file, 3 | 4))
-    }));
+    assert_eq!(actions.len(), 6);
     assert!(actions
         .iter()
-        .all(|action| action.to.is_none_or(|target| target.file != 5)));
+        .all(|action| action.to.is_some_and(|target| target.file == 3)));
     let action = actions
         .into_iter()
-        .find(|action| action.to == Some(Square::new(4, 5)))
+        .find(|action| action.to == Some(Square::new(3, 5)))
         .unwrap();
     let state = submit_action(state, TurnAction::Ability(action)).unwrap();
 

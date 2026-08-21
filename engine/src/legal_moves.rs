@@ -714,29 +714,18 @@ pub fn generate_piece_legal_ability_actions(
                 "white".into()
             };
             let opponent_base_zone = get_base_zone_squares(&opponent_id, game_state.board.size);
-            for file in 0..game_state.board.size {
-                let has_friendly_piece = game_state.pieces.values().any(|piece| {
-                    piece.owner == actor.owner
-                        && piece
-                            .current_square
-                            .is_some_and(|square| square.file == file)
-                });
-                if !has_friendly_piece {
-                    continue;
-                }
-                for rank in 0..game_state.board.size {
-                    let target = Square::new(file, rank);
-                    if !opponent_base_zone.contains(&target) {
-                        actions.push(AbilityAction {
-                            player_id: actor.owner.clone(),
-                            piece_id: piece_id.clone(),
-                            ability_id: ability_id.into(),
-                            target_piece_id: None,
-                            pocket_piece_id: None,
-                            to: Some(target),
-                            deployments: Vec::new(),
-                        });
-                    }
+            for rank in 0..game_state.board.size {
+                let target = Square::new(origin.file, rank);
+                if !opponent_base_zone.contains(&target) {
+                    actions.push(AbilityAction {
+                        player_id: actor.owner.clone(),
+                        piece_id: piece_id.clone(),
+                        ability_id: ability_id.into(),
+                        target_piece_id: None,
+                        pocket_piece_id: None,
+                        to: Some(target),
+                        deployments: Vec::new(),
+                    });
                 }
             }
         }
