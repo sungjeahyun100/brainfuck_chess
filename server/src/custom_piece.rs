@@ -1966,6 +1966,7 @@ mod tests {
             host_ready: true,
             guest_ready: true,
             game_id: None,
+            time_control: crate::time_control::TimeControlId::Unlimited,
         };
         let room_game = crate::start_room_game(&mut room, &app)
             .await

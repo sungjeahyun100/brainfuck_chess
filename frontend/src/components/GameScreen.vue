@@ -126,7 +126,11 @@
           <br><small>({{ viewState.result.reason }})</small>
         </p>
         <p v-else>Draw</p>
-        <button @click="$emit('restart')">New Game</button>
+        <div class="game-over-actions">
+          <button @click="$emit('replay')">복기하기</button>
+          <button @click="copyReplayCode">{{ replayCopyStatus }}</button>
+          <button @click="$emit('restart')">New Game</button>
+        </div>
       </div>
     </div>
 
@@ -169,6 +173,17 @@
 
       <!-- Center: Board -->
       <div class="board-column">
+        <div class="game-clock" :class="clockClasses(topPlayer)">
+          <span><b>{{ playerInfo(topPlayer).nickname }}</b><small>@{{ playerInfo(topPlayer).public_id }} · {{ topPlayer.toUpperCase() }}</small></span>
+          <strong>{{ formattedClock(topPlayer) }}</strong>
+          <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
+        </div>
+
+        <div v-if="opponentAbandonmentWarning" class="abandonment-warning" role="status">
+          <strong>⚠ 상대방의 연결을 기다리는 중</strong>
+          <span>자동 기권까지 {{ formatDuration(opponentAbandonmentRemainingMs) }}</span>
+        </div>
+
         <Board
           :board="viewState.board"
           :pieces="viewState.pieces"
@@ -186,6 +201,12 @@
           @piece-click="onBoardPieceClick"
           @square-drop="onSquareDrop"
         />
+
+        <div class="game-clock" :class="clockClasses(bottomPlayer)">
+          <span><b>{{ playerInfo(bottomPlayer).nickname }}</b><small>@{{ playerInfo(bottomPlayer).public_id }} · {{ bottomPlayer.toUpperCase() }}</small></span>
+          <strong>{{ formattedClock(bottomPlayer) }}</strong>
+          <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
+        </div>
 
         <div class="board-tools">
           <button
@@ -264,6 +285,19 @@
           <span>{{ blackDeck.total_score }} / {{ blackDeck.score_limit }} pts</span>
         </div>
       </div>
+
+      <aside class="game-sidebar">
+        <h3>기보</h3>
+        <div class="live-notation">
+          <div v-for="entry in liveNotation" :key="entry.ply"><span>{{ entry.ply }}. {{ entry.text }}</span></div>
+          <p v-if="!liveNotation.length">아직 착수 기록이 없습니다.</p>
+        </div>
+        <div class="sidebar-game-info">
+          <strong>{{ timeControlLabel(viewState.clock.time_control) }}</strong>
+          <span>Turn {{ viewState.turn_number }}</span>
+          <span v-if="viewState.result">{{ viewState.result.reason }}</span>
+        </div>
+      </aside>
     </div>
 
     <!-- Footer: actions -->
@@ -282,7 +316,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import type {
   AbilityDeployment,
   AiAction,
@@ -304,6 +338,9 @@ import { api } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import Board from './Board.vue'
 import { applyTimelineFrame } from '../composables/useActionTimeline'
+import { CLOCK_URGENCY_THRESHOLDS_MS, timeControlLabel } from '../timeControls'
+import { encodeReplayCode } from '../replayCodec'
+import { formatAction } from '../replayNotation'
 
 const props = defineProps<{
   state: GameState
@@ -315,6 +352,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   stateUpdate: [state: GameState]
   restart: []
+  replay: []
 }>()
 
 const selectedPieceId = ref<string | null>(null)
@@ -334,6 +372,7 @@ const botThinking = ref(false)
 const botReplaying = ref(false)
 const botReplayMessage = ref<string | null>(null)
 const lastBotStats = ref<BotTurnStats | null>(null)
+const replayCopyStatus = ref('기보 복사')
 const draggedPocketPieceId = ref<string | null>(null)
 const promotionRequest = ref<{ pieceId: string; to: Square; owner: PlayerId; options: string[] } | null>(null)
 const overlapSelectionPieceIds = ref<string[]>([])
@@ -349,6 +388,9 @@ const botPreviewDropSquares = ref<Square[]>([])
 const botReplayState = ref<GameState | null>(null)
 let botRunSerial = 0
 let opponentAttackRequestSerial = 0
+const displayNowMs = ref(Date.now())
+const clockReceivedAtMs = ref(Date.now())
+const displayTimer = window.setInterval(() => { displayNowMs.value = Date.now() }, 200)
 
 const BOT_ACTION_PREVIEW_MS = 520
 const BOT_ACTION_SETTLE_MS = 340
@@ -376,6 +418,23 @@ const dropOptionsCache = new Map<string, DropAction[]>()
 const dropOptionsRequests = new Map<string, Promise<DropAction[]>>()
 
 const viewState = computed(() => botReplayState.value ?? props.state)
+const topPlayer = computed<PlayerId>(() => props.localPlayer ? otherPlayer(props.localPlayer) : 'black')
+const bottomPlayer = computed<PlayerId>(() => props.localPlayer ?? 'white')
+const liveNotation = computed(() => viewState.value.history.map((entry, index) => ({ ply: index + 1, text: formatAction(entry.action, viewState.value) })))
+const estimatedServerNowMs = computed(() => (
+  viewState.value.clock.server_now_ms + Math.max(0, displayNowMs.value - clockReceivedAtMs.value)
+))
+const opponentPresence = computed(() => props.localPlayer ? viewState.value.presence?.[otherPlayer(props.localPlayer)] : undefined)
+const opponentAbandonmentWarning = computed(() => Boolean(
+  opponentPresence.value
+  && !opponentPresence.value.connected
+  && opponentPresence.value.warning_at_ms
+  && estimatedServerNowMs.value >= opponentPresence.value.warning_at_ms,
+))
+const opponentAbandonmentRemainingMs = computed(() => Math.max(
+  0,
+  (opponentPresence.value?.forfeit_at_ms ?? estimatedServerNowMs.value) - estimatedServerNowMs.value,
+))
 const whitePocket = computed(() =>
   viewState.value.players['white']?.deck.pocket_pieces ?? []
 )
@@ -416,6 +475,48 @@ const lastMove = computed(() => {
   const action = history[history.length - 1]?.action
   return action?.type === 'move' ? { from: action.from, to: action.to } : null
 })
+
+function liveClockValue(player: PlayerId): number {
+  const clock = viewState.value.clock
+  const base = clock.mode === 'countdown'
+    ? (player === 'white' ? clock.white_remaining_ms ?? 0 : clock.black_remaining_ms ?? 0)
+    : (player === 'white' ? clock.white_elapsed_ms : clock.black_elapsed_ms)
+  if (viewState.value.phase !== 'playing' || clock.active_color !== player) return base
+  const delta = Math.max(0, estimatedServerNowMs.value - clock.server_now_ms)
+  return clock.mode === 'countdown' ? Math.max(0, base - delta) : base + delta
+}
+
+function formatDuration(milliseconds: number): string {
+  const seconds = Math.max(0, Math.ceil(milliseconds / 1_000))
+  const hours = Math.floor(seconds / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  const rest = seconds % 60
+  return hours > 0
+    ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
+    : `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
+}
+
+function formattedClock(player: PlayerId): string { return formatDuration(liveClockValue(player)) }
+function playerInfo(player: PlayerId) { return viewState.value.player_info[player] ?? { nickname: player === 'white' ? 'White Player' : 'Black Player', public_id: player, side: player } }
+
+async function copyReplayCode() {
+  try {
+    const record = await api.getGameRecord(props.state.id)
+    await navigator.clipboard.writeText(await encodeReplayCode(record))
+    replayCopyStatus.value = '복사 완료'
+  } catch { replayCopyStatus.value = '복사 실패' }
+  window.setTimeout(() => { replayCopyStatus.value = '기보 복사' }, 1800)
+}
+
+function clockClasses(player: PlayerId): Record<string, boolean> {
+  const remaining = liveClockValue(player)
+  const countdown = viewState.value.clock.mode === 'countdown'
+  return {
+    active: viewState.value.phase === 'playing' && viewState.value.clock.active_color === player,
+    low: countdown && remaining <= CLOCK_URGENCY_THRESHOLDS_MS.low,
+    critical: countdown && remaining <= CLOCK_URGENCY_THRESHOLDS_MS.critical,
+  }
+}
 const boardOrientation = computed(() => props.localPlayer ?? viewState.value.current_player)
 const opponentPlayer = computed<PlayerId>(() => otherPlayer(props.localPlayer ?? props.state.current_player))
 const opponentAttackButtonLabel = computed(() => {
@@ -830,6 +931,13 @@ async function runBotTurn() {
     }
   }
 }
+
+watch(
+  () => props.state.clock.server_now_ms,
+  () => { clockReceivedAtMs.value = Date.now() },
+)
+
+onUnmounted(() => window.clearInterval(displayTimer))
 
 watch(
   () => [
@@ -1508,6 +1616,34 @@ async function onResign() {
 .game-screen { display: flex; flex-direction: column; gap: 12px; padding: 16px; position: relative; }
 
 .header { display: flex; align-items: center; gap: 16px; }
+.game-clock {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(15, 23, 34, 0.88);
+  color: #a8b1c2;
+  width: min(80vw, 80vh);
+}
+.game-clock strong { grid-row: span 2; font: 700 1.8rem/1 ui-monospace, monospace; color: #eef2f7; }
+.game-clock > span { display: grid; }.game-clock > span small { color: #a8b1c2; }
+.game-clock small { font-size: 0.75rem; }
+.game-clock.active { border-color: #d9a441; box-shadow: inset 3px 0 #d9a441; }
+.game-clock.low strong { color: #ffb56b; }
+.game-clock.critical strong { color: #ff7d7d; }
+.abandonment-warning {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 181, 107, 0.5);
+  border-radius: 8px;
+  background: rgba(96, 54, 14, 0.45);
+  color: #ffd7ad;
+}
 .title-en { font-size: 0.55em; font-weight: 400; opacity: 0.65; margin-left: 6px; }
 .player-badge { padding: 4px 10px; border-radius: 6px; font-weight: bold; }
 .player-badge.player-white { background: #eee; color: #333; }
@@ -1562,7 +1698,7 @@ async function onResign() {
   to { background: rgba(217, 164, 65, 0.16); }
 }
 
-.main-layout { display: flex; gap: 16px; align-items: flex-start; justify-content: center; }
+.main-layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; justify-content: center; }
 .main-layout.locked { pointer-events: none; opacity: 0.78; }
 
 .board-column {
@@ -1572,6 +1708,10 @@ async function onResign() {
   gap: 10px;
   min-width: 0;
 }
+.game-sidebar { width: 290px; max-height: 82vh; overflow: auto; display: grid; gap: 12px; padding: 12px; border-radius: 10px; background: rgba(19,26,39,.92); border: 1px solid rgba(255,255,255,.1); }
+.live-notation { display: grid; gap: 4px; color: #dbe2ec; }.live-notation > div { padding: 7px 8px; border-radius: 5px; background: rgba(255,255,255,.045); }.live-notation p { color: #a8b1c2; }
+.sidebar-game-info { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); color: #a8b1c2; }
+.game-over-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
 .board-tools {
   width: min(80vw, 80vh);
@@ -1812,6 +1952,7 @@ async function onResign() {
     width: min(320px, 100%);
     flex: 1 1 220px;
   }
+  .game-sidebar { width: 100%; max-height: none; order: 3; }
   .board-column,
   .selected-piece-panel {
     width: 100%;

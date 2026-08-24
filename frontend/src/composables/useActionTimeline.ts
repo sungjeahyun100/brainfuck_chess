@@ -6,5 +6,9 @@ export function cloneGameState(state: GameState): GameState {
 
 /** Apply an authoritative server timeline frame. */
 export function applyTimelineFrame(_current: GameState, frame: ActionTimelineFrame): GameState {
-  return cloneGameState(frame.state)
+  const next = cloneGameState(frame.state)
+  next.clock ??= _current.clock
+  next.presence ??= _current.presence
+  next.player_info ??= _current.player_info
+  return next
 }

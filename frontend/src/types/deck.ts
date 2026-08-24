@@ -1,10 +1,10 @@
-import type { BoardMapId, BotDifficulty, Square } from './game'
+import type { BoardMapId, BotDifficulty, Square, TimeControlId } from './game'
 import type { CustomPieceImage } from './customPiece'
 
 export type LobbyPlayer = 'white' | 'black'
 export type DeckPieceType = string
 export type DeploymentZone = 'front' | 'back'
-export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop'
+export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop' | 'replay-import'
 
 export interface PieceCatalogItem {
   id: DeckPieceType
@@ -84,6 +84,7 @@ export type DeckSelectMode = 'single' | 'bot'
 export interface SingleDeckSelection {
   whiteDeckId: string
   blackDeckId: string
+  timeControl: TimeControlId
 }
 
 export interface BotDeckSelection {
@@ -91,4 +92,5 @@ export interface BotDeckSelection {
   humanDeckId: string
   botDeckId: string
   difficulty: BotDifficulty
+  timeControl: TimeControlId
 }

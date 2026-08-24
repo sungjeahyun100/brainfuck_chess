@@ -15,7 +15,9 @@ pub(crate) async fn verify_database_contract(
         "SELECT to_regclass('shared.users') IS NOT NULL \
          AND to_regclass('shared.auth_identities') IS NOT NULL \
          AND to_regclass('{}.custom_piece_versions') IS NOT NULL \
-         AND to_regclass('{}.custom_piece_images') IS NOT NULL",
+         AND to_regclass('{}.custom_piece_images') IS NOT NULL \
+         AND to_regclass('{}.game_records') IS NOT NULL",
+        data_schema.name(),
         data_schema.name(),
         data_schema.name()
     ))
@@ -90,7 +92,7 @@ impl DataSchema {
     pub(crate) fn table(self, table: &str) -> String {
         debug_assert!(matches!(
             table,
-            "custom_piece_versions" | "custom_piece_images"
+            "custom_piece_versions" | "custom_piece_images" | "game_records"
         ));
         format!("{}.{}", self.name(), table)
     }

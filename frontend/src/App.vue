@@ -8,8 +8,10 @@
       {{ envBannerLabel }}
     </div>
 
+    <ReplayPage v-if="replayRecord" :record="replayRecord" @close="closeReplay" />
+
     <GameScreen
-      v-if="gameState"
+      v-else-if="gameState"
       :state="gameState"
       :local-player="localPlayer"
       :room-id="currentRoom?.id ?? null"
@@ -17,6 +19,7 @@
       :bot-difficulty="botDifficulty"
       @state-update="onGameStateUpdate"
       @restart="restartToLobby"
+      @replay="openReplayFromGame"
     />
 
     <LobbyHome
@@ -45,6 +48,11 @@
       v-else-if="view === 'custom-piece-workshop'"
       @back="navigate('home')"
     />
+    <ReplayImport
+      v-else-if="view === 'replay-import'"
+      @back="navigate('home')"
+      @loaded="openReplay"
+    />
     <DeckSelect
       v-else-if="view === 'single-select'"
       mode="single"
@@ -71,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { BotDifficulty, GameState } from './types/game'
 import type {
   AppView,
@@ -88,6 +96,9 @@ import DeckSelect from './views/DeckSelect.vue'
 import MultiplayerLobby from './views/MultiplayerLobby.vue'
 import PieceLab from './views/PieceLab.vue'
 import CustomPieceWorkshop from './views/CustomPieceWorkshop.vue'
+import ReplayImport from './views/ReplayImport.vue'
+import ReplayPage from './views/ReplayPage.vue'
+import type { GameRecord } from './types/gameRecord'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
 import { useSavedDecks } from './composables/useSavedDecks'
 import { serializeNeutralDeck } from './composables/useDeckSerialization'
@@ -108,11 +119,14 @@ const playMode = ref<'single' | 'bot' | 'multiplayer'>('single')
 const botDifficulty = ref<BotDifficulty>('normal')
 const lobbyError = ref<string | null>(null)
 const gamePollTimer = ref<number | null>(null)
+const replayRecord = ref<GameRecord | null>(null)
+const ACTIVE_MATCH_KEY = 'deck_chess_active_match'
 const botPlayer = computed<LobbyPlayer>(() => localPlayer.value === 'white' ? 'black' : 'white')
 
 function navigate(nextView: AppView) {
   stopGamePolling()
   lobbyError.value = null
+  replayRecord.value = null
   if (nextView !== 'deck-editor' && nextView !== 'piece-lab') {
     editingDeckId.value = null
   }
@@ -121,6 +135,25 @@ function navigate(nextView: AppView) {
     pieceLabInitial.value = { pieceType: null, boardSize: null }
   }
   view.value = nextView
+}
+
+function openReplay(record: GameRecord) {
+  stopGamePolling()
+  replayRecord.value = record
+}
+
+async function openReplayFromGame() {
+  if (!gameState.value) return
+  try { openReplay(await api.getGameRecord(gameState.value.id)) }
+  catch (error) { lobbyError.value = error instanceof Error ? error.message : String(error) }
+}
+
+function closeReplay() {
+  replayRecord.value = null
+  gameState.value = null
+  currentRoom.value = null
+  localPlayer.value = null
+  view.value = 'home'
 }
 
 function openDeckEditor(deckId: string) {
@@ -175,6 +208,7 @@ async function startSingleGame(selection: SingleDeckSelection) {
       serializeNeutralDeck(whiteDeck, 'white'),
       serializeNeutralDeck(blackDeck, 'black'),
       whiteDeck.mapId,
+      selection.timeControl,
     )
     localPlayer.value = null
     currentRoom.value = null
@@ -200,6 +234,7 @@ async function startBotGame(selection: BotDeckSelection) {
       serializeNeutralDeck(whiteDeck, 'white'),
       serializeNeutralDeck(blackDeck, 'black'),
       humanDeck.mapId,
+      selection.timeControl,
     )
     localPlayer.value = selection.humanSide
     currentRoom.value = null
@@ -214,6 +249,7 @@ function startMultiplayerGame(payload: { state: GameState; room: MultiplayerRoom
   localPlayer.value = payload.localPlayer
   currentRoom.value = payload.room
   gameState.value = payload.state
+  sessionStorage.setItem(ACTIVE_MATCH_KEY, JSON.stringify({ roomId: payload.room.id, player: payload.localPlayer }))
   if (payload.room.game_id) {
     startGamePolling(payload.room.game_id)
   }
@@ -223,6 +259,7 @@ function onGameStateUpdate(state: GameState) {
   gameState.value = state
   if (state.phase === 'ended') {
     stopGamePolling()
+    sessionStorage.removeItem(ACTIVE_MATCH_KEY)
   }
 }
 
@@ -232,6 +269,7 @@ function restartToLobby() {
   currentRoom.value = null
   localPlayer.value = null
   lobbyError.value = null
+  sessionStorage.removeItem(ACTIVE_MATCH_KEY)
   view.value = 'home'
 }
 
@@ -246,13 +284,34 @@ function startGamePolling(gameId: string) {
   stopGamePolling()
   gamePollTimer.value = window.setInterval(async () => {
     try {
-      gameState.value = await api.getGame(gameId)
+      gameState.value = currentRoom.value && localPlayer.value
+        ? await api.heartbeatRoom(currentRoom.value.id, localPlayer.value)
+        : await api.getGame(gameId)
+      if (gameState.value.phase === 'ended') {
+        stopGamePolling()
+        sessionStorage.removeItem(ACTIVE_MATCH_KEY)
+      }
     } catch {
       // Keep the last known state visible through transient sync failures.
     }
-  }, 900)
+  }, 2_000)
 }
 
+onMounted(async () => {
+  const raw = sessionStorage.getItem(ACTIVE_MATCH_KEY)
+  if (!raw) return
+  try {
+    const saved = JSON.parse(raw) as { roomId?: string; player?: LobbyPlayer }
+    if (!saved.roomId || (saved.player !== 'white' && saved.player !== 'black')) throw new Error('invalid active match')
+    const room = await api.getRoom(saved.roomId)
+    if (!room.game_id) throw new Error('game not started')
+    const state = await api.heartbeatRoom(room.id, saved.player)
+    if (state.phase === 'ended') throw new Error('game ended')
+    startMultiplayerGame({ state, room, localPlayer: saved.player })
+  } catch {
+    sessionStorage.removeItem(ACTIVE_MATCH_KEY)
+  }
+})
 onUnmounted(stopGamePolling)
 </script>
 

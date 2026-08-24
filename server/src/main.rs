@@ -15,12 +15,16 @@ mod app_state;
 mod auth;
 mod custom_piece;
 mod database;
+mod game_record;
 mod request_guard;
 mod routes;
 mod stores;
+mod time_control;
 
 use app_state::AppState;
+use game_record::GameRecordPlayer;
 use stores::RoomStore;
+use time_control::{now_ms, GameView, StoredGame, TimeControlId};
 
 use brainfuck_chess_engine::{
     actions::submit_action as submit_engine_action,
@@ -51,6 +55,8 @@ struct CreateGameRequest {
     board_variant: BoardVariant,
     white_deck: PlayerDeckSpec,
     black_deck: PlayerDeckSpec,
+    #[serde(default)]
+    time_control: TimeControlId,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -75,6 +81,8 @@ struct MultiplayerRoom {
     host_ready: bool,
     guest_ready: bool,
     game_id: Option<String>,
+    #[serde(default)]
+    time_control: TimeControlId,
 }
 
 #[derive(Deserialize)]
@@ -87,6 +95,8 @@ struct CreateRoomRequest {
     host_side: PlayerId,
     client_id: String,
     deck: PlayerDeckSpec,
+    #[serde(default)]
+    time_control: TimeControlId,
 }
 
 fn resolve_board_map(
@@ -141,6 +151,12 @@ struct ResignGameRequest {
     player_id: PlayerId,
 }
 
+#[derive(Deserialize)]
+struct HeartbeatRequest {
+    client_id: String,
+    player_id: PlayerId,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 struct PlayerDeckSpec {
     starting: Vec<StartingPieceSpec>,
@@ -171,7 +187,7 @@ enum DeckPieceRef {
 #[derive(Serialize)]
 struct GameResponse {
     id: String,
-    state: GameState,
+    state: GameView,
 }
 
 #[derive(Deserialize)]
@@ -250,7 +266,7 @@ struct BotTurnStats {
 #[derive(Debug, Serialize)]
 struct BotTurnResponse {
     ok: bool,
-    game_state: GameState,
+    game_state: GameView,
     actions: Vec<AiAction>,
     timeline: Vec<brainfuck_chess_engine::ai::ActionTimelineFrame>,
     stats: BotTurnStats,
@@ -1031,13 +1047,15 @@ async fn start_room_game(
     app: &AppState,
 ) -> Result<Option<GameResponse>, String> {
     if let Some(game_id) = &room.game_id {
-        let state = app
+        let mut state = app
             .games
-            .get(game_id)
+            .get_mut(game_id)
             .ok_or_else(|| "방의 게임을 찾을 수 없습니다.".to_string())?;
+        let now = now_ms();
+        state.adjudicate(now);
         return Ok(Some(GameResponse {
             id: game_id.clone(),
-            state: state.clone(),
+            state: state.view(now),
         }));
     }
 
@@ -1076,10 +1094,78 @@ async fn start_room_game(
         black_deck,
         packages,
     )?;
+    let (white_owner, black_owner) = if room.host_side == "white" {
+        (host_owner, guest_owner)
+    } else {
+        (guest_owner, host_owner)
+    };
+    let record_players = game_record_players(app, white_owner, black_owner).await;
 
     room.game_id = Some(game_id.clone());
-    app.games.insert(game_id.clone(), state.clone());
-    Ok(Some(GameResponse { id: game_id, state }))
+    let now = now_ms();
+    let stored = StoredGame::new_with_players(state, room.time_control, true, now, record_players);
+    let view = stored.view(now);
+    app.games.insert(game_id.clone(), stored);
+    Ok(Some(GameResponse {
+        id: game_id,
+        state: view,
+    }))
+}
+
+async fn game_record_players(
+    app: &AppState,
+    white_owner: &str,
+    black_owner: &str,
+) -> HashMap<PlayerId, GameRecordPlayer> {
+    let white = game_record_player(app, white_owner, "white").await;
+    let black = game_record_player(app, black_owner, "black").await;
+    HashMap::from([("white".into(), white), ("black".into(), black)])
+}
+
+async fn game_record_player(app: &AppState, owner: &str, side: &str) -> GameRecordPlayer {
+    let profile = app.accounts.authenticated_user(owner).await.ok().flatten();
+    GameRecordPlayer {
+        public_id: profile
+            .as_ref()
+            .and_then(|profile| profile.public_id.clone())
+            .unwrap_or_else(|| format!("guest-{side}")),
+        nickname: profile
+            .and_then(|profile| profile.display_name)
+            .unwrap_or_else(|| {
+                if side == "white" {
+                    "White Player".into()
+                } else {
+                    "Black Player".into()
+                }
+            }),
+        side: side.into(),
+    }
+}
+
+async fn run_game_time_adjudicator(
+    games: stores::GameStore,
+    records: game_record::GameRecordStore,
+) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
+    loop {
+        interval.tick().await;
+        let ids = games
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        let now = now_ms();
+        for id in ids {
+            let completed = if let Some(mut game) = games.get_mut(&id) {
+                game.adjudicate(now);
+                game.take_completed_record()
+            } else {
+                None
+            };
+            if let Some(record) = completed {
+                let _ = records.save(&record).await;
+            }
+        }
+    }
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -1090,6 +1176,10 @@ async fn main() {
     let state = AppState::from_env(environment)
         .await
         .unwrap_or_else(|error| panic!("server startup blocked: {error}"));
+    tokio::spawn(run_game_time_adjudicator(
+        state.games.clone(),
+        state.game_records.clone(),
+    ));
 
     // Static frontend directory — populated at Docker build time.
     // Falls back gracefully if the directory doesn't exist (dev mode).
@@ -1248,8 +1338,12 @@ async fn create_game(
         packages,
     )
     .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
-    app.games.insert(id.clone(), state.clone());
-    Ok(Json(GameResponse { id, state }))
+    let now = now_ms();
+    let record_players = game_record_players(&app, &owner, &owner).await;
+    let stored = StoredGame::new_with_players(state, req.time_control, false, now, record_players);
+    let view = stored.view(now);
+    app.games.insert(id.clone(), stored);
+    Ok(Json(GameResponse { id, state: view }))
 }
 
 async fn create_room(
@@ -1297,6 +1391,7 @@ async fn create_room(
         host_ready: true,
         guest_ready: false,
         game_id: None,
+        time_control: req.time_control,
     };
 
     app.rooms.insert(id, room.clone());
@@ -1347,7 +1442,7 @@ async fn join_room(
     }
 
     if let Some(game_id) = &room.game_id {
-        let state = app.games.get(game_id).ok_or_else(|| {
+        let mut state = app.games.get_mut(game_id).ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
                 Json(ErrorResponse {
@@ -1355,9 +1450,11 @@ async fn join_room(
                 }),
             )
         })?;
+        let now = now_ms();
+        state.adjudicate(now);
         return Ok(Json(GameResponse {
             id: game_id.clone(),
-            state: state.clone(),
+            state: state.view(now),
         }));
     }
 
@@ -1536,7 +1633,7 @@ async fn resign_room(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<ResignRoomRequest>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
     let room = app
         .rooms
         .get(&id.to_uppercase())
@@ -1579,23 +1676,20 @@ async fn resign_room(
         )
     })?;
 
-    let state = entry.value_mut();
-    if state.phase != GamePhase::Ended {
-        state.phase = GamePhase::Ended;
-        state.result = Some(GameResult {
-            winner: Some(opponent_side(&req.player_id)),
-            reason: GameEndReason::Resignation,
-        });
+    let game = entry.value_mut();
+    if game.phase != GamePhase::Ended {
+        game.clock.stop(now_ms());
+        game.end_with_loss(&req.player_id, GameEndReason::Resignation);
     }
 
-    Ok(Json(state.clone()))
+    Ok(Json(game.view(now_ms())))
 }
 
 async fn resign_game(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<ResignGameRequest>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
     if req.player_id != "white" && req.player_id != "black" {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1614,24 +1708,74 @@ async fn resign_game(
         )
     })?;
 
-    let state = entry.value_mut();
-    if state.phase != GamePhase::Ended {
-        state.phase = GamePhase::Ended;
-        state.result = Some(GameResult {
-            winner: Some(opponent_side(&req.player_id)),
-            reason: GameEndReason::Resignation,
-        });
+    let game = entry.value_mut();
+    if game.phase != GamePhase::Ended {
+        game.clock.stop(now_ms());
+        game.end_with_loss(&req.player_id, GameEndReason::Resignation);
     }
 
-    Ok(Json(state.clone()))
+    Ok(Json(game.view(now_ms())))
+}
+
+async fn heartbeat_room(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<HeartbeatRequest>,
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
+    let room = app.rooms.get(&id.to_uppercase()).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "방을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+    let authorized = (req.player_id == room.host_side && req.client_id == room.host_client_id)
+        || (req.player_id == room.guest_side
+            && room.guest_client_id.as_deref() == Some(req.client_id.as_str()));
+    if !authorized {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "이 방의 플레이어만 heartbeat를 보낼 수 있습니다.".into(),
+            }),
+        ));
+    }
+    let game_id = room.game_id.clone().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "아직 시작되지 않은 방입니다.".into(),
+            }),
+        )
+    })?;
+    drop(room);
+    let mut game = app.games.get_mut(&game_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "방의 게임을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+    let now = now_ms();
+    game.adjudicate(now);
+    if game.phase != GamePhase::Ended {
+        game.heartbeat(&req.player_id, now);
+    }
+    Ok(Json(game.view(now)))
 }
 
 async fn get_game(
     State(app): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
-    match app.games.get(&id) {
-        Some(state) => Ok(Json(state.clone())),
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
+    match app.games.get_mut(&id) {
+        Some(mut game) => {
+            let now = now_ms();
+            game.adjudicate(now);
+            Ok(Json(game.view(now)))
+        }
         None => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -1641,11 +1785,98 @@ async fn get_game(
     }
 }
 
+async fn get_game_record(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<game_record::GameRecord>, (StatusCode, Json<ErrorResponse>)> {
+    if let Some(mut game) = app.games.get_mut(&id) {
+        let now = now_ms();
+        game.adjudicate(now);
+        if game.phase != GamePhase::Ended {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(ErrorResponse {
+                    error: "진행 중인 게임은 아직 기보를 내보낼 수 없습니다.".into(),
+                }),
+            ));
+        }
+        let record = game.record.clone();
+        drop(game);
+        let _ = app.game_records.save(&record).await;
+        return Ok(Json(record));
+    }
+    match app.game_records.get(&id).await {
+        Ok(Some(record)) => Ok(Json(record)),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "게임 기록을 찾을 수 없습니다.".into(),
+            }),
+        )),
+        Err(_) => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "게임 기록 저장소를 사용할 수 없습니다.".into(),
+            }),
+        )),
+    }
+}
+
+async fn list_game_records(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<game_record::GameRecord>>, (StatusCode, Json<ErrorResponse>)> {
+    let owner = app
+        .auth
+        .authenticate(&headers)
+        .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
+    let profile = app
+        .accounts
+        .authenticated_user(&owner)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "계정 정보를 불러올 수 없습니다.".into(),
+                }),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "로그인 계정의 기록만 조회할 수 있습니다.".into(),
+                }),
+            )
+        })?;
+    let public_id = profile.public_id.ok_or_else(|| {
+        (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "게임 기록을 조회하려면 공개 ID를 먼저 설정해 주세요.".into(),
+            }),
+        )
+    })?;
+    app.game_records
+        .list_for_public_id(&public_id, 50)
+        .await
+        .map(Json)
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "게임 기록 저장소를 사용할 수 없습니다.".into(),
+                }),
+            )
+        })
+}
+
 async fn submit_action(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<SubmitActionRequest>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
     let mut entry = app.games.get_mut(&id).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -1655,9 +1886,11 @@ async fn submit_action(
         )
     })?;
 
-    let state = entry.value_mut();
+    let game = entry.value_mut();
+    let now = now_ms();
+    game.adjudicate(now);
 
-    if state.phase == GamePhase::Ended {
+    if game.phase == GamePhase::Ended {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -1666,9 +1899,11 @@ async fn submit_action(
         ));
     }
 
-    match req.action {
+    let moving_player = game.current_player.clone();
+    let clock_before = game.clock.snapshot(now, true);
+    let (next_state, recorded_action) = match req.action {
         SubmitAction::Move(request) => {
-            let piece = state.pieces.get(&request.piece_id).ok_or_else(|| {
+            let piece = game.pieces.get(&request.piece_id).ok_or_else(|| {
                 (
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
@@ -1676,7 +1911,7 @@ async fn submit_action(
                     }),
                 )
             })?;
-            if piece.owner != state.current_player {
+            if piece.owner != game.current_player {
                 return Err((
                     StatusCode::FORBIDDEN,
                     Json(ErrorResponse {
@@ -1690,7 +1925,7 @@ async fn submit_action(
                 move_option_id: request.move_option_id.clone(),
             };
             let matching_actions = generate_piece_legal_move_actions_with_options(
-                state,
+                &game.state,
                 &request.piece_id,
                 &move_options,
             )
@@ -1717,11 +1952,13 @@ async fn submit_action(
                     }),
                 ));
             };
-            *state = submit_engine_action(state.clone(), TurnAction::Move(legal_action.clone()))
+            let action = TurnAction::Move(legal_action.clone());
+            let state = submit_engine_action(game.state.clone(), action.clone())
                 .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+            (state, action)
         }
         SubmitAction::Drop(request) => {
-            let legal_action = generate_piece_legal_drop_actions(state, &request.piece_id)
+            let legal_action = generate_piece_legal_drop_actions(&game.state, &request.piece_id)
                 .into_iter()
                 .find(|action| action.to == request.to);
             let Some(legal_action) = legal_action else {
@@ -1732,12 +1969,14 @@ async fn submit_action(
                     }),
                 ));
             };
-            *state = submit_engine_action(state.clone(), TurnAction::Drop(legal_action))
+            let action = TurnAction::Drop(legal_action);
+            let state = submit_engine_action(game.state.clone(), action.clone())
                 .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+            (state, action)
         }
         SubmitAction::Ability(request) => {
             let legal_action = AbilityAction {
-                player_id: state.current_player.clone(),
+                player_id: game.current_player.clone(),
                 piece_id: request.piece_id,
                 ability_id: request.ability_id,
                 target_piece_id: request.target_piece_id,
@@ -1745,12 +1984,63 @@ async fn submit_action(
                 to: request.to,
                 deployments: request.deployments,
             };
-            *state = submit_engine_action(state.clone(), TurnAction::Ability(legal_action))
+            let action = TurnAction::Ability(legal_action);
+            let state = submit_engine_action(game.state.clone(), action.clone())
                 .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+            (state, action)
         }
-    }
+    };
 
-    Ok(Json(state.clone()))
+    let confirmed_at = now_ms();
+    game.adjudicate(confirmed_at);
+    if game.phase == GamePhase::Ended {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "착수 확정 전에 시간이 만료되었습니다.".into(),
+            }),
+        ));
+    }
+    game.state = next_state;
+    let next_player = game.current_player.clone();
+    let ended = game.phase == GamePhase::Ended;
+    game.clock
+        .finish_turn(&moving_player, &next_player, confirmed_at, ended);
+    let clock_after = game.clock.snapshot(confirmed_at, !ended);
+    let elapsed_ms = clock_before
+        .turn_started_at_ms
+        .map(|started| confirmed_at.saturating_sub(started))
+        .unwrap_or(0);
+    game.record.push_action(
+        moving_player.clone(),
+        recorded_action,
+        elapsed_ms,
+        player_clock_value(&clock_before, &moving_player),
+        player_clock_value(&clock_after, &moving_player),
+        clock_after,
+        game.state.clone(),
+    );
+    if ended {
+        let final_state = game.state.clone();
+        let final_clock = game.clock.snapshot(confirmed_at, false);
+        game.record
+            .finalize(&final_state, final_clock, confirmed_at);
+    }
+    Ok(Json(game.view(confirmed_at)))
+}
+
+fn player_clock_value(clock: &time_control::ClockSnapshot, player: &str) -> Option<i64> {
+    if clock.mode == time_control::TimeControlMode::Countdown {
+        if player == "white" {
+            clock.white_remaining_ms
+        } else {
+            clock.black_remaining_ms
+        }
+    } else if player == "white" {
+        Some(clock.white_elapsed_ms)
+    } else {
+        Some(clock.black_elapsed_ms)
+    }
 }
 
 async fn run_bot_turn(
@@ -1788,6 +2078,8 @@ async fn run_bot_turn(
             }),
         )
     })?;
+    let started_at = now_ms();
+    entry.adjudicate(started_at);
     if entry.phase == GamePhase::Ended || entry.result.is_some() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1805,13 +2097,53 @@ async fn run_bot_turn(
         ));
     }
 
-    let result = play_bot_turn_detailed(entry.clone(), &req.bot_player_id, difficulty)
+    let moving_player = entry.current_player.clone();
+    let clock_before = entry.clock.snapshot(started_at, true);
+    let result = play_bot_turn_detailed(entry.state.clone(), &req.bot_player_id, difficulty)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
-    *entry = result.state.clone();
+    let finished_at = now_ms();
+    entry.adjudicate(finished_at);
+    if entry.phase == GamePhase::Ended {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "봇 착수 확정 전에 시간이 만료되었습니다.".into(),
+            }),
+        ));
+    }
+    entry.state = result.state.clone();
+    let next_player = entry.current_player.clone();
+    let ended = entry.phase == GamePhase::Ended;
+    entry
+        .clock
+        .finish_turn(&moving_player, &next_player, finished_at, ended);
+    let clock_after = entry.clock.snapshot(finished_at, !ended);
+    for (index, frame) in result.timeline.iter().enumerate() {
+        entry.record.push_action(
+            moving_player.clone(),
+            ai_action_to_turn_action(frame.action.clone()),
+            if index == 0 {
+                finished_at.saturating_sub(clock_before.turn_started_at_ms.unwrap_or(started_at))
+            } else {
+                0
+            },
+            player_clock_value(&clock_before, &moving_player),
+            player_clock_value(&clock_after, &moving_player),
+            clock_after.clone(),
+            frame.state.clone(),
+        );
+    }
+    if ended {
+        let final_state = entry.state.clone();
+        let final_clock = entry.clock.snapshot(finished_at, false);
+        entry
+            .record
+            .finalize(&final_state, final_clock, finished_at);
+    }
 
     Ok(Json(BotTurnResponse {
         ok: true,
-        game_state: result.state,
+        game_state: entry.view(finished_at),
         actions: result.actions,
         timeline: result.timeline,
         stats: BotTurnStats {
@@ -1833,6 +2165,14 @@ async fn run_bot_turn(
             elapsed_ms: result.elapsed_ms,
         },
     }))
+}
+
+fn ai_action_to_turn_action(action: AiAction) -> TurnAction {
+    match action {
+        AiAction::Move(action) => TurnAction::Move(action),
+        AiAction::Drop(action) => TurnAction::Drop(action),
+        AiAction::Ability(action) => TurnAction::Ability(action),
+    }
 }
 
 async fn get_legal_moves(
@@ -2242,7 +2582,10 @@ mod tests {
             build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
         remove_front_line_after_validation(&mut state);
         let app = AppState::in_memory();
-        app.games.insert(game_id.clone(), state);
+        app.games.insert(
+            game_id.clone(),
+            StoredGame::new(state, TimeControlId::Unlimited, false, now_ms()),
+        );
         (app, game_id)
     }
 
@@ -2826,6 +3169,56 @@ mod tests {
         assert_eq!(response.history.len(), 1);
         let stored = app.games.get(&game_id).unwrap();
         assert_eq!(stored.current_player, "black");
+        assert_eq!(stored.record.actions.len(), 1);
+        assert_eq!(
+            stored.record.actions[0].state_after.turn_number,
+            stored.turn_number
+        );
+        assert_eq!(
+            stored.record.actions[0].piece_index,
+            stored.record.piece_id_map["white_rook_1"]
+        );
+        assert_eq!(stored.record.actions[0].clock.active_color, "black");
+    }
+
+    #[tokio::test]
+    async fn resignation_completes_a_portable_record_with_the_authoritative_final_state() {
+        let (app, game_id) = test_app_with_game();
+        let ended = resign_game(
+            State(app.clone()),
+            Path(game_id.clone()),
+            Json(ResignGameRequest {
+                player_id: "white".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let record = get_game_record(State(app), Path(game_id)).await.unwrap().0;
+        assert_eq!(
+            record.result.as_ref().map(|result| &result.reason),
+            Some(&GameEndReason::Resignation)
+        );
+        assert_eq!(
+            record.final_state.as_ref().map(|state| state.phase.clone()),
+            Some(GamePhase::Ended)
+        );
+        assert_eq!(
+            record
+                .final_state
+                .as_ref()
+                .and_then(|state| state.result.as_ref())
+                .and_then(|result| result.winner.as_deref()),
+            Some("black")
+        );
+        assert_eq!(
+            ended
+                .result
+                .as_ref()
+                .and_then(|result| result.winner.as_deref()),
+            Some("black")
+        );
+        assert!(record.final_clock.is_some());
     }
 
     #[tokio::test]
@@ -2927,7 +3320,10 @@ mod tests {
             build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
         remove_front_line_after_validation(&mut state);
         let app = AppState::in_memory();
-        app.games.insert(game_id.clone(), state);
+        app.games.insert(
+            game_id.clone(),
+            StoredGame::new(state, TimeControlId::Unlimited, false, now_ms()),
+        );
 
         let response = match submit_action(
             State(app),

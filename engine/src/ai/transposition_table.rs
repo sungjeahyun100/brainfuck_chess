@@ -180,7 +180,8 @@ const fn result_tag(reason: &GameEndReason) -> u8 {
         GameEndReason::KingCapture => 0,
         GameEndReason::Resignation => 1,
         GameEndReason::Timeout => 2,
-        GameEndReason::Draw => 3,
+        GameEndReason::Abandonment => 3,
+        GameEndReason::Draw => 4,
     }
 }
 

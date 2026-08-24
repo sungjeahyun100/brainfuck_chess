@@ -36,6 +36,15 @@
         </div>
       </section>
 
+      <section class="card bot-panel">
+        <label class="difficulty-select">
+          <span class="limit-label">타임 컨트롤</span>
+          <select v-model="timeControl">
+            <option v-for="option in TIME_CONTROLS" :key="option.id" :value="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+      </section>
+
       <section class="summary-grid">
         <div class="card summary-card">
           <p class="summary-title">{{ mode === 'bot' ? '내 덱' : 'White 덱' }}</p>
@@ -75,6 +84,8 @@ import type { BotDeckSelection, DeckSelectMode, LobbyPlayer, SavedDeck, SingleDe
 import { useSavedDecks } from '../composables/useSavedDecks'
 import { totalPocketCount, validateSavedDeck } from '../composables/useDeckValidation'
 import { boardMapLabel } from '../boardMaps'
+import { TIME_CONTROLS } from '../timeControls'
+import type { TimeControlId } from '../types/game'
 
 const props = defineProps<{
   mode: DeckSelectMode
@@ -93,6 +104,7 @@ const primaryDeckId = ref('')
 const secondaryDeckId = ref('')
 const humanSide = ref<LobbyPlayer>('white')
 const difficulty = ref<BotDifficulty>('normal')
+const timeControl = ref<TimeControlId>('ten_five')
 
 const validDecks = computed(() => decks.value.filter(deck => validateSavedDeck(deck).valid))
 const invalidDecks = computed(() => decks.value.filter(deck => !validateSavedDeck(deck).valid))
@@ -130,6 +142,7 @@ function start() {
       humanDeckId: primaryDeckId.value,
       botDeckId: secondaryDeckId.value,
       difficulty: difficulty.value,
+      timeControl: timeControl.value,
     })
     return
   }
@@ -137,6 +150,7 @@ function start() {
   emit('start-single', {
     whiteDeckId: primaryDeckId.value,
     blackDeckId: secondaryDeckId.value,
+    timeControl: timeControl.value,
   })
 }
 

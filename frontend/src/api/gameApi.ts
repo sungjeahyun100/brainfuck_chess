@@ -13,8 +13,10 @@ import type {
   PlayerId,
   Square,
   SubmitAction,
+  TimeControlId,
 } from '../types/game'
 import type { PieceCatalogMetadata } from '../types/deck'
+import type { GameRecord } from '../types/gameRecord'
 
 const BASE = '/api/games'
 const ROOM_BASE = '/api/rooms'
@@ -58,6 +60,7 @@ export interface MultiplayerRoom {
   host_ready: boolean
   guest_ready: boolean
   game_id?: string | null
+  time_control: TimeControlId
 }
 
 interface ResignRoomRequest {
@@ -179,6 +182,7 @@ export const api = {
     whiteDeck: PlayerDeckRequest,
     blackDeck: PlayerDeckRequest,
     mapId: BoardMapId,
+    timeControl: TimeControlId,
   ): Promise<{ id: string; state: GameState }> {
     return request(`${BASE}`, {
       method: 'POST',
@@ -187,12 +191,21 @@ export const api = {
         map_id: mapId,
         white_deck: whiteDeck,
         black_deck: blackDeck,
+        time_control: timeControl,
       }),
     })
   },
 
   getGame(id: string): Promise<GameState> {
     return request(`${BASE}/${id}`)
+  },
+
+  getGameRecord(id: string): Promise<GameRecord> {
+    return request(`${BASE}/${id}/record`)
+  },
+
+  listGameRecords(): Promise<GameRecord[]> {
+    return request('/api/game-records')
   },
 
   submitAction(id: string, action: SubmitAction): Promise<GameState> {
@@ -260,6 +273,7 @@ export const api = {
     hostSide: 'white' | 'black',
     deck: PlayerDeckRequest,
     mapId: BoardMapId,
+    timeControl: TimeControlId,
   ): Promise<MultiplayerRoom> {
     return request(`${ROOM_BASE}`, {
       method: 'POST',
@@ -269,7 +283,15 @@ export const api = {
         host_side: hostSide,
         client_id: getClientId(),
         deck,
+        time_control: timeControl,
       }),
+    })
+  },
+
+  heartbeatRoom(id: string, playerId: PlayerId): Promise<GameState> {
+    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/heartbeat`, {
+      method: 'POST',
+      body: JSON.stringify({ client_id: getClientId(), player_id: playerId }),
     })
   },
 

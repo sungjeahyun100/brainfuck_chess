@@ -264,7 +264,36 @@ export interface BotTurnResponse {
 
 export type GamePhase = 'setup' | 'playing' | 'ended'
 
-export type GameEndReason = 'king_capture' | 'resignation' | 'timeout' | 'draw'
+export type GameEndReason = 'king_capture' | 'resignation' | 'timeout' | 'abandonment' | 'draw'
+
+export type TimeControlId = 'five_zero' | 'ten_zero' | 'five_three' | 'ten_five' | 'fifteen_ten' | 'unlimited'
+
+export interface GameClock {
+  time_control: TimeControlId
+  mode: 'countdown' | 'unlimited'
+  initial_time_ms: number | null
+  increment_ms: number
+  active_color: PlayerId
+  turn_started_at_ms?: number | null
+  server_now_ms: number
+  white_remaining_ms?: number | null
+  black_remaining_ms?: number | null
+  white_elapsed_ms: number
+  black_elapsed_ms: number
+}
+
+export interface PlayerPresence {
+  connected: boolean
+  disconnected_at_ms?: number | null
+  warning_at_ms?: number | null
+  forfeit_at_ms?: number | null
+}
+
+export interface GamePlayerInfo {
+  public_id: string
+  nickname: string
+  side: PlayerId
+}
 
 export interface GameResult {
   winner?: PlayerId
@@ -297,6 +326,9 @@ export interface GameState {
     action: TurnAction
   }>
   result?: GameResult
+  clock: GameClock
+  presence?: { white: PlayerPresence; black: PlayerPresence }
+  player_info: Record<PlayerId, GamePlayerInfo>
 }
 
 export interface AttackMap {

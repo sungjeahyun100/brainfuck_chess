@@ -1013,6 +1013,7 @@ pub enum GameEndReason {
     KingCapture,
     Resignation,
     Timeout,
+    Abandonment,
     Draw,
 }
 
