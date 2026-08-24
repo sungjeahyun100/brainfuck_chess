@@ -204,6 +204,7 @@ interface PieceDefinition {
   id: string;
   name: string;
   score: number;
+  maxAmmo: number; // JSON/Rust: max_ammo, 기본값 0
   chessemblyCode: string;
   chessemblyVersion: string;
   dialect?: "classic" | "brainfuck-chess";
@@ -516,13 +517,15 @@ interface Square {
 
 interface Board {
   size: number;
-  squares: Map<SquareId, PieceId | null>;
+  squares: Map<SquareId, PieceId | null>;    // Ground Layer
+  airSquares: Map<SquareId, PieceId | null>; // JSON/Rust: air_squares
 }
 
 interface PieceDefinition {
   id: PieceTypeId;
   name: string;
   score: number;
+  maxAmmo: number; // JSON/Rust: max_ammo, 기본값 0
   chessemblyCode: string;
   chessemblyVersion: string;
   dialect?: "classic" | "brainfuck-chess";
@@ -539,6 +542,9 @@ interface Piece {
   captured: boolean;
   moveStack: number;
   hasMoved: boolean;
+  currentAmmo: number; // JSON/Rust: current_ammo
+  layer: "ground" | "air";
+  remainingFlightTurns: number; // JSON/Rust: remaining_flight_turns
 }
 
 interface Deck {

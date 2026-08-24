@@ -26,6 +26,13 @@
 `move_layers[].chessembly_code`는 기존 체섬블리 문법을 그대로 사용한다.
 엔진에 존재하지 않는 새 기물 선언 문법을 체섬블리 파서에 추가하지 않았다.
 
+현재 정의 JSON은 탄약 관련 `max_ammo`, `move_options[].ammo_cost`,
+`move_options[].enabled_when`도 받을 수 있다. 누락 시 각각 `0`, `0`, 빈 조건으로
+처리된다. `ammo_cost`는 canonical move/ability commit에서만 소비되며 현재
+탄약이 부족한 옵션은 합법 행동으로 생성되지 않는다. `Piece.current_ammo`,
+`Piece.layer`, `Piece.remaining_flight_turns`, `Board.air_squares`의 저장 계약과
+Air Layer 규칙은 [`ammo-air-layer.md`](ammo-air-layer.md)를 참고한다.
+
 패키지는 로컬 ID를
 `custom:{package_id}:v{version}:{local_piece_key}` 런타임 ID로 변환한다.
 promotion과 `transition(local_key)` 참조도 같은 패키지 네임스페이스로

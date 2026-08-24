@@ -7,6 +7,7 @@ pub fn dozer_black_definition() -> PieceDefinition {
         id: "dozer-black".into(),
         name: "Dozer".into(),
         score: 2,
+        max_ammo: 0,
         chessembly_code: "\
 take-move(-2, -1);
 take-move(-1, -1);

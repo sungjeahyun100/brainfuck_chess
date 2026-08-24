@@ -16,6 +16,12 @@ import machineGunnerBlack from './assets/pieces/machine-gunner-black.svg'
 import machineGunnerWhite from './assets/pieces/machine-gunner-white.svg'
 import mortarBlack from './assets/pieces/mortar-black.svg'
 import mortarWhite from './assets/pieces/mortar-white.svg'
+import tankBlack from './assets/pieces/tank-black.svg'
+import tankWhite from './assets/pieces/tank-white.svg'
+import bomberBlack from './assets/pieces/bomber-black.svg'
+import bomberWhite from './assets/pieces/bomber-white.svg'
+import surfaceToAirMissileBlack from './assets/pieces/surface-to-air-missile-black.svg'
+import surfaceToAirMissileWhite from './assets/pieces/surface-to-air-missile-white.svg'
 import dozerBlack from './assets/pieces/dozer-black.svg'
 import dozerWhite from './assets/pieces/dozer-white.svg'
 import kingBlack from './assets/pieces/king-black.svg'
@@ -78,6 +84,11 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   airborne: { white: airborneWhite, black: airborneBlack },
   'green-camp': { white: greenCampWhite, black: greenCampBlack },
   mortar: { white: mortarWhite, black: mortarBlack },
+  tank: { white: tankWhite, black: tankBlack },
+  bomber: { white: bomberWhite, black: bomberBlack },
+  'surface-to-air-missile': { white: surfaceToAirMissileWhite, black: surfaceToAirMissileBlack },
+  'surface-to-air-missile-white': { white: surfaceToAirMissileWhite, black: surfaceToAirMissileBlack },
+  'surface-to-air-missile-black': { white: surfaceToAirMissileWhite, black: surfaceToAirMissileBlack },
   'machine-gunner': { white: machineGunnerWhite, black: machineGunnerBlack },
   'pawn-white': { white: pawnWhite, black: pawnBlack },
   'pawn-black': { white: pawnWhite, black: pawnBlack },

@@ -11,12 +11,36 @@ pub struct BoardMapDefinition {
 }
 
 pub const BOARD_MAPS: [BoardMapDefinition; 6] = [
-    BoardMapDefinition { id: "standard-8x8", board_size: 8, variant: BoardVariant::Plain },
-    BoardMapDefinition { id: "standard-9x9", board_size: 9, variant: BoardVariant::Plain },
-    BoardMapDefinition { id: "standard-10x10", board_size: 10, variant: BoardVariant::Plain },
-    BoardMapDefinition { id: "standard-11x11", board_size: 11, variant: BoardVariant::Plain },
-    BoardMapDefinition { id: "standard-12x12", board_size: 12, variant: BoardVariant::Plain },
-    BoardMapDefinition { id: "central-high-ground-12x12", board_size: 12, variant: BoardVariant::CentralHighGround },
+    BoardMapDefinition {
+        id: "standard-8x8",
+        board_size: 8,
+        variant: BoardVariant::Plain,
+    },
+    BoardMapDefinition {
+        id: "standard-9x9",
+        board_size: 9,
+        variant: BoardVariant::Plain,
+    },
+    BoardMapDefinition {
+        id: "standard-10x10",
+        board_size: 10,
+        variant: BoardVariant::Plain,
+    },
+    BoardMapDefinition {
+        id: "standard-11x11",
+        board_size: 11,
+        variant: BoardVariant::Plain,
+    },
+    BoardMapDefinition {
+        id: "standard-12x12",
+        board_size: 12,
+        variant: BoardVariant::Plain,
+    },
+    BoardMapDefinition {
+        id: "central-high-ground-12x12",
+        board_size: 12,
+        variant: BoardVariant::CentralHighGround,
+    },
 ];
 
 pub fn board_map_definition(id: &str) -> Option<BoardMapDefinition> {
@@ -24,7 +48,10 @@ pub fn board_map_definition(id: &str) -> Option<BoardMapDefinition> {
 }
 
 pub fn standard_board_map_id(size: i32) -> Option<&'static str> {
-    BOARD_MAPS.iter().find(|map| map.board_size == size && map.variant == BoardVariant::Plain).map(|map| map.id)
+    BOARD_MAPS
+        .iter()
+        .find(|map| map.board_size == size && map.variant == BoardVariant::Plain)
+        .map(|map| map.id)
 }
 
 /// Create an empty n×n board with all squares initialized to empty.
@@ -40,6 +67,7 @@ pub fn create_board(size: i32) -> Board {
     Board {
         size,
         squares,
+        air_squares: HashMap::new(),
         terrain: HashMap::new(),
     }
 }

@@ -53,6 +53,33 @@
       </div>
     </div>
 
+    <div v-if="overlapSelectionPieceIds.length" class="promotion-overlay" @click.self="cancelOverlapSelection">
+      <div class="promotion-box">
+        <h3>기물 선택</h3>
+        <p>같은 칸에 있는 기물 중 선택할 기물을 고르세요.</p>
+        <div class="promotion-choices">
+          <button
+            v-for="pieceId in overlapSelectionPieceIds"
+            :key="pieceId"
+            class="promotion-choice"
+            type="button"
+            @click="chooseOverlappingPiece(pieceId)"
+          >
+            <img
+              v-if="pieceImage(pieceId)"
+              class="promotion-choice-image"
+              :src="pieceImage(pieceId)"
+              :alt="pieceAlt(pieceId)"
+            />
+            <span v-else>{{ pieceSymbol(props.state.pieces[pieceId].type_id) }}</span>
+            <strong>{{ props.state.piece_definitions[props.state.pieces[pieceId].type_id]?.name ?? props.state.pieces[pieceId].type_id }}</strong>
+            <small>{{ props.state.pieces[pieceId].layer === 'air' ? '공중 기물' : '지상 기물' }}</small>
+          </button>
+        </div>
+        <button class="overlap-cancel" type="button" @click="cancelOverlapSelection">취소</button>
+      </div>
+    </div>
+
     <div v-if="airdropOpen" class="airdrop-overlay">
       <div class="airdrop-box">
         <h3>공수부대 다중 소환</h3>
@@ -156,6 +183,7 @@
           :ability-mode="visibleAbilityMode"
           @square-click="onSquareClick"
           @piece-drag-start="onBoardPieceDragStart"
+          @piece-click="onBoardPieceClick"
           @square-drop="onSquareDrop"
         />
 
@@ -265,12 +293,13 @@ import type {
   GameState,
   MoveAction,
   MoveOptionDefinition,
+  Piece,
   PlayerId,
   Square,
   SubmitDropAction,
   SubmitMoveAction,
 } from '../types/game'
-import { isImmediateAbilityAction, moveOptionTargets, usesMoveSubmission } from '../moveOptionUi'
+import { abilityActionTargetsSquare, abilitySelectionSquares, isImmediateAbilityAction, moveOptionTargets, pendingForcedLandingPieceId, usesMoveSubmission } from '../moveOptionUi'
 import { api } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import Board from './Board.vue'
@@ -307,6 +336,7 @@ const botReplayMessage = ref<string | null>(null)
 const lastBotStats = ref<BotTurnStats | null>(null)
 const draggedPocketPieceId = ref<string | null>(null)
 const promotionRequest = ref<{ pieceId: string; to: Square; owner: PlayerId; options: string[] } | null>(null)
+const overlapSelectionPieceIds = ref<string[]>([])
 const airdropOpen = ref(false)
 const airdropSelectedPieceId = ref<string | null>(null)
 const airdropDraft = ref<AbilityDeployment[]>([])
@@ -399,7 +429,14 @@ const selectedPieceDefinition = computed(() => (
   selectedPiece.value ? props.state.piece_definitions[selectedPiece.value.type_id] ?? null : null
 ))
 const selectedPieceAbilities = computed<MoveOptionDefinition[]>(() => (
-  selectedPieceDefinition.value?.move_options?.filter(option => option.kind === 'ability') ?? []
+  selectedPieceDefinition.value?.move_options?.filter(option => (
+    option.kind === 'ability'
+      && selectedPiece.value
+      && (option.enabled_when ?? []).every(predicate => pieceStatePredicateMatches(selectedPiece.value!, predicate))
+      && ((selectedPiece.value.layer === 'air' && (selectedPiece.value.remaining_flight_turns ?? 0) === 0)
+        ? option.id === 'forced-landing'
+        : option.id !== 'forced-landing')
+  )) ?? []
 ))
 const selectedAbility = computed(() => (
   selectedPieceAbilities.value.find(ability => ability.id === activeAbilityId.value) ?? null
@@ -427,6 +464,10 @@ function abilityUnavailableReason(ability: MoveOptionDefinition): string {
   if (!selectedPiece.value) return '선택한 기물이 없습니다.'
   if (selectedPieceAbilities.value.length === 0) return '선택한 기물은 특수 능력이 없습니다.'
   if (selectedPiece.value.owner !== props.state.current_player) return '현재 턴의 기물이 아닙니다.'
+  if ((selectedPiece.value.current_ammo ?? 0) < (ability.ammo_cost ?? 0)) return '탄약이 부족합니다.'
+  if (ability.id === 'takeoff' && !hasTakeoffRoute(selectedPiece.value)) {
+    return '연속 5칸의 빈 지상 활주로가 없습니다.'
+  }
   const remaining = selectedPiece.value.move_option_cooldowns?.[ability.id]?.remaining ?? 0
   if (remaining > 0) {
     const clockLabel = ability.cooldown?.clock === 'global_turns'
@@ -435,6 +476,33 @@ function abilityUnavailableReason(ability: MoveOptionDefinition): string {
     return `${remaining}번의 ${clockLabel}을 마친 뒤 다시 사용할 수 있습니다.`
   }
   return ''
+}
+
+function pieceStatePredicateMatches(
+  piece: Piece,
+  predicate: import('../types/game').PieceStatePredicate,
+): boolean {
+  const actual = piece.state[predicate.key]
+  if ('equals' in predicate.condition) return actual === predicate.condition.equals
+  return actual !== undefined && actual !== predicate.condition.not_equals
+}
+
+function hasTakeoffRoute(piece: Piece): boolean {
+  if (!piece.current_square || piece.layer !== 'ground') return false
+  const directions = [
+    [1, 0], [-1, 0], [0, 1], [0, -1],
+    [1, 1], [1, -1], [-1, 1], [-1, -1],
+  ]
+  return directions.some(([dx, dy]) => {
+    for (let distance = 1; distance <= 5; distance += 1) {
+      const file = piece.current_square!.file + dx * distance
+      const rank = piece.current_square!.rank + dy * distance
+      if (file < 0 || rank < 0 || file >= props.state.board.size || rank >= props.state.board.size) return false
+      if (props.state.board.squares[`${file}_${rank}`]) return false
+      if (distance === 5 && props.state.board.air_squares?.[`${file}_${rank}`]) return false
+    }
+    return true
+  })
 }
 const botDifficultyLabel = computed(() => {
   const labels: Record<BotDifficulty, string> = {
@@ -538,17 +606,23 @@ function removePieceFromBoard(state: GameState, pieceId: string) {
   for (const [id, occupant] of Object.entries(state.board.squares)) {
     if (occupant === pieceId) state.board.squares[id] = null
   }
+  for (const [id, occupant] of Object.entries(state.board.air_squares ?? {})) {
+    if (occupant === pieceId) state.board.air_squares![id] = null
+  }
 }
 
 function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
   const next = cloneGameState(state)
   const movedPiece = next.pieces[action.piece_id]
-  const isCastling = movedPiece?.type_id === 'king'
+  const occupancy = movedPiece?.layer === 'air'
+    ? (next.board.air_squares ??= {})
+    : next.board.squares
+  const isCastling = movedPiece?.layer !== 'air' && movedPiece?.type_id === 'king'
     && Math.abs(action.to.file - action.from.file) === 2
     && action.to.rank === action.from.rank
-  next.board.squares[squareId(action.from)] = null
+  occupancy[squareId(action.from)] = null
 
-  const capturedPieceId = action.captured_piece_id ?? next.board.squares[squareId(action.to)] ?? undefined
+  const capturedPieceId = action.captured_piece_id ?? occupancy[squareId(action.to)] ?? undefined
   if (capturedPieceId) {
     removePieceFromBoard(next, capturedPieceId)
     const capturedPiece = next.pieces[capturedPieceId]
@@ -583,7 +657,7 @@ function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
     }
   }
 
-  next.board.squares[squareId(action.to)] = action.piece_id
+  occupancy[squareId(action.to)] = action.piece_id
   if (movedPiece) {
     movedPiece.current_square = action.to
     movedPiece.has_moved = true
@@ -594,6 +668,9 @@ function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
         (promotedDefinition?.state_schema ?? []).map(entry => [entry.key, entry.default_value]),
       )
       movedPiece.move_option_cooldowns = {}
+      movedPiece.current_ammo = promotedDefinition?.max_ammo ?? 0
+      movedPiece.layer = 'ground'
+      movedPiece.remaining_flight_turns = 0
     }
   }
   for (const update of action.effects.piece_state_updates) {
@@ -776,10 +853,22 @@ watch(
   },
 )
 
+watch(
+  () => pendingForcedLandingPieceId(props.state),
+  async (pieceId) => {
+    if (!pieceId || !isMyTurn.value || isBotTurn.value || props.state.phase !== 'playing') return
+    const options = await selectBoardPiece(pieceId)
+    if (!options || selectedPieceId.value !== pieceId) return
+    await toggleAbilityMode('forced-landing')
+  },
+  { immediate: true },
+)
+
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
   amazon: 'A', guhang: 'G', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-bishop': 'B', 'tempest-knight': 'N', 'bouncing-bishop': 'B', 'bouncing-rook': 'R', 'bouncing-queen': 'Q', nightrider: 'N', windmill: 'W',
   'pawn-white': '♙', 'pawn-black': '♟', 'tempest-pawn-white': '♙', 'tempest-pawn-black': '♟', 'bouncing-pawn-white': '♙', 'bouncing-pawn-black': '♟', 'dozer-white': 'D', 'dozer-black': 'D',
+  tank: '🛡', bomber: '✈', 'surface-to-air-missile-white': '▲', 'surface-to-air-missile-black': '▲',
 }
 function pieceSymbol(typeId: string): string {
   return PIECE_SYMBOLS[typeId] ?? '?'
@@ -873,6 +962,7 @@ function cancelPromotion() {
 }
 
 function clearSelection() {
+  overlapSelectionPieceIds.value = []
   selectedPieceId.value = null
   selectedPocketPieceId.value = null
   draggedPocketPieceId.value = null
@@ -882,6 +972,34 @@ function clearSelection() {
   movableSquares.value = []
   attackSquares.value = []
   dropSquares.value = []
+}
+
+function overlappingFriendlyPieceIds(square: Square): string[] {
+  const key = squareId(square)
+  const groundId = props.state.board.squares[key] ?? null
+  const airId = props.state.board.air_squares?.[key] ?? null
+  if (!groundId || !airId) return []
+  const ground = props.state.pieces[groundId]
+  const air = props.state.pieces[airId]
+  return ground && air && ground.owner === air.owner && ground.owner === props.state.current_player
+    ? [groundId, airId]
+    : []
+}
+
+function openOverlapSelection(square: Square): boolean {
+  const pieceIds = overlappingFriendlyPieceIds(square)
+  if (pieceIds.length < 2) return false
+  overlapSelectionPieceIds.value = pieceIds
+  return true
+}
+
+function cancelOverlapSelection() {
+  overlapSelectionPieceIds.value = []
+}
+
+async function chooseOverlappingPiece(pieceId: string) {
+  cancelOverlapSelection()
+  await selectBoardPiece(pieceId)
 }
 
 function actionCacheKey(pieceId?: string, abilityId?: string | null): string {
@@ -996,13 +1114,15 @@ async function toggleAbilityMode(abilityId: string) {
     airdropOpen.value = true
   }
   const immediateActions = options.abilityActions.filter(isImmediateAbilityAction)
-  if (immediateActions.length === 1) {
+  const actorSquare = props.state.pieces[pieceId]?.current_square
+  const selfTargets = abilitySelectionSquares(options.abilityActions, actorSquare)
+  if (immediateActions.length === 1 && selfTargets.length === 0) {
     await submitImmediateAbility(immediateActions[0])
     return
   }
   if (selectedPieceId.value === pieceId && abilityMode.value && activeAbilityId.value === abilityId) {
-    legalTargetSquares.value = options.legalTargets
-    movableSquares.value = options.movable
+    legalTargetSquares.value = [...options.legalTargets, ...selfTargets]
+    movableSquares.value = [...options.movable, ...selfTargets]
     attackSquares.value = options.captures
   }
 }
@@ -1178,7 +1298,8 @@ async function submitAbility(pieceId: string, to: Square) {
   const abilityId = activeAbilityId.value
   if (!abilityId) return
   const options = await loadPieceOptions(pieceId, abilityId)
-  const candidates = options.abilityActions.filter(action => action.to && sameSquare(action.to, to))
+  const actorSquare = props.state.pieces[pieceId]?.current_square
+  const candidates = options.abilityActions.filter(action => abilityActionTargetsSquare(action, actorSquare, to))
   if (candidates.length === 0) { clearSelection(); return }
   let chosen = candidates[0]
   if (candidates.length > 1) {
@@ -1257,6 +1378,10 @@ async function onSquareClick(sq: Square) {
       }
       return
     }
+    if (props.state.pieces[selectedPieceId.value]?.layer === 'air') {
+      await submitMove(selectedPieceId.value, sq)
+      return
+    }
     if (pieceId && piece && piece.owner === currentPlayer && pieceId !== selectedPieceId.value) {
       await selectBoardPiece(pieceId)
       return
@@ -1266,6 +1391,7 @@ async function onSquareClick(sq: Square) {
   }
 
   // ── Select own piece ──
+  if (openOverlapSelection(sq)) return
   if (pieceId && piece && piece.owner === currentPlayer) {
     await selectBoardPiece(pieceId)
   } else {
@@ -1294,6 +1420,27 @@ function onBoardPieceDragStart(pieceId: string) {
     return
   }
 
+  void selectBoardPiece(pieceId)
+}
+
+function onBoardPieceClick(pieceId: string) {
+  error.value = null
+  if (!canUsePlayerControls.value) {
+    clearSelection()
+    return
+  }
+  const piece = props.state.pieces[pieceId]
+  if (!piece) return
+  if (piece.layer === 'air' && piece.owner !== props.state.current_player && piece.current_square) {
+    void onSquareClick(piece.current_square)
+    return
+  }
+  if (piece.owner !== props.state.current_player) return
+  if (abilityMode.value && activeAbilityId.value === 'bomb' && selectedPieceId.value === pieceId && piece.current_square) {
+    void submitAbility(pieceId, piece.current_square)
+    return
+  }
+  if (!abilityMode.value && piece.current_square && openOverlapSelection(piece.current_square)) return
   void selectBoardPiece(pieceId)
 }
 
@@ -1619,6 +1766,10 @@ async function onResign() {
   border-color: #1976d2; background: #e3f2fd;
 }
 .promotion-choice-image { width: 48px; height: 48px; }
+.overlap-cancel {
+  margin-top: 16px; padding: 8px 18px; border: 0; border-radius: 6px;
+  background: #d9e2ec; color: #1f2933; cursor: pointer;
+}
 
 .airdrop-overlay {
   position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center;

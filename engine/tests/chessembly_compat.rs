@@ -20,6 +20,9 @@ fn make_piece(id: &str, owner: &str, type_id: &str, file: i32, rank: i32) -> Pie
         in_pocket: false,
         captured: false,
         has_moved: false,
+        current_ammo: 0,
+        layer: brainfuck_chess_engine::types::PieceLayer::Ground,
+        remaining_flight_turns: 0,
         state: HashMap::new(),
         move_option_cooldowns: HashMap::new(),
     }
@@ -41,6 +44,7 @@ fn run_code(
     let definitions = HashMap::from([(def.id.clone(), def.clone())]);
     let ctx = ExecutionContext {
         board: &board,
+        layer: brainfuck_chess_engine::types::PieceLayer::Ground,
         initial_square,
         all_definitions: &definitions,
         all_pieces,
@@ -67,6 +71,7 @@ fn test_wazir_center() {
         id: "wazir".into(),
         name: "Wazir".into(),
         score: 1,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 0);
@@ -162,6 +167,7 @@ fn test_knightrider_slide() {
         id: "knightrider".into(),
         name: "Knightrider".into(),
         score: 5,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 2) repeat(1);
@@ -239,7 +245,10 @@ fn test_guhang_executes_all_four_orthogonal_fan_chains() {
         Square::new(7, 2),
         Square::new(0, 2),
     ] {
-        assert!(result.movement_squares.contains(&square), "missing {square:?}");
+        assert!(
+            result.movement_squares.contains(&square),
+            "missing {square:?}"
+        );
     }
 }
 
@@ -446,6 +455,7 @@ fn test_scope_block_y_move() {
         id: "test".into(),
         name: "Test".into(),
         score: 1,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "move(0, 1) { move(1, 1) } move(-1, 1);".into(),
         chessembly_version: "1.0".into(),
@@ -483,6 +493,7 @@ fn test_catch_scans_and_marks_threatened_squares() {
         id: "cannon".into(),
         name: "Cannon".into(),
         score: 4,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "catch(1, 0) repeat(1);".into(),
         chessembly_version: "1.0".into(),

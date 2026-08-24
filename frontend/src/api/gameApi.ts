@@ -82,6 +82,9 @@ export interface PieceLabPieceRequest {
   square: Square
   state?: Record<string, PieceStateValue>
   move_option_cooldowns?: Record<string, { remaining: number }>
+  current_ammo?: number
+  layer?: 'ground' | 'air'
+  remaining_flight_turns?: number
 }
 
 export interface PieceLabPocketPieceRequest {
@@ -89,6 +92,7 @@ export interface PieceLabPocketPieceRequest {
   piece_type: string
   owner: PlayerId
   state?: Record<string, PieceStateValue>
+  current_ammo?: number
 }
 
 export interface PieceLabOptionsRequest {
@@ -121,6 +125,7 @@ export interface PieceLabOptionsResponse {
   piece_definitions: Record<string, PieceDefinition>
   piece_states: Record<string, Record<string, PieceStateValue>>
   piece_cooldowns: Record<string, Record<string, { remaining: number }>>
+  piece_runtime: Record<string, import('../types/game').Piece>
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -144,6 +149,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     throw new Error(err.error ?? res.statusText)
   }
   return res.json()
+}
+
+export function withTurnActionType(action: import('../types/game').TurnAction): import('../types/game').TurnAction {
+  const type = 'ability_id' in action ? 'ability' : 'from' in action ? 'move' : 'drop'
+  return { ...action, type } as import('../types/game').TurnAction
 }
 
 function getClientId(): string {
@@ -231,6 +241,13 @@ export const api = {
     return request('/api/lab/piece-options', {
       method: 'POST',
       body: JSON.stringify(payload),
+    })
+  },
+
+  applyPieceLabAction(payload: PieceLabOptionsRequest, action: import('../types/game').TurnAction): Promise<GameState> {
+    return request('/api/lab/apply-action', {
+      method: 'POST',
+      body: JSON.stringify({ lab: payload, action: withTurnActionType(action) }),
     })
   },
 

@@ -36,6 +36,33 @@
       </div>
     </div>
 
+    <div v-if="overlapSelectionPieceIds.length" class="lab-promotion-overlay" @click.self="cancelOverlapSelection">
+      <div class="lab-promotion-box">
+        <h2>기물 선택</h2>
+        <p>같은 칸에 있는 기물 중 선택할 기물을 고르세요.</p>
+        <div class="promotion-choices">
+          <button
+            v-for="pieceId in overlapSelectionPieceIds"
+            :key="pieceId"
+            type="button"
+            class="promotion-choice"
+            @click="chooseOverlappingPiece(pieceId)"
+          >
+            <img
+              v-if="placedPieceAsset(pieces.find(piece => piece.id === pieceId)!)"
+              class="piece-icon"
+              :src="placedPieceAsset(pieces.find(piece => piece.id === pieceId)!)"
+              :alt="pieceLabel(pieces.find(piece => piece.id === pieceId)!.pieceType)"
+            />
+            <span v-else>{{ displayPieceSymbol(pieces.find(piece => piece.id === pieceId)!.pieceType) }}</span>
+            <strong>{{ pieceLabel(pieces.find(piece => piece.id === pieceId)!.pieceType) }}</strong>
+            <small>{{ pieces.find(piece => piece.id === pieceId)!.layer === 'air' ? '공중 기물' : '지상 기물' }}</small>
+          </button>
+        </div>
+        <button class="btn-secondary" type="button" @click="cancelOverlapSelection">취소</button>
+      </div>
+    </div>
+
     <div v-if="labAirdropOpen" class="lab-airdrop-overlay">
       <div class="lab-airdrop-box">
         <h2>공수부대 다중 소환</h2>
@@ -191,6 +218,32 @@
               >
                 {{ labPieceCooldown(pieceAt(square.file, square.rank)!) }}
               </span>
+              <span
+                v-if="labPieceMaxAmmo(pieceAt(square.file, square.rank)!) > 0"
+                class="lab-ammo-badge"
+              >{{ pieceAt(square.file, square.rank)!.currentAmmo ?? 0 }}</span>
+            </span>
+            <span
+              v-if="airPieceAt(square.file, square.rank)"
+              class="square-piece lab-piece lab-air-piece"
+              draggable="true"
+              @click.stop="onAirPieceClick(airPieceAt(square.file, square.rank)!, square.file, square.rank)"
+              @dragstart.stop="onPlacedPieceDragStart($event, airPieceAt(square.file, square.rank)!.id)"
+              @dragend="clearDragState"
+            >
+              <img
+                v-if="placedPieceAsset(airPieceAt(square.file, square.rank)!)"
+                class="piece-icon"
+                :src="placedPieceAsset(airPieceAt(square.file, square.rank)!)"
+                :alt="pieceLabel(airPieceAt(square.file, square.rank)!.pieceType)"
+                draggable="false"
+              />
+              <span v-else>{{ displayPieceSymbol(airPieceAt(square.file, square.rank)!.pieceType) }}</span>
+              <span class="lab-flight-badge">✈ {{ airPieceAt(square.file, square.rank)!.remainingFlightTurns ?? 0 }}</span>
+              <span
+                v-if="labPieceMaxAmmo(airPieceAt(square.file, square.rank)!) > 0"
+                class="lab-ammo-badge"
+              >{{ airPieceAt(square.file, square.rank)!.currentAmmo ?? 0 }}</span>
             </span>
           </button>
           <svg
@@ -345,13 +398,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { api, type PieceLabMoveOption } from '../api/gameApi'
-import { activeCooldownRemaining, usesMoveSubmission } from '../moveOptionUi'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { api, type PieceLabMoveOption, type PieceLabOptionsRequest } from '../api/gameApi'
+import { abilityActionTargetsSquare, abilitySelectionSquares, activeCooldownRemaining, isImmediateAbilityAction, pendingForcedLandingPieceId, usesMoveSubmission } from '../moveOptionUi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import type { DeckPieceType } from '../types/deck'
-import type { AbilityAction, AbilityDeployment, DropAction, MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square } from '../types/game'
-import { boardSizes, pieceCatalog, pieceLabel, pocketCatalog } from '../composables/useDeckValidation'
+import type { AbilityAction, AbilityDeployment, DropAction, GameState, MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square, TurnAction } from '../types/game'
+import { boardSizes, neutralPieceCatalogId, pieceCatalog, pieceLabel, pocketCatalog } from '../composables/useDeckValidation'
 
 interface PieceLabPiece {
   id: string
@@ -360,6 +413,9 @@ interface PieceLabPiece {
   square: Square
   state: Record<string, PieceStateValue>
   moveOptionCooldowns: Record<string, { remaining: number }>
+  currentAmmo?: number
+  layer?: 'ground' | 'air'
+  remainingFlightTurns?: number
 }
 
 interface PieceLabPocketPiece {
@@ -367,6 +423,7 @@ interface PieceLabPocketPiece {
   pieceType: string
   owner: PlayerId
   state: Record<string, PieceStateValue>
+  currentAmmo?: number
 }
 
 interface LabSquare extends Square {
@@ -438,6 +495,7 @@ const promotionRequest = ref<{
   to: Square
   actions: MoveAction[]
 } | null>(null)
+const overlapSelectionPieceIds = ref<string[]>([])
 let nextPieceSerial = 1
 let optionsSerial = 0
 const arrowMarkerId = `lab-arrow-head-${Math.random().toString(36).slice(2)}`
@@ -453,7 +511,8 @@ const selectedLabPiece = computed(() => pieces.value.find(piece => piece.id === 
 const selectedPocketPiece = computed(() => pocketPieces.value.find(piece => piece.id === selectedPieceId.value) ?? null)
 const inspectedType = computed(() => selectedLabPiece.value?.pieceType ?? selectedPocketPiece.value?.pieceType ?? (selectedTool.value && selectedTool.value !== eraseTool ? selectedTool.value : null))
 const inspectedOwner = computed(() => selectedLabPiece.value?.owner ?? selectedPocketPiece.value?.owner ?? selectedOwner.value)
-const inspectedCatalogItem = computed(() => pieceCatalog.find(piece => piece.id === inspectedType.value) ?? null)
+const inspectedCatalogType = computed(() => inspectedType.value ? neutralPieceCatalogId(inspectedType.value) : null)
+const inspectedCatalogItem = computed(() => pieceCatalog.find(piece => piece.id === inspectedCatalogType.value) ?? null)
 const selectedToolLabel = computed(() => {
   if (selectedTool.value === eraseTool) return '지우개'
   return selectedTool.value ? pieceLabel(selectedTool.value) : '없음'
@@ -463,7 +522,7 @@ const canAddSelectedToolToPocket = computed(() => Boolean(
 ))
 const displayAbilities = computed<PieceLabMoveOption[]>(() => {
   if (selectedLabPiece.value || selectedPocketPiece.value) return abilities.value
-  return inspectedType.value ? staticAbilities(inspectedType.value) : []
+  return inspectedCatalogType.value ? staticAbilities(inspectedCatalogType.value) : []
 })
 const activeAbility = computed(() => (
   abilities.value.find(ability => ability.id === activeAbilityId.value) ?? null
@@ -562,6 +621,9 @@ function placedPieceAsset(piece: PieceLabPiece): string | undefined {
     in_pocket: false,
     captured: false,
     has_moved: false,
+    current_ammo: piece.currentAmmo,
+    layer: piece.layer ?? 'ground',
+    remaining_flight_turns: piece.remainingFlightTurns ?? 0,
     state: piece.state,
     move_option_cooldowns: piece.moveOptionCooldowns,
   }
@@ -570,6 +632,10 @@ function placedPieceAsset(piece: PieceLabPiece): string | undefined {
 
 function labPieceCooldown(piece: PieceLabPiece): number {
   return activeCooldownRemaining(piece.moveOptionCooldowns)
+}
+
+function labPieceMaxAmmo(piece: PieceLabPiece): number {
+  return labDefinitions.value[piece.pieceType]?.max_ammo ?? 0
 }
 
 function initialPieceState(pieceType: string): Record<string, PieceStateValue> {
@@ -635,12 +701,26 @@ function movementDescription(pieceType: string): string {
     airborne: '왕처럼 8방향으로 한 칸 이동합니다. 공중 소환을 사용하면 전방 2×3 구역에 점수 4 이하인 포켓 기물을 소환합니다.',
     'green-camp': '왕처럼 8방향으로 한 칸 이동합니다. 포켓 복귀를 사용하면 주변 8칸의 기물 하나를 해당 기물 소유자의 포켓으로 돌려보냅니다.',
     mortar: '상하좌우로 한 칸 이동하거나 포획합니다. 박격포 사격으로 자신이 있는 파일의 한 지점을 골라, 중심과 상하좌우에 인접한 모든 기물을 제거합니다.',
+    tank: '직교 방향으로 연속해 두 칸 이동하며, 주포로 착탄지와 상하좌우의 지상 기물을 제거합니다.',
+    bomber: '지상에서 직교 1칸을 이동하고, 비행 시 별도 공중 레이어에서 퀸처럼 이동하며 지상을 폭격합니다.',
+    'surface-to-air-missile': '전방 대각선 1칸 또는 전방 2칸으로 이동합니다. 격추로 자신 중심 5×3 범위의 적 비행 기물 하나를 제거합니다.',
     'machine-gunner': '상하좌우로 한 칸 이동하거나 포획합니다. 기관총 사격을 선택한 뒤 자기 자신을 누르면, 바로 앞의 2×3 영역에 있는 모든 기물을 제거합니다.',
   }
   return descriptions[pieceType] ?? 'Custom Piece: 등록된 Chessembly 행마법을 따릅니다.'
 }
 
 function staticAbilities(pieceType: string): PieceLabMoveOption[] {
+  if (pieceType === 'surface-to-air-missile') {
+    return [{
+      id: 'intercept',
+      name: '격추',
+      description: '자신 중심 5파일×3랭크 범위의 적 비행 기물 하나를 제거합니다. 탄약 1발을 사용하며 쿨타임은 없습니다.',
+      available: false,
+      kind: 'ability',
+      execution_mode: 'standalone_action',
+      cooldown_remaining: 0,
+    }]
+  }
   if (pieceType === 'cannon-rook') {
     return [{
       id: 'cannon_move',
@@ -684,6 +764,7 @@ function resetLabPieces() {
 }
 
 function clearSelection() {
+  overlapSelectionPieceIds.value = []
   selectedPieceId.value = null
   moves.value = []
   legalMoves.value = []
@@ -731,7 +812,36 @@ function removePocketPiece(pieceId: string) {
 }
 
 function pieceAt(file: number, rank: number): PieceLabPiece | null {
-  return pieces.value.find(piece => piece.square.file === file && piece.square.rank === rank) ?? null
+  return pieces.value.find(piece => (piece.layer ?? 'ground') === 'ground'
+    && piece.square.file === file && piece.square.rank === rank) ?? null
+}
+
+function airPieceAt(file: number, rank: number): PieceLabPiece | null {
+  return pieces.value.find(piece => piece.layer === 'air'
+    && piece.square.file === file && piece.square.rank === rank) ?? null
+}
+
+function sameOwnerOverlap(file: number, rank: number): PieceLabPiece[] {
+  const ground = pieceAt(file, rank)
+  const air = airPieceAt(file, rank)
+  return ground && air && ground.owner === air.owner ? [ground, air] : []
+}
+
+function openOverlapSelection(file: number, rank: number): boolean {
+  const overlap = sameOwnerOverlap(file, rank)
+  const selected = selectedLabPiece.value
+  if (overlap.length < 2 || (selected && selected.owner !== overlap[0].owner)) return false
+  overlapSelectionPieceIds.value = overlap.map(piece => piece.id)
+  return true
+}
+
+function cancelOverlapSelection() {
+  overlapSelectionPieceIds.value = []
+}
+
+function chooseOverlappingPiece(pieceId: string) {
+  cancelOverlapSelection()
+  selectedPieceId.value = pieceId
 }
 
 function sameSquare(left: Square, right: Square): boolean {
@@ -742,170 +852,95 @@ function legalActionsForTarget(pieceId: string, to: Square): MoveAction[] {
   return legalMoves.value.filter(action => action.piece_id === pieceId && sameSquare(action.to, to))
 }
 
-function applyLabMove(action: MoveAction) {
-  lastMove.value = { from: action.from, to: action.to }
-  pieces.value = pieces.value
-    .filter(piece => piece.id !== action.captured_piece_id)
-    .map(piece => (
-      piece.id === action.piece_id
-        ? {
-            ...piece,
-            pieceType: action.promotion ?? piece.pieceType,
-            square: action.to,
-            state: action.promotion ? initialPieceState(action.promotion) : piece.state,
-            moveOptionCooldowns: action.promotion ? {} : piece.moveOptionCooldowns,
-          }
-        : piece
-    ))
-  for (const update of action.effects.piece_state_updates) {
-    const piece = pieces.value.find(piece => piece.id === update.piece_id)
-    if (!piece) continue
-    const definition = labDefinitions.value[piece.pieceType]
-    if (!definition?.state_schema.some(state => state.key === update.key)) continue
-    piece.state = { ...piece.state, [update.key]: update.value }
-  }
-  for (const update of action.effects.global_state_updates) {
-    globalState.value = {
-      ...globalState.value,
-      [update.key]: update.value,
+async function applyCanonicalLabAction(action: TurnAction): Promise<boolean> {
+  optionsLoading.value = true
+  optionsError.value = null
+  try {
+    const state = await api.applyPieceLabAction(labRequest(action.piece_id), action)
+    const forcedLandingPieceId = pendingForcedLandingPieceId(state)
+    syncLabState(state, action.piece_id)
+    if (forcedLandingPieceId) {
+      selectedPieceId.value = forcedLandingPieceId
+      await nextTick()
+      activeAbilityId.value = 'forced-landing'
+      await loadSelectedPieceOptions()
     }
+    return true
+  } catch (error: unknown) {
+    optionsError.value = error instanceof Error ? error.message : String(error)
+    return false
+  } finally {
+    optionsLoading.value = false
   }
-  const newlySetCooldowns = new Set(
-    action.effects.cooldown_updates.map(update => `${update.piece_id}\u0000${update.move_option_id}`),
+}
+
+function syncLabState(state: GameState, actorId: string) {
+  const previousTypes = new Map(
+    [...pieces.value, ...pocketPieces.value].map(piece => [piece.id, piece.pieceType]),
   )
-  for (const update of action.effects.cooldown_updates) {
-    const piece = pieces.value.find(piece => piece.id === update.piece_id)
-    const option = piece
-      ? labDefinitions.value[piece.pieceType]?.move_options.find(option => option.id === update.move_option_id)
-      : undefined
-    if (!piece || !option?.cooldown) continue
-    piece.moveOptionCooldowns = {
-      ...piece.moveOptionCooldowns,
-      [update.move_option_id]: { remaining: update.remaining },
+  const labFacingType = (piece: Piece): string => {
+    const previousType = previousTypes.get(piece.id)
+    if (previousType && pieceCatalog.some(entry => entry.id === previousType && entry.custom)) {
+      return previousType
     }
+    return piece.type_id
+      .replace(/^(pawn|tempest-pawn|bouncing-pawn|dozer)-(white|black)$/, '$1')
   }
-  // The lab has no server-side turn loop, so advance cooldown clocks locally
-  // after every committed move. This mirrors the engine and deliberately skips
-  // cooldowns created by the move that just happened.
-  for (const piece of pieces.value) {
-    const definition = labDefinitions.value[piece.pieceType]
-    const nextCooldowns = { ...piece.moveOptionCooldowns }
-    for (const [optionId, cooldown] of Object.entries(nextCooldowns)) {
-      if (newlySetCooldowns.has(`${piece.id}\u0000${optionId}`)) continue
-      const clock = definition?.move_options.find(option => option.id === optionId)?.cooldown?.clock
-      const shouldTick = clock === 'global_turns'
-        || (clock === 'owner_turns' && piece.owner === action.player_id)
-      if (!shouldTick) continue
-      const remaining = Math.max(0, cooldown.remaining - 1)
-      if (remaining === 0) delete nextCooldowns[optionId]
-      else nextCooldowns[optionId] = { remaining }
-    }
-    piece.moveOptionCooldowns = nextCooldowns
-  }
-  selectedPieceId.value = action.piece_id
+  labDefinitions.value = state.piece_definitions
+  pieces.value = Object.values(state.pieces)
+    .filter(piece => piece.current_square && !piece.captured && !piece.in_pocket)
+    .map(piece => ({
+      id: piece.id,
+      pieceType: labFacingType(piece),
+      owner: piece.owner,
+      square: piece.current_square!,
+      state: piece.state ?? {},
+      moveOptionCooldowns: piece.move_option_cooldowns ?? {},
+      currentAmmo: piece.current_ammo ?? state.piece_definitions[piece.type_id]?.max_ammo ?? 0,
+      layer: piece.layer ?? 'ground',
+      remainingFlightTurns: piece.remaining_flight_turns ?? 0,
+    }))
+  pocketPieces.value = Object.values(state.pieces)
+    .filter(piece => piece.in_pocket && !piece.captured)
+    .map(piece => ({
+      id: piece.id,
+      pieceType: labFacingType(piece),
+      owner: piece.owner,
+      state: piece.state ?? {},
+      currentAmmo: piece.current_ammo ?? state.piece_definitions[piece.type_id]?.max_ammo ?? 0,
+    }))
+  globalState.value = state.global_state ?? {}
+  selectedPieceId.value = state.pieces[actorId]?.captured ? null : actorId
   activeAbilityId.value = null
+  moves.value = []
+  legalMoves.value = []
+  legalDrops.value = []
+  legalAbilityActions.value = []
+  attacks.value = []
   abilitySquares.value = []
   loadedOptionsPieceId.value = null
   optionsError.value = null
   promotionRequest.value = null
 }
 
-function applyLabDrop(action: DropAction) {
-  const pocketPiece = pocketPieces.value.find(piece => piece.id === action.piece_id)
-  if (!pocketPiece) return
-  lastMove.value = null
-  pieces.value = pieces.value.filter(piece => piece.id !== action.captured_piece_id)
-  pieces.value = [...pieces.value, {
-    ...pocketPiece,
-    square: action.to,
-    moveOptionCooldowns: {},
-  }]
-  pocketPieces.value = pocketPieces.value.filter(piece => piece.id !== action.piece_id)
-  selectedPieceId.value = action.piece_id
-  moves.value = []
-  legalDrops.value = []
-  loadedOptionsPieceId.value = null
-  optionsError.value = null
+async function applyLabMove(action: MoveAction): Promise<boolean> {
+  const applied = await applyCanonicalLabAction(action)
+  if (applied) lastMove.value = { from: action.from, to: action.to }
+  return applied
 }
 
-function applyLabAbility(action: AbilityAction) {
-  if (!action.to) return
-  const abilityActor = pieces.value.find(piece => piece.id === action.piece_id)
-  const cooldown = abilityActor
-    ? labDefinitions.value[abilityActor.pieceType]?.move_options
-      .find(option => option.id === action.ability_id)?.cooldown
-    : undefined
-  if (action.ability_id === 'mortar-barrage') {
-    const affectedSquares = new Set([
-      action.to,
-      { file: action.to.file + 1, rank: action.to.rank },
-      { file: action.to.file - 1, rank: action.to.rank },
-      { file: action.to.file, rank: action.to.rank + 1 },
-      { file: action.to.file, rank: action.to.rank - 1 },
-    ].map(squareId))
-    pieces.value = pieces.value.filter(piece => !affectedSquares.has(squareId(piece.square)))
-  } else if (action.ability_id === 'machine-gun-barrage') {
-    if (!abilityActor) return
-    const forward = abilityActor.owner === 'white' ? 1 : -1
-    const affectedSquares = new Set(
-      [1, 2].flatMap(depth => [-1, 0, 1].map(fileOffset => squareId({
-        file: abilityActor.square.file + fileOffset,
-        rank: abilityActor.square.rank + forward * depth,
-      }))),
-    )
-    pieces.value = pieces.value.filter(piece => !affectedSquares.has(squareId(piece.square)))
-  } else if (action.ability_id === 'relieve' && action.target_piece_id && action.pocket_piece_id) {
-    const target = pieces.value.find(piece => piece.id === action.target_piece_id)
-    const reserve = pocketPieces.value.find(piece => piece.id === action.pocket_piece_id)
-    if (!target || !reserve) return
-    pieces.value = pieces.value.filter(piece => piece.id !== target.id)
-    pocketPieces.value = pocketPieces.value.filter(piece => piece.id !== reserve.id)
-    pocketPieces.value = [...pocketPieces.value, { ...target, square: undefined } as PieceLabPocketPiece]
-    pieces.value = [...pieces.value, { ...reserve, square: action.to, moveOptionCooldowns: {} }]
-  } else if (action.ability_id === 'airdrop' && action.pocket_piece_id) {
-    const reserve = pocketPieces.value.find(piece => piece.id === action.pocket_piece_id)
-    if (!reserve) return
-    pocketPieces.value = pocketPieces.value.filter(piece => piece.id !== reserve.id)
-    pieces.value = [...pieces.value, { ...reserve, square: action.to, moveOptionCooldowns: {} }]
-  } else if (action.ability_id === 'recall' && action.target_piece_id) {
-    const target = pieces.value.find(piece => piece.id === action.target_piece_id)
-    if (!target) return
-    pieces.value = pieces.value.filter(piece => piece.id !== target.id)
-    pocketPieces.value = [...pocketPieces.value, { ...target, square: undefined } as PieceLabPocketPiece]
-  }
-  const survivingActor = pieces.value.find(piece => piece.id === action.piece_id)
-  const newlySetCooldown = Boolean(survivingActor && cooldown && cooldown.turns > 0)
-  if (survivingActor && cooldown && cooldown.turns > 0) {
-    survivingActor.moveOptionCooldowns = {
-      ...survivingActor.moveOptionCooldowns,
-      [action.ability_id]: { remaining: cooldown.turns },
-    }
-  }
-  for (const piece of pieces.value) {
-    const definition = labDefinitions.value[piece.pieceType]
-    const nextCooldowns = { ...piece.moveOptionCooldowns }
-    for (const [optionId, state] of Object.entries(nextCooldowns)) {
-      if (newlySetCooldown && piece.id === action.piece_id && optionId === action.ability_id) continue
-      const clock = definition?.move_options.find(option => option.id === optionId)?.cooldown?.clock
-      const shouldTick = clock === 'global_turns'
-        || (clock === 'owner_turns' && piece.owner === action.player_id)
-      if (!shouldTick) continue
-      const remaining = Math.max(0, state.remaining - 1)
-      if (remaining === 0) delete nextCooldowns[optionId]
-      else nextCooldowns[optionId] = { remaining }
-    }
-    piece.moveOptionCooldowns = nextCooldowns
-  }
-  activeAbilityId.value = null
-  abilitySquares.value = []
-  legalAbilityActions.value = []
-  loadedOptionsPieceId.value = null
-  optionsError.value = null
-  if (!pieces.value.some(piece => piece.id === selectedPieceId.value)) selectedPieceId.value = null
+async function applyLabDrop(action: DropAction): Promise<boolean> {
+  return applyCanonicalLabAction(action)
 }
 
-function tryLabAbility(to: Square): boolean {
-  const candidates = legalAbilityActions.value.filter(action => action.to && sameSquare(action.to, to))
+async function applyLabAbility(action: AbilityAction): Promise<boolean> {
+  return applyCanonicalLabAction(action)
+}
+
+async function tryLabAbility(to: Square): Promise<boolean> {
+  const candidates = legalAbilityActions.value.filter(action => (
+    abilityActionTargetsSquare(action, selectedLabPiece.value?.square, to)
+  ))
   if (candidates.length === 0) return false
   let chosen = candidates[0]
   if (candidates.length > 1) {
@@ -919,19 +954,17 @@ function tryLabAbility(to: Square): boolean {
     if (!Number.isInteger(selected) || !candidates[selected]) return false
     chosen = candidates[selected]
   }
-  applyLabAbility(chosen)
-  return true
+  return applyLabAbility(chosen)
 }
 
-function tryDropPocketPiece(pieceId: string, file: number, rank: number): boolean {
+async function tryDropPocketPiece(pieceId: string, file: number, rank: number): Promise<boolean> {
   const action = legalDrops.value.find(drop => drop.piece_id === pieceId && sameSquare(drop.to, { file, rank }))
   if (!action) return false
-  applyLabDrop(action)
-  return true
+  return applyLabDrop(action)
 }
 
 function choosePromotion(action: MoveAction) {
-  applyLabMove(action)
+  void applyLabMove(action)
 }
 
 async function ensureLegalMovesForPiece(pieceId: string) {
@@ -962,8 +995,7 @@ async function tryMovePlacedPiece(pieceId: string, file: number, rank: number): 
     return true
   }
 
-  applyLabMove(actions[0])
-  return true
+  return applyLabMove(actions[0])
 }
 
 async function onSquareClick(file: number, rank: number) {
@@ -971,7 +1003,7 @@ async function onSquareClick(file: number, rank: number) {
   if (activeAbilityId.value && selectedLabPiece.value) {
     const used = usesMoveSubmission(activeAbility.value)
       ? await tryMovePlacedPiece(selectedLabPiece.value.id, file, rank)
-      : tryLabAbility({ file, rank })
+      : await tryLabAbility({ file, rank })
     if (!used) {
       optionsError.value = usesMoveSubmission(activeAbility.value)
         ? '선택한 특수 이동으로 갈 수 없는 칸입니다.'
@@ -987,11 +1019,18 @@ async function onSquareClick(file: number, rank: number) {
   }
 
   if (selectedPocketPiece.value) {
-    if (!tryDropPocketPiece(selectedPocketPiece.value.id, file, rank)) {
+    if (!await tryDropPocketPiece(selectedPocketPiece.value.id, file, rank)) {
       clearSelection()
       optionsError.value = '선택한 포켓 기물을 착수할 수 없는 칸입니다.'
     }
     return
+  }
+
+  if (openOverlapSelection(file, rank)) return
+
+  const selectedAirPiece = selectedLabPiece.value
+  if (selectedAirPiece?.layer === 'air' && existing?.id !== selectedAirPiece.id) {
+    if (await tryMovePlacedPiece(selectedAirPiece.id, file, rank)) return
   }
 
   if (existing) {
@@ -1026,8 +1065,38 @@ async function onSquareClick(file: number, rank: number) {
     square: { file, rank },
     state: initialPieceState(selectedTool.value),
     moveOptionCooldowns: {},
+    layer: 'ground',
+    remainingFlightTurns: 0,
   }
   pieces.value = [...pieces.value, piece]
+  selectedPieceId.value = piece.id
+}
+
+async function onAirPieceClick(piece: PieceLabPiece, file: number, rank: number) {
+  if (activeAbilityId.value || selectedPocketPiece.value) {
+    await onSquareClick(file, rank)
+    return
+  }
+  if (selectedTool.value === eraseTool) {
+    pieces.value = pieces.value.filter(entry => entry.id !== piece.id)
+    if (selectedPieceId.value === piece.id) clearSelection()
+    return
+  }
+  const ground = pieceAt(file, rank)
+  const selected = selectedLabPiece.value
+  if ((selected && selected.owner !== piece.owner) || (!selected && ground && ground.owner !== piece.owner)) {
+    await onSquareClick(file, rank)
+    return
+  }
+  if (openOverlapSelection(file, rank)) return
+  if (selectedPieceId.value && selectedPieceId.value !== piece.id) {
+    if (selected && selected.owner !== piece.owner) {
+      if (await tryMovePlacedPiece(selected.id, file, rank)) return
+      clearSelection()
+      optionsError.value = '선택한 기물이 행마법상 이동할 수 없는 칸입니다.'
+      return
+    }
+  }
   selectedPieceId.value = piece.id
 }
 
@@ -1253,12 +1322,13 @@ function onSquareDragOver(event: DragEvent, file: number, rank: number) {
     event.dataTransfer.dropEffect = legalDrops.value.some(action => action.piece_id === pocketPieceId && sameSquare(action.to, { file, rank })) ? 'move' : 'none'
     return
   }
-  const existing = pieceAt(file, rank)
   if (draggedCatalogPiece.value || Array.from(event.dataTransfer.types).includes('application/x-piece-lab-catalog-piece')) {
     event.dataTransfer.dropEffect = selectedTool.value === eraseTool ? 'none' : 'copy'
     return
   }
   const boardPieceId = draggedPieceId.value || event.dataTransfer.getData('application/x-piece-lab-board-piece')
+  const movingPiece = pieces.value.find(piece => piece.id === boardPieceId)
+  const existing = movingPiece?.layer === 'air' ? airPieceAt(file, rank) : pieceAt(file, rank)
   event.dataTransfer.dropEffect = boardPieceId && (!existing || existing.id === boardPieceId) ? 'move' : 'none'
 }
 
@@ -1268,15 +1338,16 @@ async function onSquareDrop(event: DragEvent, file: number, rank: number) {
   const catalogPiece = draggedCatalogPiece.value || event.dataTransfer?.getData('application/x-piece-lab-catalog-piece') || null
   clearDragState()
 
-  const existing = pieceAt(file, rank)
+  let existing = pieceAt(file, rank)
   if (pocketPieceId) {
-    if (!tryDropPocketPiece(pocketPieceId, file, rank)) {
+    if (!await tryDropPocketPiece(pocketPieceId, file, rank)) {
       optionsError.value = '선택한 포켓 기물을 착수할 수 없는 칸입니다.'
     }
     return
   }
   if (boardPieceId) {
     const movingPiece = pieces.value.find(piece => piece.id === boardPieceId)
+    existing = movingPiece?.layer === 'air' ? airPieceAt(file, rank) : existing
     if (existing && existing.id !== boardPieceId && movingPiece?.owner === existing.owner) {
       selectedPieceId.value = existing.id
       return
@@ -1302,6 +1373,8 @@ async function onSquareDrop(event: DragEvent, file: number, rank: number) {
         square: { file, rank },
         state: initialPieceState(catalogPiece),
         moveOptionCooldowns: {},
+        layer: 'ground',
+        remainingFlightTurns: 0,
       },
     ]
     selectedPieceId.value = pieces.value[pieces.value.length - 1]?.id ?? null
@@ -1310,10 +1383,11 @@ async function onSquareDrop(event: DragEvent, file: number, rank: number) {
 
 function squareClasses(square: LabSquare): string[] {
   const piece = pieceAt(square.file, square.rank)
+  const airPiece = airPieceAt(square.file, square.rank)
   return [
     (square.file + square.rank) % 2 === 1 ? 'light' : 'dark',
-    piece ? 'occupied' : 'empty',
-    piece?.id === selectedPieceId.value ? 'selected' : '',
+    piece || airPiece ? 'occupied' : 'empty',
+    piece?.id === selectedPieceId.value || airPiece?.id === selectedPieceId.value ? 'selected' : '',
     isMoveSquare(square) ? 'can-move' : '',
     isAttackSquare(square) ? 'can-attack' : '',
     isAbilitySquare(square) ? 'can-ability' : '',
@@ -1341,6 +1415,12 @@ async function toggleAbility(ability: PieceLabMoveOption) {
     labAirdropDraft.value = []
     labAirdropSelectedPieceId.value = labAirdropEligiblePieceIds.value[0] ?? null
     labAirdropOpen.value = true
+    return
+  }
+  const immediate = legalAbilityActions.value.filter(isImmediateAbilityAction)
+  const selfTargets = abilitySelectionSquares(legalAbilityActions.value, selectedLabPiece.value?.square)
+  if (immediate.length === 1 && selfTargets.length === 0) {
+    await applyLabAbility(immediate[0])
   }
 }
 
@@ -1380,27 +1460,21 @@ function cancelLabAirdrop() {
   abilitySquares.value = []
 }
 
-function confirmLabAirdrop() {
+async function confirmLabAirdrop() {
   if (labAirdropDraft.value.length === 0) return
   const deployments = [...labAirdropDraft.value]
-  const deployedIds = new Set(deployments.map(item => item.pocket_piece_id))
-  const deployed = pocketPieces.value
-    .filter(piece => deployedIds.has(piece.id))
-    .map(piece => {
-      const deployment = deployments.find(item => item.pocket_piece_id === piece.id)!
-      return { ...piece, square: deployment.to, moveOptionCooldowns: {} }
-    })
-  pocketPieces.value = pocketPieces.value.filter(piece => !deployedIds.has(piece.id))
-  pieces.value = [...pieces.value, ...deployed]
-  lastMove.value = null
+  const actor = selectedLabPiece.value
+  if (!actor) return
   labAirdropOpen.value = false
   labAirdropDraft.value = []
   labAirdropSelectedPieceId.value = null
-  activeAbilityId.value = null
-  abilitySquares.value = []
-  legalAbilityActions.value = []
-  loadedOptionsPieceId.value = null
-  optionsError.value = null
+  await applyLabAbility({
+    type: 'ability',
+    player_id: actor.owner,
+    piece_id: actor.id,
+    ability_id: 'airdrop',
+    deployments,
+  })
 }
 
 function isAbilitySquare(square: Square): boolean {
@@ -1421,53 +1495,29 @@ async function loadSelectedPieceOptions() {
   optionsLoading.value = true
   optionsError.value = null
   try {
-    const response = await api.getPieceLabOptions({
-      board_size: boardSize.value,
-      pieces: pieces.value.map(piece => ({
-        id: piece.id,
-        piece_type: piece.pieceType,
-        owner: piece.owner,
-        square: piece.square,
-        state: piece.state,
-        move_option_cooldowns: piece.moveOptionCooldowns,
-      })),
-      pocket_pieces: pocketPieces.value.map(piece => ({
-        id: piece.id,
-        piece_type: piece.pieceType,
-        owner: piece.owner,
-        state: piece.state,
-      })),
-      custom_pieces: pieceCatalog
-        .filter(piece => piece.custom && (
-          pieces.value.some(placed => placed.pieceType === piece.id)
-          || pocketPieces.value.some(pocket => pocket.pieceType === piece.id)
-        ))
-        .map(piece => ({
-          custom_piece_id: piece.custom!.id,
-          version: piece.custom!.version,
-          content_hash: piece.custom!.contentHash,
-          exposed_piece_key: piece.custom!.exposedPieceKey,
-        })),
-      selected_piece_id: selected.id,
-      move_option_id: activeAbilityId.value ?? undefined,
-      global_state: globalState.value,
-    })
+    const response = await api.getPieceLabOptions(labRequest(selected.id, activeAbilityId.value ?? undefined))
     if (serial !== optionsSerial) return
     moves.value = response.moves
     legalMoves.value = response.legal_moves
     legalDrops.value = response.legal_drops
     legalAbilityActions.value = response.legal_ability_actions
     attacks.value = response.attacks
-    abilitySquares.value = activeAbilityId.value ? response.moves : []
+    abilitySquares.value = activeAbilityId.value
+      ? [...response.moves, ...abilitySelectionSquares(response.legal_ability_actions, selectedLabPiece.value?.square)]
+      : []
     labDefinitions.value = response.piece_definitions
     pieces.value = pieces.value.map(piece => ({
       ...piece,
       state: response.piece_states[piece.id] ?? piece.state,
       moveOptionCooldowns: response.piece_cooldowns[piece.id] ?? piece.moveOptionCooldowns,
+      currentAmmo: response.piece_runtime[piece.id]?.current_ammo ?? piece.currentAmmo,
+      layer: response.piece_runtime[piece.id]?.layer ?? piece.layer ?? 'ground',
+      remainingFlightTurns: response.piece_runtime[piece.id]?.remaining_flight_turns ?? piece.remainingFlightTurns ?? 0,
     }))
     pocketPieces.value = pocketPieces.value.map(piece => ({
       ...piece,
       state: response.piece_states[piece.id] ?? piece.state,
+      currentAmmo: response.piece_runtime[piece.id]?.current_ammo ?? piece.currentAmmo,
     }))
     abilities.value = response.move_options.filter(option => option.kind === 'ability')
     loadedOptionsPieceId.value = selected.id
@@ -1483,6 +1533,44 @@ async function loadSelectedPieceOptions() {
     optionsError.value = e instanceof Error ? e.message : String(e)
   } finally {
     if (serial === optionsSerial) optionsLoading.value = false
+  }
+}
+
+function labRequest(selectedPieceId: string, moveOptionId?: string): PieceLabOptionsRequest {
+  return {
+    board_size: boardSize.value,
+    pieces: pieces.value.map(piece => ({
+      id: piece.id,
+      piece_type: piece.pieceType,
+      owner: piece.owner,
+      square: piece.square,
+      state: piece.state,
+      move_option_cooldowns: piece.moveOptionCooldowns,
+      current_ammo: piece.currentAmmo,
+      layer: piece.layer ?? 'ground',
+      remaining_flight_turns: piece.remainingFlightTurns ?? 0,
+    })),
+    pocket_pieces: pocketPieces.value.map(piece => ({
+      id: piece.id,
+      piece_type: piece.pieceType,
+      owner: piece.owner,
+      state: piece.state,
+      current_ammo: piece.currentAmmo,
+    })),
+    custom_pieces: pieceCatalog
+      .filter(piece => piece.custom && (
+        pieces.value.some(placed => placed.pieceType === piece.id)
+        || pocketPieces.value.some(pocket => pocket.pieceType === piece.id)
+      ))
+      .map(piece => ({
+        custom_piece_id: piece.custom!.id,
+        version: piece.custom!.version,
+        content_hash: piece.custom!.contentHash,
+        exposed_piece_key: piece.custom!.exposedPieceKey,
+      })),
+    selected_piece_id: selectedPieceId,
+    move_option_id: moveOptionId,
+    global_state: globalState.value,
   }
 }
 
@@ -1807,6 +1895,46 @@ onBeforeUnmount(() => {
 
 .lab-piece:active {
   cursor: grabbing;
+}
+
+.lab-air-piece {
+  z-index: 4;
+  transform: translate(10%, -10%) scale(0.88);
+  filter: drop-shadow(0 8px 5px rgba(20, 50, 80, 0.48));
+}
+
+.lab-ammo-badge {
+  position: absolute;
+  left: -5%;
+  bottom: -5%;
+  z-index: 6;
+  display: inline-flex;
+  min-width: 1.45em;
+  height: 1.45em;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  background: #16834a;
+  color: #fff;
+  font-size: clamp(10px, 1.45vw, 15px);
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.lab-flight-badge {
+  position: absolute;
+  top: -8%;
+  right: -8%;
+  z-index: 6;
+  padding: 0.12em 0.35em;
+  border-radius: 999px;
+  background: #246da8;
+  color: #fff;
+  font-size: clamp(9px, 1.2vw, 13px);
+  font-weight: 800;
+  pointer-events: none;
 }
 
 .lab-cooldown-badge {

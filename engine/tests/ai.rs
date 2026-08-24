@@ -70,6 +70,9 @@ fn add_board_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, 
             in_pocket: false,
             captured: false,
             has_moved: false,
+            current_ammo: 0,
+            layer: brainfuck_chess_engine::types::PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: HashMap::new(),
             move_option_cooldowns: HashMap::new(),
         },
@@ -95,6 +98,9 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
             in_pocket: true,
             captured: false,
             has_moved: false,
+            current_ammo: 0,
+            layer: brainfuck_chess_engine::types::PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: HashMap::new(),
             move_option_cooldowns: HashMap::new(),
         },
@@ -135,20 +141,8 @@ fn generated_actions_are_accepted_by_the_ai_apply_boundary() {
 #[test]
 fn standalone_piece_abilities_are_exposed_to_ai_and_apply_canonically() {
     let mut state = make_state();
-    add_board_piece(
-        &mut state,
-        "camp",
-        "white",
-        "green-camp",
-        Square::new(3, 3),
-    );
-    add_board_piece(
-        &mut state,
-        "enemy",
-        "black",
-        "rook",
-        Square::new(4, 3),
-    );
+    add_board_piece(&mut state, "camp", "white", "green-camp", Square::new(3, 3));
+    add_board_piece(&mut state, "enemy", "black", "rook", Square::new(4, 3));
 
     let ability = generate_ai_actions(&state)
         .into_iter()

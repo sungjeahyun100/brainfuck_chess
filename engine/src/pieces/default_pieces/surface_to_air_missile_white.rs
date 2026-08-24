@@ -1,25 +1,21 @@
 use crate::types::*;
 
-/// Alternating Soldier: moves one square in any direction and can exchange an
-/// adjacent friendly piece with one of its owner's pocket pieces.
-pub fn alternating_soldier_definition() -> PieceDefinition {
-    let movement = "\
-take-move(1, 0);
-take-move(-1, 0);
-take-move(0, 1);
-take-move(0, -1);
-take-move(1, 1);
-take-move(1, -1);
-take-move(-1, 1);
-take-move(-1, -1);"
-        .to_string();
+pub const INTERCEPT_ABILITY_ID: &str = "intercept";
 
+/// White Surface-to-Air Missile: advances toward increasing ranks and can
+/// destroy a nearby enemy piece on the Air Layer.
+pub fn surface_to_air_missile_white_definition() -> PieceDefinition {
+    let movement = "\
+take-move(1, 1);
+take-move(0, 1) take-move(0, 1);
+take-move(-1, 1);"
+        .to_string();
     PieceDefinition {
-        id: "alternating-soldier".into(),
-        name: "교대병".into(),
-        score: 4,
-        max_ammo: 0,
-        deployment_zone: DeploymentZone::Back,
+        id: "surface-to-air-missile-white".into(),
+        name: "지대공 미사일".into(),
+        score: 2,
+        max_ammo: 2,
+        deployment_zone: DeploymentZone::Front,
         chessembly_code: movement.clone(),
         chessembly_version: "1.0".into(),
         dialect: None,
@@ -30,7 +26,7 @@ take-move(-1, -1);"
         promotion_pool: Vec::new(),
         state_schema: Vec::new(),
         move_layers: vec![MoveLayerDefinition {
-            id: "king_step".into(),
+            id: "missile_move".into(),
             chessembly_code: movement,
             enabled_when: Vec::new(),
             on_commit: Vec::new(),
@@ -39,9 +35,10 @@ take-move(-1, -1);"
             MoveOptionDefinition {
                 id: "normal".into(),
                 name: "일반 이동".into(),
-                description: "왕처럼 한 칸 이동합니다.".into(),
+                description: "전방 대각선으로 1칸 또는 전방으로 연속 2칸 이동하거나 포획합니다."
+                    .into(),
                 kind: MoveOptionKind::Normal,
-                layer_ids: vec!["king_step".into()],
+                layer_ids: vec!["missile_move".into()],
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
                 contributes_to_attack_map: true,
                 ammo_cost: 0,
@@ -49,23 +46,23 @@ take-move(-1, -1);"
                 cooldown: None,
             },
             MoveOptionDefinition {
-                id: "relieve".into(),
-                name: "교대".into(),
-                description: "주변 8칸의 기물 하나와 자신의 포켓 기물 하나를 교대합니다.".into(),
+                id: INTERCEPT_ABILITY_ID.into(),
+                name: "격추".into(),
+                description: "자신 중심 5파일×3랭크 범위의 적 비행 기물 하나를 제거합니다.".into(),
                 kind: MoveOptionKind::Ability,
                 layer_ids: Vec::new(),
                 execution_mode: MoveOptionExecutionMode::StandaloneAction,
                 contributes_to_attack_map: false,
-                ammo_cost: 0,
+                ammo_cost: 1,
                 enabled_when: Vec::new(),
                 cooldown: None,
             },
         ],
         visual: PieceVisualDefinition {
-            default_asset_key: "alternating-soldier".into(),
+            default_asset_key: "surface-to-air-missile".into(),
             variants: Vec::new(),
         },
     }
     .normalize_and_validate()
-    .expect("alternating soldier definition must be valid")
+    .expect("white surface-to-air missile definition must be valid")
 }

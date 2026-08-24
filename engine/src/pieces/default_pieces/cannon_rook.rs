@@ -20,6 +20,7 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
         id: "cannon-rook".into(),
         name: "Cannon Rook".into(),
         score: 7,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: rook_code.clone(),
         chessembly_version: "1.0".into(),
@@ -53,6 +54,8 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
                 layer_ids: vec!["rook_move".into()],
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
                 contributes_to_attack_map: true,
+                ammo_cost: 0,
+                enabled_when: Vec::new(),
                 cooldown: None,
             },
             MoveOptionDefinition {
@@ -63,6 +66,8 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
                 layer_ids: vec!["cannon_move".into()],
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
                 contributes_to_attack_map: true,
+                ammo_cost: 0,
+                enabled_when: Vec::new(),
                 cooldown: Some(CooldownDefinition {
                     turns: 3,
                     clock: CooldownClock::OwnerTurns,

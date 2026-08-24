@@ -23,6 +23,8 @@ export interface Board {
   size: number
   /** SquareId → PieceId | null */
   squares: Record<SquareId, PieceId | null>
+  /** Independent air-layer occupancy at the same coordinates. */
+  air_squares?: Record<SquareId, PieceId | null>
   /** SquareId → terrain that remains on the square when pieces move. */
   terrain?: Record<SquareId, TerrainCell>
 }
@@ -37,6 +39,7 @@ export interface PieceDefinition {
   id: PieceTypeId
   name: string
   score: number
+  max_ammo?: number
   deployment_zone: DeploymentZone
   chessembly_code: string
   chessembly_version: string
@@ -104,6 +107,8 @@ export interface MoveOptionDefinition {
   layer_ids: string[]
   execution_mode: MoveOptionExecutionMode
   contributes_to_attack_map: boolean
+  ammo_cost?: number
+  enabled_when?: PieceStatePredicate[]
   cooldown?: CooldownDefinition
 }
 
@@ -127,6 +132,9 @@ export interface Piece {
   in_pocket: boolean
   captured: boolean
   has_moved: boolean
+  current_ammo?: number
+  layer?: 'ground' | 'air'
+  remaining_flight_turns?: number
   state: Record<string, PieceStateValue>
   move_option_cooldowns: Record<string, { remaining: number }>
 }

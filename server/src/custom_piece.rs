@@ -1705,6 +1705,9 @@ fn build_test_state(board_spec: TestBoard, package: &CustomPiecePackage) -> ApiR
             in_pocket: false,
             captured: false,
             has_moved: false,
+            current_ammo: definition.max_ammo,
+            layer: PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: piece_state,
             move_option_cooldowns: HashMap::new(),
         };

@@ -2,8 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   activeCooldownRemaining,
+  abilityActionTargetsSquare,
+  abilitySelectionSquares,
   isImmediateAbilityAction,
   moveOptionTargets,
+  pendingForcedLandingPieceId,
   usesMoveSubmission,
 } from './moveOptionUi.ts'
 import type { AbilityAction, MoveAction } from './types/game.ts'
@@ -80,4 +83,40 @@ test('targetless standalone abilities are recognized as immediate actions', () =
 
   assert.equal(isImmediateAbilityAction(action), true)
   assert.equal(isImmediateAbilityAction({ ...action, to: { file: 3, rank: 3 } }), false)
+})
+
+test('targetless bomb uses the bomber square as its explicit UI target', () => {
+  const bomb = {
+    type: 'ability',
+    player_id: 'white',
+    piece_id: 'bomber',
+    ability_id: 'bomb',
+    deployments: [],
+  } satisfies AbilityAction
+  const actorSquare = { file: 4, rank: 4 }
+
+  assert.deepEqual(abilitySelectionSquares([bomb], actorSquare), [actorSquare])
+  assert.equal(abilityActionTargetsSquare(bomb, actorSquare, actorSquare), true)
+  assert.equal(abilityActionTargetsSquare(bomb, actorSquare, { file: 5, rank: 4 }), false)
+})
+
+test('airborne owner piece becomes a forced-landing prompt immediately at zero', () => {
+  const pieces = {
+    bomber: {
+      id: 'bomber',
+      owner: 'white',
+      type_id: 'bomber',
+      current_square: { file: 4, rank: 4 },
+      in_pocket: false,
+      captured: false,
+      has_moved: true,
+      layer: 'air',
+      remaining_flight_turns: 0,
+      state: { airborne: true },
+      move_option_cooldowns: {},
+    },
+  }
+
+  assert.equal(pendingForcedLandingPieceId({ current_player: 'white', pieces }), 'bomber')
+  assert.equal(pendingForcedLandingPieceId({ current_player: 'black', pieces }), null)
 })

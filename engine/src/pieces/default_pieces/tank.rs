@@ -1,24 +1,19 @@
 use crate::types::*;
 
-/// Alternating Soldier: moves one square in any direction and can exchange an
-/// adjacent friendly piece with one of its owner's pocket pieces.
-pub fn alternating_soldier_definition() -> PieceDefinition {
-    let movement = "\
-take-move(1, 0);
-take-move(-1, 0);
-take-move(0, 1);
-take-move(0, -1);
-take-move(1, 1);
-take-move(1, -1);
-take-move(-1, 1);
-take-move(-1, -1);"
-        .to_string();
+pub const TANK_FIRE_ABILITY_ID: &str = "tank-fire";
 
+pub fn tank_definition() -> PieceDefinition {
+    let movement = "\
+take-move(0, 1) take-move(0, 1);
+take-move(0, -1) take-move(0, -1);
+take-move(1, 0) take-move(1, 0);
+take-move(-1, 0) take-move(-1, 0);"
+        .to_string();
     PieceDefinition {
-        id: "alternating-soldier".into(),
-        name: "교대병".into(),
-        score: 4,
-        max_ammo: 0,
+        id: "tank".into(),
+        name: "탱크".into(),
+        score: 12,
+        max_ammo: 3,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: movement.clone(),
         chessembly_version: "1.0".into(),
@@ -30,7 +25,7 @@ take-move(-1, -1);"
         promotion_pool: Vec::new(),
         state_schema: Vec::new(),
         move_layers: vec![MoveLayerDefinition {
-            id: "king_step".into(),
+            id: "tank_move".into(),
             chessembly_code: movement,
             enabled_when: Vec::new(),
             on_commit: Vec::new(),
@@ -39,9 +34,9 @@ take-move(-1, -1);"
             MoveOptionDefinition {
                 id: "normal".into(),
                 name: "일반 이동".into(),
-                description: "왕처럼 한 칸 이동합니다.".into(),
+                description: "상하좌우로 연속해 두 칸 이동합니다.".into(),
                 kind: MoveOptionKind::Normal,
-                layer_ids: vec!["king_step".into()],
+                layer_ids: vec!["tank_move".into()],
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
                 contributes_to_attack_map: true,
                 ammo_cost: 0,
@@ -49,23 +44,26 @@ take-move(-1, -1);"
                 cooldown: None,
             },
             MoveOptionDefinition {
-                id: "relieve".into(),
-                name: "교대".into(),
-                description: "주변 8칸의 기물 하나와 자신의 포켓 기물 하나를 교대합니다.".into(),
+                id: TANK_FIRE_ABILITY_ID.into(),
+                name: "주포 발사".into(),
+                description: "8방향으로 조준해 착탄지와 상하좌우의 지상 기물을 제거합니다.".into(),
                 kind: MoveOptionKind::Ability,
                 layer_ids: Vec::new(),
                 execution_mode: MoveOptionExecutionMode::StandaloneAction,
                 contributes_to_attack_map: false,
-                ammo_cost: 0,
+                ammo_cost: 1,
                 enabled_when: Vec::new(),
-                cooldown: None,
+                cooldown: Some(CooldownDefinition {
+                    turns: 1,
+                    clock: CooldownClock::OwnerTurns,
+                }),
             },
         ],
         visual: PieceVisualDefinition {
-            default_asset_key: "alternating-soldier".into(),
+            default_asset_key: "tank".into(),
             variants: Vec::new(),
         },
     }
     .normalize_and_validate()
-    .expect("alternating soldier definition must be valid")
+    .expect("tank definition must be valid")
 }

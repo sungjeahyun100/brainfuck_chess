@@ -34,6 +34,7 @@ pub(crate) fn api(state: AppState) -> Router {
             get(get_piece_options),
         )
         .route("/lab/piece-options", post(get_lab_piece_options))
+        .route("/lab/apply-action", post(apply_lab_action))
         .route(
             "/custom-pieces",
             get(custom_piece::list).post(custom_piece::create),

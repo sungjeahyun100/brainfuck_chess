@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 
 use crate::ai::types::AiAction;
-use crate::types::{GameEndReason, GamePhase, GameState, PieceId, PieceStateValue, Square};
+use crate::types::{
+    GameEndReason, GamePhase, GameState, PieceId, PieceLayer, PieceStateValue, Square,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PositionKey {
     board_size: i32,
     board: Vec<(i32, i32, Option<PieceId>)>,
+    air_board: Vec<(i32, i32, Option<PieceId>)>,
     terrain: Vec<(i32, i32, String)>,
     current_player: String,
     phase: u8,
@@ -27,6 +30,9 @@ struct PieceKey {
     in_pocket: bool,
     captured: bool,
     has_moved: bool,
+    current_ammo: u32,
+    layer: PieceLayer,
+    remaining_flight_turns: u32,
     state: Vec<(String, PieceStateValue)>,
     cooldowns: Vec<(String, u32)>,
 }
@@ -56,6 +62,18 @@ impl PositionKey {
             })
             .collect::<Vec<_>>();
         board.sort();
+
+        let mut air_board = state
+            .board
+            .air_squares
+            .iter()
+            .filter_map(|(square, piece_id)| {
+                piece_id
+                    .as_ref()
+                    .map(|piece_id| (square.file, square.rank, Some(piece_id.clone())))
+            })
+            .collect::<Vec<_>>();
+        air_board.sort();
 
         let mut terrain = state
             .board
@@ -89,6 +107,9 @@ impl PositionKey {
                     in_pocket: piece.in_pocket,
                     captured: piece.captured,
                     has_moved: piece.has_moved,
+                    current_ammo: piece.current_ammo,
+                    layer: piece.layer,
+                    remaining_flight_turns: piece.remaining_flight_turns,
                     state: piece_state,
                     cooldowns,
                 }
@@ -129,6 +150,7 @@ impl PositionKey {
         Self {
             board_size: state.board.size,
             board,
+            air_board,
             terrain,
             current_player: state.current_player.clone(),
             phase: phase_tag(&state.phase),
@@ -313,6 +335,9 @@ mod tests {
                 in_pocket,
                 captured: false,
                 has_moved: false,
+                current_ammo: 0,
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
                 state: HashMap::new(),
                 move_option_cooldowns: HashMap::new(),
             },

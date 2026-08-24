@@ -6,6 +6,7 @@ pub fn queen_definition() -> PieceDefinition {
         id: "queen".into(),
         name: "Queen".into(),
         score: 9,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 0) repeat(1);

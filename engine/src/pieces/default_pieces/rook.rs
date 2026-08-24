@@ -6,6 +6,7 @@ pub fn rook_definition() -> PieceDefinition {
         id: "rook".into(),
         name: "Rook".into(),
         score: 5,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 0) repeat(1);

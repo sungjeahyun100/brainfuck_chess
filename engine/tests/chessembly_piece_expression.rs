@@ -15,6 +15,9 @@ fn piece(id: &str, type_id: &str, square: Square) -> Piece {
         in_pocket: false,
         captured: false,
         has_moved: false,
+        current_ammo: 0,
+        layer: brainfuck_chess_engine::types::PieceLayer::Ground,
+        remaining_flight_turns: 0,
         state: HashMap::new(),
         move_option_cooldowns: HashMap::new(),
     }
@@ -47,6 +50,7 @@ fn piece_expression_resolves_the_piece_on_the_initial_square() {
     let attack_maps: HashMap<PlayerId, HashSet<SquareId>> = HashMap::new();
     let context = ExecutionContext {
         board: &board,
+        layer: brainfuck_chess_engine::types::PieceLayer::Ground,
         initial_square,
         all_definitions: &definitions,
         all_pieces: &pieces,
@@ -68,6 +72,7 @@ fn piece_expression_rejects_a_different_piece_type() {
     let attack_maps: HashMap<PlayerId, HashSet<SquareId>> = HashMap::new();
     let context = ExecutionContext {
         board: &board,
+        layer: brainfuck_chess_engine::types::PieceLayer::Ground,
         initial_square,
         all_definitions: &definitions,
         all_pieces: &pieces,

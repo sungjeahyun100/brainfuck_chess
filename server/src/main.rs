@@ -293,6 +293,12 @@ struct LabPieceSpec {
     state: HashMap<String, PieceStateValue>,
     #[serde(default)]
     move_option_cooldowns: HashMap<String, CooldownState>,
+    #[serde(default)]
+    current_ammo: Option<u32>,
+    #[serde(default)]
+    layer: PieceLayer,
+    #[serde(default)]
+    remaining_flight_turns: u32,
 }
 
 #[derive(Clone, Deserialize)]
@@ -302,6 +308,8 @@ struct LabPocketPieceSpec {
     owner: PlayerId,
     #[serde(default)]
     state: HashMap<String, PieceStateValue>,
+    #[serde(default)]
+    current_ammo: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -316,6 +324,12 @@ struct LabPieceOptionsRequest {
     move_option_id: Option<String>,
     #[serde(default)]
     global_state: HashMap<String, i32>,
+}
+
+#[derive(Deserialize)]
+struct LabApplyActionRequest {
+    lab: LabPieceOptionsRequest,
+    action: TurnAction,
 }
 
 #[derive(Clone, Deserialize)]
@@ -348,6 +362,7 @@ struct LabPieceOptionsResponse {
     piece_definitions: HashMap<PieceTypeId, PieceDefinition>,
     piece_states: HashMap<PieceId, HashMap<String, PieceStateValue>>,
     piece_cooldowns: HashMap<PieceId, HashMap<String, CooldownState>>,
+    piece_runtime: HashMap<PieceId, Piece>,
 }
 
 #[derive(Debug, Serialize)]
@@ -380,8 +395,17 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
         | "airborne"
         | "green-camp"
         | "mortar"
+        | "tank"
+        | "bomber"
         | "machine-gunner"
         | "machine_gunner" => Some(raw_piece_type.replace('_', "-")),
+        "surface-to-air-missile"
+        | "surface-to-air-missile-white"
+        | "surface-to-air-missile-black" => Some(if player_id == "white" {
+            "surface-to-air-missile-white".into()
+        } else {
+            "surface-to-air-missile-black".into()
+        }),
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
             "pawn-white".into()
         } else {
@@ -493,6 +517,11 @@ fn build_player_deck(
             in_pocket: false,
             captured: false,
             has_moved: false,
+            current_ammo: definitions
+                .get(&type_id)
+                .map_or(0, |definition| definition.max_ammo),
+            layer: PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: definitions
                 .get(&type_id)
                 .map(PieceDefinition::initial_state)
@@ -518,6 +547,11 @@ fn build_player_deck(
             in_pocket: true,
             captured: false,
             has_moved: false,
+            current_ammo: definitions
+                .get(&type_id)
+                .map_or(0, |definition| definition.max_ammo),
+            layer: PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: definitions
                 .get(&type_id)
                 .map(PieceDefinition::initial_state)
@@ -705,7 +739,7 @@ fn build_lab_game_state(
                 lab_piece.square.to_id()
             ));
         }
-        if !board.is_empty(&lab_piece.square) {
+        if !board.is_empty_at_layer(&lab_piece.square, lab_piece.layer) {
             return Err(format!(
                 "{} 칸에 이미 기물이 있습니다.",
                 lab_piece.square.to_id()
@@ -758,13 +792,14 @@ fn build_lab_game_state(
             in_pocket: false,
             captured: false,
             has_moved: false,
+            current_ammo: lab_piece.current_ammo.unwrap_or(definition.max_ammo),
+            layer: lab_piece.layer,
+            remaining_flight_turns: lab_piece.remaining_flight_turns,
             state: piece_state,
             move_option_cooldowns: lab_piece.move_option_cooldowns.clone(),
         };
 
-        board
-            .squares
-            .insert(lab_piece.square.to_id(), Some(piece_id.clone()));
+        board.set_piece_at_layer(lab_piece.square, lab_piece.layer, Some(piece_id.clone()));
         if lab_piece.owner == "white" {
             white_starting.push(piece_id.clone());
         } else {
@@ -816,6 +851,9 @@ fn build_lab_game_state(
                 in_pocket: true,
                 captured: false,
                 has_moved: false,
+                current_ammo: lab_piece.current_ammo.unwrap_or(definition.max_ammo),
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
                 state: piece_state,
                 move_option_cooldowns: HashMap::new(),
             },
@@ -1101,6 +1139,7 @@ async fn get_piece_scores() -> Json<HashMap<PieceTypeId, u32>> {
 #[derive(Clone, Copy, Serialize)]
 struct PieceCatalogMetadata {
     score: u32,
+    max_ammo: u32,
     deployment_zone: DeploymentZone,
 }
 
@@ -1112,6 +1151,7 @@ fn default_piece_catalog() -> HashMap<PieceTypeId, PieceCatalogMetadata> {
                 definition.id,
                 PieceCatalogMetadata {
                     score: definition.score,
+                    max_ammo: definition.max_ammo,
                     deployment_zone: definition.deployment_zone,
                 },
             )
@@ -1125,6 +1165,7 @@ fn default_piece_catalog() -> HashMap<PieceTypeId, PieceCatalogMetadata> {
         ("tempest-pawn", "tempest-pawn-white"),
         ("bouncing-pawn", "bouncing-pawn-white"),
         ("dozer", "dozer-white"),
+        ("surface-to-air-missile", "surface-to-air-missile-white"),
     ] {
         if let Some(metadata) = catalog.get(white).copied() {
             catalog.insert(neutral.into(), metadata);
@@ -1924,31 +1965,7 @@ async fn get_lab_piece_options(
     headers: HeaderMap,
     Json(req): Json<LabPieceOptionsRequest>,
 ) -> Result<Json<LabPieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let packages = if req.custom_pieces.is_empty() {
-        Vec::new()
-    } else {
-        let owner = custom_piece::authenticated_owner(&app, &headers)
-            .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
-        let deck = PlayerDeckSpec {
-            starting: req
-                .custom_pieces
-                .iter()
-                .map(|piece| StartingPieceSpec {
-                    piece: DeckPieceRef::Custom {
-                        custom_piece_id: piece.custom_piece_id.clone(),
-                        version: piece.version,
-                        content_hash: piece.content_hash.clone(),
-                        exposed_piece_key: piece.exposed_piece_key.clone(),
-                    },
-                    square: Square::new(0, 0),
-                })
-                .collect(),
-            pocket: Vec::new(),
-        };
-        resolve_custom_packages(&app, &[(owner.as_str(), &deck)])
-            .await
-            .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
-    };
+    let packages = resolve_lab_packages(&app, &headers, &req.custom_pieces).await?;
     let state = build_lab_game_state(&req, &packages)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let piece_id = PieceId::from(req.selected_piece_id.clone());
@@ -2020,11 +2037,20 @@ async fn get_lab_piece_options(
                         name: option.name.clone(),
                         description: option.description.clone(),
                         available: cooldown_remaining == 0
-                            && (option.execution_mode == MoveOptionExecutionMode::MoveModifier
-                                || !generate_piece_legal_ability_actions(
-                                    &state, &piece_id, &option.id,
+                            && option.is_enabled_for(piece)
+                            && if option.execution_mode == MoveOptionExecutionMode::MoveModifier {
+                                !generate_piece_legal_move_actions_with_options(
+                                    &state,
+                                    &piece_id,
+                                    &MoveGenerationOptions {
+                                        move_option_id: Some(option.id.clone()),
+                                    },
                                 )
-                                .is_empty()),
+                                .is_empty()
+                            } else {
+                                !generate_piece_legal_ability_actions(&state, &piece_id, &option.id)
+                                    .is_empty()
+                            },
                         kind: option.kind,
                         execution_mode: option.execution_mode,
                         cooldown_remaining,
@@ -2052,7 +2078,51 @@ async fn get_lab_piece_options(
             .iter()
             .map(|(piece_id, piece)| (piece_id.clone(), piece.move_option_cooldowns.clone()))
             .collect(),
+        piece_runtime: state.pieces.clone(),
     }))
+}
+
+async fn apply_lab_action(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<LabApplyActionRequest>,
+) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+    let packages = resolve_lab_packages(&app, &headers, &req.lab.custom_pieces).await?;
+    let state = build_lab_game_state(&req.lab, &packages)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    let state = submit_engine_action(state, req.action)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    Ok(Json(state))
+}
+
+async fn resolve_lab_packages(
+    app: &AppState,
+    headers: &HeaderMap,
+    custom_pieces: &[LabCustomPieceRef],
+) -> Result<Vec<CustomPiecePackage>, (StatusCode, Json<ErrorResponse>)> {
+    if custom_pieces.is_empty() {
+        return Ok(Vec::new());
+    }
+    let owner = custom_piece::authenticated_owner(app, headers)
+        .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
+    let deck = PlayerDeckSpec {
+        starting: custom_pieces
+            .iter()
+            .map(|piece| StartingPieceSpec {
+                piece: DeckPieceRef::Custom {
+                    custom_piece_id: piece.custom_piece_id.clone(),
+                    version: piece.version,
+                    content_hash: piece.content_hash.clone(),
+                    exposed_piece_key: piece.exposed_piece_key.clone(),
+                },
+                square: Square::new(0, 0),
+            })
+            .collect(),
+        pocket: Vec::new(),
+    };
+    resolve_custom_packages(app, &[(owner.as_str(), &deck)])
+        .await
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))
 }
 
 #[cfg(test)]
@@ -2206,6 +2276,15 @@ mod tests {
         assert_eq!(scores.get("dozer"), scores.get("dozer-white"));
         assert_eq!(scores.get("mortar"), Some(&8));
         assert_eq!(scores.get("machine-gunner"), Some(&8));
+        assert_eq!(scores.get("surface-to-air-missile"), Some(&2));
+        assert_eq!(
+            resolve_piece_type("white", "surface-to-air-missile").as_deref(),
+            Some("surface-to-air-missile-white")
+        );
+        assert_eq!(
+            resolve_piece_type("black", "surface-to-air-missile").as_deref(),
+            Some("surface-to-air-missile-black")
+        );
         assert_eq!(
             resolve_piece_type("white", "dozer").as_deref(),
             Some("dozer-white")
@@ -2220,7 +2299,13 @@ mod tests {
     async fn piece_catalog_serves_deployment_zones_from_engine_definitions() {
         let Json(catalog) = get_piece_catalog().await;
 
-        for piece_type in ["pawn", "tempest-pawn", "bouncing-pawn", "dozer"] {
+        for piece_type in [
+            "pawn",
+            "tempest-pawn",
+            "bouncing-pawn",
+            "dozer",
+            "surface-to-air-missile",
+        ] {
             assert_eq!(catalog[piece_type].deployment_zone, DeploymentZone::Front);
         }
         for piece_type in ["knight", "bishop", "rook", "queen", "king", "paratrooper"] {
@@ -2351,6 +2436,9 @@ mod tests {
                     square: Square::new(3, 3),
                     state: HashMap::new(),
                     move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
                 },
                 LabPieceSpec {
                     id: "lab_black_knight_1".into(),
@@ -2359,6 +2447,9 @@ mod tests {
                     square: Square::new(3, 6),
                     state: HashMap::new(),
                     move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
                 },
             ],
         };
@@ -2415,6 +2506,9 @@ mod tests {
                 square: Square::new(3, 3),
                 state: HashMap::new(),
                 move_option_cooldowns: HashMap::new(),
+                current_ammo: None,
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
             }],
         };
 
@@ -2449,6 +2543,9 @@ mod tests {
                 square: Square::new(3, 3),
                 state: HashMap::from([("mode".into(), PieceStateValue::Text("rook".into()))]),
                 move_option_cooldowns: HashMap::new(),
+                current_ammo: None,
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
             }],
         };
 
@@ -2478,6 +2575,7 @@ mod tests {
                 piece_type: "paratrooper".into(),
                 owner: "white".into(),
                 state: HashMap::new(),
+                current_ammo: None,
             }],
         };
 
@@ -2493,6 +2591,212 @@ mod tests {
         assert!(!response.legal_drops.is_empty());
         assert!(response.moves.iter().all(|square| square.rank < 2));
         assert_eq!(response.moves.len(), response.legal_drops.len());
+    }
+
+    #[test]
+    fn lab_game_allows_ground_and_air_pieces_on_the_same_coordinate() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_bomber".into(),
+            move_option_id: None,
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![
+                LabPieceSpec {
+                    id: "lab_ground_rook".into(),
+                    piece_type: "rook".into(),
+                    owner: "black".into(),
+                    square: Square::new(3, 3),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                },
+                LabPieceSpec {
+                    id: "lab_bomber".into(),
+                    piece_type: "bomber".into(),
+                    owner: "white".into(),
+                    square: Square::new(3, 3),
+                    state: HashMap::from([("airborne".into(), PieceStateValue::Boolean(true))]),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: Some(2),
+                    layer: PieceLayer::Air,
+                    remaining_flight_turns: 3,
+                },
+            ],
+        };
+
+        let state = build_lab_game_state(&req, &[]).unwrap();
+        assert_eq!(
+            state.board.get_piece_at(&Square::new(3, 3)),
+            Some(&PieceId::from("lab_ground_rook"))
+        );
+        assert_eq!(
+            state
+                .board
+                .get_piece_at_layer(&Square::new(3, 3), PieceLayer::Air),
+            Some(&PieceId::from("lab_bomber"))
+        );
+        assert_eq!(state.pieces["lab_bomber"].current_ammo, 2);
+        assert_eq!(state.pieces["lab_bomber"].remaining_flight_turns, 3);
+    }
+
+    #[tokio::test]
+    async fn lab_surface_to_air_missile_exposes_intercept_and_its_air_target() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_sam".into(),
+            move_option_id: Some("intercept".into()),
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![
+                LabPieceSpec {
+                    id: "lab_sam".into(),
+                    piece_type: "surface-to-air-missile".into(),
+                    owner: "white".into(),
+                    square: Square::new(3, 3),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                },
+                LabPieceSpec {
+                    id: "lab_enemy_bomber".into(),
+                    piece_type: "bomber".into(),
+                    owner: "black".into(),
+                    square: Square::new(5, 4),
+                    state: HashMap::from([("airborne".into(), PieceStateValue::Boolean(true))]),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Air,
+                    remaining_flight_turns: 3,
+                },
+            ],
+        };
+
+        let response =
+            match get_lab_piece_options(State(AppState::in_memory()), HeaderMap::new(), Json(req))
+                .await
+            {
+                Ok(Json(response)) => response,
+                Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+            };
+
+        let intercept = response
+            .move_options
+            .iter()
+            .find(|option| option.id == "intercept")
+            .expect("intercept must be exposed by the lab response");
+        assert_eq!(intercept.name, "격추");
+        assert!(intercept.available);
+        assert_eq!(response.legal_ability_actions.len(), 1);
+        assert_eq!(
+            response.legal_ability_actions[0].target_piece_id,
+            Some(PieceId::from("lab_enemy_bomber"))
+        );
+        assert_eq!(
+            response.legal_ability_actions[0].to,
+            Some(Square::new(5, 4))
+        );
+    }
+
+    #[tokio::test]
+    async fn lab_apply_action_uses_the_authoritative_engine_transition() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_bomber".into(),
+            move_option_id: Some("takeoff".into()),
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![LabPieceSpec {
+                id: "lab_bomber".into(),
+                piece_type: "bomber".into(),
+                owner: "white".into(),
+                square: Square::new(1, 1),
+                state: HashMap::new(),
+                move_option_cooldowns: HashMap::new(),
+                current_ammo: None,
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
+            }],
+        };
+        let state = build_lab_game_state(&req, &[]).unwrap();
+        let takeoff =
+            generate_piece_legal_ability_actions(&state, &PieceId::from("lab_bomber"), "takeoff")
+                .into_iter()
+                .find(|action| action.to == Some(Square::new(6, 1)))
+                .unwrap();
+
+        let response = apply_lab_action(
+            State(AppState::in_memory()),
+            HeaderMap::new(),
+            Json(LabApplyActionRequest {
+                lab: req,
+                action: TurnAction::Ability(takeoff),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(response.pieces["lab_bomber"].layer, PieceLayer::Air);
+        assert_eq!(response.pieces["lab_bomber"].remaining_flight_turns, 5);
+        assert_eq!(response.pieces["lab_bomber"].current_ammo, 3);
+        assert!(response.board.get_piece_at(&Square::new(1, 1)).is_none());
+        assert_eq!(
+            response
+                .board
+                .get_piece_at_layer(&Square::new(6, 1), PieceLayer::Air),
+            Some(&PieceId::from("lab_bomber"))
+        );
+    }
+
+    #[tokio::test]
+    async fn lab_apply_action_replenishes_depleted_ammo_inside_the_home_zone() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_tank".into(),
+            move_option_id: Some("tank-fire".into()),
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![LabPieceSpec {
+                id: "lab_tank".into(),
+                piece_type: "tank".into(),
+                owner: "white".into(),
+                square: Square::new(1, 1),
+                state: HashMap::new(),
+                move_option_cooldowns: HashMap::new(),
+                current_ammo: Some(1),
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
+            }],
+        };
+        let state = build_lab_game_state(&req, &[]).unwrap();
+        let shot =
+            generate_piece_legal_ability_actions(&state, &PieceId::from("lab_tank"), "tank-fire")
+                .into_iter()
+                .find(|action| action.to == Some(Square::new(1, 4)))
+                .unwrap();
+
+        let response = apply_lab_action(
+            State(AppState::in_memory()),
+            HeaderMap::new(),
+            Json(LabApplyActionRequest {
+                lab: req,
+                action: TurnAction::Ability(shot),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(response.pieces["lab_tank"].current_ammo, 3);
     }
 
     #[tokio::test]

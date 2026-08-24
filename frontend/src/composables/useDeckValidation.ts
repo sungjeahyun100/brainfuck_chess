@@ -62,7 +62,10 @@ const builtInPieceCatalog: Omit<PieceCatalogItem, 'deploymentZone'>[] = [
   { id: 'airborne', name: '공수부대', score: 0, category: 'variant', canPocket: true },
   { id: 'green-camp', name: '그린캠프', score: 0, category: 'variant', canPocket: true },
   { id: 'mortar', name: '박격포병', score: 0, category: 'variant', canPocket: true },
+  { id: 'tank', name: '탱크', score: 0, category: 'variant', canPocket: true },
+  { id: 'bomber', name: '폭격기', score: 0, category: 'variant', canPocket: true },
   { id: 'machine-gunner', name: '기관총 사수', score: 0, category: 'variant', canPocket: true },
+  { id: 'surface-to-air-missile', name: '지대공 미사일', score: 0, category: 'variant', canPocket: true, aliases: ['SAM', '격추'] },
   { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
 ]
 
@@ -84,6 +87,17 @@ function rememberCustomCatalogItem(item: PieceCatalogItem): void {
 
 export function findPieceCatalogItem(pieceType: DeckPieceType): PieceCatalogItem | undefined {
   return pieceCatalog.find(piece => piece.id === pieceType) ?? archivedCustomCatalog.get(pieceType)
+}
+
+/** Maps direction-specific engine IDs back to the neutral catalog entry used by the UI. */
+export function neutralPieceCatalogId(pieceType: DeckPieceType): DeckPieceType {
+  if (findPieceCatalogItem(pieceType)) return pieceType
+  for (const suffix of ['-white', '-black']) {
+    if (!pieceType.endsWith(suffix)) continue
+    const neutral = pieceType.slice(0, -suffix.length)
+    if (findPieceCatalogItem(neutral)) return neutral
+  }
+  return pieceType
 }
 
 export function customDeckPieceType(piece: Pick<CustomPieceRecord, 'id' | 'version' | 'exposed_piece_key'>): string {

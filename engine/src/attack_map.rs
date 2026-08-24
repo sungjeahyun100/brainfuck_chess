@@ -176,6 +176,9 @@ mod tests {
             in_pocket: false,
             captured: false,
             has_moved: false,
+            current_ammo: 0,
+            layer: PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: state
                 .piece_definitions
                 .get(type_id)
@@ -203,6 +206,9 @@ mod tests {
             in_pocket: true,
             captured: false,
             has_moved: false,
+            current_ammo: 0,
+            layer: PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: state
                 .piece_definitions
                 .get(type_id)
@@ -224,14 +230,7 @@ mod tests {
     fn bounced_attack_squares_are_valid_placement_squares() {
         let mut state = make_game_state(8);
         add_piece(&mut state, "bouncer", "white", "bouncing-rook", 3, 3);
-        add_piece(
-            &mut state,
-            "wall",
-            "black",
-            "bouncing-pawn-black",
-            3,
-            5,
-        );
+        add_piece(&mut state, "wall", "black", "bouncing-pawn-black", 3, 5);
         add_pocket_piece(&mut state, "reserve", "white", "paratrooper");
 
         let attack_map = generate_attack_map(&state, &"white".into(), &HashMap::new());

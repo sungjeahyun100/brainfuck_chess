@@ -6,6 +6,7 @@ pub fn nightrider_definition() -> PieceDefinition {
         id: "nightrider".into(),
         name: "Nightrider".into(),
         score: 5,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(2, 1) repeat(1);

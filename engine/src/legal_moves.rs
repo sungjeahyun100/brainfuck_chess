@@ -7,7 +7,11 @@ use crate::chessembly::run_chessembly_layer_for_piece;
 use crate::interaction::{
     destination_is_blocked_by_interaction, neighboring_pieces, resolve_piece_interactions,
 };
-use crate::pieces::default_pieces::{MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID};
+use crate::pieces::default_pieces::{
+    BOMBER_BOMB_ABILITY_ID, BOMBER_LANDING_DISTANCE, BOMBER_LAND_ABILITY_ID,
+    BOMBER_TAKEOFF_ABILITY_ID, BOMBER_TAKEOFF_DISTANCE, INTERCEPT_ABILITY_ID,
+    MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID, TANK_FIRE_ABILITY_ID,
+};
 use crate::rules::{get_base_zone_squares, player_forward_direction};
 use crate::terrain::{can_affect_square, can_capture_piece};
 use crate::types::*;
@@ -161,7 +165,11 @@ fn append_actions_from_result(
             }
         }
 
-        let captured_piece_id = context.game_state.board.get_piece_at(&to).cloned();
+        let captured_piece_id = context
+            .game_state
+            .board
+            .get_piece_at_layer(&to, context.piece.layer)
+            .cloned();
         let effects =
             effects_for_candidate(result, to, context.piece_id, context.option, context.layer);
         if let Some(ref cap_id) = captured_piece_id {
@@ -180,7 +188,12 @@ fn append_actions_from_result(
             continue;
         }
 
-        let Some(captured_piece_id) = context.game_state.board.get_piece_at(&to).cloned() else {
+        let Some(captured_piece_id) = context
+            .game_state
+            .board
+            .get_piece_at_layer(&to, context.piece.layer)
+            .cloned()
+        else {
             continue;
         };
         let Some(captured_piece) = context.game_state.pieces.get(&captured_piece_id) else {
@@ -247,6 +260,7 @@ fn effects_for_candidate(
 
 fn can_use_move_option(piece: &Piece, option: &MoveOptionDefinition) -> bool {
     option.execution_mode == MoveOptionExecutionMode::MoveModifier
+        && option.is_enabled_for(piece)
         && piece
             .move_option_cooldowns
             .get(&option.id)
@@ -345,6 +359,10 @@ pub fn generate_piece_legal_move_actions_with_options(
 
     let player_id = &game_state.current_player;
 
+    if pending_landing_piece_id(game_state).is_some() {
+        return Vec::new();
+    }
+
     // A turn allows exactly one action: either one move or one pocket drop.
     let mut actions = Vec::new();
     let empty_maps = HashMap::new();
@@ -429,7 +447,12 @@ pub fn generate_piece_legal_move_actions_with_options(
         option: selected_option,
         layer: special_layer,
     };
-    for candidate in resolve_piece_interactions(game_state, piece, &selected_option.id).moves {
+    let interaction_moves = if piece.layer == PieceLayer::Ground {
+        resolve_piece_interactions(game_state, piece, &selected_option.id).moves
+    } else {
+        Vec::new()
+    };
+    for candidate in interaction_moves {
         push_move_or_promotions(
             &mut actions,
             &interaction_context,
@@ -630,6 +653,10 @@ pub fn generate_piece_legal_drop_actions(
 ) -> Vec<DropAction> {
     let player_id = &game_state.current_player;
 
+    if pending_landing_piece_id(game_state).is_some() {
+        return Vec::new();
+    }
+
     // A turn allows exactly one action: either one move or one pocket drop.
     let Some(player) = game_state.players.get(player_id) else {
         return Vec::new();
@@ -679,6 +706,13 @@ pub fn generate_piece_legal_ability_actions(
     let Some(actor) = game_state.pieces.get(piece_id) else {
         return Vec::new();
     };
+    if let Some(pending_id) = pending_landing_piece_id(game_state) {
+        if pending_id != *piece_id || ability_id != BOMBER_LAND_ABILITY_ID {
+            return Vec::new();
+        }
+    } else if ability_id == BOMBER_LAND_ABILITY_ID {
+        return Vec::new();
+    }
     if actor.owner != game_state.current_player || !actor.is_on_board() {
         return Vec::new();
     }
@@ -696,6 +730,7 @@ pub fn generate_piece_legal_ability_actions(
         })
         .is_some_and(|option| {
             option.execution_mode == MoveOptionExecutionMode::StandaloneAction
+                && option.is_enabled_for(actor)
                 && actor
                     .move_option_cooldowns
                     .get(ability_id)
@@ -739,6 +774,94 @@ pub fn generate_piece_legal_ability_actions(
                 to: Some(origin),
                 deployments: Vec::new(),
             });
+        }
+        ("tank", TANK_FIRE_ABILITY_ID) if actor.layer == PieceLayer::Ground => {
+            for (dx, dy) in QUEEN_DIRECTIONS {
+                let mut distance = 1;
+                loop {
+                    let target =
+                        Square::new(origin.file + dx * distance, origin.rank + dy * distance);
+                    if !game_state.board.is_in_bounds(&target) {
+                        break;
+                    }
+                    actions.push(simple_ability_action(
+                        actor,
+                        piece_id,
+                        ability_id,
+                        Some(target),
+                    ));
+                    if !game_state.board.is_empty(&target) {
+                        break;
+                    }
+                    distance += 1;
+                }
+            }
+        }
+        ("surface-to-air-missile-white" | "surface-to-air-missile-black", INTERCEPT_ABILITY_ID)
+            if actor.layer == PieceLayer::Ground =>
+        {
+            for rank_offset in -1..=1 {
+                for file_offset in -2..=2 {
+                    let target = Square::new(origin.file + file_offset, origin.rank + rank_offset);
+                    let Some(target_id) = game_state
+                        .board
+                        .get_piece_at_layer(&target, PieceLayer::Air)
+                    else {
+                        continue;
+                    };
+                    if game_state
+                        .pieces
+                        .get(target_id)
+                        .is_some_and(|target| target.owner != actor.owner)
+                    {
+                        actions.push(AbilityAction {
+                            player_id: actor.owner.clone(),
+                            piece_id: piece_id.clone(),
+                            ability_id: ability_id.into(),
+                            target_piece_id: Some(target_id.clone()),
+                            pocket_piece_id: None,
+                            to: Some(target),
+                            deployments: Vec::new(),
+                        });
+                    }
+                }
+            }
+        }
+        ("bomber", BOMBER_TAKEOFF_ABILITY_ID) if actor.layer == PieceLayer::Ground => {
+            for (dx, dy) in QUEEN_DIRECTIONS {
+                let target = Square::new(
+                    origin.file + dx * BOMBER_TAKEOFF_DISTANCE,
+                    origin.rank + dy * BOMBER_TAKEOFF_DISTANCE,
+                );
+                if clear_path_on_layer(
+                    game_state,
+                    origin,
+                    dx,
+                    dy,
+                    PieceLayer::Ground,
+                    BOMBER_TAKEOFF_DISTANCE,
+                ) && game_state.board.is_empty_at_layer(&target, PieceLayer::Air)
+                {
+                    actions.push(simple_ability_action(
+                        actor,
+                        piece_id,
+                        ability_id,
+                        Some(target),
+                    ));
+                }
+            }
+        }
+        ("bomber", BOMBER_BOMB_ABILITY_ID) if actor.layer == PieceLayer::Air => {
+            actions.push(simple_ability_action(actor, piece_id, ability_id, None));
+        }
+        ("bomber", BOMBER_LAND_ABILITY_ID)
+            if actor.layer == PieceLayer::Air && actor.remaining_flight_turns == 0 =>
+        {
+            actions.extend(
+                bomber_landing_targets(game_state, actor)
+                    .into_iter()
+                    .map(|target| simple_ability_action(actor, piece_id, ability_id, Some(target))),
+            );
         }
         ("alternating-soldier", "relieve") => {
             let Some(player) = game_state.players.get(&actor.owner) else {
@@ -821,6 +944,98 @@ pub fn generate_piece_legal_ability_actions(
         _ => {}
     }
     actions
+}
+
+const QUEEN_DIRECTIONS: [(i32, i32); 8] = [
+    (1, 0),
+    (-1, 0),
+    (0, 1),
+    (0, -1),
+    (1, 1),
+    (1, -1),
+    (-1, 1),
+    (-1, -1),
+];
+
+fn clear_path_on_layer(
+    game_state: &GameState,
+    origin: Square,
+    dx: i32,
+    dy: i32,
+    layer: PieceLayer,
+    distance: i32,
+) -> bool {
+    (1..=distance).all(|step| {
+        let square = Square::new(origin.file + dx * step, origin.rank + dy * step);
+        game_state.board.is_in_bounds(&square) && game_state.board.is_empty_at_layer(&square, layer)
+    })
+}
+
+pub(crate) fn bomber_landing_targets(game_state: &GameState, actor: &Piece) -> Vec<Square> {
+    let Some(origin) = actor.current_square else {
+        return Vec::new();
+    };
+    let opponent: PlayerId = if actor.owner == "white" {
+        "black".into()
+    } else {
+        "white".into()
+    };
+    if get_base_zone_squares(&opponent, game_state.board.size).contains(&origin) {
+        return Vec::new();
+    }
+    QUEEN_DIRECTIONS
+        .into_iter()
+        .filter_map(|(dx, dy)| {
+            let target = Square::new(
+                origin.file + dx * BOMBER_LANDING_DISTANCE,
+                origin.rank + dy * BOMBER_LANDING_DISTANCE,
+            );
+            (clear_path_on_layer(
+                game_state,
+                origin,
+                dx,
+                dy,
+                PieceLayer::Ground,
+                BOMBER_LANDING_DISTANCE,
+            ) && clear_path_on_layer(
+                game_state,
+                origin,
+                dx,
+                dy,
+                PieceLayer::Air,
+                BOMBER_LANDING_DISTANCE,
+            ))
+            .then_some(target)
+        })
+        .collect()
+}
+
+fn simple_ability_action(
+    actor: &Piece,
+    piece_id: &PieceId,
+    ability_id: &str,
+    to: Option<Square>,
+) -> AbilityAction {
+    AbilityAction {
+        player_id: actor.owner.clone(),
+        piece_id: piece_id.clone(),
+        ability_id: ability_id.into(),
+        target_piece_id: None,
+        pocket_piece_id: None,
+        to,
+        deployments: Vec::new(),
+    }
+}
+
+pub(crate) fn pending_landing_piece_id(game_state: &GameState) -> Option<PieceId> {
+    game_state.pieces.values().find_map(|piece| {
+        (piece.owner == game_state.current_player
+            && piece.is_on_board()
+            && piece.layer == PieceLayer::Air
+            && piece.remaining_flight_turns == 0
+            && piece.state.get("airborne") == Some(&PieceStateValue::Boolean(true)))
+        .then(|| piece.id.clone())
+    })
 }
 
 /// Mortar removes pieces on the selected point and its four orthogonally

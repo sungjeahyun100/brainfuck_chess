@@ -7,6 +7,7 @@ pub fn pawn_black_definition() -> PieceDefinition {
         id: "pawn-black".into(),
         name: "Pawn".into(),
         score: 1,
+        max_ammo: 0,
         chessembly_code: "\
 move(0, -1);
 observe(0, -1) move(0, -2);

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">지대공 미사일</title>
+  <desc id="desc">흰색 이동식 발사대에 대각선으로 세워진 미사일과 레이더를 검은 윤곽선으로 그린 픽토그램</desc>
+  <g fill="#fff" stroke="#111" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <!-- missile and fins -->
+    <path d="M286 276 L369 85 Q385 65 402 82 Q419 99 399 115 L316 198 Z"/>
+    <path d="M351 132 L340 81 L370 53 L386 102 Z"/>
+    <path d="M364 145 L415 156 L443 126 L394 110 Z"/>
+    <path d="M286 276 L269 228 L316 198 Z"/>
+    <!-- launcher cradle and radar -->
+    <path d="M215 285 L285 215 L326 256 L263 319 Z"/>
+    <path d="M222 238 Q173 201 128 216 Q145 264 197 279 Z"/>
+    <path d="M171 222 L191 174" fill="none"/>
+    <circle cx="197" cy="279" r="13"/>
+    <!-- vehicle body and tracks -->
+    <path d="M105 295 H326 L391 345 L374 389 H82 L61 345 Z"/>
+    <path d="M92 376 H381 Q408 376 420 400 L432 424 Q443 448 420 462 H70 Q47 448 58 424 L70 400 Q80 376 92 376 Z"/>
+    <circle cx="112" cy="421" r="25"/>
+    <circle cx="179" cy="421" r="25"/>
+    <circle cx="246" cy="421" r="25"/>
+    <circle cx="313" cy="421" r="25"/>
+    <circle cx="380" cy="421" r="25"/>
+    <path d="M112 345 H343" fill="none"/>
+  </g>
+</svg>

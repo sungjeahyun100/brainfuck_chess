@@ -87,6 +87,12 @@ fn add_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, file: 
         in_pocket: false,
         captured: false,
         has_moved: false,
+        current_ammo: state
+            .piece_definitions
+            .get(type_id)
+            .map_or(0, |definition| definition.max_ammo),
+        layer: brainfuck_chess_engine::types::PieceLayer::Ground,
+        remaining_flight_turns: 0,
         state: state
             .piece_definitions
             .get(type_id)
@@ -114,6 +120,12 @@ fn add_pocket_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str)
         in_pocket: true,
         captured: false,
         has_moved: false,
+        current_ammo: state
+            .piece_definitions
+            .get(type_id)
+            .map_or(0, |definition| definition.max_ammo),
+        layer: brainfuck_chess_engine::types::PieceLayer::Ground,
+        remaining_flight_turns: 0,
         state: state
             .piece_definitions
             .get(type_id)
@@ -306,13 +318,9 @@ fn barrage_abilities_have_two_owner_turn_cooldowns() {
         add_piece(&mut state, "bk", "black", "king", 7, 7);
         add_piece(&mut state, "actor", "white", piece_type, 3, 3);
 
-        let ability = generate_piece_legal_ability_actions(
-            &state,
-            &"actor".into(),
-            ability_id,
-        )
-        .pop()
-        .unwrap();
+        let ability = generate_piece_legal_ability_actions(&state, &"actor".into(), ability_id)
+            .pop()
+            .unwrap();
         state = submit_action(state, TurnAction::Ability(ability)).unwrap();
         assert_eq!(
             state.pieces["actor"].move_option_cooldowns[ability_id].remaining,
@@ -324,12 +332,9 @@ fn barrage_abilities_have_two_owner_turn_cooldowns() {
             .next()
             .unwrap();
         state = submit_action(state, TurnAction::Move(black_move)).unwrap();
-        assert!(generate_piece_legal_ability_actions(
-            &state,
-            &"actor".into(),
-            ability_id
-        )
-        .is_empty());
+        assert!(
+            generate_piece_legal_ability_actions(&state, &"actor".into(), ability_id).is_empty()
+        );
 
         for expected_remaining in [1, 0] {
             let white_move = generate_piece_legal_move_actions(&state, &"wk".into())
@@ -352,12 +357,14 @@ fn barrage_abilities_have_two_owner_turn_cooldowns() {
             state = submit_action(state, TurnAction::Move(black_move)).unwrap();
         }
 
-        assert!(!generate_piece_legal_ability_actions(
-            &state,
-            &"actor".into(),
-            ability_id
-        )
-        .is_empty());
+        // This test isolates cooldown timing; mortar now also needs a shell.
+        if piece_type == "mortar" {
+            state.pieces.get_mut("actor").unwrap().current_ammo = 1;
+        }
+
+        assert!(
+            !generate_piece_legal_ability_actions(&state, &"actor".into(), ability_id).is_empty()
+        );
     }
 }
 
@@ -432,13 +439,31 @@ fn airborne_commits_multiple_unique_deployments_in_one_turn() {
         pocket_piece_id: None,
         to: None,
         deployments: vec![
-            AbilityDeployment { pocket_piece_id: "first".into(), to: Square::new(2, 4) },
-            AbilityDeployment { pocket_piece_id: "second".into(), to: Square::new(3, 5) },
+            AbilityDeployment {
+                pocket_piece_id: "first".into(),
+                to: Square::new(2, 4),
+            },
+            AbilityDeployment {
+                pocket_piece_id: "second".into(),
+                to: Square::new(3, 5),
+            },
         ],
     };
     let state = submit_action(state, TurnAction::Ability(action)).unwrap();
-    assert_eq!(state.board.get_piece_at(&Square::new(2, 4)).map(PieceId::as_str), Some("first"));
-    assert_eq!(state.board.get_piece_at(&Square::new(3, 5)).map(PieceId::as_str), Some("second"));
+    assert_eq!(
+        state
+            .board
+            .get_piece_at(&Square::new(2, 4))
+            .map(PieceId::as_str),
+        Some("first")
+    );
+    assert_eq!(
+        state
+            .board
+            .get_piece_at(&Square::new(3, 5))
+            .map(PieceId::as_str),
+        Some("second")
+    );
     assert_eq!(state.current_player, "black");
 }
 
@@ -650,14 +675,10 @@ fn low_ground_barrage_does_not_remove_a_piece_on_high_ground() {
     state.board = create_board_with_variant(12, BoardVariant::CentralHighGround).unwrap();
     add_piece(&mut state, "mortar", "white", "mortar", 5, 3);
     add_piece(&mut state, "target", "black", "knight", 5, 5);
-    let action = generate_piece_legal_ability_actions(
-        &state,
-        &"mortar".into(),
-        "mortar-barrage",
-    )
-    .into_iter()
-    .find(|action| action.to == Some(Square::new(5, 5)))
-    .unwrap();
+    let action = generate_piece_legal_ability_actions(&state, &"mortar".into(), "mortar-barrage")
+        .into_iter()
+        .find(|action| action.to == Some(Square::new(5, 5)))
+        .unwrap();
 
     let state = submit_action(state, TurnAction::Ability(action)).unwrap();
     assert!(!state.pieces["target"].captured);
@@ -754,6 +775,7 @@ fn layers_with_same_destination_and_different_effects_stay_distinct() {
         id: "layered".into(),
         name: "Layered".into(),
         score: 1,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: String::new(),
         chessembly_version: "1.0".into(),
@@ -801,6 +823,8 @@ fn layers_with_same_destination_and_different_effects_stay_distinct() {
             layer_ids: vec!["a".into(), "b".into()],
             execution_mode: MoveOptionExecutionMode::MoveModifier,
             contributes_to_attack_map: true,
+            ammo_cost: 0,
+            enabled_when: Vec::new(),
             cooldown: None,
         }],
         visual: PieceVisualDefinition {
@@ -829,6 +853,7 @@ fn chessembly_set_state_remains_global_and_separate_from_piece_state() {
         id: "global-writer".into(),
         name: "Global writer".into(),
         score: 1,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "set-state(flag, 7) move(1, 0);".into(),
         chessembly_version: "1.0".into(),
@@ -1016,6 +1041,8 @@ fn deployment_zone_classifies_every_builtin_and_both_player_orientations() {
         "bouncing-pawn-black",
         "dozer-white",
         "dozer-black",
+        "surface-to-air-missile-white",
+        "surface-to-air-missile-black",
     ];
 
     for definition in definitions.values() {
@@ -1574,6 +1601,7 @@ fn test_custom_piece_definition_can_generate_promotion_choices() {
         id: "promoter".into(),
         name: "Promoter".into(),
         score: 2,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "move(0, 1);".into(),
         chessembly_version: "1.0".into(),
@@ -1830,7 +1858,14 @@ fn test_cannon_rook_ability_uses_cannon_move_for_selected_move_only() {
     add_piece(&mut state, "screen2", "black", "pawn-black", 5, 3);
     add_piece(&mut state, "blocked", "white", "pawn-white", 6, 3);
     add_piece(&mut state, "enemy-screen", "black", "pawn-black", 2, 3);
-    add_piece(&mut state, "enemy-behind-screen", "black", "pawn-black", 0, 3);
+    add_piece(
+        &mut state,
+        "enemy-behind-screen",
+        "black",
+        "pawn-black",
+        0,
+        3,
+    );
 
     let base_moves = generate_piece_legal_move_actions(&state, &"cr".into());
     assert!(base_moves
