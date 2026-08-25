@@ -1173,8 +1173,8 @@ async fn game_record_players(
     (
         HashMap::from([("white".into(), white), ("black".into(), black)]),
         GameRecordOwnership {
-            white_user_id: white_registered.then(|| white_owner.to_owned()),
-            black_user_id: black_registered.then(|| black_owner.to_owned()),
+            white_user_id: (!white_owner.is_empty()).then(|| white_owner.to_owned()),
+            black_user_id: (!black_owner.is_empty()).then(|| black_owner.to_owned()),
             persist,
         },
     )
@@ -1245,8 +1245,8 @@ async fn singleplayer_record_players(
     Ok((
         players,
         GameRecordOwnership {
-            white_user_id: (registered && local_side == "white").then(|| owner.to_owned()),
-            black_user_id: (registered && local_side == "black").then(|| owner.to_owned()),
+            white_user_id: (local_side == "white" && !owner.is_empty()).then(|| owner.to_owned()),
+            black_user_id: (local_side == "black" && !owner.is_empty()).then(|| owner.to_owned()),
             persist: registered,
         },
     ))
@@ -2828,6 +2828,7 @@ mod tests {
                 .unwrap();
         assert_eq!(fallback["white"].nickname, "계정 닉네임");
 
+        app.accounts.ensure_guest("guest-session").await.unwrap();
         let (guest_players, guest_ownership) = singleplayer_record_players(
             &app,
             "guest-session",
@@ -2838,12 +2839,20 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(guest_players["white"].nickname, "Local Guest");
-        assert_eq!(guest_ownership.white_user_id, None);
+        assert_eq!(guest_ownership.white_user_id.as_deref(), Some("guest-session"));
+        assert_eq!(guest_ownership.black_user_id, None);
         assert!(!guest_ownership.has_registered_owner());
+
+        let (_, black_guest_ownership) = singleplayer_record_players(
+            &app, "guest-session", "black", Some("Local Guest"), Some("Guest"),
+        ).await.unwrap();
+        assert_eq!(black_guest_ownership.white_user_id, None);
+        assert_eq!(black_guest_ownership.black_user_id.as_deref(), Some("guest-session"));
+        assert!(!black_guest_ownership.persist);
     }
 
     #[tokio::test]
-    async fn multiplayer_ownership_contains_registered_accounts_only() {
+    async fn multiplayer_ownership_preserves_all_participant_sessions() {
         let (app, _) = test_app_with_game();
         for (user_id, subject, public_id) in [
             ("account-a", "subject-a", "public_a"),
@@ -2867,6 +2876,9 @@ mod tests {
                 .await
                 .unwrap();
         }
+        app.accounts.ensure_guest("guest-a").await.unwrap();
+        app.accounts.ensure_guest("guest-b").await.unwrap();
+        assert!(app.accounts.authenticated_user("guest-a").await.unwrap().is_none());
 
         let (players, both) = game_record_players(&app, "account-a", "account-b").await;
         assert_eq!(players["white"].public_id.as_deref(), Some("public_a"));
@@ -2878,21 +2890,62 @@ mod tests {
         let (players, account_guest) = game_record_players(&app, "account-a", "guest-b").await;
         assert_eq!(players["black"].public_id, None);
         assert_eq!(account_guest.white_user_id.as_deref(), Some("account-a"));
-        assert_eq!(account_guest.black_user_id, None);
+        assert_eq!(account_guest.black_user_id.as_deref(), Some("guest-b"));
         assert!(account_guest.persist);
 
         let (players, guest_account) = game_record_players(&app, "guest-a", "account-b").await;
         assert_eq!(players["white"].public_id, None);
-        assert_eq!(guest_account.white_user_id, None);
+        assert_eq!(guest_account.white_user_id.as_deref(), Some("guest-a"));
         assert_eq!(guest_account.black_user_id.as_deref(), Some("account-b"));
         assert!(guest_account.persist);
 
         let (players, neither) = game_record_players(&app, "guest-a", "guest-b").await;
         assert_eq!(players["white"].public_id, None);
         assert_eq!(players["black"].public_id, None);
-        assert_eq!(neither.white_user_id, None);
-        assert_eq!(neither.black_user_id, None);
+        assert_eq!(neither.white_user_id.as_deref(), Some("guest-a"));
+        assert_eq!(neither.black_user_id.as_deref(), Some("guest-b"));
         assert!(!neither.persist);
+    }
+
+    #[tokio::test]
+    async fn participant_sessions_keep_replay_access_without_granting_guest_history() {
+        let (app, game_id) = test_app_with_game();
+        let identity = account::VerifiedIdentity {
+            issuer: "issuer".into(), subject: "access-subject".into(), provider: "google".into(),
+            email: None, email_verified: true, display_name: Some("Account".into()), avatar_url: None,
+        };
+        app.accounts.complete_google_login("account", &identity, None).await.unwrap();
+        app.accounts.ensure_guest("guest-a").await.unwrap();
+        app.accounts.ensure_guest("guest-b").await.unwrap();
+        app.accounts.ensure_guest("unrelated").await.unwrap();
+        let headers = |user_id: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-user-id", user_id.parse().unwrap());
+            headers
+        };
+        let mut record = app.games.get(&game_id).unwrap().record.clone();
+
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("account".into()), black_user_id: Some("guest-a".into()), persist: true,
+        };
+        assert!(ensure_game_record_access(&app, &headers("account"), &record).await.is_ok());
+        assert!(ensure_game_record_access(&app, &headers("guest-a"), &record).await.is_ok());
+        assert_eq!(ensure_game_record_access(&app, &headers("unrelated"), &record).await.unwrap_err().0, StatusCode::NOT_FOUND);
+
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("guest-a".into()), black_user_id: Some("guest-b".into()), persist: false,
+        };
+        assert!(ensure_game_record_access(&app, &headers("guest-a"), &record).await.is_ok());
+        assert!(ensure_game_record_access(&app, &headers("guest-b"), &record).await.is_ok());
+        assert_eq!(ensure_game_record_access(&app, &headers("unrelated"), &record).await.unwrap_err().0, StatusCode::NOT_FOUND);
+
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("guest-a".into()), black_user_id: None, persist: false,
+        };
+        assert!(ensure_game_record_access(&app, &headers("guest-a"), &record).await.is_ok());
+        assert_eq!(ensure_game_record_access(&app, &headers("unrelated"), &record).await.unwrap_err().0, StatusCode::NOT_FOUND);
+
+        assert_eq!(list_game_records(State(app), headers("guest-a")).await.unwrap_err().0, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
