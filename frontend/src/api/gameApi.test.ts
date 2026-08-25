@@ -44,3 +44,18 @@ test('piece lab action adds the move discriminator omitted by legal-action respo
   assert.equal(body.action.type, 'move')
   assert.equal(body.action.piece_id, 'lab-rook')
 })
+
+test('singleplayer create request sends only side and per-game nicknames as player metadata', async () => {
+  let body: Record<string, unknown> = {}
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return new Response(JSON.stringify({ id: 'game', state: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+  const deck = { name: 'Deck', starting: [], pocket: [] }
+  await api.createGame(8, deck, deck, 'standard-8x8', 'ten_five', { localSide: 'black', localNickname: 'Match Name', guestNickname: 'Guest Name' })
+  assert.equal(body.local_side, 'black')
+  assert.equal(body.local_nickname, 'Match Name')
+  assert.equal(body.guest_nickname, 'Guest Name')
+  assert.equal('public_id' in body, false)
+  assert.equal('user_id' in body, false)
+})

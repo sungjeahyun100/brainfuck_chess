@@ -218,7 +218,7 @@ async function startSingleGame(selection: SingleDeckSelection) {
       serializeNeutralDeck(blackDeck, 'black'),
       localDeck.mapId,
       selection.timeControl,
-      { localSide: resolvedSide, guestNickname: selection.guestNickname },
+      { localSide: resolvedSide, localNickname: selection.localNickname, guestNickname: selection.guestNickname },
     )
     localPlayer.value = resolvedSide
     currentRoom.value = null

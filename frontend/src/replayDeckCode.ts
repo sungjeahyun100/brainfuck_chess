@@ -1,6 +1,7 @@
 import type { CustomDeckPieceRef, LobbyDeck } from './types/deck'
 import type { BoardMapId, PlayerId } from './types/game'
 import type { GameRecord } from './types/gameRecord'
+import { neutralPieceCatalogId } from './composables/useDeckValidation.ts'
 
 export type FrozenDeckCodeSource = LobbyDeck & { name: string; mapId: BoardMapId; boardSize: number }
 
@@ -20,8 +21,8 @@ export function frozenDeckCodeSource(record: GameRecord, side: PlayerId): Frozen
   }
   return {
     name: deck.deck_name, mapId: deck.map_id as BoardMapId, boardSize: deck.board_size,
-    starting: deck.deployments.map(piece => ({ pieceType: piece.piece_type_id as string, square: { file: piece.square.file, rank: side === 'black' ? deck.board_size as number - 1 - piece.square.rank : piece.square.rank } })),
-    pocket: Object.fromEntries(deck.pocket.map(piece => [piece.piece_type_id as string, piece.count])),
+    starting: deck.deployments.map(piece => ({ pieceType: neutralPieceCatalogId(piece.piece_type_id as string), square: { file: piece.square.file, rank: side === 'black' ? deck.board_size as number - 1 - piece.square.rank : piece.square.rank } })),
+    pocket: Object.fromEntries(deck.pocket.map(piece => [neutralPieceCatalogId(piece.piece_type_id as string), piece.count])),
     customPieces: [...customPieces.values()],
   }
 }

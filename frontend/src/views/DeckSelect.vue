@@ -20,7 +20,7 @@
     <template v-else>
       <section v-if="mode === 'single'" class="card bot-panel">
         <div class="bot-options">
-          <label class="difficulty-select"><span class="limit-label">내 닉네임</span><input class="text-input" :value="accountNickname" readonly /></label>
+          <label class="difficulty-select"><span class="limit-label">내 닉네임</span><input v-model="localNickname" class="text-input" maxlength="30" /></label>
           <label class="difficulty-select"><span class="limit-label">상대 닉네임</span><input v-model="guestNickname" class="text-input" maxlength="30" /></label>
           <div class="color-match">
             <span class="limit-label">내 진영</span>
@@ -99,6 +99,7 @@ import { boardMapLabel } from '../boardMaps'
 import { TIME_CONTROLS } from '../timeControls'
 import type { TimeControlId } from '../types/game'
 import { authApi } from '../api/authApi'
+import { createSinglePlayerSelection, isValidGameNickname } from '../singlePlayerSetup'
 
 const props = defineProps<{
   mode: DeckSelectMode
@@ -120,7 +121,7 @@ const difficulty = ref<BotDifficulty>('normal')
 const timeControl = ref<TimeControlId>('ten_five')
 const singleSide = ref<LobbyPlayer | 'random'>('random')
 const guestNickname = ref('Guest')
-const accountNickname = ref('Player')
+const localNickname = ref('Player')
 
 const validDecks = computed(() => decks.value.filter(deck => validateSavedDeck(deck).valid))
 const invalidDecks = computed(() => decks.value.filter(deck => !validateSavedDeck(deck).valid))
@@ -136,7 +137,7 @@ const canStart = computed(() => Boolean(
   primaryDeck.value
   && secondaryDeck.value
   && sameMap.value
-  && (props.mode !== 'single' || (guestNickname.value.trim().length > 0 && guestNickname.value.trim().length <= 30))
+  && (props.mode !== 'single' || (isValidGameNickname(localNickname.value) && isValidGameNickname(guestNickname.value)))
 ))
 
 function refresh() {
@@ -164,13 +165,14 @@ function start() {
     return
   }
 
-  emit('start-single', {
+  emit('start-single', createSinglePlayerSelection({
     localDeckId: primaryDeckId.value,
     opponentDeckId: secondaryDeckId.value,
     localSide: singleSide.value,
+    localNickname: localNickname.value.trim(),
     guestNickname: guestNickname.value.trim(),
     timeControl: timeControl.value,
-  })
+  }))
 }
 
 watch(() => props.mode, refresh)
@@ -178,7 +180,7 @@ onMounted(async () => {
   refresh()
   try {
     const state = await authApi.me()
-    accountNickname.value = state.user?.displayName?.trim() || 'Player'
-  } catch { accountNickname.value = 'Player' }
+    localNickname.value = state.user?.displayName?.trim() || 'Player'
+  } catch { localNickname.value = 'Player' }
 })
 </script>

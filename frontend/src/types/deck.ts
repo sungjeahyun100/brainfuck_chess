@@ -85,6 +85,7 @@ export interface SingleDeckSelection {
   localDeckId: string
   opponentDeckId: string
   localSide: LobbyPlayer | 'random'
+  localNickname: string
   guestNickname: string
   timeControl: TimeControlId
 }

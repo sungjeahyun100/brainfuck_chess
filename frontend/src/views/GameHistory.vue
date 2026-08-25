@@ -9,7 +9,7 @@
       <p v-else-if="error" class="error">{{ error }}</p>
       <p v-else-if="!records.length" class="muted-note">저장된 게임 기록이 없습니다.</p>
       <button v-for="record in records" :key="record.game_id" class="record-row" :disabled="openingId === record.game_id" @click="open(record.game_id)">
-        <span><strong>{{ record.players.white.nickname }} vs {{ record.players.black.nickname }}</strong><small>{{ new Date(record.started_at_ms).toLocaleString() }} · {{ resultLabel(record) }}</small></span>
+        <span><strong>{{ record.players.white.nickname }} vs {{ record.players.black.nickname }}</strong><small>{{ resultLabel(record) }} · {{ timeControlLabel(record.time_control) }} · {{ new Date(record.started_at_ms).toLocaleString() }}</small></span>
         <span>{{ openingId === record.game_id ? '불러오는 중…' : '리플레이' }}</span>
       </button>
     </section>
@@ -20,6 +20,7 @@
 import { onMounted, ref } from 'vue'
 import { api } from '../api/gameApi'
 import type { GameRecord, GameRecordSummary } from '../types/gameRecord'
+import { timeControlLabel } from '../timeControls'
 
 const emit = defineEmits<{ back: []; loaded: [record: GameRecord] }>()
 const records = ref<GameRecordSummary[]>([])

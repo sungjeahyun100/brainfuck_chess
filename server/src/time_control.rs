@@ -387,12 +387,17 @@ impl StoredGame {
             .finalize(&self.state, self.clock.snapshot(ended_at, false), ended_at);
     }
 
-    pub(crate) fn take_completed_record(&mut self) -> Option<GameRecord> {
+    pub(crate) fn completed_record(&self) -> Option<GameRecord> {
         if self.record_persisted || self.record.ended_at_ms.is_none() {
             return None;
         }
-        self.record_persisted = true;
         Some(self.record.clone())
+    }
+
+    pub(crate) fn mark_record_persisted(&mut self) {
+        if self.record.ended_at_ms.is_some() {
+            self.record_persisted = true;
+        }
     }
 }
 

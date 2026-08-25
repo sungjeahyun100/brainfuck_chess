@@ -1,4 +1,14 @@
-import type { LobbyPlayer } from './types/deck'
+import type { LobbyPlayer, SingleDeckSelection } from './types/deck'
+import type { TimeControlId } from './types/game'
+
+export function isValidGameNickname(value: string): boolean {
+  const normalized = value.trim()
+  return normalized.length > 0 && [...normalized].length <= 30 && ![...normalized].some(character => /\p{Cc}/u.test(character))
+}
+
+export function createSinglePlayerSelection(input: Omit<SingleDeckSelection, 'localNickname' | 'guestNickname'> & { localNickname: string; guestNickname: string; timeControl: TimeControlId }): SingleDeckSelection {
+  return { ...input, localNickname: input.localNickname.trim(), guestNickname: input.guestNickname.trim() }
+}
 
 export function resolveLocalSide(choice: LobbyPlayer | 'random', randomByte?: number): LobbyPlayer {
   if (choice !== 'random') return choice

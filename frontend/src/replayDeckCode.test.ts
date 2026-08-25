@@ -20,3 +20,22 @@ test('frozen black replay deck copies through the shared codec with custom ident
   assert.deepEqual(decoded.value.starting, [{ pieceId, file: 2, rank: 0 }])
   assert.deepEqual(decoded.value.pocket, [{ pieceId: 'pawn', count: 2 }])
 })
+
+test('directional built-in engine ids become canonical neutral Deck Code ids', () => {
+  const cases = [
+    ['pawn-white', 'pawn'], ['pawn-black', 'pawn'], ['tempest-pawn-black', 'tempest-pawn'],
+    ['bouncing-pawn-white', 'bouncing-pawn'], ['dozer-black', 'dozer'],
+    ['surface-to-air-missile-white', 'surface-to-air-missile'],
+    ['custom:airship:v7:captain', 'custom:airship:v7:captain'],
+  ] as const
+  for (const [engineId, canonicalId] of cases) {
+    const record = { decks: { white: { side: 'white', deck_name: 'Frozen', map_id: 'standard-8x8', board_size: 8,
+      deployments: [{ piece_type_id: engineId, piece_name: 'Historical name', square: { file: 0, rank: 0 } }], pocket: [] } },
+      initial_state: { custom_piece_manifest: [] } } as unknown as GameRecord
+    const source = frozenDeckCodeSource(record, 'white')
+    assert.ok(source)
+    const decoded = decodeDeckCode(encodeDeckCode(source))
+    assert.equal(decoded.ok, true)
+    if (decoded.ok) assert.equal(decoded.value.starting[0].pieceId, canonicalId)
+  }
+})

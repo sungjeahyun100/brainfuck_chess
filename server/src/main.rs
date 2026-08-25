@@ -62,6 +62,8 @@ struct CreateGameRequest {
     #[serde(default)]
     local_side: Option<PlayerId>,
     #[serde(default)]
+    local_nickname: Option<String>,
+    #[serde(default)]
     guest_nickname: Option<String>,
 }
 
@@ -1151,16 +1153,28 @@ async fn game_record_players(
     white_owner: &str,
     black_owner: &str,
 ) -> (HashMap<PlayerId, GameRecordPlayer>, GameRecordOwnership) {
-    let white_registered = app.accounts.authenticated_user(white_owner).await.ok().flatten().is_some();
-    let black_registered = app.accounts.authenticated_user(black_owner).await.ok().flatten().is_some();
+    let white_registered = app
+        .accounts
+        .authenticated_user(white_owner)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    let black_registered = app
+        .accounts
+        .authenticated_user(black_owner)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
     let white = game_record_player(app, white_owner, "white").await;
     let black = game_record_player(app, black_owner, "black").await;
     let persist = white_registered || black_registered;
     (
         HashMap::from([("white".into(), white), ("black".into(), black)]),
         GameRecordOwnership {
-            white_user_id: (!white_owner.is_empty()).then(|| white_owner.to_owned()),
-            black_user_id: (!black_owner.is_empty()).then(|| black_owner.to_owned()),
+            white_user_id: white_registered.then(|| white_owner.to_owned()),
+            black_user_id: black_registered.then(|| black_owner.to_owned()),
             persist,
         },
     )
@@ -1185,7 +1199,7 @@ async fn game_record_player(app: &AppState, owner: &str, side: &str) -> GameReco
     }
 }
 
-fn normalize_guest_nickname(value: Option<&str>, fallback: &str) -> Result<String, String> {
+fn normalize_game_nickname(value: Option<&str>, fallback: &str) -> Result<String, String> {
     let nickname = value.unwrap_or(fallback).trim();
     if nickname.is_empty()
         || nickname.chars().count() > 30
@@ -1200,27 +1214,42 @@ async fn singleplayer_record_players(
     app: &AppState,
     owner: &str,
     local_side: &str,
+    local_nickname: Option<&str>,
     guest_nickname: Option<&str>,
 ) -> Result<(HashMap<PlayerId, GameRecordPlayer>, GameRecordOwnership), String> {
     if local_side != "white" && local_side != "black" {
         return Err("로컬 플레이어 진영이 올바르지 않습니다.".into());
     }
-    let opponent_side = if local_side == "white" { "black" } else { "white" };
-    let local = game_record_player(app, owner, local_side).await;
+    let opponent_side = if local_side == "white" {
+        "black"
+    } else {
+        "white"
+    };
+    let mut local = game_record_player(app, owner, local_side).await;
+    local.nickname = normalize_game_nickname(local_nickname, &local.nickname)?;
     let guest = GameRecordPlayer {
         public_id: None,
-        nickname: normalize_guest_nickname(guest_nickname, "Guest")?,
+        nickname: normalize_game_nickname(guest_nickname, "Guest")?,
         side: opponent_side.into(),
     };
-    let registered = app.accounts.authenticated_user(owner).await.ok().flatten().is_some();
+    let registered = app
+        .accounts
+        .authenticated_user(owner)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
     let mut players = HashMap::new();
     players.insert(local_side.into(), local);
     players.insert(opponent_side.into(), guest);
-    Ok((players, GameRecordOwnership {
-        white_user_id: (local_side == "white").then(|| owner.to_owned()),
-        black_user_id: (local_side == "black").then(|| owner.to_owned()),
-        persist: registered,
-    }))
+    Ok((
+        players,
+        GameRecordOwnership {
+            white_user_id: (registered && local_side == "white").then(|| owner.to_owned()),
+            black_user_id: (registered && local_side == "black").then(|| owner.to_owned()),
+            persist: registered,
+        },
+    ))
 }
 
 async fn run_game_time_adjudicator(
@@ -1236,19 +1265,31 @@ async fn run_game_time_adjudicator(
             .collect::<Vec<_>>();
         let now = now_ms();
         for id in ids {
-            let completed = if let Some(mut game) = games.get_mut(&id) {
+            if let Some(mut game) = games.get_mut(&id) {
                 game.adjudicate(now);
-                game.take_completed_record()
-            } else {
-                None
-            };
-            if let Some(record) = completed {
-                if record.ownership.has_registered_owner() {
-                    let _ = records.save(&record).await;
-                }
+            }
+            if let Err(error) = persist_completed_record(&games, &records, &id).await {
+                eprintln!("failed to persist completed game record {id}: {error}");
             }
         }
     }
+}
+
+async fn persist_completed_record(
+    games: &stores::GameStore,
+    records: &game_record::GameRecordStore,
+    game_id: &str,
+) -> Result<(), &'static str> {
+    let Some(record) = games.get(game_id).and_then(|game| game.completed_record()) else {
+        return Ok(());
+    };
+    if record.ownership.has_registered_owner() {
+        records.save(&record).await?;
+    }
+    if let Some(mut game) = games.get_mut(game_id) {
+        game.mark_record_persisted();
+    }
+    Ok(())
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -1423,9 +1464,15 @@ async fn create_game(
     .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let now = now_ms();
     let (record_players, record_ownership) = if let Some(local_side) = req.local_side.as_deref() {
-        singleplayer_record_players(&app, &owner, local_side, req.guest_nickname.as_deref())
-            .await
-            .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
+        singleplayer_record_players(
+            &app,
+            &owner,
+            local_side,
+            req.local_nickname.as_deref(),
+            req.guest_nickname.as_deref(),
+        )
+        .await
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
     } else {
         game_record_players(&app, &owner, &owner).await
     };
@@ -1918,8 +1965,8 @@ async fn get_game_record(
                 }),
             ));
         }
-        if record.ownership.has_registered_owner() {
-            let _ = app.game_records.save(&record).await;
+        if let Err(error) = persist_completed_record(&app.games, &app.game_records, &id).await {
+            eprintln!("failed to persist completed game record {id}: {error}");
         }
         return Ok(Json(record));
     }
@@ -2657,6 +2704,38 @@ async fn resolve_lab_packages(
 mod tests {
     use super::*;
 
+    struct FailOnceGameRecordRepository {
+        fail_next: std::sync::atomic::AtomicBool,
+        saves: std::sync::Mutex<Vec<game_record::GameRecord>>,
+    }
+
+    #[async_trait::async_trait]
+    impl game_record::GameRecordRepository for FailOnceGameRecordRepository {
+        async fn save(&self, record: &game_record::GameRecord) -> Result<(), &'static str> {
+            if self
+                .fail_next
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err("injected failure");
+            }
+            self.saves.lock().unwrap().push(record.clone());
+            Ok(())
+        }
+        async fn get(
+            &self,
+            _game_id: &str,
+        ) -> Result<Option<game_record::GameRecord>, &'static str> {
+            Ok(None)
+        }
+        async fn list_summaries_for_user_id(
+            &self,
+            _user_id: &str,
+            _limit: i64,
+        ) -> Result<Vec<game_record::GameRecordSummary>, &'static str> {
+            Ok(Vec::new())
+        }
+    }
+
     #[test]
     fn missing_app_env_is_local_only_for_debug_builds() {
         assert_eq!(resolve_app_env(None, true), "local");
@@ -2687,32 +2766,207 @@ mod tests {
 
     #[test]
     fn guest_nickname_is_trimmed_and_rejects_empty_controls_and_excess_length() {
-        assert_eq!(normalize_guest_nickname(Some("  상대  "), "Guest").unwrap(), "상대");
-        assert!(normalize_guest_nickname(Some(""), "Guest").is_err());
-        assert!(normalize_guest_nickname(Some("bad\nname"), "Guest").is_err());
-        assert!(normalize_guest_nickname(Some(&"x".repeat(31)), "Guest").is_err());
+        assert_eq!(
+            normalize_game_nickname(Some("  상대  "), "Guest").unwrap(),
+            "상대"
+        );
+        assert!(normalize_game_nickname(Some(""), "Guest").is_err());
+        assert!(normalize_game_nickname(Some("bad\nname"), "Guest").is_err());
+        assert!(normalize_game_nickname(Some(&"x".repeat(31)), "Guest").is_err());
     }
 
     #[tokio::test]
     async fn singleplayer_metadata_follows_the_resolved_local_side_and_account_profile() {
         let (app, _) = test_app_with_game();
         let identity = account::VerifiedIdentity {
-            issuer: "issuer".into(), subject: "single-subject".into(), provider: "google".into(),
-            email: None, email_verified: true, display_name: Some("계정 닉네임".into()), avatar_url: None,
+            issuer: "issuer".into(),
+            subject: "single-subject".into(),
+            provider: "google".into(),
+            email: None,
+            email_verified: true,
+            display_name: Some("계정 닉네임".into()),
+            avatar_url: None,
         };
-        app.accounts.complete_google_login("single-user", &identity, None).await.unwrap();
-        app.accounts.update_profile("single-user", Some("single_public"), None, None).await.unwrap();
-        let (players, ownership) = singleplayer_record_players(&app, "single-user", "black", Some("로컬 상대")).await.unwrap();
-        assert_eq!(players["black"].nickname, "계정 닉네임");
+        app.accounts
+            .complete_google_login("single-user", &identity, None)
+            .await
+            .unwrap();
+        app.accounts
+            .update_profile("single-user", Some("single_public"), None, None)
+            .await
+            .unwrap();
+        let (players, ownership) = singleplayer_record_players(
+            &app,
+            "single-user",
+            "black",
+            Some("임시 닉네임"),
+            Some("로컬 상대"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(players["black"].nickname, "임시 닉네임");
         assert_eq!(players["black"].public_id.as_deref(), Some("single_public"));
         assert_eq!(players["white"].nickname, "로컬 상대");
         assert_eq!(players["white"].public_id, None);
         assert_eq!(ownership.black_user_id.as_deref(), Some("single-user"));
         assert_eq!(ownership.white_user_id, None);
         assert!(ownership.has_registered_owner());
+        assert_eq!(
+            app.accounts
+                .authenticated_user("single-user")
+                .await
+                .unwrap()
+                .unwrap()
+                .display_name
+                .as_deref(),
+            Some("계정 닉네임")
+        );
 
-        let (_, guest_ownership) = singleplayer_record_players(&app, "guest-session", "white", Some("Guest")).await.unwrap();
+        let (fallback, _) =
+            singleplayer_record_players(&app, "single-user", "white", None, Some("Guest"))
+                .await
+                .unwrap();
+        assert_eq!(fallback["white"].nickname, "계정 닉네임");
+
+        let (guest_players, guest_ownership) = singleplayer_record_players(
+            &app,
+            "guest-session",
+            "white",
+            Some("Local Guest"),
+            Some("Guest"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(guest_players["white"].nickname, "Local Guest");
+        assert_eq!(guest_ownership.white_user_id, None);
         assert!(!guest_ownership.has_registered_owner());
+    }
+
+    #[tokio::test]
+    async fn multiplayer_ownership_contains_registered_accounts_only() {
+        let (app, _) = test_app_with_game();
+        for (user_id, subject, public_id) in [
+            ("account-a", "subject-a", "public_a"),
+            ("account-b", "subject-b", "public_b"),
+        ] {
+            let identity = account::VerifiedIdentity {
+                issuer: "issuer".into(),
+                subject: subject.into(),
+                provider: "google".into(),
+                email: None,
+                email_verified: true,
+                display_name: Some(public_id.into()),
+                avatar_url: None,
+            };
+            app.accounts
+                .complete_google_login(user_id, &identity, None)
+                .await
+                .unwrap();
+            app.accounts
+                .update_profile(user_id, Some(public_id), None, None)
+                .await
+                .unwrap();
+        }
+
+        let (players, both) = game_record_players(&app, "account-a", "account-b").await;
+        assert_eq!(players["white"].public_id.as_deref(), Some("public_a"));
+        assert_eq!(players["black"].public_id.as_deref(), Some("public_b"));
+        assert_eq!(both.white_user_id.as_deref(), Some("account-a"));
+        assert_eq!(both.black_user_id.as_deref(), Some("account-b"));
+        assert!(both.persist);
+
+        let (players, account_guest) = game_record_players(&app, "account-a", "guest-b").await;
+        assert_eq!(players["black"].public_id, None);
+        assert_eq!(account_guest.white_user_id.as_deref(), Some("account-a"));
+        assert_eq!(account_guest.black_user_id, None);
+        assert!(account_guest.persist);
+
+        let (players, guest_account) = game_record_players(&app, "guest-a", "account-b").await;
+        assert_eq!(players["white"].public_id, None);
+        assert_eq!(guest_account.white_user_id, None);
+        assert_eq!(guest_account.black_user_id.as_deref(), Some("account-b"));
+        assert!(guest_account.persist);
+
+        let (players, neither) = game_record_players(&app, "guest-a", "guest-b").await;
+        assert_eq!(players["white"].public_id, None);
+        assert_eq!(players["black"].public_id, None);
+        assert_eq!(neither.white_user_id, None);
+        assert_eq!(neither.black_user_id, None);
+        assert!(!neither.persist);
+    }
+
+    #[tokio::test]
+    async fn completed_record_is_marked_only_after_a_successful_idempotent_save() {
+        let (app, game_id) = test_app_with_game();
+        {
+            let mut game = app.games.get_mut(&game_id).unwrap();
+            game.record.ownership = GameRecordOwnership {
+                white_user_id: Some("registered-user".into()),
+                black_user_id: None,
+                persist: true,
+            };
+            game.end_with_loss("black", GameEndReason::Resignation);
+            assert!(game.completed_record().is_some());
+        }
+        let repository = std::sync::Arc::new(FailOnceGameRecordRepository {
+            fail_next: std::sync::atomic::AtomicBool::new(true),
+            saves: std::sync::Mutex::new(Vec::new()),
+        });
+        let store: game_record::GameRecordStore = repository.clone();
+
+        assert!(persist_completed_record(&app.games, &store, &game_id)
+            .await
+            .is_err());
+        assert!(app
+            .games
+            .get(&game_id)
+            .unwrap()
+            .completed_record()
+            .is_some());
+
+        persist_completed_record(&app.games, &store, &game_id)
+            .await
+            .unwrap();
+        assert!(app
+            .games
+            .get(&game_id)
+            .unwrap()
+            .completed_record()
+            .is_none());
+        assert_eq!(repository.saves.lock().unwrap().len(), 1);
+
+        persist_completed_record(&app.games, &store, &game_id)
+            .await
+            .unwrap();
+        assert_eq!(repository.saves.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn guest_only_completed_record_is_not_sent_to_the_repository() {
+        let (app, game_id) = test_app_with_game();
+        {
+            let mut game = app.games.get_mut(&game_id).unwrap();
+            game.record.ownership = GameRecordOwnership::default();
+            game.end_with_loss("black", GameEndReason::Resignation);
+        }
+        let repository = std::sync::Arc::new(FailOnceGameRecordRepository {
+            fail_next: std::sync::atomic::AtomicBool::new(true),
+            saves: std::sync::Mutex::new(Vec::new()),
+        });
+        let store: game_record::GameRecordStore = repository.clone();
+        persist_completed_record(&app.games, &store, &game_id)
+            .await
+            .unwrap();
+        assert!(app
+            .games
+            .get(&game_id)
+            .unwrap()
+            .completed_record()
+            .is_none());
+        assert!(repository.saves.lock().unwrap().is_empty());
+        assert!(repository
+            .fail_next
+            .load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[tokio::test]
