@@ -3500,8 +3500,7 @@ mod tests {
             ],
         };
         let state = build_lab_game_state(&req, &[]).unwrap();
-        let mut stored = StoredGame::new(state, TimeControlId::Unlimited, false, 1);
-        let clock = stored.clock.snapshot(1, true);
+        let mut stored = StoredGame::new(state, TimeControlId::FiveThree, false, 1);
 
         let bomber_move = generate_piece_legal_move_actions(&stored.state, &"bomber".into())
             .into_iter()
@@ -3513,13 +3512,18 @@ mod tests {
                 .unwrap();
         assert_eq!(after_move.current_player, "white");
         assert_eq!(after_move.turn_number, 1);
+        stored
+            .clock
+            .finish_turn("white", &after_move.current_player, 1_001, false);
+        let clock_after_move = stored.clock.snapshot(1_001, true);
+        assert_eq!(clock_after_move.white_remaining_ms, Some(299_000));
         stored.record.push_action(
             "white".into(),
             TurnAction::Move(bomber_move),
             0,
             None,
             None,
-            clock.clone(),
+            clock_after_move,
             &before_move,
             after_move.clone(),
         );
@@ -3538,13 +3542,20 @@ mod tests {
                 .unwrap();
         assert_eq!(after_landing.current_player, "black");
         assert_eq!(after_landing.turn_number, 2);
+        stored
+            .clock
+            .finish_turn("white", &after_landing.current_player, 2_001, false);
+        let clock_after_landing = stored.clock.snapshot(2_001, true);
+        // Two seconds were consumed across both canonical actions and the
+        // three-second increment was added exactly once: 300 - 2 + 3 = 301.
+        assert_eq!(clock_after_landing.white_remaining_ms, Some(301_000));
         stored.record.push_action(
             "white".into(),
             TurnAction::Ability(landing),
             0,
             None,
             None,
-            clock.clone(),
+            clock_after_landing.clone(),
             &before_landing,
             after_landing.clone(),
         );
@@ -3564,7 +3575,7 @@ mod tests {
             0,
             None,
             None,
-            clock,
+            clock_after_landing,
             &before_black,
             after_black,
         );

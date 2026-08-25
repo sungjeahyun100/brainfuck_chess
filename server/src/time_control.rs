@@ -166,6 +166,7 @@ impl ClockState {
     ) {
         let delta = self.active_delta(now_ms);
         let definition = self.time_control.definition();
+        let player_turn_completed = game_ended || moving_player != next_player;
         if definition.mode == TimeControlMode::Countdown {
             let remaining = if moving_player == "white" {
                 &mut self.white_remaining_ms
@@ -173,7 +174,10 @@ impl ClockState {
                 &mut self.black_remaining_ms
             };
             if let Some(value) = remaining {
-                *value = value.saturating_sub(delta).max(0) + definition.increment_ms;
+                *value = value.saturating_sub(delta).max(0);
+                if player_turn_completed {
+                    *value += definition.increment_ms;
+                }
             }
         } else if moving_player == "white" {
             self.white_elapsed_ms += delta;
@@ -530,6 +534,21 @@ mod tests {
             clock.finish_turn("white", "black", 100, false);
             assert_eq!(clock.snapshot(100, true).white_remaining_ms, Some(expected));
         }
+    }
+
+    #[test]
+    fn same_player_follow_up_action_debits_time_but_defers_increment_until_turn_switch() {
+        let mut clock = ClockState::new(TimeControlId::FiveThree, 0);
+
+        clock.finish_turn("white", "white", 2_000, false);
+        let pending_landing = clock.snapshot(2_000, true);
+        assert_eq!(pending_landing.white_remaining_ms, Some(298_000));
+        assert_eq!(pending_landing.active_color, "white");
+
+        clock.finish_turn("white", "black", 5_000, false);
+        let completed_turn = clock.snapshot(5_000, true);
+        assert_eq!(completed_turn.white_remaining_ms, Some(298_000));
+        assert_eq!(completed_turn.active_color, "black");
     }
 
     #[test]
