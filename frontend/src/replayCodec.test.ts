@@ -51,7 +51,7 @@ test('Replay Code rejects malformed action, square, deck and oversized delta arr
   const baseAction = {
     ply: 1, player_id: 'white', elapsed_ms: 10, clock,
     action: { type: 'ability', player_id: 'white', piece_id: 'p1', ability_id: 'fire', to: { file: 1, rank: 1 }, deployments: [] },
-    notation: { move_number: 1, side: 'white', actor: { piece_id: 'p1', piece_type_id: 'tank', piece_name: 'tank', from: { file: 1, rank: 0 }, layer: 'ground', state: {} }, kind: 'ability', ability_id: 'fire', ability_name: '포격', from: { file: 1, rank: 0 }, to: { file: 1, rank: 1 }, target: { file: 1, rank: 1 }, ability_events: [{ ability_id: 'fire', ability_name: '포격', target: { file: 1, rank: 1 } }] },
+    notation: { turn_number: 1, move_number: 1, side: 'white', actor: { piece_id: 'p1', piece_type_id: 'tank', piece_name: 'tank', from: { file: 1, rank: 0 }, layer: 'ground', state: {} }, kind: 'ability', ability_id: 'fire', ability_name: '포격', from: { file: 1, rank: 0 }, to: { file: 1, rank: 1 }, target: { file: 1, rank: 1 }, ability_events: [{ ability_id: 'fire', ability_name: '포격', target: { file: 1, rank: 1 } }] },
     state_delta: [],
   }
   async function rejected(mutator: (value: Record<string, unknown>) => void) {

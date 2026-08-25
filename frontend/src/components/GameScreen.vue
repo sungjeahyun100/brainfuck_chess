@@ -424,7 +424,7 @@ const liveNotation = computed(() => viewState.value.history.map((entry, index) =
   ply: index + 1,
   text: viewState.value.record_notation?.[index]
     ? formatNotation(viewState.value.record_notation[index])
-    : formatLiveAction(entry.action, viewState.value, index + 1),
+    : formatLiveAction(entry.action, viewState.value, entry.turn_number),
 })))
 const estimatedServerNowMs = computed(() => (
   viewState.value.clock.server_now_ms + Math.max(0, displayNowMs.value - clockReceivedAtMs.value)

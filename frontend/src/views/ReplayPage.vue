@@ -21,11 +21,11 @@
         </div></section>
         <section><h3>기보</h3><div class="notation-list">
           <button class="notation-row" :class="{ active: ply === 0 }" @click="go(0)">0. 시작 위치</button>
-          <div v-for="row in notationRows" :key="row.moveNumber" class="notation-full-move"><b>{{ row.moveNumber }}.</b>
-            <button v-for="entry in [row.white, row.black].filter(Boolean)" :key="entry!.ply" class="notation-row" :class="{ active: ply === entry!.ply }" @click="go(entry!.ply)">
-              <span>{{ formatNotation(entry!.notation) }}</span><small>{{ duration(entry!.elapsed_ms) }}</small>
+          <div v-for="row in notationRows" :key="row.moveNumber" class="notation-full-move"><b>{{ row.moveNumber }}.</b><div class="notation-entries">
+            <button v-for="entry in row.entries" :key="entry.ply" class="notation-row" :class="{ active: ply === entry.ply }" @click="go(entry.ply)">
+              <span>{{ formatNotation(entry.notation) }}</span><small>{{ duration(entry.elapsed_ms) }}</small>
             </button>
-          </div>
+          </div></div>
         </div></section>
         <section class="replay-controls">
           <button @click="go(0)">|◀</button><button @click="go(ply - 1)">◀</button>
@@ -83,7 +83,7 @@ onMounted(() => { window.addEventListener('keydown', keydown) }); onUnmounted(()
 .replay-player div { display: grid; }.replay-player small { color: #a8b1c2; }.replay-player b { font: 700 1.5rem ui-monospace, monospace; }
 .replay-sidebar { display: grid; gap: 14px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; padding: 14px; background: rgba(19,26,39,.94); border-radius: 10px; }
 .notation-list { display: grid; gap: 4px; margin-top: 8px; }.notation-row { display: flex; justify-content: space-between; text-align: left; padding: 8px; border: 0; border-radius: 6px; background: rgba(255,255,255,.05); color: inherit; }.notation-row.active { background: rgba(217,164,65,.25); outline: 1px solid #d9a441; }
-.notation-full-move { display: grid; grid-template-columns: 2rem 1fr 1fr; gap: 4px; align-items: start; }.notation-full-move > b { padding-top: 8px; }.deck-summary { display: grid; gap: 4px; margin-top: 8px; padding: 8px; background: rgba(255,255,255,.04); border-radius: 6px; }.deck-summary small { color: #a8b1c2; }
+.notation-full-move { display: grid; grid-template-columns: 2rem 1fr; gap: 4px; align-items: start; }.notation-full-move > b { padding-top: 8px; }.notation-entries { display: grid; gap: 4px; }.deck-summary { display: grid; gap: 4px; margin-top: 8px; padding: 8px; background: rgba(255,255,255,.04); border-radius: 6px; }.deck-summary small { color: #a8b1c2; }
 .replay-controls { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }.replay-controls strong { grid-column: 1/-1; text-align: center; }
 .game-info { display: grid; gap: 5px; color: #a8b1c2; }
 @media (max-width: 1000px) { .replay-layout { grid-template-columns: 1fr; }.replay-sidebar { position: static; max-height: none; } }

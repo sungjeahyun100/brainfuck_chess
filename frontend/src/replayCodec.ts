@@ -88,8 +88,8 @@ function validDelta(value: unknown): boolean {
   })
 }
 
-function validNotation(value: unknown, index: number, size: number): boolean {
-  if (!isRecord(value) || value.move_number !== Math.floor(index / 2) + 1 || !['white', 'black'].includes(String(value.side))) return false
+function validNotation(value: unknown, size: number): boolean {
+  if (!isRecord(value) || !Number.isInteger(value.turn_number) || (value.turn_number as number) < 1 || !Number.isInteger(value.move_number) || value.move_number !== Math.floor(((value.turn_number as number) + 1) / 2) || !['white', 'black'].includes(String(value.side))) return false
   if (!['move', 'move_with_ability', 'ability', 'drop'].includes(String(value.kind)) || !isRecord(value.actor)) return false
   if (!validText(value.actor.piece_id, 256) || !validText(value.actor.piece_type_id, 256) || !validText(value.actor.piece_name, 160)) return false
   if (value.from != null && !validSquare(value.from, size) || value.to != null && !validSquare(value.to, size) || value.target != null && !validSquare(value.target, size)) return false
@@ -99,7 +99,7 @@ function validNotation(value: unknown, index: number, size: number): boolean {
 
 function validAction(value: unknown, index: number, size: number): boolean {
   if (!isRecord(value) || value.ply !== index + 1 || !isRecord(value.action) || !validClock(value.clock)) return false
-  if (!['white', 'black'].includes(String(value.player_id)) || !Number.isFinite(value.elapsed_ms) || !validNotation(value.notation, index, size) || !validDelta(value.state_delta)) return false
+  if (!['white', 'black'].includes(String(value.player_id)) || !Number.isFinite(value.elapsed_ms) || !validNotation(value.notation, size) || !validDelta(value.state_delta)) return false
   const type = value.action.type
   if (!['move', 'drop', 'ability'].includes(String(type))) return false
   if (!validText(value.action.piece_id, 256) || value.action.player_id !== value.player_id || (value.notation as Record<string, unknown>).side !== value.player_id) return false
@@ -127,6 +127,10 @@ function parseRecord(value: unknown): GameRecord | null {
     if (!deck.pocket.every(entry => isRecord(entry) && validText(entry.piece_name, 160) && Number.isInteger(entry.count) && (entry.count as number) > 0 && (entry.count as number) <= MAX_REPLAY_PIECES)) return null
   }
   if (!Array.isArray(value.actions) || value.actions.length > MAX_REPLAY_ACTIONS || !value.actions.every((action, index) => validAction(action, index, size))) return null
+  const moveNumbers = (value.actions as Array<{ notation: { move_number: number } }>).map(action => action.notation.move_number)
+  if (moveNumbers.some((moveNumber, index) => index > 0 && (moveNumber < moveNumbers[index - 1] || moveNumber > moveNumbers[index - 1] + 1))) return null
+  const turnNumbers = (value.actions as Array<{ notation: { turn_number: number } }>).map(action => action.notation.turn_number)
+  if (turnNumbers.some((turnNumber, index) => index > 0 && (turnNumber < turnNumbers[index - 1] || turnNumber > turnNumbers[index - 1] + 1))) return null
   if (value.final_clock != null && !validClock(value.final_clock)) return null
   return value as unknown as GameRecord
 }

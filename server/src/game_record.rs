@@ -71,6 +71,7 @@ pub(crate) struct AbilityEventSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RecordedNotationAction {
+    pub(crate) turn_number: u32,
     pub(crate) move_number: u32,
     pub(crate) side: PlayerId,
     pub(crate) actor: ActorSnapshot,
@@ -205,7 +206,7 @@ impl GameRecord {
 
     pub(crate) fn push_action(
         &mut self,
-        player_id: PlayerId,
+        _player_id: PlayerId,
         action: TurnAction,
         elapsed_ms: i64,
         clock_before_ms: Option<i64>,
@@ -214,12 +215,8 @@ impl GameRecord {
         state_before: &GameState,
         state_after: GameState,
     ) {
-        let notation = build_notation(
-            self.actions.len() as u32 + 1,
-            &player_id,
-            &action,
-            state_before,
-        );
+        let player_id = action_player_id(&action).clone();
+        let notation = build_notation(&action, state_before);
         let state_delta = build_state_delta(state_before, &state_after);
         self.actions.push(RecordedAction {
             ply: self.actions.len() as u32 + 1,
@@ -317,6 +314,20 @@ fn actor_piece_id(action: &TurnAction) -> &PieceId {
     }
 }
 
+fn action_player_id(action: &TurnAction) -> &PlayerId {
+    match action {
+        TurnAction::Move(action) => &action.player_id,
+        TurnAction::Drop(action) => &action.player_id,
+        TurnAction::Ability(action) => &action.player_id,
+    }
+}
+
+/// Engine turn numbers advance after each completed player-turn. Forced
+/// follow-up actions keep the current engine turn number.
+fn full_move_number(engine_turn_number: u32) -> u32 {
+    engine_turn_number.saturating_add(1) / 2
+}
+
 fn ability_name(state: &GameState, piece: &Piece, ability_id: &str) -> String {
     state
         .piece_definitions
@@ -331,12 +342,7 @@ fn ability_name(state: &GameState, piece: &Piece, ability_id: &str) -> String {
         .unwrap_or_else(|| ability_id.to_string())
 }
 
-fn build_notation(
-    ply: u32,
-    side: &PlayerId,
-    action: &TurnAction,
-    state_before: &GameState,
-) -> RecordedNotationAction {
+fn build_notation(action: &TurnAction, state_before: &GameState) -> RecordedNotationAction {
     let piece = state_before.pieces.get(actor_piece_id(action));
     let actor = piece
         .map(|piece| ActorSnapshot {
@@ -419,8 +425,9 @@ fn build_notation(
         })
         .unwrap_or_default();
     RecordedNotationAction {
-        move_number: (ply + 1) / 2,
-        side: side.clone(),
+        turn_number: state_before.turn_number,
+        move_number: full_move_number(state_before.turn_number),
+        side: action_player_id(action).clone(),
         from: actor.from,
         actor,
         kind,

@@ -35,7 +35,8 @@ use brainfuck_chess_engine::{
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_ability_actions, generate_piece_legal_drop_actions,
-        generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
+        generate_piece_legal_move_actions, generate_piece_legal_move_actions_with_options,
+        MoveGenerationOptions,
     },
     pieces::default_pieces::all_default_definitions,
     rules::{
@@ -3462,6 +3463,160 @@ mod tests {
         assert!(stored.record.initial_state.history.is_empty());
         assert!(stored.record.decks.contains_key("white"));
         assert_eq!(stored.record.actions[0].clock.active_color, "black");
+    }
+
+    #[test]
+    fn forced_landing_records_two_white_actions_before_the_black_action() {
+        let req = LabPieceOptionsRequest {
+            board_size: 12,
+            selected_piece_id: "bomber".into(),
+            move_option_id: None,
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![
+                LabPieceSpec {
+                    id: "bomber".into(),
+                    piece_type: "bomber".into(),
+                    owner: "white".into(),
+                    square: Square::new(4, 10), // e11
+                    state: HashMap::from([("airborne".into(), PieceStateValue::Boolean(true))]),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: Some(2),
+                    layer: PieceLayer::Air,
+                    remaining_flight_turns: 1,
+                },
+                LabPieceSpec {
+                    id: "black-king".into(),
+                    piece_type: "king".into(),
+                    owner: "black".into(),
+                    square: Square::new(0, 11),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                },
+            ],
+        };
+        let state = build_lab_game_state(&req, &[]).unwrap();
+        let mut stored = StoredGame::new(state, TimeControlId::Unlimited, false, 1);
+        let clock = stored.clock.snapshot(1, true);
+
+        let bomber_move = generate_piece_legal_move_actions(&stored.state, &"bomber".into())
+            .into_iter()
+            .find(|action| action.to == Square::new(4, 3)) // e4
+            .unwrap();
+        let before_move = stored.state.clone();
+        let after_move =
+            submit_engine_action(before_move.clone(), TurnAction::Move(bomber_move.clone()))
+                .unwrap();
+        assert_eq!(after_move.current_player, "white");
+        assert_eq!(after_move.turn_number, 1);
+        stored.record.push_action(
+            "white".into(),
+            TurnAction::Move(bomber_move),
+            0,
+            None,
+            None,
+            clock.clone(),
+            &before_move,
+            after_move.clone(),
+        );
+        stored.state = after_move;
+
+        // The engine's forced-landing runway is four squares, so e4 -> i4 is
+        // the legal equivalent of the notation grouping regression scenario.
+        let landing =
+            generate_piece_legal_ability_actions(&stored.state, &"bomber".into(), "forced-landing")
+                .into_iter()
+                .find(|action| action.to == Some(Square::new(8, 3))) // i4
+                .unwrap();
+        let before_landing = stored.state.clone();
+        let after_landing =
+            submit_engine_action(before_landing.clone(), TurnAction::Ability(landing.clone()))
+                .unwrap();
+        assert_eq!(after_landing.current_player, "black");
+        assert_eq!(after_landing.turn_number, 2);
+        stored.record.push_action(
+            "white".into(),
+            TurnAction::Ability(landing),
+            0,
+            None,
+            None,
+            clock.clone(),
+            &before_landing,
+            after_landing.clone(),
+        );
+        stored.state = after_landing;
+
+        let black_move = generate_piece_legal_move_actions(&stored.state, &"black-king".into())
+            .into_iter()
+            .next()
+            .unwrap();
+        let before_black = stored.state.clone();
+        let after_black =
+            submit_engine_action(before_black.clone(), TurnAction::Move(black_move.clone()))
+                .unwrap();
+        stored.record.push_action(
+            "black".into(),
+            TurnAction::Move(black_move),
+            0,
+            None,
+            None,
+            clock,
+            &before_black,
+            after_black,
+        );
+
+        assert_eq!(stored.record.actions.len(), 3);
+        assert_eq!(
+            stored
+                .record
+                .actions
+                .iter()
+                .map(|entry| entry.notation.side.as_str())
+                .collect::<Vec<_>>(),
+            vec!["white", "white", "black"]
+        );
+        assert_eq!(
+            stored
+                .record
+                .actions
+                .iter()
+                .map(|entry| entry.notation.turn_number)
+                .collect::<Vec<_>>(),
+            vec![1, 1, 2]
+        );
+        assert_eq!(
+            stored
+                .record
+                .actions
+                .iter()
+                .map(|entry| entry.notation.move_number)
+                .collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
+        assert_eq!(
+            stored.record.actions[0].notation.from,
+            Some(Square::new(4, 10))
+        );
+        assert_eq!(
+            stored.record.actions[0].notation.to,
+            Some(Square::new(4, 3))
+        );
+        assert_eq!(
+            stored.record.actions[1].notation.from,
+            Some(Square::new(4, 3))
+        );
+        assert_eq!(
+            stored.record.actions[1].notation.to,
+            Some(Square::new(8, 3))
+        );
+        assert_eq!(
+            stored.record.actions[1].notation.ability_name.as_deref(),
+            Some("강제 착륙")
+        );
     }
 
     #[tokio::test]

@@ -15,24 +15,30 @@ export function formatNotation(notation: RecordedNotationAction): string {
   return `${name} - ${squareName(notation.from)} - ${squareName(notation.to)}`
 }
 
-export function groupNotation<T extends { notation: RecordedNotationAction }>(actions: T[]): Array<{ moveNumber: number; white?: T; black?: T }> {
-  const rows = new Map<number, { moveNumber: number; white?: T; black?: T }>()
+export interface NotationGroup<T> { moveNumber: number; entries: T[] }
+
+export function groupNotation<T extends { notation: RecordedNotationAction }>(actions: T[]): NotationGroup<T>[] {
+  const rows = new Map<number, NotationGroup<T>>()
   for (const entry of actions) {
-    const row = rows.get(entry.notation.move_number) ?? { moveNumber: entry.notation.move_number }
-    row[entry.notation.side] = entry
+    const row = rows.get(entry.notation.move_number) ?? { moveNumber: entry.notation.move_number, entries: [] }
+    row.entries.push(entry)
     rows.set(row.moveNumber, row)
   }
-  return [...rows.values()].sort((left, right) => left.moveNumber - right.moveNumber)
+  return [...rows.values()]
 }
 
-export function formatLiveAction(action: TurnAction, state: GameState, ply: number): string {
+export function fullMoveNumber(engineTurnNumber: number): number {
+  return Math.floor((engineTurnNumber + 1) / 2)
+}
+
+export function formatLiveAction(action: TurnAction, state: GameState, engineTurnNumber: number): string {
   const piece = state.pieces[action.piece_id]
   const definition = piece ? state.piece_definitions[piece.type_id] : undefined
   const moveOption = action.type === 'move' ? definition?.move_options.find(option => option.id === action.move_option_id) : undefined
   const abilityId = action.type === 'ability' ? action.ability_id : action.type === 'move' && moveOption?.kind === 'ability' ? action.move_option_id : undefined
   const abilityName = abilityId ? definition?.move_options.find(option => option.id === abilityId)?.name ?? abilityId : undefined
   return formatNotation({
-    move_number: Math.floor((ply + 1) / 2), side: action.player_id,
+    turn_number: engineTurnNumber, move_number: fullMoveNumber(engineTurnNumber), side: action.player_id,
     actor: { piece_id: action.piece_id, piece_type_id: piece?.type_id ?? 'unknown', piece_name: definition?.name ?? piece?.type_id ?? 'unknown', from: action.type === 'move' ? action.from : piece?.current_square, layer: piece?.layer ?? 'ground', current_ammo: piece?.current_ammo, state: piece?.state ?? {} },
     kind: action.type === 'drop' ? 'drop' : action.type === 'ability' ? 'ability' : abilityId ? 'move_with_ability' : 'move',
     ability_id: abilityId, ability_name: abilityName, from: action.type === 'move' ? action.from : piece?.current_square,

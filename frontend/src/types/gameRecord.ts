@@ -6,7 +6,7 @@ export type NotationActionKind = 'move' | 'move_with_ability' | 'ability' | 'dro
 export interface ActorSnapshot { piece_id: string; piece_type_id: string; piece_name: string; from?: Square | null; layer: 'ground' | 'air'; current_ammo?: number | null; state: Record<string, PieceStateValue> }
 export interface AbilityEventSnapshot { ability_id: string; ability_name: string; target?: Square | null }
 export interface RecordedNotationAction {
-  move_number: number; side: PlayerId; actor: ActorSnapshot; kind: NotationActionKind
+  turn_number: number; move_number: number; side: PlayerId; actor: ActorSnapshot; kind: NotationActionKind
   ability_id?: string | null; ability_name?: string | null; from?: Square | null; to?: Square | null; target?: Square | null
   ability_events: AbilityEventSnapshot[]
 }
