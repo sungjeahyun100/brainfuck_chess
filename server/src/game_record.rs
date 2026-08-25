@@ -350,6 +350,8 @@ impl GameRecordRepository for PostgresGameRecordRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use brainfuck_chess_engine::types::{Board, ChessemblyProgramCache, GamePhase};
+    use uuid::Uuid;
 
     #[test]
     fn display_name_is_white_black_timestamp_and_sanitized() {
@@ -357,5 +359,132 @@ mod tests {
             replay_display_name("playerA", "bad/id", 1_777_209_120_000),
             "playerA-bad_id-2026-04-26-1312"
         );
+    }
+
+    fn postgres_test_record(
+        game_id: String,
+        white_user_id: String,
+        black_user_id: String,
+    ) -> GameRecord {
+        let state = GameState {
+            id: game_id,
+            board: Board {
+                size: 8,
+                squares: HashMap::new(),
+                air_squares: HashMap::new(),
+                terrain: HashMap::new(),
+            },
+            pieces: HashMap::new(),
+            piece_definitions: HashMap::new(),
+            custom_piece_manifest: Vec::new(),
+            players: HashMap::new(),
+            current_player: "white".into(),
+            turn_number: 1,
+            phase: GamePhase::Playing,
+            en_passant_target: None,
+            en_passant_available_to: None,
+            global_state: HashMap::new(),
+            history: Vec::new(),
+            result: None,
+            chessembly_program_cache: ChessemblyProgramCache::default(),
+        };
+        let clock = ClockSnapshot {
+            time_control: TimeControlId::Unlimited,
+            mode: crate::time_control::TimeControlMode::Unlimited,
+            initial_time_ms: None,
+            increment_ms: 0,
+            active_color: "white".into(),
+            turn_started_at_ms: Some(1),
+            server_now_ms: 1,
+            white_remaining_ms: None,
+            black_remaining_ms: None,
+            white_elapsed_ms: 0,
+            black_elapsed_ms: 0,
+        };
+        GameRecord::new(
+            state,
+            HashMap::from([
+                (
+                    "white".into(),
+                    GameRecordPlayer {
+                        public_id: "white-public".into(),
+                        nickname: "White".into(),
+                        side: "white".into(),
+                    },
+                ),
+                (
+                    "black".into(),
+                    GameRecordPlayer {
+                        public_id: "black-public".into(),
+                        nickname: "Black".into(),
+                        side: "black".into(),
+                    },
+                ),
+            ]),
+            TimeControlId::Unlimited,
+            1,
+            clock,
+            GameRecordOwnership {
+                white_user_id: Some(white_user_id),
+                black_user_id: Some(black_user_id),
+            },
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_GAME_RECORD_DATABASE_URL for a disposable migrated PostgreSQL database"]
+    async fn postgres_repository_inserts_upserts_gets_and_lists_by_internal_user() {
+        let database_url = std::env::var("TEST_GAME_RECORD_DATABASE_URL")
+            .expect("TEST_GAME_RECORD_DATABASE_URL is required");
+        let pool = PgPool::connect(&database_url).await.unwrap();
+        let suffix = Uuid::new_v4().to_string();
+        let white_user_id = format!("record-white-{suffix}");
+        let black_user_id = format!("record-black-{suffix}");
+        for user_id in [&white_user_id, &black_user_id] {
+            sqlx::query("INSERT INTO shared.users (id, account_kind, status, created_at, updated_at) VALUES ($1, 'registered', 'active', 1, 1)")
+                .bind(user_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        for schema in [DataSchema::Prod, DataSchema::Test] {
+            let game_id = format!("record-{}-{suffix}", schema.name());
+            let repository = PostgresGameRecordRepository::new(pool.clone(), schema);
+            let mut record = postgres_test_record(
+                game_id.clone(),
+                white_user_id.clone(),
+                black_user_id.clone(),
+            );
+            repository.save(&record).await.unwrap();
+            record.ended_at_ms = Some(2);
+            repository.save(&record).await.unwrap();
+
+            let loaded = repository.get(&game_id).await.unwrap().unwrap();
+            assert_eq!(loaded.ended_at_ms, Some(2));
+            assert_eq!(
+                loaded.ownership.white_user_id.as_deref(),
+                Some(white_user_id.as_str())
+            );
+            let listed = repository
+                .list_for_user_id(&black_user_id, 50)
+                .await
+                .unwrap();
+            assert!(listed.iter().any(|item| item.game_id == game_id));
+
+            sqlx::query(&format!(
+                "DELETE FROM {}.game_records WHERE id = $1",
+                schema.name()
+            ))
+            .bind(&game_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query("DELETE FROM shared.users WHERE id = ANY($1)")
+            .bind(vec![white_user_id, black_user_id])
+            .execute(&pool)
+            .await
+            .unwrap();
     }
 }

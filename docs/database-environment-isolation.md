@@ -193,14 +193,30 @@ shared insert/update가 필요한 이유다. rating/achievement 같은 향후 �
 
 1. backup과 preflight를 확인한 뒤
    `server/db/shared/20260826000000_profile_visibility.sql`을 적용한다.
-2. production에는 `server/db/prod/20260826001000_game_record_ownership.sql`,
-   test에는 `server/db/test/20260826001000_game_record_ownership.sql`만 각각 적용한다.
-3. 새 application revision은 shared visibility column과 현재 환경의 ownership
+2. production release는 `server/db/prod/20260826000500_create_game_records.sql`을
+   적용한 뒤 `server/db/prod/20260826001000_game_record_ownership.sql`을 적용한다.
+3. test release는 production 파일 대신
+   `server/db/test/20260826000500_create_game_records.sql`과
+   `server/db/test/20260826001000_game_record_ownership.sql`만 순서대로 적용한다.
+4. `server/db/admin/verify_environment_isolation.sql`로 양쪽 runtime role의
+   GameRecord INSERT/UPSERT/SELECT와 반대 schema 차단을 확인한다.
+5. 새 application revision은 shared visibility column과 현재 환경의 ownership
    column을 startup contract로 확인하므로, 모든 해당 migration 완료 후 배포한다.
 
 소유권 column은 현재 public ID와 유일하게 매칭되는 기존 기록만
 backfill한다. 게스트나 매칭할 수 없는 이전 기록은 nullable로 남고,
 제3자에게는 fail-closed로 공개되지 않는다.
+
+신규 환경에서 `00500` migration은 ownership column, nullable FK와 user ID
+조회 index를 최초 생성에 포함한다. 기존 환경에서는 먼저 table의
+기본 column/PK 계약을 검증하고, 예상과 다른 partial schema는 덩어쓰지
+않고 transaction을 실패시킨다. `01000` migration은 기존 row의 ownership만
+보수적으로 backfill하며 DROP, TRUNCATE, 환경 간 복사를 하지 않는다.
+
+`server/migrations/20260824000000_game_records.sql`은 pre-isolation SQLx history를
+위해 checksum을 변경하지 않고 보존한다. application과 deployment는 이
+디렉터리를 실행하지 않으며, 현재 release에서는 반드시 schema별
+`server/db/prod` 또는 `server/db/test` migration을 사용한다.
 
 애플리케이션 startup의 `sqlx::migrate!`는 제거했다. `cloudbuild.yaml`에도 DB
 migration step이 없다. 따라서 test deployment만으로 `shared`나 `prod`가
