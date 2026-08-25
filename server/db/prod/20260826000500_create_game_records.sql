@@ -36,14 +36,18 @@ CREATE TABLE IF NOT EXISTS prod.game_records (
     id TEXT PRIMARY KEY,
     white_public_id TEXT,
     black_public_id TEXT,
-    white_user_id TEXT REFERENCES shared.users(id) ON DELETE RESTRICT,
-    black_user_id TEXT REFERENCES shared.users(id) ON DELETE RESTRICT,
+    white_user_id TEXT,
+    black_user_id TEXT,
     started_at_ms BIGINT NOT NULL,
     ended_at_ms BIGINT,
     result_reason TEXT,
     display_name TEXT NOT NULL,
     record_version INTEGER NOT NULL,
-    record JSONB NOT NULL
+    record JSONB NOT NULL,
+    CONSTRAINT game_records_white_user_fk
+        FOREIGN KEY (white_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT,
+    CONSTRAINT game_records_black_user_fk
+        FOREIGN KEY (black_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT
 );
 
 -- Existing tables must match the legacy record contract before ownership is added.
@@ -87,10 +91,24 @@ ALTER TABLE prod.game_records
 
 DO $ownership_constraints$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'prod.game_records'::regclass AND conname = 'game_records_white_user_fk') THEN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'prod.game_records'::regclass
+          AND contype = 'f'
+          AND confrelid = 'shared.users'::regclass
+          AND confdeltype = 'r'
+          AND pg_get_constraintdef(oid) LIKE 'FOREIGN KEY (white_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT%'
+    ) THEN
         ALTER TABLE prod.game_records ADD CONSTRAINT game_records_white_user_fk FOREIGN KEY (white_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'prod.game_records'::regclass AND conname = 'game_records_black_user_fk') THEN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'prod.game_records'::regclass
+          AND contype = 'f'
+          AND confrelid = 'shared.users'::regclass
+          AND confdeltype = 'r'
+          AND pg_get_constraintdef(oid) LIKE 'FOREIGN KEY (black_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT%'
+    ) THEN
         ALTER TABLE prod.game_records ADD CONSTRAINT game_records_black_user_fk FOREIGN KEY (black_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT;
     END IF;
 END
@@ -117,10 +135,12 @@ BEGIN
         )
     ) OR NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conrelid = 'prod.game_records'::regclass
-          AND conname = 'game_records_white_user_fk' AND contype = 'f' AND confrelid = 'shared.users'::regclass AND confdeltype = 'r'
+          AND contype = 'f' AND confrelid = 'shared.users'::regclass AND confdeltype = 'r'
+          AND pg_get_constraintdef(oid) LIKE 'FOREIGN KEY (white_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT%'
     ) OR NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conrelid = 'prod.game_records'::regclass
-          AND conname = 'game_records_black_user_fk' AND contype = 'f' AND confrelid = 'shared.users'::regclass AND confdeltype = 'r'
+          AND contype = 'f' AND confrelid = 'shared.users'::regclass AND confdeltype = 'r'
+          AND pg_get_constraintdef(oid) LIKE 'FOREIGN KEY (black_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT%'
     ) OR NOT EXISTS (
         SELECT 1 FROM pg_indexes WHERE schemaname = 'prod' AND tablename = 'game_records'
           AND indexname = 'game_records_white_user_started' AND indexdef LIKE '%(white_user_id, started_at_ms DESC)%'

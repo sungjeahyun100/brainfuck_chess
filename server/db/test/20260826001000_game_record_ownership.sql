@@ -34,10 +34,24 @@ WHERE records.black_user_id IS NULL
 
 DO $constraints$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'test.game_records'::regclass AND conname = 'game_records_white_user_fk') THEN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'test.game_records'::regclass
+          AND contype = 'f'
+          AND confrelid = 'shared.users'::regclass
+          AND confdeltype = 'r'
+          AND pg_get_constraintdef(oid) LIKE 'FOREIGN KEY (white_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT%'
+    ) THEN
         ALTER TABLE test.game_records ADD CONSTRAINT game_records_white_user_fk FOREIGN KEY (white_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'test.game_records'::regclass AND conname = 'game_records_black_user_fk') THEN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'test.game_records'::regclass
+          AND contype = 'f'
+          AND confrelid = 'shared.users'::regclass
+          AND confdeltype = 'r'
+          AND pg_get_constraintdef(oid) LIKE 'FOREIGN KEY (black_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT%'
+    ) THEN
         ALTER TABLE test.game_records ADD CONSTRAINT game_records_black_user_fk FOREIGN KEY (black_user_id) REFERENCES shared.users(id) ON DELETE RESTRICT;
     END IF;
 END
