@@ -17,27 +17,49 @@ pub(crate) const CHESSEMBLY_VERSION: &str = "chessembly-1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GameRecordPlayer {
-    pub(crate) public_id: String,
+    pub(crate) public_id: Option<String>,
     pub(crate) nickname: String,
     pub(crate) side: PlayerId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CustomDeckPieceSnapshot {
+    pub(crate) custom_piece_id: String,
+    pub(crate) version: u32,
+    pub(crate) content_hash: String,
+    pub(crate) exposed_piece_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DeckDeploymentSnapshot {
+    #[serde(default)]
+    pub(crate) piece_type_id: String,
     pub(crate) piece_name: String,
+    #[serde(default)]
+    pub(crate) custom_piece: Option<CustomDeckPieceSnapshot>,
     pub(crate) square: Square,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DeckPocketSnapshot {
+    #[serde(default)]
+    pub(crate) piece_type_id: String,
     pub(crate) piece_name: String,
+    #[serde(default)]
+    pub(crate) custom_piece: Option<CustomDeckPieceSnapshot>,
     pub(crate) count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DeckSnapshot {
+    #[serde(default)]
+    pub(crate) snapshot_version: u32,
     pub(crate) side: PlayerId,
     pub(crate) deck_name: String,
+    #[serde(default)]
+    pub(crate) map_id: String,
+    #[serde(default)]
+    pub(crate) board_size: i32,
     pub(crate) deployments: Vec<DeckDeploymentSnapshot>,
     pub(crate) pocket: Vec<DeckPocketSnapshot>,
 }
@@ -108,6 +130,7 @@ pub(crate) struct RecordedAction {
 pub(crate) struct GameRecordOwnership {
     pub(crate) white_user_id: Option<String>,
     pub(crate) black_user_id: Option<String>,
+    pub(crate) persist: bool,
 }
 
 impl GameRecordOwnership {
@@ -121,6 +144,42 @@ impl GameRecordOwnership {
             self.white_user_id.as_deref()?,
             self.black_user_id.as_deref()?,
         ))
+    }
+
+    pub(crate) fn has_registered_owner(&self) -> bool {
+        self.persist
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GameRecordSummary {
+    pub(crate) game_id: String,
+    pub(crate) display_name: String,
+    pub(crate) started_at_ms: i64,
+    pub(crate) ended_at_ms: Option<i64>,
+    pub(crate) result: Option<GameResult>,
+    pub(crate) players: HashMap<PlayerId, GameRecordPlayer>,
+    pub(crate) time_control: TimeControlId,
+    pub(crate) owner_side: PlayerId,
+}
+
+impl GameRecordSummary {
+    fn from_record(record: &GameRecord, user_id: &str) -> Self {
+        let owner_side = if record.ownership.black_user_id.as_deref() == Some(user_id) {
+            "black"
+        } else {
+            "white"
+        };
+        Self {
+            game_id: record.game_id.clone(),
+            display_name: record.display_name.clone(),
+            started_at_ms: record.started_at_ms,
+            ended_at_ms: record.ended_at_ms,
+            result: record.result.clone(),
+            players: record.players.clone(),
+            time_control: record.time_control,
+            owner_side: owner_side.into(),
+        }
     }
 }
 
@@ -154,6 +213,7 @@ impl GameRecord {
         initial_clock: ClockSnapshot,
         ownership: GameRecordOwnership,
     ) -> Self {
+        let map_id = format!("standard-{}x{}", initial_state.board.size, initial_state.board.size);
         Self::new_with_deck_names(
             initial_state,
             players,
@@ -162,6 +222,7 @@ impl GameRecord {
             initial_clock,
             ownership,
             HashMap::new(),
+            map_id,
         )
     }
 
@@ -173,17 +234,14 @@ impl GameRecord {
         initial_clock: ClockSnapshot,
         ownership: GameRecordOwnership,
         deck_names: HashMap<PlayerId, String>,
+        map_id: String,
     ) -> Self {
         initial_state.history.clear();
-        let decks = build_deck_snapshots(&initial_state, &deck_names);
-        let white = players
-            .get("white")
-            .map(|p| p.public_id.as_str())
-            .unwrap_or("white");
-        let black = players
-            .get("black")
-            .map(|p| p.public_id.as_str())
-            .unwrap_or("black");
+        let decks = build_deck_snapshots(&initial_state, &deck_names, &map_id);
+        let white = players.get("white").and_then(|p| p.public_id.as_deref())
+            .or_else(|| players.get("white").map(|p| p.nickname.as_str())).unwrap_or("white");
+        let black = players.get("black").and_then(|p| p.public_id.as_deref())
+            .or_else(|| players.get("black").map(|p| p.nickname.as_str())).unwrap_or("black");
         Self {
             ownership,
             format_version: GAME_RECORD_FORMAT_VERSION,
@@ -249,9 +307,22 @@ fn piece_name(state: &GameState, piece: &Piece) -> String {
         .unwrap_or_else(|| piece.type_id.clone())
 }
 
+fn custom_piece_snapshot(state: &GameState, piece_type_id: &str) -> Option<CustomDeckPieceSnapshot> {
+    let rest = piece_type_id.strip_prefix("custom:")?;
+    let (custom_piece_id, version_and_key) = rest.rsplit_once(":v")?;
+    let (version, exposed_piece_key) = version_and_key.split_once(':')?;
+    let version = version.parse().ok()?;
+    let manifest = state.custom_piece_manifest.iter().find(|entry| entry.exposed_type_id == piece_type_id)?;
+    Some(CustomDeckPieceSnapshot {
+        custom_piece_id: custom_piece_id.into(), version,
+        content_hash: manifest.content_hash.clone(), exposed_piece_key: exposed_piece_key.into(),
+    })
+}
+
 fn build_deck_snapshots(
     state: &GameState,
     deck_names: &HashMap<PlayerId, String>,
+    map_id: &str,
 ) -> HashMap<PlayerId, DeckSnapshot> {
     state
         .players
@@ -264,7 +335,9 @@ fn build_deck_snapshots(
                 .filter_map(|id| state.pieces.get(id))
                 .filter_map(|piece| {
                     Some(DeckDeploymentSnapshot {
+                        piece_type_id: piece.type_id.clone(),
                         piece_name: piece_name(state, piece),
+                        custom_piece: custom_piece_snapshot(state, &piece.type_id),
                         square: piece.current_square?,
                     })
                 })
@@ -277,15 +350,17 @@ fn build_deck_snapshots(
                 )
             });
 
-            let mut counts = HashMap::<String, u32>::new();
+            let mut counts = HashMap::<(String, String), u32>::new();
             for id in &player.deck.pocket_pieces {
                 if let Some(piece) = state.pieces.get(id) {
-                    *counts.entry(piece_name(state, piece)).or_default() += 1;
+                    *counts.entry((piece.type_id.clone(), piece_name(state, piece))).or_default() += 1;
                 }
             }
             let mut pocket = counts
                 .into_iter()
-                .map(|(piece_name, count)| DeckPocketSnapshot { piece_name, count })
+                .map(|((piece_type_id, piece_name), count)| DeckPocketSnapshot {
+                    custom_piece: custom_piece_snapshot(state, &piece_type_id), piece_type_id, piece_name, count
+                })
                 .collect::<Vec<_>>();
             pocket.sort_by(|left, right| left.piece_name.cmp(&right.piece_name));
             let deck_name = deck_names
@@ -296,8 +371,11 @@ fn build_deck_snapshots(
             (
                 side.clone(),
                 DeckSnapshot {
+                    snapshot_version: 1,
                     side: side.clone(),
                     deck_name,
+                    map_id: map_id.into(),
+                    board_size: state.board.size,
                     deployments,
                     pocket,
                 },
@@ -553,11 +631,11 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 pub(crate) trait GameRecordRepository: Send + Sync {
     async fn save(&self, record: &GameRecord) -> Result<(), &'static str>;
     async fn get(&self, game_id: &str) -> Result<Option<GameRecord>, &'static str>;
-    async fn list_for_user_id(
+    async fn list_summaries_for_user_id(
         &self,
         user_id: &str,
         limit: i64,
-    ) -> Result<Vec<GameRecord>, &'static str>;
+    ) -> Result<Vec<GameRecordSummary>, &'static str>;
 }
 
 pub(crate) type GameRecordStore = Arc<dyn GameRecordRepository>;
@@ -582,18 +660,18 @@ impl GameRecordRepository for InMemoryGameRecordRepository {
             .get(game_id)
             .cloned())
     }
-    async fn list_for_user_id(
+    async fn list_summaries_for_user_id(
         &self,
         user_id: &str,
         limit: i64,
-    ) -> Result<Vec<GameRecord>, &'static str> {
+    ) -> Result<Vec<GameRecordSummary>, &'static str> {
         let mut records = self
             .0
             .read()
             .map_err(|_| "unavailable")?
             .values()
             .filter(|record| record.ownership.contains(user_id))
-            .cloned()
+            .map(|record| GameRecordSummary::from_record(record, user_id))
             .collect::<Vec<_>>();
         records.sort_by_key(|record| std::cmp::Reverse(record.started_at_ms));
         records.truncate(limit.max(0) as usize);
@@ -621,8 +699,8 @@ impl GameRecordRepository for PostgresGameRecordRepository {
         let value = serde_json::to_value(record).map_err(|_| "unavailable")?;
         sqlx::query(&format!("INSERT INTO {} AS target (id, white_public_id, black_public_id, white_user_id, black_user_id, started_at_ms, ended_at_ms, result_reason, display_name, record_version, record) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO UPDATE SET white_user_id=COALESCE(EXCLUDED.white_user_id, target.white_user_id), black_user_id=COALESCE(EXCLUDED.black_user_id, target.black_user_id), ended_at_ms=EXCLUDED.ended_at_ms, result_reason=EXCLUDED.result_reason, record=EXCLUDED.record", self.table))
             .bind(&record.game_id)
-            .bind(record.players.get("white").map(|p| p.public_id.as_str()))
-            .bind(record.players.get("black").map(|p| p.public_id.as_str()))
+            .bind(record.players.get("white").and_then(|p| p.public_id.as_deref()))
+            .bind(record.players.get("black").and_then(|p| p.public_id.as_deref()))
             .bind(record.ownership.white_user_id.as_deref())
             .bind(record.ownership.black_user_id.as_deref())
             .bind(record.started_at_ms)
@@ -650,26 +728,29 @@ impl GameRecordRepository for PostgresGameRecordRepository {
         record.ownership = GameRecordOwnership {
             white_user_id: row.try_get("white_user_id").map_err(|_| "unavailable")?,
             black_user_id: row.try_get("black_user_id").map_err(|_| "unavailable")?,
+            persist: true,
         };
         Ok(Some(record))
     }
-    async fn list_for_user_id(
+    async fn list_summaries_for_user_id(
         &self,
         user_id: &str,
         limit: i64,
-    ) -> Result<Vec<GameRecord>, &'static str> {
-        let rows = sqlx::query(&format!("SELECT record, white_user_id, black_user_id FROM {} WHERE white_user_id=$1 OR black_user_id=$1 ORDER BY started_at_ms DESC LIMIT $2", self.table))
+    ) -> Result<Vec<GameRecordSummary>, &'static str> {
+        let rows = sqlx::query(&format!("SELECT id, display_name, started_at_ms, ended_at_ms, record->'result' AS result, record->'players' AS players, record->'time_control' AS time_control, CASE WHEN black_user_id=$1 THEN 'black' ELSE 'white' END AS owner_side FROM {} WHERE white_user_id=$1 OR black_user_id=$1 ORDER BY started_at_ms DESC LIMIT $2", self.table))
             .bind(user_id).bind(limit.clamp(1, 100)).fetch_all(&self.pool).await.map_err(|_| "unavailable")?;
         rows.into_iter()
             .map(|row| {
-                let mut record: GameRecord =
-                    serde_json::from_value(row.try_get("record").map_err(|_| "unavailable")?)
-                        .map_err(|_| "unavailable")?;
-                record.ownership = GameRecordOwnership {
-                    white_user_id: row.try_get("white_user_id").map_err(|_| "unavailable")?,
-                    black_user_id: row.try_get("black_user_id").map_err(|_| "unavailable")?,
-                };
-                Ok(record)
+                Ok(GameRecordSummary {
+                    game_id: row.try_get("id").map_err(|_| "unavailable")?,
+                    display_name: row.try_get("display_name").map_err(|_| "unavailable")?,
+                    started_at_ms: row.try_get("started_at_ms").map_err(|_| "unavailable")?,
+                    ended_at_ms: row.try_get("ended_at_ms").map_err(|_| "unavailable")?,
+                    result: serde_json::from_value(row.try_get("result").map_err(|_| "unavailable")?).map_err(|_| "unavailable")?,
+                    players: serde_json::from_value(row.try_get("players").map_err(|_| "unavailable")?).map_err(|_| "unavailable")?,
+                    time_control: serde_json::from_value(row.try_get("time_control").map_err(|_| "unavailable")?).map_err(|_| "unavailable")?,
+                    owner_side: row.try_get("owner_side").map_err(|_| "unavailable")?,
+                })
             })
             .collect()
     }
@@ -735,7 +816,7 @@ mod tests {
                 (
                     "white".into(),
                     GameRecordPlayer {
-                        public_id: "white-public".into(),
+                        public_id: Some("white-public".into()),
                         nickname: "White".into(),
                         side: "white".into(),
                     },
@@ -743,7 +824,7 @@ mod tests {
                 (
                     "black".into(),
                     GameRecordPlayer {
-                        public_id: "black-public".into(),
+                        public_id: Some("black-public".into()),
                         nickname: "Black".into(),
                         side: "black".into(),
                     },
@@ -755,6 +836,7 @@ mod tests {
             GameRecordOwnership {
                 white_user_id: Some(white_user_id),
                 black_user_id: Some(black_user_id),
+                persist: true,
             },
         )
     }
@@ -795,7 +877,7 @@ mod tests {
                 Some(white_user_id.as_str())
             );
             let listed = repository
-                .list_for_user_id(&black_user_id, 50)
+                .list_summaries_for_user_id(&black_user_id, 50)
                 .await
                 .unwrap();
             assert!(listed.iter().any(|item| item.game_id == game_id));

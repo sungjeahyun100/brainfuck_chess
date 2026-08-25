@@ -284,6 +284,7 @@ impl StoredGame {
         players: HashMap<PlayerId, GameRecordPlayer>,
         ownership: GameRecordOwnership,
     ) -> Self {
+        let map_id = format!("standard-{}x{}", state.board.size, state.board.size);
         Self::new_with_players_and_deck_names(
             state,
             time_control,
@@ -292,6 +293,7 @@ impl StoredGame {
             players,
             ownership,
             HashMap::new(),
+            map_id,
         )
     }
 
@@ -303,6 +305,7 @@ impl StoredGame {
         players: HashMap<PlayerId, GameRecordPlayer>,
         ownership: GameRecordOwnership,
         deck_names: HashMap<PlayerId, String>,
+        map_id: String,
     ) -> Self {
         let presence = multiplayer.then(|| PresenceState {
             last_seen_ms: HashMap::from([("white".into(), now_ms), ("black".into(), now_ms)]),
@@ -316,6 +319,7 @@ impl StoredGame {
             clock.snapshot(now_ms, true),
             ownership,
             deck_names,
+            map_id,
         );
         Self {
             state,
@@ -398,7 +402,7 @@ fn default_record_players() -> HashMap<PlayerId, GameRecordPlayer> {
         (
             "white".into(),
             GameRecordPlayer {
-                public_id: "white".into(),
+                public_id: Some("white".into()),
                 nickname: "White".into(),
                 side: "white".into(),
             },
@@ -406,7 +410,7 @@ fn default_record_players() -> HashMap<PlayerId, GameRecordPlayer> {
         (
             "black".into(),
             GameRecordPlayer {
-                public_id: "black".into(),
+                public_id: Some("black".into()),
                 nickname: "Black".into(),
                 side: "black".into(),
             },

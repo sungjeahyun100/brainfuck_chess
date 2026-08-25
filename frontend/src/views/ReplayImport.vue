@@ -11,26 +11,18 @@
       <button class="btn-start" :disabled="loading || !code.trim()" @click="load">{{ loading ? '검증 중…' : '불러오기' }}</button>
       <p v-if="error" class="error">{{ error }}</p>
     </section>
-    <section v-if="records.length" class="card replay-import">
-      <h2>내 게임 기록</h2>
-      <button v-for="record in records" :key="record.game_id" class="record-row" @click="emit('loaded', record)">
-        <strong>{{ record.display_name }}</strong><small>{{ new Date(record.started_at_ms).toLocaleString() }} · {{ record.result?.reason ?? '기록' }}</small>
-      </button>
-    </section>
   </main>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { decodeReplayCode, type ReplayDecodeError } from '../replayCodec'
 import type { GameRecord } from '../types/gameRecord'
-import { api } from '../api/gameApi'
 
 const emit = defineEmits<{ back: []; loaded: [record: GameRecord] }>()
 const code = ref('')
 const loading = ref(false)
 const error = ref<string | null>(null)
-const records = ref<GameRecord[]>([])
 const messages: Record<ReplayDecodeError, string> = {
   empty: '기보 코드를 입력해 주세요.', too_large: '코드가 허용된 최대 길이를 초과했습니다.',
   invalid_format: 'DC-G2 형식의 기보 코드가 아닙니다.', unsupported_version: '지원하지 않는 기보 버전입니다.',
@@ -43,7 +35,6 @@ async function load() {
   if (!decoded.ok) { error.value = messages[decoded.error]; return }
   emit('loaded', decoded.value)
 }
-onMounted(async () => { try { records.value = await api.listGameRecords() } catch { records.value = [] } })
 </script>
 
 <style scoped>

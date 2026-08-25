@@ -53,6 +53,11 @@
       @back="navigate('home')"
       @loaded="openReplay"
     />
+    <GameHistory
+      v-else-if="view === 'game-history'"
+      @back="navigate('home')"
+      @loaded="openReplay"
+    />
     <DeckSelect
       v-else-if="view === 'single-select'"
       mode="single"
@@ -98,11 +103,13 @@ import PieceLab from './views/PieceLab.vue'
 import CustomPieceWorkshop from './views/CustomPieceWorkshop.vue'
 import ReplayImport from './views/ReplayImport.vue'
 import ReplayPage from './views/ReplayPage.vue'
+import GameHistory from './views/GameHistory.vue'
 import type { GameRecord } from './types/gameRecord'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
 import { useSavedDecks } from './composables/useSavedDecks'
 import { serializeNeutralDeck } from './composables/useDeckSerialization'
 import { validateSavedDeck } from './composables/useDeckValidation'
+import { mapSinglePlayerDecks, resolveLocalSide } from './singlePlayerSetup'
 
 const savedDecks = useSavedDecks()
 const view = ref<AppView>('home')
@@ -199,18 +206,21 @@ async function startSingleGame(selection: SingleDeckSelection) {
   lobbyError.value = null
   playMode.value = 'single'
   try {
-    const whiteDeck = getValidDeck(selection.whiteDeckId)
-    const blackDeck = getValidDeck(selection.blackDeckId)
-    ensureSameMap(whiteDeck.mapId, blackDeck.mapId)
+    const localDeck = getValidDeck(selection.localDeckId)
+    const opponentDeck = getValidDeck(selection.opponentDeckId)
+    ensureSameMap(localDeck.mapId, opponentDeck.mapId)
+    const resolvedSide = resolveLocalSide(selection.localSide)
+    const { white: whiteDeck, black: blackDeck } = mapSinglePlayerDecks(resolvedSide, localDeck, opponentDeck)
 
     const { state } = await api.createGame(
-      whiteDeck.boardSize,
+      localDeck.boardSize,
       serializeNeutralDeck(whiteDeck, 'white'),
       serializeNeutralDeck(blackDeck, 'black'),
-      whiteDeck.mapId,
+      localDeck.mapId,
       selection.timeControl,
+      { localSide: resolvedSide, guestNickname: selection.guestNickname },
     )
-    localPlayer.value = null
+    localPlayer.value = resolvedSide
     currentRoom.value = null
     gameState.value = state
   } catch (e: unknown) {
@@ -235,6 +245,7 @@ async function startBotGame(selection: BotDeckSelection) {
       serializeNeutralDeck(blackDeck, 'black'),
       humanDeck.mapId,
       selection.timeControl,
+      { localSide: selection.humanSide, guestNickname: `${selection.difficulty} Bot` },
     )
     localPlayer.value = selection.humanSide
     currentRoom.value = null

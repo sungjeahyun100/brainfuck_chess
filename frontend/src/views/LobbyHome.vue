@@ -15,6 +15,7 @@
       <button class="home-action" @click="$emit('navigate', 'piece-lab')">기물 테스트장</button>
       <button class="home-action" @click="$emit('navigate', 'custom-piece-workshop')">커스텀 기물 제작소</button>
       <button class="home-action" @click="$emit('navigate', 'replay-import')">기보 / 리플레이</button>
+      <button class="home-action" @click="$emit('navigate', 'game-history')">게임 기록</button>
     </section>
   </main>
 </template>

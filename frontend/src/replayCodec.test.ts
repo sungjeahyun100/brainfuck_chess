@@ -29,6 +29,14 @@ test('Replay Code gzip encode and decode round-trips the canonical GameRecord', 
   if (decoded.ok) assert.deepEqual(decoded.value, record)
 })
 
+test('Replay Code preserves a guest nickname without inventing a public id', async () => {
+  const guestRecord = structuredClone(record)
+  guestRecord.players.black = { public_id: null, nickname: 'Local Guest', side: 'black' }
+  const decoded = await decodeReplayCode(await encodeReplayCode(guestRecord))
+  assert.equal(decoded.ok, true)
+  if (decoded.ok) assert.deepEqual(decoded.value.players.black, guestRecord.players.black)
+})
+
 test('Replay Code rejects prefix, version, truncation, malformed payload and excessive input', async () => {
   assert.deepEqual(await decodeReplayCode(''), { ok: false, error: 'empty' })
   assert.deepEqual(await decodeReplayCode('wrong'), { ok: false, error: 'invalid_format' })

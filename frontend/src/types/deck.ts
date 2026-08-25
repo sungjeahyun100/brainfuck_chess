@@ -4,7 +4,7 @@ import type { CustomPieceImage } from './customPiece'
 export type LobbyPlayer = 'white' | 'black'
 export type DeckPieceType = string
 export type DeploymentZone = 'front' | 'back'
-export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop' | 'replay-import'
+export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop' | 'replay-import' | 'game-history'
 
 export interface PieceCatalogItem {
   id: DeckPieceType
@@ -82,8 +82,10 @@ export interface DeckPreset {
 export type DeckSelectMode = 'single' | 'bot'
 
 export interface SingleDeckSelection {
-  whiteDeckId: string
-  blackDeckId: string
+  localDeckId: string
+  opponentDeckId: string
+  localSide: LobbyPlayer | 'random'
+  guestNickname: string
   timeControl: TimeControlId
 }
 

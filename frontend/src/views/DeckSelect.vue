@@ -18,6 +18,18 @@
     </section>
 
     <template v-else>
+      <section v-if="mode === 'single'" class="card bot-panel">
+        <div class="bot-options">
+          <label class="difficulty-select"><span class="limit-label">내 닉네임</span><input class="text-input" :value="accountNickname" readonly /></label>
+          <label class="difficulty-select"><span class="limit-label">상대 닉네임</span><input v-model="guestNickname" class="text-input" maxlength="30" /></label>
+          <div class="color-match">
+            <span class="limit-label">내 진영</span>
+            <label><input v-model="singleSide" type="radio" value="white" /> White</label>
+            <label><input v-model="singleSide" type="radio" value="black" /> Black</label>
+            <label><input v-model="singleSide" type="radio" value="random" /> Random</label>
+          </div>
+        </div>
+      </section>
       <section v-if="mode === 'bot'" class="card bot-panel">
         <div class="bot-options">
           <div class="color-match">
@@ -47,7 +59,7 @@
 
       <section class="summary-grid">
         <div class="card summary-card">
-          <p class="summary-title">{{ mode === 'bot' ? '내 덱' : 'White 덱' }}</p>
+          <p class="summary-title">{{ mode === 'bot' ? '내 덱' : '내 덱' }}</p>
           <select v-model="primaryDeckId" class="text-input">
             <option value="">선택 안 함</option>
             <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
@@ -58,7 +70,7 @@
         </div>
 
         <div class="card summary-card">
-          <p class="summary-title">{{ mode === 'bot' ? '봇 덱' : 'Black 덱' }}</p>
+          <p class="summary-title">{{ mode === 'bot' ? '봇 덱' : '상대 덱' }}</p>
           <select v-model="secondaryDeckId" class="text-input">
             <option value="">선택 안 함</option>
             <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
@@ -86,6 +98,7 @@ import { totalPocketCount, validateSavedDeck } from '../composables/useDeckValid
 import { boardMapLabel } from '../boardMaps'
 import { TIME_CONTROLS } from '../timeControls'
 import type { TimeControlId } from '../types/game'
+import { authApi } from '../api/authApi'
 
 const props = defineProps<{
   mode: DeckSelectMode
@@ -105,6 +118,9 @@ const secondaryDeckId = ref('')
 const humanSide = ref<LobbyPlayer>('white')
 const difficulty = ref<BotDifficulty>('normal')
 const timeControl = ref<TimeControlId>('ten_five')
+const singleSide = ref<LobbyPlayer | 'random'>('random')
+const guestNickname = ref('Guest')
+const accountNickname = ref('Player')
 
 const validDecks = computed(() => decks.value.filter(deck => validateSavedDeck(deck).valid))
 const invalidDecks = computed(() => decks.value.filter(deck => !validateSavedDeck(deck).valid))
@@ -119,7 +135,8 @@ const errorMessage = computed(() => {
 const canStart = computed(() => Boolean(
   primaryDeck.value
   && secondaryDeck.value
-  && sameMap.value,
+  && sameMap.value
+  && (props.mode !== 'single' || (guestNickname.value.trim().length > 0 && guestNickname.value.trim().length <= 30))
 ))
 
 function refresh() {
@@ -148,12 +165,20 @@ function start() {
   }
 
   emit('start-single', {
-    whiteDeckId: primaryDeckId.value,
-    blackDeckId: secondaryDeckId.value,
+    localDeckId: primaryDeckId.value,
+    opponentDeckId: secondaryDeckId.value,
+    localSide: singleSide.value,
+    guestNickname: guestNickname.value.trim(),
     timeControl: timeControl.value,
   })
 }
 
 watch(() => props.mode, refresh)
-onMounted(refresh)
+onMounted(async () => {
+  refresh()
+  try {
+    const state = await authApi.me()
+    accountNickname.value = state.user?.displayName?.trim() || 'Player'
+  } catch { accountNickname.value = 'Player' }
+})
 </script>

@@ -174,7 +174,7 @@
       <!-- Center: Board -->
       <div class="board-column">
         <div class="game-clock" :class="clockClasses(topPlayer)">
-          <span><b>{{ playerInfo(topPlayer).nickname }}</b><small>@{{ playerInfo(topPlayer).public_id }} · {{ topPlayer.toUpperCase() }}</small></span>
+          <span><b>{{ playerInfo(topPlayer).nickname }}</b><small><template v-if="playerInfo(topPlayer).public_id">@{{ playerInfo(topPlayer).public_id }} · </template>{{ topPlayer.toUpperCase() }}</small></span>
           <strong>{{ formattedClock(topPlayer) }}</strong>
           <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
         </div>
@@ -203,7 +203,7 @@
         />
 
         <div class="game-clock" :class="clockClasses(bottomPlayer)">
-          <span><b>{{ playerInfo(bottomPlayer).nickname }}</b><small>@{{ playerInfo(bottomPlayer).public_id }} · {{ bottomPlayer.toUpperCase() }}</small></span>
+          <span><b>{{ playerInfo(bottomPlayer).nickname }}</b><small><template v-if="playerInfo(bottomPlayer).public_id">@{{ playerInfo(bottomPlayer).public_id }} · </template>{{ bottomPlayer.toUpperCase() }}</small></span>
           <strong>{{ formattedClock(bottomPlayer) }}</strong>
           <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
         </div>
@@ -502,7 +502,7 @@ function formatDuration(milliseconds: number): string {
 }
 
 function formattedClock(player: PlayerId): string { return formatDuration(liveClockValue(player)) }
-function playerInfo(player: PlayerId) { return viewState.value.player_info[player] ?? { nickname: player === 'white' ? 'White Player' : 'Black Player', public_id: player, side: player } }
+function playerInfo(player: PlayerId) { return viewState.value.player_info[player] ?? { nickname: player === 'white' ? 'White Player' : 'Black Player', public_id: null, side: player } }
 
 async function copyReplayCode() {
   try {

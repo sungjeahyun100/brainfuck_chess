@@ -290,7 +290,7 @@ export interface PlayerPresence {
 }
 
 export interface GamePlayerInfo {
-  public_id: string
+  public_id: string | null
   nickname: string
   side: PlayerId
 }

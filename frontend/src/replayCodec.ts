@@ -115,7 +115,7 @@ function parseRecord(value: unknown): GameRecord | null {
   if (!isRecord(value.players) || !isRecord(value.players.white) || !isRecord(value.players.black)) return null
   for (const side of ['white', 'black']) {
     const player = value.players[side]
-    if (!isRecord(player) || player.side !== side || typeof player.public_id !== 'string' || player.public_id.length > 64 || typeof player.nickname !== 'string' || player.nickname.length > 80) return null
+    if (!isRecord(player) || player.side !== side || (player.public_id !== null && (typeof player.public_id !== 'string' || player.public_id.length > 64)) || typeof player.nickname !== 'string' || player.nickname.length > 80) return null
   }
   if (!isRecord(value.decks) || !isRecord(value.decks.white) || !isRecord(value.decks.black)) return null
   const size = (value.initial_state as Record<string, unknown> & { board: { size: number } }).board.size

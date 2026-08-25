@@ -30,13 +30,13 @@ export function importDeckCode(code: string, currentDeck: SavedDeck): DeckCodeIm
     ...decoded.value.starting.map(piece => piece.pieceId),
     ...decoded.value.pocket.map(piece => piece.pieceId),
   ])
-  const customPieces: CustomDeckPieceRef[] = []
+  const customPieces: CustomDeckPieceRef[] = decoded.value.customPieces ? structuredClone(decoded.value.customPieces) : []
   for (const pieceId of usedPieceIds) {
     const catalogItem = findPieceCatalogItem(pieceId)
     if (!catalogItem) {
       return { ok: false, message: `존재하지 않거나 현재 사용할 수 없는 기물이 포함되어 있습니다: ${pieceId}` }
     }
-    if (catalogItem.custom) {
+    if (catalogItem.custom && !customPieces.some(piece => piece.id === catalogItem.custom?.id && piece.version === catalogItem.custom?.version && piece.exposedPieceKey === catalogItem.custom?.exposedPieceKey)) {
       customPieces.push({
         id: catalogItem.custom.id,
         version: catalogItem.custom.version,
@@ -48,6 +48,7 @@ export function importDeckCode(code: string, currentDeck: SavedDeck): DeckCodeIm
 
   const candidate: SavedDeck = {
     ...currentDeck,
+    name: decoded.value.name?.trim() || currentDeck.name,
     mapId: decoded.value.mapId,
     boardSize: decoded.value.boardSize,
     starting: decoded.value.starting.map(piece => ({

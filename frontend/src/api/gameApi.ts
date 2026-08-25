@@ -184,6 +184,7 @@ export const api = {
     blackDeck: PlayerDeckRequest,
     mapId: BoardMapId,
     timeControl: TimeControlId,
+    player?: { localSide: PlayerId; guestNickname: string },
   ): Promise<{ id: string; state: GameState }> {
     return request(`${BASE}`, {
       method: 'POST',
@@ -193,6 +194,7 @@ export const api = {
         white_deck: whiteDeck,
         black_deck: blackDeck,
         time_control: timeControl,
+        ...(player ? { local_side: player.localSide, guest_nickname: player.guestNickname } : {}),
       }),
     })
   },
@@ -205,7 +207,7 @@ export const api = {
     return request(`${BASE}/${id}/record`)
   },
 
-  listGameRecords(): Promise<GameRecord[]> {
+  listGameRecords(): Promise<import('../types/gameRecord').GameRecordSummary[]> {
     return request('/api/game-records')
   },
 

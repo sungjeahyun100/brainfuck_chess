@@ -8,16 +8,17 @@
     <div class="replay-layout">
       <p v-if="compatibilityWarning" class="compatibility-warning">이 게임 기록은 현재 게임 버전과 완전히 호환되지 않을 수 있습니다.</p>
       <section class="replay-board-area">
-        <div class="replay-player"><div><strong>{{ record.players.black.nickname }}</strong><small>@{{ record.players.black.public_id }}</small></div><b>{{ clockText('black') }}</b></div>
+        <div class="replay-player"><div><strong>{{ record.players.black.nickname }}</strong><small v-if="record.players.black.public_id">@{{ record.players.black.public_id }}</small></div><b>{{ clockText('black') }}</b></div>
         <div class="replay-board-readonly" aria-label="읽기 전용 리플레이 보드">
           <Board :board="state.board" :pieces="state.pieces" :definitions="state.piece_definitions" :selected-piece-id="null" :movable-squares="[]" :attack-squares="[]" :threat-squares="[]" :drop-squares="[]" :last-move="lastMove" orientation="white" :ability-mode="false" />
         </div>
-        <div class="replay-player"><div><strong>{{ record.players.white.nickname }}</strong><small>@{{ record.players.white.public_id }}</small></div><b>{{ clockText('white') }}</b></div>
+        <div class="replay-player"><div><strong>{{ record.players.white.nickname }}</strong><small v-if="record.players.white.public_id">@{{ record.players.white.public_id }}</small></div><b>{{ clockText('white') }}</b></div>
       </section>
       <aside class="replay-sidebar">
         <section><h3>덱</h3><div class="deck-summary" v-for="side in replaySides" :key="side">
           <strong>{{ side === 'white' ? '백' : '흑' }} · {{ record.decks[side].deck_name }}</strong>
           <small>{{ deploymentText(side) }}</small><small>{{ pocketText(side) }}</small>
+          <button class="btn-secondary" :disabled="!canCopyDeck(side)" @click="copyDeck(side)">{{ deckCopyStatus[side] }}</button>
         </div></section>
         <section><h3>기보</h3><div class="notation-list">
           <button class="notation-row" :class="{ active: ply === 0 }" @click="go(0)">0. 시작 위치</button>
@@ -48,11 +49,14 @@ import { buildReplayFrames } from '../replayState'
 import { timeControlLabel } from '../timeControls'
 import type { PlayerId } from '../types/game'
 import type { GameRecord } from '../types/gameRecord'
+import { encodeDeckCode } from '../composables/useDeckCodeCodec'
+import { frozenDeckCodeSource } from '../replayDeckCode'
 
 const props = defineProps<{ record: GameRecord }>()
 defineEmits<{ close: [] }>()
 const replaySides: PlayerId[] = ['white', 'black']
 const ply = ref(0), playing = ref(false), copyStatus = ref('기보 복사')
+const deckCopyStatus = ref<Record<PlayerId, string>>({ white: '덱 코드 복사', black: '덱 코드 복사' })
 let timer: number | null = null
 const frames = computed(() => buildReplayFrames(props.record))
 const state = computed(() => frames.value[ply.value])
@@ -63,6 +67,13 @@ const lastMove = computed(() => { const action = ply.value ? props.record.action
 function duration(ms: number) { return `${(Math.max(0, ms) / 1000).toFixed(1)}s` }
 function deploymentText(side: PlayerId) { return props.record.decks[side].deployments.map(piece => `${piece.piece_name} ${squareName(piece.square)}`).join(', ') || '보드 배치 없음' }
 function pocketText(side: PlayerId) { return props.record.decks[side].pocket.map(piece => `${piece.piece_name} x${piece.count}`).join(', ') || '포켓 없음' }
+function canCopyDeck(side: PlayerId) { return frozenDeckCodeSource(props.record, side) !== null }
+async function copyDeck(side: PlayerId) {
+  const source = frozenDeckCodeSource(props.record, side); if (!source) return
+  const code = encodeDeckCode(source)
+  try { await navigator.clipboard.writeText(code); deckCopyStatus.value[side] = '복사 완료' } catch { deckCopyStatus.value[side] = '복사 실패' }
+  window.setTimeout(() => { deckCopyStatus.value[side] = '덱 코드 복사' }, 1800)
+}
 function clockText(player: PlayerId) { const clock = activeClock.value; const ms = clock.mode === 'countdown' ? (player === 'white' ? clock.white_remaining_ms ?? 0 : clock.black_remaining_ms ?? 0) : (player === 'white' ? clock.white_elapsed_ms : clock.black_elapsed_ms); const seconds = Math.ceil(ms / 1000); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}` }
 function stop() { playing.value = false; if (timer !== null) window.clearInterval(timer); timer = null }
 function go(next: number) { ply.value = Math.max(0, Math.min(props.record.actions.length, next)); if (ply.value === props.record.actions.length) stop() }
