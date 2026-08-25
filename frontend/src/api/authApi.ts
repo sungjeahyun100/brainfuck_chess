@@ -1,8 +1,11 @@
+export type ProfileVisibility = 'public' | 'private'
+
 export interface AuthUser {
   id: string
   publicId: string | null
   displayName: string | null
   avatarUrl: string | null
+  profileVisibility: ProfileVisibility
 }
 
 export interface AuthStateResponse {
@@ -51,7 +54,7 @@ export const authApi = {
     body: JSON.stringify({ idToken, importGuestData }),
   }).then(parse<AuthStateResponse & { importedGuestData: boolean }>),
 
-  updateProfile: (input: { publicId?: string; displayName?: string }) => fetch('/api/auth/profile', {
+  updateProfile: (input: { publicId?: string; displayName?: string; profileVisibility?: ProfileVisibility }) => fetch('/api/auth/profile', {
     method: 'PATCH',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },

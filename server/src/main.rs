@@ -21,8 +21,9 @@ mod routes;
 mod stores;
 mod time_control;
 
+use account::ProfileVisibility;
 use app_state::AppState;
-use game_record::GameRecordPlayer;
+use game_record::{GameRecordOwnership, GameRecordPlayer};
 use stores::RoomStore;
 use time_control::{now_ms, GameView, StoredGame, TimeControlId};
 
@@ -1099,11 +1100,19 @@ async fn start_room_game(
     } else {
         (guest_owner, host_owner)
     };
-    let record_players = game_record_players(app, white_owner, black_owner).await;
+    let (record_players, record_ownership) =
+        game_record_players(app, white_owner, black_owner).await;
 
     room.game_id = Some(game_id.clone());
     let now = now_ms();
-    let stored = StoredGame::new_with_players(state, room.time_control, true, now, record_players);
+    let stored = StoredGame::new_with_players(
+        state,
+        room.time_control,
+        true,
+        now,
+        record_players,
+        record_ownership,
+    );
     let view = stored.view(now);
     app.games.insert(game_id.clone(), stored);
     Ok(Some(GameResponse {
@@ -1116,10 +1125,16 @@ async fn game_record_players(
     app: &AppState,
     white_owner: &str,
     black_owner: &str,
-) -> HashMap<PlayerId, GameRecordPlayer> {
+) -> (HashMap<PlayerId, GameRecordPlayer>, GameRecordOwnership) {
     let white = game_record_player(app, white_owner, "white").await;
     let black = game_record_player(app, black_owner, "black").await;
-    HashMap::from([("white".into(), white), ("black".into(), black)])
+    (
+        HashMap::from([("white".into(), white), ("black".into(), black)]),
+        GameRecordOwnership {
+            white_user_id: (!white_owner.is_empty()).then(|| white_owner.to_owned()),
+            black_user_id: (!black_owner.is_empty()).then(|| black_owner.to_owned()),
+        },
+    )
 }
 
 async fn game_record_player(app: &AppState, owner: &str, side: &str) -> GameRecordPlayer {
@@ -1339,8 +1354,15 @@ async fn create_game(
     )
     .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let now = now_ms();
-    let record_players = game_record_players(&app, &owner, &owner).await;
-    let stored = StoredGame::new_with_players(state, req.time_control, false, now, record_players);
+    let (record_players, record_ownership) = game_record_players(&app, &owner, &owner).await;
+    let stored = StoredGame::new_with_players(
+        state,
+        req.time_control,
+        false,
+        now,
+        record_players,
+        record_ownership,
+    );
     let view = stored.view(now);
     app.games.insert(id.clone(), stored);
     Ok(Json(GameResponse { id, state: view }))
@@ -1788,11 +1810,16 @@ async fn get_game(
 async fn get_game_record(
     State(app): State<AppState>,
     Path(id): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<game_record::GameRecord>, (StatusCode, Json<ErrorResponse>)> {
     if let Some(mut game) = app.games.get_mut(&id) {
         let now = now_ms();
         game.adjudicate(now);
-        if game.phase != GamePhase::Ended {
+        let ended = game.phase == GamePhase::Ended;
+        let record = game.record.clone();
+        drop(game);
+        ensure_game_record_access(&app, &headers, &record).await?;
+        if !ended {
             return Err((
                 StatusCode::CONFLICT,
                 Json(ErrorResponse {
@@ -1800,13 +1827,14 @@ async fn get_game_record(
                 }),
             ));
         }
-        let record = game.record.clone();
-        drop(game);
         let _ = app.game_records.save(&record).await;
         return Ok(Json(record));
     }
     match app.game_records.get(&id).await {
-        Ok(Some(record)) => Ok(Json(record)),
+        Ok(Some(record)) => {
+            ensure_game_record_access(&app, &headers, &record).await?;
+            Ok(Json(record))
+        }
         Ok(None) => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -1822,6 +1850,75 @@ async fn get_game_record(
     }
 }
 
+async fn ensure_game_record_access(
+    app: &AppState,
+    headers: &HeaderMap,
+    record: &game_record::GameRecord,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    if app
+        .auth
+        .authenticate(headers)
+        .ok()
+        .is_some_and(|user_id| record.ownership.contains(&user_id))
+    {
+        return Ok(());
+    }
+    let Some((white_user_id, black_user_id)) = record.ownership.both_user_ids() else {
+        return Err(private_game_record_error());
+    };
+    let white = app
+        .accounts
+        .authenticated_user(white_user_id)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "계정 공개 설정을 확인할 수 없습니다.".into(),
+                }),
+            )
+        })?;
+    let black = if black_user_id == white_user_id {
+        white.clone()
+    } else {
+        app.accounts
+            .authenticated_user(black_user_id)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ErrorResponse {
+                        error: "계정 공개 설정을 확인할 수 없습니다.".into(),
+                    }),
+                )
+            })?
+    };
+    if third_party_game_record_is_public(
+        white.map(|profile| profile.profile_visibility),
+        black.map(|profile| profile.profile_visibility),
+    ) {
+        Ok(())
+    } else {
+        Err(private_game_record_error())
+    }
+}
+
+fn third_party_game_record_is_public(
+    white: Option<ProfileVisibility>,
+    black: Option<ProfileVisibility>,
+) -> bool {
+    white == Some(ProfileVisibility::Public) && black == Some(ProfileVisibility::Public)
+}
+
+fn private_game_record_error() -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: "게임 기록을 찾을 수 없습니다.".into(),
+        }),
+    )
+}
+
 async fn list_game_records(
     State(app): State<AppState>,
     headers: HeaderMap,
@@ -1830,8 +1927,7 @@ async fn list_game_records(
         .auth
         .authenticate(&headers)
         .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
-    let profile = app
-        .accounts
+    app.accounts
         .authenticated_user(&owner)
         .await
         .map_err(|_| {
@@ -1850,16 +1946,8 @@ async fn list_game_records(
                 }),
             )
         })?;
-    let public_id = profile.public_id.ok_or_else(|| {
-        (
-            StatusCode::CONFLICT,
-            Json(ErrorResponse {
-                error: "게임 기록을 조회하려면 공개 ID를 먼저 설정해 주세요.".into(),
-            }),
-        )
-    })?;
     app.game_records
-        .list_for_public_id(&public_id, 50)
+        .list_for_user_id(&owner, 50)
         .await
         .map(Json)
         .map_err(|_| {
@@ -2475,6 +2563,131 @@ mod tests {
         assert_eq!(resolve_app_env(None, false), "prod");
         assert_eq!(resolve_app_env(Some("prod"), true), "prod");
         assert_eq!(resolve_app_env(Some("typo"), true), "prod");
+    }
+
+    #[test]
+    fn third_party_record_visibility_requires_two_public_accounts() {
+        assert!(third_party_game_record_is_public(
+            Some(ProfileVisibility::Public),
+            Some(ProfileVisibility::Public),
+        ));
+        assert!(!third_party_game_record_is_public(
+            Some(ProfileVisibility::Public),
+            Some(ProfileVisibility::Private),
+        ));
+        assert!(!third_party_game_record_is_public(
+            Some(ProfileVisibility::Private),
+            Some(ProfileVisibility::Private),
+        ));
+        assert!(!third_party_game_record_is_public(
+            Some(ProfileVisibility::Public),
+            None,
+        ));
+    }
+
+    #[tokio::test]
+    async fn record_listing_uses_internal_ownership_and_never_serializes_it() {
+        let (app, game_id) = test_app_with_game();
+        let mut record = app.games.get(&game_id).unwrap().record.clone();
+        record.players.get_mut("white").unwrap().public_id = "old_public_id".into();
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("stable-internal-user".into()),
+            black_user_id: Some("other-internal-user".into()),
+        };
+        app.game_records.save(&record).await.unwrap();
+
+        let listed = app
+            .game_records
+            .list_for_user_id("stable-internal-user", 50)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].game_id, game_id);
+        let exported = serde_json::to_string(&listed[0]).unwrap();
+        assert!(exported.contains("old_public_id"));
+        assert!(!exported.contains("stable-internal-user"));
+        assert!(!exported.contains("other-internal-user"));
+    }
+
+    #[tokio::test]
+    async fn record_access_uses_current_privacy_but_keeps_identity_snapshots() {
+        let (app, game_id) = test_app_with_game();
+        for (user_id, subject, public_id) in [
+            ("white-user", "white-subject", "white_old"),
+            ("black-user", "black-subject", "black_id"),
+        ] {
+            let identity = account::VerifiedIdentity {
+                issuer: "issuer".into(),
+                subject: subject.into(),
+                provider: "google".into(),
+                email: None,
+                email_verified: true,
+                display_name: Some(format!("{public_id} name")),
+                avatar_url: None,
+            };
+            app.accounts
+                .complete_google_login(user_id, &identity, None)
+                .await
+                .unwrap();
+            app.accounts
+                .update_profile(user_id, Some(public_id), None, None)
+                .await
+                .unwrap();
+        }
+        let mut record = app.games.get(&game_id).unwrap().record.clone();
+        record.players.get_mut("white").unwrap().public_id = "white_old".into();
+        record.players.get_mut("black").unwrap().public_id = "black_id".into();
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("white-user".into()),
+            black_user_id: Some("black-user".into()),
+        };
+        app.game_records.save(&record).await.unwrap();
+        app.games.remove(&game_id);
+
+        let mut third_party = HeaderMap::new();
+        third_party.insert("x-user-id", "third-user".parse().unwrap());
+        assert!(get_game_record(
+            State(app.clone()),
+            Path(game_id.clone()),
+            third_party.clone(),
+        )
+        .await
+        .is_ok());
+
+        app.accounts
+            .update_profile("black-user", None, None, Some(ProfileVisibility::Private))
+            .await
+            .unwrap();
+        let private_player_info = game_record_player(&app, "black-user", "black").await;
+        assert_eq!(private_player_info.public_id, "black_id");
+        assert_eq!(private_player_info.nickname, "black_id name");
+        assert_eq!(
+            get_game_record(State(app.clone()), Path(game_id.clone()), third_party,)
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::NOT_FOUND
+        );
+
+        let mut owner = HeaderMap::new();
+        owner.insert("x-user-id", "white-user".parse().unwrap());
+        let owned = get_game_record(State(app.clone()), Path(game_id), owner)
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(owned.players["white"].public_id, "white_old");
+
+        app.accounts
+            .update_profile("white-user", Some("white_new"), None, None)
+            .await
+            .unwrap();
+        let listed = app
+            .game_records
+            .list_for_user_id("white-user", 50)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].players["white"].public_id, "white_old");
     }
 
     #[test]
@@ -3184,6 +3397,12 @@ mod tests {
     #[tokio::test]
     async fn resignation_completes_a_portable_record_with_the_authoritative_final_state() {
         let (app, game_id) = test_app_with_game();
+        app.games
+            .get_mut(&game_id)
+            .unwrap()
+            .record
+            .ownership
+            .white_user_id = Some("record-owner".into());
         let ended = resign_game(
             State(app.clone()),
             Path(game_id.clone()),
@@ -3194,7 +3413,12 @@ mod tests {
         .await
         .unwrap()
         .0;
-        let record = get_game_record(State(app), Path(game_id)).await.unwrap().0;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-user-id", "record-owner".parse().unwrap());
+        let record = get_game_record(State(app), Path(game_id), headers)
+            .await
+            .unwrap()
+            .0;
         assert_eq!(
             record.result.as_ref().map(|result| &result.reason),
             Some(&GameEndReason::Resignation)

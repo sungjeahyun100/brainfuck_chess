@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/pieceVisual.test.ts src/moveOptionUi.test.ts src/replayCodec.test.ts src/api/authApi.test.ts src/api/customPieceApi.test.ts src/api/gameApi.test.ts src/composables/useCustomPieceDraft.test.ts src/composables/customPieceAbilityBuilder.test.ts src/composables/customDeckIntegration.test.ts src/composables/useDeckCode.test.ts",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/accountSettings.test.ts src/pieceVisual.test.ts src/moveOptionUi.test.ts src/replayCodec.test.ts src/api/authApi.test.ts src/api/customPieceApi.test.ts src/api/gameApi.test.ts src/composables/useCustomPieceDraft.test.ts src/composables/customPieceAbilityBuilder.test.ts src/composables/customDeckIntegration.test.ts src/composables/useDeckCode.test.ts",
     "typecheck": "vue-tsc --noEmit",
     "lint": "vue-tsc --noEmit",
     "preview": "vite preview"

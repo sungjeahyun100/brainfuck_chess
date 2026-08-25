@@ -14,6 +14,7 @@
     </button>
     <p v-if="!loginAvailable && !loading" class="auth-error">Google 로그인 설정이 필요합니다.</p>
     <p v-else-if="error" class="auth-error">{{ error }}</p>
+    <p v-else-if="settingsNotice" class="auth-success" role="status">{{ settingsNotice }}</p>
   </aside>
 
   <div v-if="pendingToken" class="auth-modal-backdrop" role="presentation">
@@ -51,6 +52,20 @@
         />
       </label>
       <p class="auth-muted">상단 계정 영역과 게임 내에서 표시할 이름입니다. 1~30자로 입력하세요.</p>
+      <fieldset class="auth-visibility">
+        <legend>계정 공개 설정</legend>
+        <label>
+          <input v-model="visibilityDraft" type="radio" name="profileVisibility" value="public" />
+          <span><strong>공개 계정</strong><small>다른 사용자가 내 프로필과 공개 대국 기록을 볼 수 있습니다.</small></span>
+        </label>
+        <label>
+          <input v-model="visibilityDraft" type="radio" name="profileVisibility" value="private" />
+          <span><strong>비공개 계정</strong><small>다른 사용자가 내 대국 기록을 자동으로 조회할 수 없습니다.</small></span>
+        </label>
+      </fieldset>
+      <p v-if="visibilityDraft === 'private'" class="auth-privacy-note">
+        대국 상대에게는 닉네임과 ID가 계속 표시되며, 직접 공유한 기보 코드는 상대가 열람할 수 있습니다.
+      </p>
       <p v-if="settingsError" class="auth-error" role="alert">{{ settingsError }}</p>
       <div class="auth-modal-actions">
         <button type="button" :disabled="busy" @click="closeSettings">취소</button>
@@ -66,7 +81,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { getApps, initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, type Auth } from 'firebase/auth'
-import { AuthApiError, authApi, type AuthUser } from '../api/authApi'
+import { AuthApiError, authApi, type AuthUser, type ProfileVisibility } from '../api/authApi'
+import { accountSettingsDraft, persistAccountSettings } from '../accountSettings'
 import { CUSTOM_PIECES_CHANGED_EVENT } from '../api/customPieceApi'
 import { firebaseConfig } from '../config'
 
@@ -77,7 +93,9 @@ const error = ref<string | null>(null)
 const pendingToken = ref<string | null>(null)
 const settingsOpen = ref(false)
 const displayNameDraft = ref('')
+const visibilityDraft = ref<ProfileVisibility>('public')
 const settingsError = ref<string | null>(null)
+const settingsNotice = ref<string | null>(null)
 const loginAvailable = computed(() => firebaseConfig !== null)
 const displayNameValid = computed(() => {
   const value = displayNameDraft.value.trim()
@@ -161,8 +179,11 @@ async function logout() {
 
 function openSettings() {
   if (!user.value) return
-  displayNameDraft.value = user.value.displayName ?? '덱 체스 사용자'
+  const draft = accountSettingsDraft(user.value)
+  displayNameDraft.value = draft.displayName
+  visibilityDraft.value = draft.profileVisibility
   settingsError.value = null
+  settingsNotice.value = null
   settingsOpen.value = true
 }
 
@@ -177,12 +198,15 @@ async function saveSettings() {
   busy.value = true
   settingsError.value = null
   try {
-    const result = await authApi.updateProfile({
+    const savedUser = await persistAccountSettings({
       displayName: displayNameDraft.value.trim(),
+      profileVisibility: visibilityDraft.value,
     })
-    user.value = result.user
-    displayNameDraft.value = result.user.displayName ?? ''
+    user.value = savedUser
+    displayNameDraft.value = savedUser.displayName ?? ''
+    visibilityDraft.value = savedUser.profileVisibility
     settingsOpen.value = false
+    settingsNotice.value = '계정 공개 설정을 저장했습니다.'
   } catch (cause) {
     settingsError.value = cause instanceof Error ? cause.message : '계정 설정을 저장하지 못했습니다.'
   } finally {
@@ -210,6 +234,7 @@ onMounted(async () => {
 .auth-account button:disabled, .auth-modal button:disabled { opacity: .55; cursor: not-allowed; }
 .auth-muted { color: var(--muted); font-size: 13px; }
 .auth-error { color: var(--danger); font-size: 12px; }
+.auth-success { color: #87d7a1; font-size: 12px; }
 .auth-modal-backdrop { position: fixed; z-index: 1200; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(5,8,13,.8); }
 .auth-modal { width: min(560px, 100%); display: flex; flex-direction: column; gap: 15px; padding: 24px; }
 .auth-modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
@@ -218,6 +243,13 @@ onMounted(async () => {
 .auth-field { display: grid; gap: 8px; color: var(--text); font-size: 13px; font-weight: 700; }
 .auth-text-input { width: 100%; min-width: 0; box-sizing: border-box; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; outline: 0; background: rgba(9,15,24,.9); color: var(--text); font: inherit; }
 .auth-text-input:focus { border-color: rgba(240,193,95,.7); box-shadow: 0 0 0 3px rgba(240,193,95,.1); }
+.auth-visibility { display: grid; gap: 10px; margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 9px; }
+.auth-visibility legend { padding: 0 6px; font-size: 13px; font-weight: 800; }
+.auth-visibility label { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.auth-visibility input { margin-top: 3px; accent-color: #d9a441; }
+.auth-visibility span { display: grid; gap: 3px; }
+.auth-visibility small { color: var(--muted); font-weight: 400; line-height: 1.45; }
+.auth-privacy-note { margin: 0; padding: 11px 12px; border-left: 3px solid #d9a441; background: rgba(217,164,65,.08); color: var(--muted); font-size: 12px; line-height: 1.55; }
 .auth-modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
 .auth-modal .auth-primary { background: linear-gradient(135deg,#f0c15f,#c68a1b); color: #221a0d; font-weight: 800; }
 @media (max-width: 620px) { .auth-account { position: relative; top: auto; right: auto; align-self: flex-end; margin: 12px 12px 0; flex-wrap: wrap; } }

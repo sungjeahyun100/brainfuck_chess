@@ -29,6 +29,8 @@ deck_chess database
 - local의 안전한 기본값은 `test`이며 `search_path`로 환경을 선택하지 않는다.
 - 동일 `(issuer, subject)`는 양쪽 환경에서 같은 `shared.users.id`를 반환한다.
 - nickname/public ID는 `shared.users`에 한 번만 존재한다.
+- 계정의 `profile_visibility`도 `shared.users`에 저장되어 prod/test에서
+  동일하게 적용된다.
 - 기존 production custom piece와 `BYTEA` image는 `prod`로 이동한다.
 - `test` custom piece/image table은 빈 상태로 시작한다.
 - 향후 server deck은 `prod.decks`와 `test.decks`로 각각 추가한다.
@@ -186,6 +188,19 @@ shared insert/update가 필요한 이유다. rating/achievement 같은 향후 �
 - `server/db/prod`: production game-data release.
 - `server/db/test`: test game-data release. 이것만 test release에서 실행 가능.
 - `server/db/admin`: bootstrap/권한처럼 table owner가 실행하는 작업.
+
+2026-08-26 공개 설정 release는 관리자가 다음 순서로 적용한다.
+
+1. backup과 preflight를 확인한 뒤
+   `server/db/shared/20260826000000_profile_visibility.sql`을 적용한다.
+2. production에는 `server/db/prod/20260826001000_game_record_ownership.sql`,
+   test에는 `server/db/test/20260826001000_game_record_ownership.sql`만 각각 적용한다.
+3. 새 application revision은 shared visibility column과 현재 환경의 ownership
+   column을 startup contract로 확인하므로, 모든 해당 migration 완료 후 배포한다.
+
+소유권 column은 현재 public ID와 유일하게 매칭되는 기존 기록만
+backfill한다. 게스트나 매칭할 수 없는 이전 기록은 nullable로 남고,
+제3자에게는 fail-closed로 공개되지 않는다.
 
 애플리케이션 startup의 `sqlx::migrate!`는 제거했다. `cloudbuild.yaml`에도 DB
 migration step이 없다. 따라서 test deployment만으로 `shared`나 `prod`가

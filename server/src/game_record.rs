@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use brainfuck_chess_engine::types::{GameResult, GameState, PlayerId, TurnAction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -34,8 +34,30 @@ pub(crate) struct RecordedAction {
     pub(crate) state_after: GameState,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct GameRecordOwnership {
+    pub(crate) white_user_id: Option<String>,
+    pub(crate) black_user_id: Option<String>,
+}
+
+impl GameRecordOwnership {
+    pub(crate) fn contains(&self, user_id: &str) -> bool {
+        self.white_user_id.as_deref() == Some(user_id)
+            || self.black_user_id.as_deref() == Some(user_id)
+    }
+
+    pub(crate) fn both_user_ids(&self) -> Option<(&str, &str)> {
+        Some((
+            self.white_user_id.as_deref()?,
+            self.black_user_id.as_deref()?,
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GameRecord {
+    #[serde(skip)]
+    pub(crate) ownership: GameRecordOwnership,
     pub(crate) format_version: u32,
     pub(crate) game_id: String,
     pub(crate) display_name: String,
@@ -61,6 +83,7 @@ impl GameRecord {
         time_control: TimeControlId,
         started_at_ms: i64,
         initial_clock: ClockSnapshot,
+        ownership: GameRecordOwnership,
     ) -> Self {
         let piece_id_map = initial_state
             .pieces
@@ -80,6 +103,7 @@ impl GameRecord {
             .map(|p| p.public_id.as_str())
             .unwrap_or("black");
         Self {
+            ownership,
             format_version: GAME_RECORD_FORMAT_VERSION,
             game_id: initial_state.id.clone(),
             display_name: replay_display_name(white, black, started_at_ms),
@@ -201,9 +225,9 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 pub(crate) trait GameRecordRepository: Send + Sync {
     async fn save(&self, record: &GameRecord) -> Result<(), &'static str>;
     async fn get(&self, game_id: &str) -> Result<Option<GameRecord>, &'static str>;
-    async fn list_for_public_id(
+    async fn list_for_user_id(
         &self,
-        public_id: &str,
+        user_id: &str,
         limit: i64,
     ) -> Result<Vec<GameRecord>, &'static str>;
 }
@@ -230,9 +254,9 @@ impl GameRecordRepository for InMemoryGameRecordRepository {
             .get(game_id)
             .cloned())
     }
-    async fn list_for_public_id(
+    async fn list_for_user_id(
         &self,
-        public_id: &str,
+        user_id: &str,
         limit: i64,
     ) -> Result<Vec<GameRecord>, &'static str> {
         let mut records = self
@@ -240,12 +264,7 @@ impl GameRecordRepository for InMemoryGameRecordRepository {
             .read()
             .map_err(|_| "unavailable")?
             .values()
-            .filter(|record| {
-                record
-                    .players
-                    .values()
-                    .any(|player| player.public_id == public_id)
-            })
+            .filter(|record| record.ownership.contains(user_id))
             .cloned()
             .collect::<Vec<_>>();
         records.sort_by_key(|record| std::cmp::Reverse(record.started_at_ms));
@@ -272,10 +291,12 @@ impl PostgresGameRecordRepository {
 impl GameRecordRepository for PostgresGameRecordRepository {
     async fn save(&self, record: &GameRecord) -> Result<(), &'static str> {
         let value = serde_json::to_value(record).map_err(|_| "unavailable")?;
-        sqlx::query(&format!("INSERT INTO {} (id, white_public_id, black_public_id, started_at_ms, ended_at_ms, result_reason, display_name, record_version, record) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO UPDATE SET ended_at_ms=EXCLUDED.ended_at_ms, result_reason=EXCLUDED.result_reason, record=EXCLUDED.record", self.table))
+        sqlx::query(&format!("INSERT INTO {} AS target (id, white_public_id, black_public_id, white_user_id, black_user_id, started_at_ms, ended_at_ms, result_reason, display_name, record_version, record) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO UPDATE SET white_user_id=COALESCE(EXCLUDED.white_user_id, target.white_user_id), black_user_id=COALESCE(EXCLUDED.black_user_id, target.black_user_id), ended_at_ms=EXCLUDED.ended_at_ms, result_reason=EXCLUDED.result_reason, record=EXCLUDED.record", self.table))
             .bind(&record.game_id)
             .bind(record.players.get("white").map(|p| p.public_id.as_str()))
             .bind(record.players.get("black").map(|p| p.public_id.as_str()))
+            .bind(record.ownership.white_user_id.as_deref())
+            .bind(record.ownership.black_user_id.as_deref())
             .bind(record.started_at_ms)
             .bind(record.ended_at_ms)
             .bind(record.result.as_ref().map(|result| format!("{:?}", result.reason)))
@@ -286,31 +307,43 @@ impl GameRecordRepository for PostgresGameRecordRepository {
         Ok(())
     }
     async fn get(&self, game_id: &str) -> Result<Option<GameRecord>, &'static str> {
-        let value = sqlx::query_scalar::<_, serde_json::Value>(&format!(
-            "SELECT record FROM {} WHERE id=$1",
+        let row = sqlx::query(&format!(
+            "SELECT record, white_user_id, black_user_id FROM {} WHERE id=$1",
             self.table
         ))
         .bind(game_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|_| "unavailable")?;
-        value
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|_| "unavailable")
+        let Some(row) = row else { return Ok(None) };
+        let mut record: GameRecord =
+            serde_json::from_value(row.try_get("record").map_err(|_| "unavailable")?)
+                .map_err(|_| "unavailable")?;
+        record.ownership = GameRecordOwnership {
+            white_user_id: row.try_get("white_user_id").map_err(|_| "unavailable")?,
+            black_user_id: row.try_get("black_user_id").map_err(|_| "unavailable")?,
+        };
+        Ok(Some(record))
     }
-    async fn list_for_public_id(
+    async fn list_for_user_id(
         &self,
-        public_id: &str,
+        user_id: &str,
         limit: i64,
     ) -> Result<Vec<GameRecord>, &'static str> {
-        let values = sqlx::query_scalar::<_, serde_json::Value>(&format!("SELECT record FROM {} WHERE white_public_id=$1 OR black_public_id=$1 ORDER BY started_at_ms DESC LIMIT $2", self.table))
-            .bind(public_id).bind(limit.clamp(1, 100)).fetch_all(&self.pool).await.map_err(|_| "unavailable")?;
-        values
-            .into_iter()
-            .map(serde_json::from_value)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "unavailable")
+        let rows = sqlx::query(&format!("SELECT record, white_user_id, black_user_id FROM {} WHERE white_user_id=$1 OR black_user_id=$1 ORDER BY started_at_ms DESC LIMIT $2", self.table))
+            .bind(user_id).bind(limit.clamp(1, 100)).fetch_all(&self.pool).await.map_err(|_| "unavailable")?;
+        rows.into_iter()
+            .map(|row| {
+                let mut record: GameRecord =
+                    serde_json::from_value(row.try_get("record").map_err(|_| "unavailable")?)
+                        .map_err(|_| "unavailable")?;
+                record.ownership = GameRecordOwnership {
+                    white_user_id: row.try_get("white_user_id").map_err(|_| "unavailable")?,
+                    black_user_id: row.try_get("black_user_id").map_err(|_| "unavailable")?,
+                };
+                Ok(record)
+            })
+            .collect()
     }
 }
 

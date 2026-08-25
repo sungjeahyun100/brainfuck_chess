@@ -7,6 +7,7 @@
     <section class="card replay-import">
       <label for="replay-code">기보 또는 게임 코드를 입력하세요</label>
       <textarea id="replay-code" v-model="code" rows="10" placeholder="DC-G1-..." />
+      <p class="replay-note">직접 공유받은 기보 코드는 계정 공개 설정과 관계없이 재생되며, 대국 당시의 닉네임과 공개 ID가 포함될 수 있습니다.</p>
       <button class="btn-start" :disabled="loading || !code.trim()" @click="load">{{ loading ? '검증 중…' : '불러오기' }}</button>
       <p v-if="error" class="error">{{ error }}</p>
     </section>
@@ -48,5 +49,6 @@ onMounted(async () => { try { records.value = await api.listGameRecords() } catc
 <style scoped>
 .replay-import { max-width: 850px; margin: 24px auto; display: grid; gap: 14px; }
 textarea { width: 100%; resize: vertical; padding: 12px; border-radius: 8px; font-family: ui-monospace, monospace; }
+.replay-note { margin: 0; color: #a8b1c2; font-size: 12px; line-height: 1.5; }
 .record-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px; text-align: left; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: rgba(255,255,255,.04); color: inherit; }.record-row small { color: #a8b1c2; }
 </style>

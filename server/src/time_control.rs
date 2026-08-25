@@ -1,4 +1,4 @@
-use crate::game_record::{GameRecord, GameRecordPlayer};
+use crate::game_record::{GameRecord, GameRecordOwnership, GameRecordPlayer};
 use brainfuck_chess_engine::types::{GameEndReason, GamePhase, GameResult, GameState, PlayerId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -259,7 +259,14 @@ impl StoredGame {
         now_ms: i64,
     ) -> Self {
         let players = default_record_players();
-        Self::new_with_players(state, time_control, multiplayer, now_ms, players)
+        Self::new_with_players(
+            state,
+            time_control,
+            multiplayer,
+            now_ms,
+            players,
+            GameRecordOwnership::default(),
+        )
     }
 
     pub(crate) fn new_with_players(
@@ -268,6 +275,7 @@ impl StoredGame {
         multiplayer: bool,
         now_ms: i64,
         players: HashMap<PlayerId, GameRecordPlayer>,
+        ownership: GameRecordOwnership,
     ) -> Self {
         let presence = multiplayer.then(|| PresenceState {
             last_seen_ms: HashMap::from([("white".into(), now_ms), ("black".into(), now_ms)]),
@@ -279,6 +287,7 @@ impl StoredGame {
             time_control,
             now_ms,
             clock.snapshot(now_ms, true),
+            ownership,
         );
         Self {
             state,
