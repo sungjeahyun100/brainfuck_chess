@@ -329,6 +329,7 @@ export interface GameState {
   clock: GameClock
   presence?: { white: PlayerPresence; black: PlayerPresence }
   player_info: Record<PlayerId, GamePlayerInfo>
+  record_notation?: import('./gameRecord').RecordedNotationAction[]
 }
 
 export interface AttackMap {

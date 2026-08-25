@@ -1,7 +1,9 @@
 use async_trait::async_trait;
-use brainfuck_chess_engine::types::{GameResult, GameState, PlayerId, TurnAction};
+use brainfuck_chess_engine::types::{
+    GameResult, GameState, MoveOptionKind, Piece, PieceId, PieceLayer, PlayerId, Square, TurnAction,
+};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use serde_json::Value;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -9,7 +11,7 @@ use std::sync::{Arc, RwLock};
 use crate::database::DataSchema;
 use crate::time_control::{ClockSnapshot, TimeControlId};
 
-pub(crate) const GAME_RECORD_FORMAT_VERSION: u32 = 1;
+pub(crate) const GAME_RECORD_FORMAT_VERSION: u32 = 2;
 pub(crate) const RULESET_VERSION: &str = "deck-chess-1";
 pub(crate) const CHESSEMBLY_VERSION: &str = "chessembly-1";
 
@@ -21,17 +23,84 @@ pub(crate) struct GameRecordPlayer {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct DeckDeploymentSnapshot {
+    pub(crate) piece_name: String,
+    pub(crate) square: Square,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct DeckPocketSnapshot {
+    pub(crate) piece_name: String,
+    pub(crate) count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct DeckSnapshot {
+    pub(crate) side: PlayerId,
+    pub(crate) deck_name: String,
+    pub(crate) deployments: Vec<DeckDeploymentSnapshot>,
+    pub(crate) pocket: Vec<DeckPocketSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum NotationActionKind {
+    Move,
+    MoveWithAbility,
+    Ability,
+    Drop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ActorSnapshot {
+    pub(crate) piece_id: String,
+    pub(crate) piece_type_id: String,
+    pub(crate) piece_name: String,
+    pub(crate) from: Option<Square>,
+    pub(crate) layer: PieceLayer,
+    pub(crate) current_ammo: Option<u32>,
+    pub(crate) state: HashMap<String, brainfuck_chess_engine::types::PieceStateValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct AbilityEventSnapshot {
+    pub(crate) ability_id: String,
+    pub(crate) ability_name: String,
+    pub(crate) target: Option<Square>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct RecordedNotationAction {
+    pub(crate) move_number: u32,
+    pub(crate) side: PlayerId,
+    pub(crate) actor: ActorSnapshot,
+    pub(crate) kind: NotationActionKind,
+    pub(crate) ability_id: Option<String>,
+    pub(crate) ability_name: Option<String>,
+    pub(crate) from: Option<Square>,
+    pub(crate) to: Option<Square>,
+    pub(crate) target: Option<Square>,
+    pub(crate) ability_events: Vec<AbilityEventSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub(crate) enum StateDeltaOperation {
+    Set { path: Vec<String>, value: Value },
+    Remove { path: Vec<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RecordedAction {
     pub(crate) ply: u32,
-    pub(crate) piece_index: u32,
     pub(crate) player_id: PlayerId,
     pub(crate) action: TurnAction,
+    pub(crate) notation: RecordedNotationAction,
+    pub(crate) state_delta: Vec<StateDeltaOperation>,
     pub(crate) elapsed_ms: i64,
     pub(crate) clock_before_ms: Option<i64>,
     pub(crate) clock_after_ms: Option<i64>,
     pub(crate) clock: ClockSnapshot,
-    pub(crate) state_hash: String,
-    pub(crate) state_after: GameState,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -70,9 +139,8 @@ pub(crate) struct GameRecord {
     pub(crate) time_control: TimeControlId,
     pub(crate) initial_state: GameState,
     pub(crate) initial_clock: ClockSnapshot,
-    pub(crate) piece_id_map: HashMap<String, u32>,
+    pub(crate) decks: HashMap<PlayerId, DeckSnapshot>,
     pub(crate) actions: Vec<RecordedAction>,
-    pub(crate) final_state: Option<GameState>,
     pub(crate) final_clock: Option<ClockSnapshot>,
 }
 
@@ -85,15 +153,28 @@ impl GameRecord {
         initial_clock: ClockSnapshot,
         ownership: GameRecordOwnership,
     ) -> Self {
-        let piece_id_map = initial_state
-            .pieces
-            .keys()
-            .map(|id| id.to_string())
-            .collect::<Vec<_>>()
-            .into_iter()
-            .enumerate()
-            .map(|(index, id)| (id, index as u32))
-            .collect();
+        Self::new_with_deck_names(
+            initial_state,
+            players,
+            time_control,
+            started_at_ms,
+            initial_clock,
+            ownership,
+            HashMap::new(),
+        )
+    }
+
+    pub(crate) fn new_with_deck_names(
+        mut initial_state: GameState,
+        players: HashMap<PlayerId, GameRecordPlayer>,
+        time_control: TimeControlId,
+        started_at_ms: i64,
+        initial_clock: ClockSnapshot,
+        ownership: GameRecordOwnership,
+        deck_names: HashMap<PlayerId, String>,
+    ) -> Self {
+        initial_state.history.clear();
+        let decks = build_deck_snapshots(&initial_state, &deck_names);
         let white = players
             .get("white")
             .map(|p| p.public_id.as_str())
@@ -116,9 +197,8 @@ impl GameRecord {
             time_control,
             initial_state,
             initial_clock,
-            piece_id_map,
+            decks,
             actions: Vec::new(),
-            final_state: None,
             final_clock: None,
         }
     }
@@ -131,29 +211,26 @@ impl GameRecord {
         clock_before_ms: Option<i64>,
         clock_after_ms: Option<i64>,
         clock: ClockSnapshot,
+        state_before: &GameState,
         state_after: GameState,
     ) {
-        let piece_id = match &action {
-            TurnAction::Move(action) => action.piece_id.to_string(),
-            TurnAction::Drop(action) => action.piece_id.to_string(),
-            TurnAction::Ability(action) => action.piece_id.to_string(),
-        };
-        let next_piece_index = self.piece_id_map.len() as u32;
-        let piece_index = *self
-            .piece_id_map
-            .entry(piece_id)
-            .or_insert(next_piece_index);
+        let notation = build_notation(
+            self.actions.len() as u32 + 1,
+            &player_id,
+            &action,
+            state_before,
+        );
+        let state_delta = build_state_delta(state_before, &state_after);
         self.actions.push(RecordedAction {
             ply: self.actions.len() as u32 + 1,
-            piece_index,
             player_id,
             action,
+            notation,
+            state_delta,
             elapsed_ms,
             clock_before_ms,
             clock_after_ms,
             clock,
-            state_hash: state_hash(&state_after),
-            state_after,
         });
     }
 
@@ -163,14 +240,258 @@ impl GameRecord {
         }
         self.ended_at_ms = Some(ended_at_ms);
         self.result = state.result.clone();
-        self.final_state = Some(state.clone());
         self.final_clock = Some(clock);
     }
 }
 
-fn state_hash(state: &GameState) -> String {
-    let bytes = serde_json::to_vec(state).unwrap_or_default();
-    format!("{:x}", Sha256::digest(bytes))
+fn piece_name(state: &GameState, piece: &Piece) -> String {
+    state
+        .piece_definitions
+        .get(&piece.type_id)
+        .map(|definition| definition.name.clone())
+        .unwrap_or_else(|| piece.type_id.clone())
+}
+
+fn build_deck_snapshots(
+    state: &GameState,
+    deck_names: &HashMap<PlayerId, String>,
+) -> HashMap<PlayerId, DeckSnapshot> {
+    state
+        .players
+        .iter()
+        .map(|(side, player)| {
+            let mut deployments = player
+                .deck
+                .starting_pieces
+                .iter()
+                .filter_map(|id| state.pieces.get(id))
+                .filter_map(|piece| {
+                    Some(DeckDeploymentSnapshot {
+                        piece_name: piece_name(state, piece),
+                        square: piece.current_square?,
+                    })
+                })
+                .collect::<Vec<_>>();
+            deployments.sort_by_key(|entry| {
+                (
+                    entry.square.rank,
+                    entry.square.file,
+                    entry.piece_name.clone(),
+                )
+            });
+
+            let mut counts = HashMap::<String, u32>::new();
+            for id in &player.deck.pocket_pieces {
+                if let Some(piece) = state.pieces.get(id) {
+                    *counts.entry(piece_name(state, piece)).or_default() += 1;
+                }
+            }
+            let mut pocket = counts
+                .into_iter()
+                .map(|(piece_name, count)| DeckPocketSnapshot { piece_name, count })
+                .collect::<Vec<_>>();
+            pocket.sort_by(|left, right| left.piece_name.cmp(&right.piece_name));
+            let deck_name = deck_names
+                .get(side)
+                .filter(|name| !name.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| format!("{} deck", side));
+            (
+                side.clone(),
+                DeckSnapshot {
+                    side: side.clone(),
+                    deck_name,
+                    deployments,
+                    pocket,
+                },
+            )
+        })
+        .collect()
+}
+
+fn actor_piece_id(action: &TurnAction) -> &PieceId {
+    match action {
+        TurnAction::Move(action) => &action.piece_id,
+        TurnAction::Drop(action) => &action.piece_id,
+        TurnAction::Ability(action) => &action.piece_id,
+    }
+}
+
+fn ability_name(state: &GameState, piece: &Piece, ability_id: &str) -> String {
+    state
+        .piece_definitions
+        .get(&piece.type_id)
+        .and_then(|definition| {
+            definition
+                .move_options
+                .iter()
+                .find(|option| option.id == ability_id)
+        })
+        .map(|option| option.name.clone())
+        .unwrap_or_else(|| ability_id.to_string())
+}
+
+fn build_notation(
+    ply: u32,
+    side: &PlayerId,
+    action: &TurnAction,
+    state_before: &GameState,
+) -> RecordedNotationAction {
+    let piece = state_before.pieces.get(actor_piece_id(action));
+    let actor = piece
+        .map(|piece| ActorSnapshot {
+            piece_id: piece.id.to_string(),
+            piece_type_id: piece.type_id.clone(),
+            piece_name: piece_name(state_before, piece),
+            from: piece.current_square,
+            layer: piece.layer.clone(),
+            current_ammo: Some(piece.current_ammo),
+            state: piece.state.clone(),
+        })
+        .unwrap_or_else(|| ActorSnapshot {
+            piece_id: actor_piece_id(action).to_string(),
+            piece_type_id: "unknown".into(),
+            piece_name: "unknown".into(),
+            from: None,
+            layer: PieceLayer::Ground,
+            current_ammo: None,
+            state: HashMap::new(),
+        });
+
+    let (kind, ability_id, ability_name_value, to, target) = match action {
+        TurnAction::Move(move_action) => {
+            let is_ability = piece
+                .and_then(|piece| state_before.piece_definitions.get(&piece.type_id))
+                .and_then(|definition| {
+                    definition
+                        .move_options
+                        .iter()
+                        .find(|option| option.id == move_action.move_option_id)
+                })
+                .is_some_and(|option| option.kind == MoveOptionKind::Ability);
+            let id = is_ability.then(|| move_action.move_option_id.clone());
+            let name = id.as_deref().map(|id| {
+                piece
+                    .map(|piece| ability_name(state_before, piece, id))
+                    .unwrap_or_else(|| id.into())
+            });
+            (
+                if is_ability {
+                    NotationActionKind::MoveWithAbility
+                } else {
+                    NotationActionKind::Move
+                },
+                id,
+                name,
+                Some(move_action.to),
+                None,
+            )
+        }
+        TurnAction::Drop(drop_action) => (
+            NotationActionKind::Drop,
+            None,
+            None,
+            Some(drop_action.to),
+            None,
+        ),
+        TurnAction::Ability(ability_action) => {
+            let name = piece
+                .map(|piece| ability_name(state_before, piece, &ability_action.ability_id))
+                .unwrap_or_else(|| ability_action.ability_id.clone());
+            (
+                NotationActionKind::Ability,
+                Some(ability_action.ability_id.clone()),
+                Some(name),
+                ability_action.to,
+                ability_action.to,
+            )
+        }
+    };
+    let ability_events = ability_id
+        .as_ref()
+        .zip(ability_name_value.as_ref())
+        .map(|(ability_id, ability_name)| {
+            vec![AbilityEventSnapshot {
+                ability_id: ability_id.clone(),
+                ability_name: ability_name.clone(),
+                target,
+            }]
+        })
+        .unwrap_or_default();
+    RecordedNotationAction {
+        move_number: (ply + 1) / 2,
+        side: side.clone(),
+        from: actor.from,
+        actor,
+        kind,
+        ability_id,
+        ability_name: ability_name_value,
+        to,
+        target,
+        ability_events,
+    }
+}
+
+fn replay_state_value(state: &GameState) -> Value {
+    let mut value = serde_json::to_value(state).unwrap_or(Value::Null);
+    if let Value::Object(root) = &mut value {
+        root.remove("piece_definitions");
+        root.remove("custom_piece_manifest");
+        root.remove("history");
+        root.remove("id");
+        if let Some(Value::Object(board)) = root.get_mut("board") {
+            board.remove("size");
+            board.remove("terrain");
+        }
+    }
+    value
+}
+
+fn build_state_delta(before: &GameState, after: &GameState) -> Vec<StateDeltaOperation> {
+    let mut operations = Vec::new();
+    diff_values(
+        &replay_state_value(before),
+        &replay_state_value(after),
+        &mut Vec::new(),
+        &mut operations,
+    );
+    operations
+}
+
+fn diff_values(
+    before: &Value,
+    after: &Value,
+    path: &mut Vec<String>,
+    output: &mut Vec<StateDeltaOperation>,
+) {
+    if before == after {
+        return;
+    }
+    match (before, after) {
+        (Value::Object(before), Value::Object(after)) => {
+            for key in before.keys().filter(|key| !after.contains_key(*key)) {
+                let mut removed_path = path.clone();
+                removed_path.push(key.clone());
+                output.push(StateDeltaOperation::Remove { path: removed_path });
+            }
+            for (key, value) in after {
+                path.push(key.clone());
+                if let Some(previous) = before.get(key) {
+                    diff_values(previous, value, path, output);
+                } else {
+                    output.push(StateDeltaOperation::Set {
+                        path: path.clone(),
+                        value: value.clone(),
+                    });
+                }
+                path.pop();
+            }
+        }
+        _ => output.push(StateDeltaOperation::Set {
+            path: path.clone(),
+            value: after.clone(),
+        }),
+    }
 }
 
 fn safe_name_part(value: &str) -> String {

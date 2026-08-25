@@ -1,4 +1,6 @@
-use crate::game_record::{GameRecord, GameRecordOwnership, GameRecordPlayer};
+use crate::game_record::{
+    GameRecord, GameRecordOwnership, GameRecordPlayer, RecordedNotationAction,
+};
 use brainfuck_chess_engine::types::{GameEndReason, GamePhase, GameResult, GameState, PlayerId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -241,6 +243,7 @@ pub(crate) struct GameView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) presence: Option<PresenceSnapshot>,
     pub(crate) player_info: HashMap<PlayerId, GameRecordPlayer>,
+    pub(crate) record_notation: Vec<RecordedNotationAction>,
 }
 
 impl Deref for GameView {
@@ -277,17 +280,38 @@ impl StoredGame {
         players: HashMap<PlayerId, GameRecordPlayer>,
         ownership: GameRecordOwnership,
     ) -> Self {
+        Self::new_with_players_and_deck_names(
+            state,
+            time_control,
+            multiplayer,
+            now_ms,
+            players,
+            ownership,
+            HashMap::new(),
+        )
+    }
+
+    pub(crate) fn new_with_players_and_deck_names(
+        state: GameState,
+        time_control: TimeControlId,
+        multiplayer: bool,
+        now_ms: i64,
+        players: HashMap<PlayerId, GameRecordPlayer>,
+        ownership: GameRecordOwnership,
+        deck_names: HashMap<PlayerId, String>,
+    ) -> Self {
         let presence = multiplayer.then(|| PresenceState {
             last_seen_ms: HashMap::from([("white".into(), now_ms), ("black".into(), now_ms)]),
         });
         let clock = ClockState::new(time_control, now_ms);
-        let record = GameRecord::new(
+        let record = GameRecord::new_with_deck_names(
             state.clone(),
             players,
             time_control,
             now_ms,
             clock.snapshot(now_ms, true),
             ownership,
+            deck_names,
         );
         Self {
             state,
@@ -332,6 +356,12 @@ impl StoredGame {
                 black: presence_for(presence, "black", now_ms),
             }),
             player_info: self.record.players.clone(),
+            record_notation: self
+                .record
+                .actions
+                .iter()
+                .map(|entry| entry.notation.clone())
+                .collect(),
         }
     }
 

@@ -44,6 +44,7 @@ export interface DeckPlacementRequest {
 }
 
 export interface PlayerDeckRequest {
+  name?: string
   starting: DeckPlacementRequest[]
   pocket: DeckPieceRequest[]
 }

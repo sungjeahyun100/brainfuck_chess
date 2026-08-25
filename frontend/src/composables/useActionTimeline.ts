@@ -10,5 +10,6 @@ export function applyTimelineFrame(_current: GameState, frame: ActionTimelineFra
   next.clock ??= _current.clock
   next.presence ??= _current.presence
   next.player_info ??= _current.player_info
+  next.record_notation ??= _current.record_notation
   return next
 }

@@ -6,7 +6,7 @@
     </div>
     <section class="card replay-import">
       <label for="replay-code">기보 또는 게임 코드를 입력하세요</label>
-      <textarea id="replay-code" v-model="code" rows="10" placeholder="DC-G1-..." />
+      <textarea id="replay-code" v-model="code" rows="10" placeholder="DC-G2-..." />
       <p class="replay-note">직접 공유받은 기보 코드는 계정 공개 설정과 관계없이 재생되며, 대국 당시의 닉네임과 공개 ID가 포함될 수 있습니다.</p>
       <button class="btn-start" :disabled="loading || !code.trim()" @click="load">{{ loading ? '검증 중…' : '불러오기' }}</button>
       <p v-if="error" class="error">{{ error }}</p>
@@ -33,7 +33,7 @@ const error = ref<string | null>(null)
 const records = ref<GameRecord[]>([])
 const messages: Record<ReplayDecodeError, string> = {
   empty: '기보 코드를 입력해 주세요.', too_large: '코드가 허용된 최대 길이를 초과했습니다.',
-  invalid_format: 'DC-G1 형식의 기보 코드가 아닙니다.', unsupported_version: '지원하지 않는 기보 버전입니다.',
+  invalid_format: 'DC-G2 형식의 기보 코드가 아닙니다.', unsupported_version: '지원하지 않는 기보 버전입니다.',
   invalid_payload: '기보 데이터가 손상되었거나 안전하게 압축 해제할 수 없습니다.', invalid_schema: '기보의 데이터 구조가 올바르지 않습니다.',
 }
 async function load() {

@@ -1,10 +1,11 @@
 import type { GameRecord } from './types/gameRecord'
 
-export const REPLAY_CODE_PREFIX = 'DC-G1-'
+export const REPLAY_CODE_PREFIX = 'DC-G2-'
 export const MAX_REPLAY_CODE_LENGTH = 4_000_000
 export const MAX_REPLAY_JSON_BYTES = 32_000_000
 export const MAX_REPLAY_ACTIONS = 4_096
 export const MAX_REPLAY_PIECES = 2_048
+export const MAX_REPLAY_DELTA_OPERATIONS = 512
 
 export type ReplayDecodeError = 'empty' | 'too_large' | 'invalid_format' | 'unsupported_version' | 'invalid_payload' | 'invalid_schema'
 export type ReplayDecodeResult = { ok: true; value: GameRecord } | { ok: false; error: ReplayDecodeError }
@@ -66,16 +67,49 @@ function validClock(value: unknown): boolean {
   return typeof value.time_control === 'string' && Number.isFinite(value.increment_ms)
 }
 
-function validAction(value: unknown, index: number): boolean {
-  if (!isRecord(value) || value.ply !== index + 1 || !isRecord(value.action) || !validState(value.state_after) || !validClock(value.clock)) return false
-  if (!['white', 'black'].includes(String(value.player_id)) || !Number.isInteger(value.piece_index) || (value.piece_index as number) < 0 || (value.piece_index as number) >= MAX_REPLAY_PIECES || !Number.isFinite(value.elapsed_ms) || typeof value.state_hash !== 'string') return false
+function validSquare(value: unknown, size: number): boolean {
+  return isRecord(value) && Number.isInteger(value.file) && Number.isInteger(value.rank)
+    && (value.file as number) >= 0 && (value.file as number) < size && (value.rank as number) >= 0 && (value.rank as number) < size
+}
+
+function validText(value: unknown, max = 128): boolean { return typeof value === 'string' && value.length > 0 && value.length <= max }
+
+const DELTA_ROOTS = new Set(['board', 'pieces', 'players', 'current_player', 'turn_number', 'phase', 'en_passant_target', 'en_passant_available_to', 'global_state', 'result'])
+const FORBIDDEN_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor'])
+function validDelta(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > MAX_REPLAY_DELTA_OPERATIONS) return false
+  return value.every(operation => {
+    if (!isRecord(operation) || !['set', 'remove'].includes(String(operation.op)) || !Array.isArray(operation.path)) return false
+    const path = operation.path
+    if (path.length < 1 || path.length > 8 || !path.every(segment => validText(segment, 256) && !FORBIDDEN_PATH_SEGMENTS.has(String(segment))) || !DELTA_ROOTS.has(String(path[0]))) return false
+    if (path[0] === 'board' && !['squares', 'air_squares'].includes(String(path[1]))) return false
+    if (operation.op === 'set' && !Object.prototype.hasOwnProperty.call(operation, 'value')) return false
+    return operation.op !== 'remove' || !Object.prototype.hasOwnProperty.call(operation, 'value')
+  })
+}
+
+function validNotation(value: unknown, index: number, size: number): boolean {
+  if (!isRecord(value) || value.move_number !== Math.floor(index / 2) + 1 || !['white', 'black'].includes(String(value.side))) return false
+  if (!['move', 'move_with_ability', 'ability', 'drop'].includes(String(value.kind)) || !isRecord(value.actor)) return false
+  if (!validText(value.actor.piece_id, 256) || !validText(value.actor.piece_type_id, 256) || !validText(value.actor.piece_name, 160)) return false
+  if (value.from != null && !validSquare(value.from, size) || value.to != null && !validSquare(value.to, size) || value.target != null && !validSquare(value.target, size)) return false
+  if (!Array.isArray(value.ability_events) || value.ability_events.length > 16) return false
+  return value.ability_events.every(event => isRecord(event) && validText(event.ability_id, 128) && validText(event.ability_name, 160) && (event.target == null || validSquare(event.target, size)))
+}
+
+function validAction(value: unknown, index: number, size: number): boolean {
+  if (!isRecord(value) || value.ply !== index + 1 || !isRecord(value.action) || !validClock(value.clock)) return false
+  if (!['white', 'black'].includes(String(value.player_id)) || !Number.isFinite(value.elapsed_ms) || !validNotation(value.notation, index, size) || !validDelta(value.state_delta)) return false
   const type = value.action.type
   if (!['move', 'drop', 'ability'].includes(String(type))) return false
-  return typeof value.action.piece_id === 'string' && value.action.piece_id.length <= 256
+  if (!validText(value.action.piece_id, 256) || value.action.player_id !== value.player_id || (value.notation as Record<string, unknown>).side !== value.player_id) return false
+  if (type === 'move') return validSquare(value.action.from, size) && validSquare(value.action.to, size) && validText(value.action.move_option_id, 128)
+  if (type === 'drop') return validSquare(value.action.to, size)
+  return validText(value.action.ability_id, 128) && (value.action.to == null || validSquare(value.action.to, size))
 }
 
 function parseRecord(value: unknown): GameRecord | null {
-  if (!isRecord(value) || value.format_version !== 1 || typeof value.game_id !== 'string' || value.game_id.length > 128) return null
+  if (!isRecord(value) || value.format_version !== 2 || typeof value.game_id !== 'string' || value.game_id.length > 128) return null
   if (typeof value.ruleset_version !== 'string' || value.ruleset_version.length > 64 || typeof value.chessembly_version !== 'string' || value.chessembly_version.length > 64 || typeof value.display_name !== 'string' || value.display_name.length > 160) return null
   if (!Number.isSafeInteger(value.started_at_ms) || !validState(value.initial_state) || !validClock(value.initial_clock)) return null
   if (!isRecord(value.players) || !isRecord(value.players.white) || !isRecord(value.players.black)) return null
@@ -83,13 +117,16 @@ function parseRecord(value: unknown): GameRecord | null {
     const player = value.players[side]
     if (!isRecord(player) || player.side !== side || typeof player.public_id !== 'string' || player.public_id.length > 64 || typeof player.nickname !== 'string' || player.nickname.length > 80) return null
   }
-  if (!isRecord(value.piece_id_map) || Object.keys(value.piece_id_map).length > MAX_REPLAY_PIECES) return null
-  const indexes = Object.values(value.piece_id_map)
-  if (indexes.some(index => !Number.isInteger(index) || (index as number) < 0 || (index as number) >= MAX_REPLAY_PIECES) || new Set(indexes).size !== indexes.length) return null
-  if (!Array.isArray(value.actions) || value.actions.length > MAX_REPLAY_ACTIONS || !value.actions.every(validAction)) return null
-  const allowedIndexes = new Set(indexes as number[])
-  if ((value.actions as Array<Record<string, unknown>>).some(action => !allowedIndexes.has(action.piece_index as number))) return null
-  if (value.final_state != null && !validState(value.final_state)) return null
+  if (!isRecord(value.decks) || !isRecord(value.decks.white) || !isRecord(value.decks.black)) return null
+  const size = (value.initial_state as Record<string, unknown> & { board: { size: number } }).board.size
+  for (const side of ['white', 'black']) {
+    const deck = value.decks[side]
+    if (!isRecord(deck) || deck.side !== side || !validText(deck.deck_name, 160) || !Array.isArray(deck.deployments) || !Array.isArray(deck.pocket)) return null
+    if (deck.deployments.length > MAX_REPLAY_PIECES || deck.pocket.length > MAX_REPLAY_PIECES) return null
+    if (!deck.deployments.every(entry => isRecord(entry) && validText(entry.piece_name, 160) && validSquare(entry.square, size))) return null
+    if (!deck.pocket.every(entry => isRecord(entry) && validText(entry.piece_name, 160) && Number.isInteger(entry.count) && (entry.count as number) > 0 && (entry.count as number) <= MAX_REPLAY_PIECES)) return null
+  }
+  if (!Array.isArray(value.actions) || value.actions.length > MAX_REPLAY_ACTIONS || !value.actions.every((action, index) => validAction(action, index, size))) return null
   if (value.final_clock != null && !validClock(value.final_clock)) return null
   return value as unknown as GameRecord
 }
@@ -106,7 +143,7 @@ export async function decodeReplayCode(input: string): Promise<ReplayDecodeResul
   const compact = input.replace(/\s/gu, '')
   const versionMatch = /^DC-G(\d+)-/u.exec(compact)
   if (!versionMatch) return { ok: false, error: 'invalid_format' }
-  if (versionMatch[1] !== '1') return { ok: false, error: 'unsupported_version' }
+  if (versionMatch[1] !== '2') return { ok: false, error: 'unsupported_version' }
   const compressed = fromBase64Url(compact.slice(REPLAY_CODE_PREFIX.length))
   if (!compressed) return { ok: false, error: 'invalid_payload' }
   const bytes = await gunzipBounded(compressed)
@@ -116,14 +153,4 @@ export async function decodeReplayCode(input: string): Promise<ReplayDecodeResul
     const record = parseRecord(value)
     return record ? { ok: true, value: record } : { ok: false, error: 'invalid_schema' }
   } catch { return { ok: false, error: 'invalid_payload' } }
-}
-
-export async function replayHashesMatch(record: GameRecord): Promise<boolean> {
-  if (!globalThis.crypto?.subtle) return true
-  for (const entry of record.actions) {
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(entry.state_after))))
-    const actual = [...digest].map(byte => byte.toString(16).padStart(2, '0')).join('')
-    if (actual !== entry.state_hash.toLowerCase()) return false
-  }
-  return true
 }

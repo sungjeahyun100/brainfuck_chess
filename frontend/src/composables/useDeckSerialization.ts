@@ -33,7 +33,7 @@ function serializeDeck(deck: LobbyDeck): PlayerDeckRequest {
 }
 
 export function savedDeckToPlayerDeckRequest(deck: SavedDeck): PlayerDeckRequest {
-  return serializeDeck(deck)
+  return { ...serializeDeck(deck), name: deck.name }
 }
 
 export function serializeNeutralDeck(deck: SavedDeck, side: LobbyPlayer): PlayerDeckRequest {
@@ -42,6 +42,7 @@ export function serializeNeutralDeck(deck: SavedDeck, side: LobbyPlayer): Player
   }
 
   return {
+    name: deck.name,
     starting: deck.starting.map(piece => ({
       ...serializePiece(deck, piece.pieceType),
       square: mirrorSquare(piece.square, deck.boardSize),

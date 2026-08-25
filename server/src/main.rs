@@ -160,6 +160,8 @@ struct HeartbeatRequest {
 
 #[derive(Clone, Deserialize, Serialize)]
 struct PlayerDeckSpec {
+    #[serde(default)]
+    name: Option<String>,
     starting: Vec<StartingPieceSpec>,
     pocket: Vec<DeckPieceRef>,
 }
@@ -958,6 +960,7 @@ fn materialize_neutral_deck(
     }
 
     PlayerDeckSpec {
+        name: spec.name.clone(),
         starting: spec
             .starting
             .iter()
@@ -1105,13 +1108,29 @@ async fn start_room_game(
 
     room.game_id = Some(game_id.clone());
     let now = now_ms();
-    let stored = StoredGame::new_with_players(
+    let stored = StoredGame::new_with_players_and_deck_names(
         state,
         room.time_control,
         true,
         now,
         record_players,
         record_ownership,
+        HashMap::from([
+            (
+                "white".into(),
+                white_deck
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "white deck".into()),
+            ),
+            (
+                "black".into(),
+                black_deck
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "black deck".into()),
+            ),
+        ]),
     );
     let view = stored.view(now);
     app.games.insert(game_id.clone(), stored);
@@ -1355,13 +1374,29 @@ async fn create_game(
     .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let now = now_ms();
     let (record_players, record_ownership) = game_record_players(&app, &owner, &owner).await;
-    let stored = StoredGame::new_with_players(
+    let stored = StoredGame::new_with_players_and_deck_names(
         state,
         req.time_control,
         false,
         now,
         record_players,
         record_ownership,
+        HashMap::from([
+            (
+                "white".into(),
+                req.white_deck
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "white deck".into()),
+            ),
+            (
+                "black".into(),
+                req.black_deck
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "black deck".into()),
+            ),
+        ]),
     );
     let view = stored.view(now);
     app.games.insert(id.clone(), stored);
@@ -1989,6 +2024,7 @@ async fn submit_action(
 
     let moving_player = game.current_player.clone();
     let clock_before = game.clock.snapshot(now, true);
+    let state_before = game.state.clone();
     let (next_state, recorded_action) = match req.action {
         SubmitAction::Move(request) => {
             let piece = game.pieces.get(&request.piece_id).ok_or_else(|| {
@@ -2106,6 +2142,7 @@ async fn submit_action(
         player_clock_value(&clock_before, &moving_player),
         player_clock_value(&clock_after, &moving_player),
         clock_after,
+        &state_before,
         game.state.clone(),
     );
     if ended {
@@ -2187,6 +2224,7 @@ async fn run_bot_turn(
 
     let moving_player = entry.current_player.clone();
     let clock_before = entry.clock.snapshot(started_at, true);
+    let replay_initial_state = entry.state.clone();
     let result = play_bot_turn_detailed(entry.state.clone(), &req.bot_player_id, difficulty)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let finished_at = now_ms();
@@ -2206,6 +2244,7 @@ async fn run_bot_turn(
         .clock
         .finish_turn(&moving_player, &next_player, finished_at, ended);
     let clock_after = entry.clock.snapshot(finished_at, !ended);
+    let mut frame_before = replay_initial_state;
     for (index, frame) in result.timeline.iter().enumerate() {
         entry.record.push_action(
             moving_player.clone(),
@@ -2218,8 +2257,10 @@ async fn run_bot_turn(
             player_clock_value(&clock_before, &moving_player),
             player_clock_value(&clock_after, &moving_player),
             clock_after.clone(),
+            &frame_before,
             frame.state.clone(),
         );
+        frame_before = frame.state.clone();
     }
     if ended {
         let final_state = entry.state.clone();
@@ -2534,6 +2575,7 @@ async fn resolve_lab_packages(
     let owner = custom_piece::authenticated_owner(app, headers)
         .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
     let deck = PlayerDeckSpec {
+        name: None,
         starting: custom_pieces
             .iter()
             .map(|piece| StartingPieceSpec {
@@ -2766,6 +2808,7 @@ mod tests {
     fn test_app_with_game() -> (AppState, String) {
         let game_id = "test-game".to_string();
         let white_deck = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "white",
                 vec![
@@ -2782,6 +2825,7 @@ mod tests {
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "black",
                 vec![StartingPieceSpec {
@@ -2872,6 +2916,7 @@ mod tests {
     #[test]
     fn game_creation_rejects_deployment_zone_mismatches_for_both_players() {
         let valid_white = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "white",
                 vec![StartingPieceSpec {
@@ -2882,6 +2927,7 @@ mod tests {
             pocket: vec![],
         };
         let valid_black = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "black",
                 vec![StartingPieceSpec {
@@ -3384,18 +3430,42 @@ mod tests {
         assert_eq!(stored.current_player, "black");
         assert_eq!(stored.record.actions.len(), 1);
         assert_eq!(
-            stored.record.actions[0].state_after.turn_number,
-            stored.turn_number
+            stored.record.actions[0].notation.actor.piece_id,
+            "white_rook_1"
         );
         assert_eq!(
-            stored.record.actions[0].piece_index,
-            stored.record.piece_id_map["white_rook_1"]
+            stored.record.actions[0].notation.actor.from,
+            Some(Square::new(0, 0))
         );
+        assert!(matches!(
+            stored.record.actions[0].notation.kind,
+            crate::game_record::NotationActionKind::Move
+        ));
+        assert!(stored.record.actions[0]
+            .state_delta
+            .iter()
+            .any(|operation| matches!(
+                operation,
+                crate::game_record::StateDeltaOperation::Set { path, value }
+                    if path == &["turn_number".to_string()] && value == &serde_json::json!(2)
+            )));
+        let serialized = serde_json::to_value(&stored.record.actions[0]).unwrap();
+        assert!(serialized.get("state_after").is_none());
+        assert!(serialized.get("state_hash").is_none());
+        assert!(serialized.get("state_delta").is_some());
+        let compact_action_bytes = serde_json::to_vec(&stored.record.actions[0]).unwrap().len();
+        let legacy_state_bytes = serde_json::to_vec(&stored.state).unwrap().len();
+        assert!(
+            compact_action_bytes < legacy_state_bytes,
+            "compact={compact_action_bytes}, legacy_state={legacy_state_bytes}"
+        );
+        assert!(stored.record.initial_state.history.is_empty());
+        assert!(stored.record.decks.contains_key("white"));
         assert_eq!(stored.record.actions[0].clock.active_color, "black");
     }
 
     #[tokio::test]
-    async fn resignation_completes_a_portable_record_with_the_authoritative_final_state() {
+    async fn resignation_completes_a_portable_record_with_the_authoritative_result() {
         let (app, game_id) = test_app_with_game();
         app.games
             .get_mut(&game_id)
@@ -3424,14 +3494,9 @@ mod tests {
             Some(&GameEndReason::Resignation)
         );
         assert_eq!(
-            record.final_state.as_ref().map(|state| state.phase.clone()),
-            Some(GamePhase::Ended)
-        );
-        assert_eq!(
             record
-                .final_state
+                .result
                 .as_ref()
-                .and_then(|state| state.result.as_ref())
                 .and_then(|result| result.winner.as_deref()),
             Some("black")
         );
@@ -3515,6 +3580,7 @@ mod tests {
     async fn submit_move_action_applies_canonical_piece_state_effect() {
         let game_id = "windmill-game".to_string();
         let white_deck = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "white",
                 vec![
@@ -3531,6 +3597,7 @@ mod tests {
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "black",
                 vec![StartingPieceSpec {

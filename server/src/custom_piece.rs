@@ -1860,6 +1860,7 @@ mod tests {
             exposed_piece_key: created.exposed_piece_key.clone(),
         };
         let white = crate::PlayerDeckSpec {
+            name: None,
             starting: vec![
                 crate::StartingPieceSpec {
                     piece: crate::DeckPieceRef::BuiltIn {
@@ -1878,6 +1879,7 @@ mod tests {
             pocket: vec![custom_ref],
         };
         let black = crate::PlayerDeckSpec {
+            name: None,
             starting: vec![crate::StartingPieceSpec {
                 piece: crate::DeckPieceRef::BuiltIn {
                     piece_type: "king".into(),
@@ -1952,6 +1954,7 @@ mod tests {
             guest_owner_id: Some("alice".into()),
             host_deck: Some(white),
             guest_deck: Some(crate::PlayerDeckSpec {
+                name: None,
                 starting: vec![crate::StartingPieceSpec {
                     piece: crate::DeckPieceRef::BuiltIn {
                         piece_type: "king".into(),

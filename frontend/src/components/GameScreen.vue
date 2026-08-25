@@ -340,7 +340,7 @@ import Board from './Board.vue'
 import { applyTimelineFrame } from '../composables/useActionTimeline'
 import { CLOCK_URGENCY_THRESHOLDS_MS, timeControlLabel } from '../timeControls'
 import { encodeReplayCode } from '../replayCodec'
-import { formatAction } from '../replayNotation'
+import { formatLiveAction, formatNotation } from '../replayNotation'
 
 const props = defineProps<{
   state: GameState
@@ -420,7 +420,12 @@ const dropOptionsRequests = new Map<string, Promise<DropAction[]>>()
 const viewState = computed(() => botReplayState.value ?? props.state)
 const topPlayer = computed<PlayerId>(() => props.localPlayer ? otherPlayer(props.localPlayer) : 'black')
 const bottomPlayer = computed<PlayerId>(() => props.localPlayer ?? 'white')
-const liveNotation = computed(() => viewState.value.history.map((entry, index) => ({ ply: index + 1, text: formatAction(entry.action, viewState.value) })))
+const liveNotation = computed(() => viewState.value.history.map((entry, index) => ({
+  ply: index + 1,
+  text: viewState.value.record_notation?.[index]
+    ? formatNotation(viewState.value.record_notation[index])
+    : formatLiveAction(entry.action, viewState.value, index + 1),
+})))
 const estimatedServerNowMs = computed(() => (
   viewState.value.clock.server_now_ms + Math.max(0, displayNowMs.value - clockReceivedAtMs.value)
 ))
