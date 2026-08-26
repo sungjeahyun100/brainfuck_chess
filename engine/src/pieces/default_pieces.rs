@@ -93,7 +93,7 @@ pub use surface_to_air_missile_black::surface_to_air_missile_black_definition;
 pub use surface_to_air_missile_white::surface_to_air_missile_white_definition;
 pub(crate) use surface_to_air_missile_white::INTERCEPT_ABILITY_ID;
 pub use tank::tank_definition;
-pub(crate) use tank::TANK_FIRE_ABILITY_ID;
+pub(crate) use tank::{TANK_FIRE_ABILITY_ID, TANK_FIRE_RANGE};
 pub use tempest_bishop::tempest_bishop_definition;
 pub use tempest_knight::tempest_knight_definition;
 pub use tempest_pawn_black::tempest_pawn_black_definition;

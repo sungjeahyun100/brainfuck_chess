@@ -11,6 +11,7 @@ use crate::pieces::default_pieces::{
     BOMBER_BOMB_ABILITY_ID, BOMBER_LANDING_DISTANCE, BOMBER_LAND_ABILITY_ID,
     BOMBER_TAKEOFF_ABILITY_ID, BOMBER_TAKEOFF_DISTANCE, INTERCEPT_ABILITY_ID,
     MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID, TANK_FIRE_ABILITY_ID,
+    TANK_FIRE_RANGE,
 };
 use crate::rules::{get_base_zone_squares, player_forward_direction};
 use crate::terrain::{can_affect_square, can_capture_piece};
@@ -778,7 +779,7 @@ pub fn generate_piece_legal_ability_actions(
         ("tank", TANK_FIRE_ABILITY_ID) if actor.layer == PieceLayer::Ground => {
             for (dx, dy) in QUEEN_DIRECTIONS {
                 let mut distance = 1;
-                loop {
+                while distance <= TANK_FIRE_RANGE {
                     let target =
                         Square::new(origin.file + dx * distance, origin.rank + dy * distance);
                     if !game_state.board.is_in_bounds(&target) {

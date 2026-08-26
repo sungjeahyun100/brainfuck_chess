@@ -272,6 +272,24 @@ fn tank_aim_stops_at_first_piece_and_blast_removes_friendlies() {
 }
 
 #[test]
+fn tank_aim_is_limited_to_five_squares() {
+    let mut game = state();
+    add_piece(&mut game, "tank", "white", "tank", Square::new(0, 0));
+
+    let actions = generate_piece_legal_ability_actions(&game, &"tank".into(), "tank-fire");
+
+    assert!(actions
+        .iter()
+        .any(|action| action.to == Some(Square::new(5, 0))));
+    assert!(!actions
+        .iter()
+        .any(|action| action.to == Some(Square::new(6, 0))));
+    assert!(!actions
+        .iter()
+        .any(|action| action.to == Some(Square::new(6, 6))));
+}
+
+#[test]
 fn tank_cannot_fire_a_fourth_shell() {
     let mut game = state();
     add_piece(&mut game, "tank", "white", "tank", Square::new(3, 3));

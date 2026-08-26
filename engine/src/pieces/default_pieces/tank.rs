@@ -1,6 +1,7 @@
 use crate::types::*;
 
 pub const TANK_FIRE_ABILITY_ID: &str = "tank-fire";
+pub const TANK_FIRE_RANGE: i32 = 5;
 
 pub fn tank_definition() -> PieceDefinition {
     let movement = "\
@@ -46,7 +47,9 @@ take-move(-1, 0) take-move(-1, 0);"
             MoveOptionDefinition {
                 id: TANK_FIRE_ABILITY_ID.into(),
                 name: "주포 발사".into(),
-                description: "8방향으로 조준해 착탄지와 상하좌우의 지상 기물을 제거합니다.".into(),
+                description:
+                    "8방향으로 최대 5칸까지 조준해 착탄지와 상하좌우의 지상 기물을 제거합니다."
+                        .into(),
                 kind: MoveOptionKind::Ability,
                 layer_ids: Vec::new(),
                 execution_mode: MoveOptionExecutionMode::StandaloneAction,
