@@ -59,6 +59,7 @@ function validState(value: unknown): boolean {
   const size = value.board.size as number
   if (size < 8 || size > 12 || !isRecord(value.pieces) || Object.keys(value.pieces).length > MAX_REPLAY_PIECES) return false
   return isRecord(value.piece_definitions) && isRecord(value.players) && Array.isArray(value.history)
+    && validCustomPieceManifest(value.custom_piece_manifest)
 }
 
 function validClock(value: unknown): boolean {
@@ -73,6 +74,20 @@ function validSquare(value: unknown, size: number): boolean {
 }
 
 function validText(value: unknown, max = 128): boolean { return typeof value === 'string' && value.length > 0 && value.length <= max }
+
+function validCustomPieceManifest(value: unknown): boolean {
+  if (value === undefined) return true
+  if (!Array.isArray(value) || value.length > MAX_REPLAY_PIECES) return false
+  return value.every(entry => isRecord(entry)
+    && validText(entry.package_id, 256)
+    && Number.isInteger(entry.version) && (entry.version as number) > 0
+    && validText(entry.content_hash, 256)
+    && validText(entry.definition_snapshot_hash, 256)
+    && validText(entry.exposed_type_id, 256)
+    && Array.isArray(entry.runtime_type_ids)
+    && entry.runtime_type_ids.length <= MAX_REPLAY_PIECES
+    && entry.runtime_type_ids.every(typeId => validText(typeId, 256)))
+}
 
 const DELTA_ROOTS = new Set(['board', 'pieces', 'players', 'current_player', 'turn_number', 'phase', 'en_passant_target', 'en_passant_available_to', 'global_state', 'result'])
 const FORBIDDEN_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor'])

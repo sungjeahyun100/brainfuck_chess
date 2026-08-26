@@ -37,6 +37,23 @@ test('Replay Code preserves a guest nickname without inventing a public id', asy
   if (decoded.ok) assert.deepEqual(decoded.value.players.black, guestRecord.players.black)
 })
 
+test('Replay Code accepts the intentionally omitted empty custom piece manifest', async () => {
+  const legacyRecord = structuredClone(record) as GameRecord
+  delete legacyRecord.initial_state.custom_piece_manifest
+  const decoded = await decodeReplayCode(await encodeReplayCode(legacyRecord))
+  assert.equal(decoded.ok, true)
+  if (decoded.ok) assert.equal(decoded.value.initial_state.custom_piece_manifest, undefined)
+})
+
+test('Replay Code rejects a present but malformed custom piece manifest', async () => {
+  const malformed = structuredClone(record) as unknown as Record<string, unknown>
+  ;(malformed.initial_state as Record<string, unknown>).custom_piece_manifest = { exposed_type_id: 'custom:bad:v1:bad' }
+  assert.deepEqual(
+    await decodeReplayCode(await encodeReplayCode(malformed as unknown as GameRecord)),
+    { ok: false, error: 'invalid_schema' },
+  )
+})
+
 test('Replay Code rejects prefix, version, truncation, malformed payload and excessive input', async () => {
   assert.deepEqual(await decodeReplayCode(''), { ok: false, error: 'empty' })
   assert.deepEqual(await decodeReplayCode('wrong'), { ok: false, error: 'invalid_format' })

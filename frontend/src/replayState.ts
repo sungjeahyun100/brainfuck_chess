@@ -55,6 +55,7 @@ function isRenderableReplayRecord(value: unknown): value is GameRecord {
   if (!isRecord(value) || !isRecord(value.initial_state) || !isRecord(value.initial_clock)) return false
   const initialState = value.initial_state
   if (!isRecord(initialState.board) || !isRecord(initialState.pieces) || !isRecord(initialState.piece_definitions)) return false
+  if (initialState.custom_piece_manifest !== undefined && !Array.isArray(initialState.custom_piece_manifest)) return false
   if (!isRecord(value.players) || !isRecord(value.players.white) || !isRecord(value.players.black)) return false
   if (!isRecord(value.decks) || !isRecord(value.decks.white) || !isRecord(value.decks.black)) return false
   for (const side of ['white', 'black']) {
@@ -96,7 +97,11 @@ export function applyStateDelta(state: GameState, operations: StateDeltaOperatio
 }
 
 export function buildReplayFrames(record: GameRecord): GameState[] {
-  const frames = [clone(record.initial_state)]
+  const initialState = clone(record.initial_state)
+  const frames: GameState[] = [{
+    ...initialState,
+    custom_piece_manifest: Array.isArray(initialState.custom_piece_manifest) ? initialState.custom_piece_manifest : [],
+  }]
   for (const entry of record.actions) frames.push(applyStateDelta(frames[frames.length - 1], entry.state_delta))
   return frames
 }

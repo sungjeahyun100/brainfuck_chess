@@ -1,5 +1,10 @@
 import type { GameClock, GameResult, GameState, PieceStateValue, PlayerId, Square, TimeControlId, TurnAction } from './game'
 
+export type ReplayInitialState = Omit<GameState, 'custom_piece_manifest'> & {
+  /** Empty manifests are omitted by the Rust serializer for built-in-only games. */
+  custom_piece_manifest?: GameState['custom_piece_manifest']
+}
+
 export interface GameRecordPlayer { public_id: string | null; nickname: string; side: PlayerId }
 export interface DeckSnapshot {
   snapshot_version?: number; side: PlayerId; deck_name: string; map_id?: string; board_size?: number
@@ -23,7 +28,7 @@ export interface GameRecord {
   format_version: 2; game_id: string; display_name: string; ruleset_version: string; chessembly_version: string
   started_at_ms: number; ended_at_ms?: number | null; result?: GameResult | null
   players: Record<PlayerId, GameRecordPlayer>; time_control: TimeControlId
-  initial_state: GameState; initial_clock: GameClock; decks: Record<PlayerId, DeckSnapshot>; actions: RecordedAction[]; final_clock?: GameClock | null
+  initial_state: ReplayInitialState; initial_clock: GameClock; decks: Record<PlayerId, DeckSnapshot>; actions: RecordedAction[]; final_clock?: GameClock | null
 }
 export interface GameRecordSummary {
   game_id: string; display_name: string; started_at_ms: number; ended_at_ms?: number | null

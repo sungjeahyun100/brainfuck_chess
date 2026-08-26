@@ -19,7 +19,7 @@
         <section><h3>덱</h3><div class="deck-summary" v-for="side in replaySides" :key="side">
           <strong>{{ side === 'white' ? '백' : '흑' }} · {{ record.decks[side].deck_name }}</strong>
           <small>{{ deploymentText(side) }}</small><small>{{ pocketText(side) }}</small>
-          <button class="btn-secondary" :disabled="!canCopyDeck(side)" @click="copyDeck(side)">{{ deckCopyStatus[side] }}</button>
+          <button class="btn-secondary" :disabled="!canCopyDeck(side)" @click="copyDeck(side)">{{ deckCopyLabel(side) }}</button>
         </div></section>
         <section><h3>기보</h3><div class="notation-list">
           <button class="notation-row" :class="{ active: ply === 0 }" @click="go(0)">0. 시작 위치</button>
@@ -69,6 +69,10 @@ let timer: number | null = null
 const replayResult = computed(() => buildReplayFramesResult(props.record))
 const actionCount = computed(() => replayResult.value.ok ? props.record.actions.length : 0)
 const state = computed(() => replayResult.value.ok ? replayResult.value.frames[ply.value] ?? null : null)
+const deckCodeSources = computed(() => ({
+  white: frozenDeckCodeSource(props.record, 'white'),
+  black: frozenDeckCodeSource(props.record, 'black'),
+}))
 const activeClock = computed(() => ply.value === 0 ? props.record.initial_clock : props.record.actions[ply.value - 1].clock)
 const notationRows = computed(() => groupNotation(props.record.actions))
 const compatibilityWarning = computed(() => props.record.format_version !== 2 || props.record.ruleset_version !== 'deck-chess-1' || props.record.chessembly_version !== 'chessembly-1')
@@ -76,11 +80,11 @@ const lastMove = computed(() => { const action = ply.value ? props.record.action
 function duration(ms: number) { return `${(Math.max(0, ms) / 1000).toFixed(1)}s` }
 function deploymentText(side: PlayerId) { return props.record.decks[side].deployments.map(piece => `${piece.piece_name} ${squareName(piece.square)}`).join(', ') || '보드 배치 없음' }
 function pocketText(side: PlayerId) { return props.record.decks[side].pocket.map(piece => `${piece.piece_name} x${piece.count}`).join(', ') || '포켓 없음' }
-function canCopyDeck(side: PlayerId) { return frozenDeckCodeSource(props.record, side) !== null }
+function canCopyDeck(side: PlayerId) { return deckCodeSources.value[side] !== null }
+function deckCopyLabel(side: PlayerId) { return canCopyDeck(side) ? deckCopyStatus.value[side] : '덱 코드 복사 불가' }
 async function copyDeck(side: PlayerId) {
-  const source = frozenDeckCodeSource(props.record, side); if (!source) return
-  const code = encodeDeckCode(source)
-  try { await navigator.clipboard.writeText(code); deckCopyStatus.value[side] = '복사 완료' } catch { deckCopyStatus.value[side] = '복사 실패' }
+  const source = deckCodeSources.value[side]; if (!source) return
+  try { await navigator.clipboard.writeText(encodeDeckCode(source)); deckCopyStatus.value[side] = '복사 완료' } catch { deckCopyStatus.value[side] = '복사 실패' }
   window.setTimeout(() => { deckCopyStatus.value[side] = '덱 코드 복사' }, 1800)
 }
 function clockText(player: PlayerId) { const clock = activeClock.value; const ms = clock.mode === 'countdown' ? (player === 'white' ? clock.white_remaining_ms ?? 0 : clock.black_remaining_ms ?? 0) : (player === 'white' ? clock.white_elapsed_ms : clock.black_elapsed_ms); const seconds = Math.ceil(ms / 1000); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}` }
