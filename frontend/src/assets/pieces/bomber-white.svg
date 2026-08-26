@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">폭격기</title>
+  <desc id="desc">흰색 기체와 폭탄을 검은 윤곽선으로 그린 위에서 본 폭격기 픽토그램</desc>
+  <g fill="#fff" stroke="#111" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <!-- top-down aircraft silhouette -->
+    <path d="M256 48
+      C236 48 224 68 220 101
+      L206 207 L75 276
+      Q59 284 56 305 L53 330
+      L200 294 L190 397 L145 428
+      L142 459 L256 432 L370 459 L367 428 L322 397 L312 294 L459 330
+      L456 305 Q453 284 437 276 L306 207 L292 101
+      C288 68 276 48 256 48 Z"/>
+    <!-- cockpit and wing details -->
+    <path d="M229 133 Q256 103 283 133 L292 202 H220 Z"/>
+    <path d="M206 207 L200 294 M306 207 L312 294" fill="none"/>
+    <path d="M256 209 V416" fill="none"/>
+    <!-- bomb load -->
+    <path d="M153 317 V365 Q153 385 171 397 Q189 385 189 365 V317 Z"/>
+    <path d="M323 317 V365 Q323 385 341 397 Q359 385 359 365 V317 Z"/>
+    <path d="M146 325 L171 304 L196 325 M316 325 L341 304 L366 325" fill="none"/>
+  </g>
+</svg>

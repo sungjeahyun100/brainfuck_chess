@@ -1,8 +1,8 @@
-import type { LobbyDeck } from '../types/deck'
+import type { CustomDeckPieceRef, LobbyDeck } from '../types/deck'
 import type { BoardMapId } from '../types/game'
 import { findBoardMap, standardMapId } from '../boardMaps.ts'
 
-export const DECK_CODE_PREFIX = 'DC2.'
+export const DECK_CODE_PREFIX = 'DC3.'
 export const MAX_DECK_CODE_LENGTH = 65_536
 
 const MAX_STARTING_PIECES = 144
@@ -26,6 +26,8 @@ export interface DeckCodeV1 {
 
 export interface DecodedDeckCode extends DeckCodeV1 {
   mapId: BoardMapId
+  name?: string
+  customPieces?: CustomDeckPieceRef[]
 }
 
 export type DeckCodeDecodeError =
@@ -110,9 +112,10 @@ function decodeBase64Url(payload: string): string | null {
   }
 }
 
-export function encodeDeckCode(deck: LobbyDeck & { boardSize: number; mapId: BoardMapId }): string {
+export function encodeDeckCode(deck: LobbyDeck & { boardSize: number; mapId: BoardMapId; name?: string }): string {
   const value = {
-    v: 2,
+    v: 3,
+    name: 'name' in deck && typeof deck.name === 'string' ? deck.name : '',
     mapId: deck.mapId,
     boardSize: deck.boardSize,
     starting: deck.starting
@@ -126,6 +129,9 @@ export function encodeDeckCode(deck: LobbyDeck & { boardSize: number; mapId: Boa
       .filter(([, count]) => count > 0)
       .map(([pieceId, count]) => ({ pieceId, count }))
       .sort((left, right) => left.pieceId.localeCompare(right.pieceId)),
+    customPieces: [...(deck.customPieces ?? [])]
+      .map(piece => ({ id: piece.id, version: piece.version, contentHash: piece.contentHash, exposedPieceKey: piece.exposedPieceKey }))
+      .sort((left, right) => left.id.localeCompare(right.id) || left.version - right.version || left.exposedPieceKey.localeCompare(right.exposedPieceKey)),
   }
   return `${DECK_CODE_PREFIX}${encodeBase64Url(JSON.stringify(value))}`
 }
@@ -137,7 +143,7 @@ export function decodeDeckCode(input: string): DeckCodeDecodeResult {
 
   const match = /^DC(\d+)\.(.*)$/u.exec(code)
   if (!match) return { ok: false, error: 'invalid_format' }
-  if (match[1] !== '1' && match[1] !== '2') return { ok: false, error: 'unsupported_version' }
+  if (match[1] !== '1' && match[1] !== '2' && match[1] !== '3') return { ok: false, error: 'unsupported_version' }
 
   const json = decodeBase64Url(match[2])
   if (json === null) return { ok: false, error: 'invalid_payload' }
@@ -148,15 +154,34 @@ export function decodeDeckCode(input: string): DeckCodeDecodeResult {
       const mapId = value ? standardMapId(value.boardSize) : null
       return value && mapId ? { ok: true, value: { ...value, mapId } } : { ok: false, error: 'invalid_schema' }
     }
-    if (!isRecord(parsed) || !hasExactlyKeys(parsed, ['v', 'mapId', 'boardSize', 'starting', 'pocket'])) {
+    const expectedKeys = match[1] === '3'
+      ? ['v', 'name', 'mapId', 'boardSize', 'starting', 'pocket', 'customPieces']
+      : ['v', 'mapId', 'boardSize', 'starting', 'pocket']
+    if (!isRecord(parsed) || !hasExactlyKeys(parsed, expectedKeys)) {
       return { ok: false, error: 'invalid_schema' }
     }
-    const { mapId: _mapId, ...withoutMapId } = parsed
+    const { mapId: _mapId, name: _name, customPieces: _customPieces, ...withoutMapId } = parsed
     const legacyShape = { ...withoutMapId, v: 1 }
     const value = parseV1(legacyShape)
     const map = typeof parsed.mapId === 'string' ? findBoardMap(parsed.mapId) : null
+    let customPieces: CustomDeckPieceRef[] | undefined
+    if (match[1] === '3') {
+      if (parsed.v !== 3 || typeof parsed.name !== 'string' || parsed.name.length > 100 || !Array.isArray(parsed.customPieces) || parsed.customPieces.length > 256) return { ok: false, error: 'invalid_schema' }
+      customPieces = []
+      const identities = new Set<string>()
+      for (const item of parsed.customPieces) {
+        if (!isRecord(item) || !hasExactlyKeys(item, ['id', 'version', 'contentHash', 'exposedPieceKey'])
+          || !isSafePieceId(item.id) || !Number.isInteger(item.version) || (item.version as number) <= 0
+          || typeof item.contentHash !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/u.test(item.contentHash)
+          || !isSafePieceId(item.exposedPieceKey)) return { ok: false, error: 'invalid_schema' }
+        const key = `${item.id}:${item.version}:${item.exposedPieceKey}`
+        if (identities.has(key)) return { ok: false, error: 'invalid_schema' }
+        identities.add(key)
+        customPieces.push({ id: item.id, version: item.version as number, contentHash: item.contentHash, exposedPieceKey: item.exposedPieceKey })
+      }
+    }
     return value && map && map.boardSize === value.boardSize
-      ? { ok: true, value: { ...value, mapId: map.id } }
+      ? { ok: true, value: { ...value, mapId: map.id, ...(match[1] === '3' ? { name: parsed.name as string, customPieces } : {}) } }
       : { ok: false, error: 'invalid_schema' }
   } catch {
     return { ok: false, error: 'invalid_payload' }

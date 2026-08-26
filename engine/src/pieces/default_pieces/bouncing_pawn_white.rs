@@ -6,6 +6,7 @@ pub fn bouncing_pawn_white_definition() -> PieceDefinition {
         id: "bouncing-pawn-white".into(),
         name: "Bouncing Pawn".into(),
         score: 2,
+        max_ammo: 0,
         chessembly_code: "\
 move(0, 1);
 observe(0, 1) move(0, 2);

@@ -15,8 +15,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::types::{
-    Board, ChessemblyActionEffect, ChessemblyResult, Piece, PieceDefinition, PieceId, PlayerId,
-    Square, SquareId, StateUpdate,
+    Board, ChessemblyActionEffect, ChessemblyResult, Piece, PieceDefinition, PieceId, PieceLayer,
+    PlayerId, Square, SquareId, StateUpdate,
 };
 
 use super::ast::{Expr, Program};
@@ -25,6 +25,7 @@ use super::ast::{Expr, Program};
 
 pub struct ExecutionContext<'a> {
     pub board: &'a Board,
+    pub layer: PieceLayer,
     /// Square supplied when interpretation starts. Every chain resets to this
     /// square, and `piece(...)` resolves the board piece located here.
     pub initial_square: Square,
@@ -187,7 +188,8 @@ fn eval_expr(
         // ── Movement expressions ─────────────────────────────────────────────
         Expr::Move(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
-            if !ctx.board.is_in_bounds(&target) || !ctx.board.is_empty(&target) {
+            if !ctx.board.is_in_bounds(&target) || !ctx.board.is_empty_at_layer(&target, ctx.layer)
+            {
                 return Ok((ExprResult::False, 1));
             }
             // Empty square: activate as movement, advance anchor
@@ -201,7 +203,7 @@ fn eval_expr(
             if !ctx.board.is_in_bounds(&target) {
                 return Ok((ExprResult::False, 1));
             }
-            let occupant = ctx.board.get_piece_at(&target);
+            let occupant = ctx.board.get_piece_at_layer(&target, ctx.layer);
             match occupant {
                 None => {
                     // Empty square: this is still a threatened square.
@@ -234,7 +236,7 @@ fn eval_expr(
             if !ctx.board.is_in_bounds(&target) {
                 return Ok((ExprResult::False, 1));
             }
-            let occupant = ctx.board.get_piece_at(&target);
+            let occupant = ctx.board.get_piece_at_layer(&target, ctx.layer);
             match occupant {
                 None => {
                     // Empty target is still threatened by take-move.
@@ -263,7 +265,7 @@ fn eval_expr(
             if !ctx.board.is_in_bounds(&target) {
                 return Ok((ExprResult::False, 1));
             }
-            let occupant = ctx.board.get_piece_at(&target);
+            let occupant = ctx.board.get_piece_at_layer(&target, ctx.layer);
             match occupant {
                 None => {
                     // Empty square is threatened while scanning.
@@ -298,7 +300,9 @@ fn eval_expr(
             state.last_was_take = false;
 
             // Jump is like `move`: only activates empty squares
-            if !ctx.board.is_in_bounds(&jump_target) || !ctx.board.is_empty(&jump_target) {
+            if !ctx.board.is_in_bounds(&jump_target)
+                || !ctx.board.is_empty_at_layer(&jump_target, ctx.layer)
+            {
                 return Ok((ExprResult::False, 1));
             }
             activate_movement(jump_target, state, result);
@@ -311,7 +315,7 @@ fn eval_expr(
             if !ctx.board.is_in_bounds(&target) {
                 return Ok((ExprResult::False, 1));
             }
-            let occupant = ctx.board.get_piece_at(&target);
+            let occupant = ctx.board.get_piece_at_layer(&target, ctx.layer);
             match occupant {
                 None => {
                     activate_movement(target, state, result);
@@ -364,7 +368,8 @@ fn eval_expr(
         // ── Conditional expressions ───────────────────────────────────────────
         Expr::Observe(dx, dy) => {
             let target = Square::new(state.anchor.file + dx, state.anchor.rank + dy);
-            let empty = ctx.board.is_in_bounds(&target) && ctx.board.is_empty(&target);
+            let empty =
+                ctx.board.is_in_bounds(&target) && ctx.board.is_empty_at_layer(&target, ctx.layer);
             if empty {
                 (ExprResult::True, 1)
             } else {
@@ -379,7 +384,7 @@ fn eval_expr(
             }
 
             state.anchor = target;
-            if ctx.board.is_empty(&target) {
+            if ctx.board.is_empty_at_layer(&target, ctx.layer) {
                 (ExprResult::True, 1)
             } else {
                 (ExprResult::False, 1)
@@ -391,7 +396,7 @@ fn eval_expr(
             if !ctx.board.is_in_bounds(&target) {
                 return Ok((ExprResult::False, 1));
             }
-            match ctx.board.get_piece_at(&target) {
+            match ctx.board.get_piece_at_layer(&target, ctx.layer) {
                 Some(pid) if is_enemy_piece(pid, &ctx.player, ctx.all_pieces) => {
                     (ExprResult::True, 1)
                 }
@@ -404,7 +409,7 @@ fn eval_expr(
             if !ctx.board.is_in_bounds(&target) {
                 return Ok((ExprResult::False, 1));
             }
-            match ctx.board.get_piece_at(&target) {
+            match ctx.board.get_piece_at_layer(&target, ctx.layer) {
                 Some(pid) if !is_enemy_piece(pid, &ctx.player, ctx.all_pieces) => {
                     (ExprResult::True, 1)
                 }

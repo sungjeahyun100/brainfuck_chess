@@ -57,6 +57,7 @@ fn state_with_piece(type_id: &str) -> GameState {
     let mut board = Board {
         size: 8,
         squares: HashMap::new(),
+        air_squares: HashMap::new(),
         terrain: HashMap::new(),
     };
     board
@@ -70,6 +71,9 @@ fn state_with_piece(type_id: &str) -> GameState {
         in_pocket: false,
         captured: false,
         has_moved: false,
+        current_ammo: 0,
+        layer: brainfuck_chess_engine::types::PieceLayer::Ground,
+        remaining_flight_turns: 0,
         state: HashMap::new(),
         move_option_cooldowns: HashMap::new(),
     };
@@ -262,6 +266,9 @@ fn custom_piece_capture_and_pocket_drop_use_the_installed_catalog() {
             in_pocket: false,
             captured: false,
             has_moved: false,
+            current_ammo: 0,
+            layer: brainfuck_chess_engine::types::PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: HashMap::new(),
             move_option_cooldowns: HashMap::new(),
         },

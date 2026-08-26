@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">탱크</title>
+  <desc id="desc">흰색 차체와 긴 주포, 무한궤도를 검은 윤곽선으로 그린 탱크 픽토그램</desc>
+  <g fill="#fff" stroke="#111" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <!-- turret and main gun -->
+    <path d="M176 221 V184 Q176 155 205 155 H310 Q339 155 339 184 V221 Z"/>
+    <path d="M339 173 H459 V207 H339 Z"/>
+    <path d="M459 164 H482 V216 H459 Z"/>
+    <path d="M224 155 V126 H287 V155"/>
+    <path d="M256 126 V91" fill="none"/>
+    <!-- sloped hull -->
+    <path d="M112 221 H374 L424 292 L393 337 H93 L61 292 Z"/>
+    <path d="M119 247 H359 L386 286 H91 Z" fill="none"/>
+    <!-- tracks -->
+    <path d="M83 326 H400 Q430 326 442 352 L457 384 Q468 410 442 431 Q429 442 408 442 H92 Q70 442 57 428 Q38 407 50 381 L65 350 Q73 326 83 326 Z"/>
+    <circle cx="111" cy="384" r="31"/>
+    <circle cx="183" cy="384" r="31"/>
+    <circle cx="256" cy="384" r="31"/>
+    <circle cx="329" cy="384" r="31"/>
+    <circle cx="401" cy="384" r="31"/>
+    <path d="M91 442 H409" fill="none"/>
+  </g>
+</svg>

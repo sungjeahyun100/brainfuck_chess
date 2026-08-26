@@ -3,7 +3,7 @@ use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -22,6 +22,24 @@ const RESERVED_PUBLIC_IDS: &[&str] = &[
     "system",
 ];
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ProfileVisibility {
+    #[default]
+    Public,
+    Private,
+}
+
+impl ProfileVisibility {
+    pub(crate) fn parse(value: &str) -> Result<Self, ()> {
+        match value {
+            "public" => Ok(Self::Public),
+            "private" => Ok(Self::Private),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UserProfile {
@@ -29,6 +47,7 @@ pub(crate) struct UserProfile {
     pub(crate) public_id: Option<String>,
     pub(crate) display_name: Option<String>,
     pub(crate) avatar_url: Option<String>,
+    pub(crate) profile_visibility: ProfileVisibility,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +91,7 @@ pub(crate) trait AccountRepository: Send + Sync {
         user_id: &str,
         public_id: Option<&str>,
         display_name: Option<&str>,
+        profile_visibility: Option<ProfileVisibility>,
     ) -> Result<UserProfile, AccountUpdateError>;
     async fn complete_google_login(
         &self,
@@ -110,6 +130,7 @@ impl AccountRepository for InMemoryAccountRepository {
                     public_id: None,
                     display_name: None,
                     avatar_url: None,
+                    profile_visibility: ProfileVisibility::Public,
                 },
                 registered: false,
             });
@@ -131,6 +152,7 @@ impl AccountRepository for InMemoryAccountRepository {
         user_id: &str,
         public_id: Option<&str>,
         display_name: Option<&str>,
+        profile_visibility: Option<ProfileVisibility>,
     ) -> Result<UserProfile, AccountUpdateError> {
         let mut users = self
             .users
@@ -152,6 +174,9 @@ impl AccountRepository for InMemoryAccountRepository {
         }
         if let Some(display_name) = display_name {
             user.profile.display_name = Some(display_name.to_owned());
+        }
+        if let Some(profile_visibility) = profile_visibility {
+            user.profile.profile_visibility = profile_visibility;
         }
         Ok(user.profile.clone())
     }
@@ -201,6 +226,7 @@ impl AccountRepository for InMemoryAccountRepository {
                         public_id: None,
                         display_name: None,
                         avatar_url: None,
+                        profile_visibility: ProfileVisibility::Public,
                     },
                     registered: true,
                 });
@@ -269,7 +295,7 @@ impl AccountRepository for PostgresAccountRepository {
 
     async fn authenticated_user(&self, user_id: &str) -> Result<Option<UserProfile>, &'static str> {
         let row = sqlx::query(
-            "SELECT id, public_id, display_name, avatar_url FROM shared.users \
+            "SELECT id, public_id, display_name, avatar_url, profile_visibility FROM shared.users \
              WHERE id = $1 AND account_kind = 'registered' AND status = 'active'",
         )
         .bind(user_id)
@@ -284,17 +310,23 @@ impl AccountRepository for PostgresAccountRepository {
         user_id: &str,
         public_id: Option<&str>,
         display_name: Option<&str>,
+        profile_visibility: Option<ProfileVisibility>,
     ) -> Result<UserProfile, AccountUpdateError> {
         let now = timestamp().map_err(|_| AccountUpdateError::Unavailable)?;
         let row = sqlx::query(
             "UPDATE shared.users SET public_id = COALESCE($2, public_id), \
-             display_name = COALESCE($3, display_name), updated_at = $4 \
+             display_name = COALESCE($3, display_name), \
+             profile_visibility = COALESCE($4, profile_visibility), updated_at = $5 \
              WHERE id = $1 AND account_kind = 'registered' AND status = 'active' \
-             RETURNING id, public_id, display_name, avatar_url",
+             RETURNING id, public_id, display_name, avatar_url, profile_visibility",
         )
         .bind(user_id)
         .bind(public_id)
         .bind(display_name)
+        .bind(profile_visibility.map(|value| match value {
+            ProfileVisibility::Public => "public",
+            ProfileVisibility::Private => "private",
+        }))
         .bind(now)
         .fetch_optional(&self.pool)
         .await
@@ -427,7 +459,7 @@ impl AccountRepository for PostgresAccountRepository {
         .map_err(|_| "unavailable")?;
 
         let row = sqlx::query(
-            "SELECT id, public_id, display_name, avatar_url FROM shared.users WHERE id = $1",
+            "SELECT id, public_id, display_name, avatar_url, profile_visibility FROM shared.users WHERE id = $1",
         )
         .bind(&target_id)
         .fetch_one(&mut *tx)
@@ -448,6 +480,12 @@ fn profile_from_row(row: sqlx::postgres::PgRow) -> Result<UserProfile, &'static 
         public_id: row.try_get("public_id").map_err(|_| "unavailable")?,
         display_name: row.try_get("display_name").map_err(|_| "unavailable")?,
         avatar_url: row.try_get("avatar_url").map_err(|_| "unavailable")?,
+        profile_visibility: ProfileVisibility::parse(
+            row.try_get::<String, _>("profile_visibility")
+                .map_err(|_| "unavailable")?
+                .as_str(),
+        )
+        .map_err(|_| "unavailable")?,
     })
 }
 
@@ -618,17 +656,70 @@ mod tests {
             .unwrap();
 
         let updated = repository
-            .update_profile("account-a", Some("deck_player"), None)
+            .update_profile("account-a", Some("deck_player"), None, None)
             .await
             .unwrap();
         assert_eq!(updated.id, "account-a");
         assert_eq!(updated.public_id.as_deref(), Some("deck_player"));
         assert!(matches!(
             repository
-                .update_profile("account-b", Some("deck_player"), None)
+                .update_profile("account-b", Some("deck_player"), None, None)
                 .await,
             Err(AccountUpdateError::PublicIdTaken)
         ));
+    }
+
+    #[tokio::test]
+    async fn visibility_defaults_public_and_updates_with_other_profile_fields() {
+        let custom = Arc::new(InMemoryCustomPieceRepository::default());
+        let repository = InMemoryAccountRepository::new(custom);
+        let LoginResult::Complete { user, .. } = repository
+            .complete_google_login("account-privacy", &google("google-privacy"), None)
+            .await
+            .unwrap()
+        else {
+            panic!("login should complete")
+        };
+        assert_eq!(user.profile_visibility, ProfileVisibility::Public);
+
+        let private = repository
+            .update_profile(
+                "account-privacy",
+                Some("private_player"),
+                Some("비공개 플레이어"),
+                Some(ProfileVisibility::Private),
+            )
+            .await
+            .unwrap();
+        assert_eq!(private.public_id.as_deref(), Some("private_player"));
+        assert_eq!(private.display_name.as_deref(), Some("비공개 플레이어"));
+        assert_eq!(private.profile_visibility, ProfileVisibility::Private);
+
+        let public = repository
+            .update_profile(
+                "account-privacy",
+                None,
+                None,
+                Some(ProfileVisibility::Public),
+            )
+            .await
+            .unwrap();
+        assert_eq!(public.profile_visibility, ProfileVisibility::Public);
+    }
+
+    #[test]
+    fn visibility_parser_rejects_unknown_values() {
+        assert_eq!(
+            ProfileVisibility::parse("public"),
+            Ok(ProfileVisibility::Public)
+        );
+        assert_eq!(
+            ProfileVisibility::parse("private"),
+            Ok(ProfileVisibility::Private)
+        );
+        for invalid in ["friends_only", "hidden", "abc", "", "PUBLIC"] {
+            assert!(ProfileVisibility::parse(invalid).is_err());
+        }
     }
 
     #[test]
@@ -662,7 +753,7 @@ mod tests {
             .await
             .unwrap();
         repository
-            .update_profile("account-a", None, Some("새 닉네임"))
+            .update_profile("account-a", None, Some("새 닉네임"), None)
             .await
             .unwrap();
 
@@ -714,17 +805,19 @@ mod tests {
         };
         assert_eq!(first.id, second.id);
 
-        prod.update_profile(&first.id, None, Some("공유 닉네임"))
-            .await
-            .unwrap();
+        prod.update_profile(
+            &first.id,
+            None,
+            Some("공유 닉네임"),
+            Some(ProfileVisibility::Private),
+        )
+        .await
+        .unwrap();
+        let shared_profile = test.authenticated_user(&first.id).await.unwrap().unwrap();
+        assert_eq!(shared_profile.display_name.as_deref(), Some("공유 닉네임"));
         assert_eq!(
-            test.authenticated_user(&first.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .display_name
-                .as_deref(),
-            Some("공유 닉네임")
+            shared_profile.profile_visibility,
+            ProfileVisibility::Private
         );
 
         sqlx::query("DELETE FROM shared.auth_identities WHERE issuer = $1 AND subject = $2")

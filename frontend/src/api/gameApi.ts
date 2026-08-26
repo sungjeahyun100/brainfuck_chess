@@ -13,8 +13,10 @@ import type {
   PlayerId,
   Square,
   SubmitAction,
+  TimeControlId,
 } from '../types/game'
 import type { PieceCatalogMetadata } from '../types/deck'
+import type { GameRecord } from '../types/gameRecord'
 
 const BASE = '/api/games'
 const ROOM_BASE = '/api/rooms'
@@ -42,6 +44,7 @@ export interface DeckPlacementRequest {
 }
 
 export interface PlayerDeckRequest {
+  name?: string
   starting: DeckPlacementRequest[]
   pocket: DeckPieceRequest[]
 }
@@ -58,6 +61,7 @@ export interface MultiplayerRoom {
   host_ready: boolean
   guest_ready: boolean
   game_id?: string | null
+  time_control: TimeControlId
 }
 
 interface ResignRoomRequest {
@@ -82,6 +86,9 @@ export interface PieceLabPieceRequest {
   square: Square
   state?: Record<string, PieceStateValue>
   move_option_cooldowns?: Record<string, { remaining: number }>
+  current_ammo?: number
+  layer?: 'ground' | 'air'
+  remaining_flight_turns?: number
 }
 
 export interface PieceLabPocketPieceRequest {
@@ -89,6 +96,7 @@ export interface PieceLabPocketPieceRequest {
   piece_type: string
   owner: PlayerId
   state?: Record<string, PieceStateValue>
+  current_ammo?: number
 }
 
 export interface PieceLabOptionsRequest {
@@ -121,6 +129,7 @@ export interface PieceLabOptionsResponse {
   piece_definitions: Record<string, PieceDefinition>
   piece_states: Record<string, Record<string, PieceStateValue>>
   piece_cooldowns: Record<string, Record<string, { remaining: number }>>
+  piece_runtime: Record<string, import('../types/game').Piece>
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -146,6 +155,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
+export function withTurnActionType(action: import('../types/game').TurnAction): import('../types/game').TurnAction {
+  const type = 'ability_id' in action ? 'ability' : 'from' in action ? 'move' : 'drop'
+  return { ...action, type } as import('../types/game').TurnAction
+}
+
 function getClientId(): string {
   const existing = sessionStorage.getItem(CLIENT_ID_KEY)
   if (existing) return existing
@@ -169,6 +183,8 @@ export const api = {
     whiteDeck: PlayerDeckRequest,
     blackDeck: PlayerDeckRequest,
     mapId: BoardMapId,
+    timeControl: TimeControlId,
+    player?: { localSide: PlayerId; localNickname?: string; guestNickname: string },
   ): Promise<{ id: string; state: GameState }> {
     return request(`${BASE}`, {
       method: 'POST',
@@ -177,12 +193,22 @@ export const api = {
         map_id: mapId,
         white_deck: whiteDeck,
         black_deck: blackDeck,
+        time_control: timeControl,
+        ...(player ? { local_side: player.localSide, local_nickname: player.localNickname, guest_nickname: player.guestNickname } : {}),
       }),
     })
   },
 
   getGame(id: string): Promise<GameState> {
     return request(`${BASE}/${id}`)
+  },
+
+  getGameRecord(id: string): Promise<GameRecord> {
+    return request(`${BASE}/${id}/record`)
+  },
+
+  listGameRecords(): Promise<import('../types/gameRecord').GameRecordSummary[]> {
+    return request('/api/game-records')
   },
 
   submitAction(id: string, action: SubmitAction): Promise<GameState> {
@@ -234,6 +260,13 @@ export const api = {
     })
   },
 
+  applyPieceLabAction(payload: PieceLabOptionsRequest, action: import('../types/game').TurnAction): Promise<GameState> {
+    return request('/api/lab/apply-action', {
+      method: 'POST',
+      body: JSON.stringify({ lab: payload, action: withTurnActionType(action) }),
+    })
+  },
+
   getLegalDrops(id: string): Promise<{ drops: DropAction[] }> {
     return request(`${BASE}/${id}/legal-drops`)
   },
@@ -243,6 +276,7 @@ export const api = {
     hostSide: 'white' | 'black',
     deck: PlayerDeckRequest,
     mapId: BoardMapId,
+    timeControl: TimeControlId,
   ): Promise<MultiplayerRoom> {
     return request(`${ROOM_BASE}`, {
       method: 'POST',
@@ -252,7 +286,15 @@ export const api = {
         host_side: hostSide,
         client_id: getClientId(),
         deck,
+        time_control: timeControl,
       }),
+    })
+  },
+
+  heartbeatRoom(id: string, playerId: PlayerId): Promise<GameState> {
+    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/heartbeat`, {
+      method: 'POST',
+      body: JSON.stringify({ client_id: getClientId(), player_id: playerId }),
     })
   },
 

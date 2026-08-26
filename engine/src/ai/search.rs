@@ -13,6 +13,7 @@ use crate::ai::types::{
 use crate::legal_moves::{
     generate_legal_ability_actions, generate_legal_drop_actions, generate_legal_move_actions,
     generate_piece_legal_ability_actions, generate_piece_legal_drop_actions,
+    pending_landing_piece_id,
 };
 use crate::types::{
     AbilityAction, DropAction, GamePhase, GameState, MoveAction, PlayerId, TurnAction,
@@ -257,7 +258,7 @@ fn is_noisy_drop(action: &DropAction) -> bool {
 }
 
 fn is_noisy_ability(state: &GameState, action: &AbilityAction) -> bool {
-    action.ability_id == "recall"
+    matches!(action.ability_id.as_str(), "recall" | "intercept")
         && action
             .target_piece_id
             .as_ref()
@@ -750,11 +751,27 @@ pub fn play_bot_turn_detailed(
     let stats = decision.stats;
     let action = decision.action;
     state = apply_ai_action(state, &action)?;
-    let actions = vec![action.clone()];
-    let timeline = vec![ActionTimelineFrame {
+    let mut actions = vec![action.clone()];
+    let mut timeline = vec![ActionTimelineFrame {
         action,
         state: state.clone(),
     }];
+    while &state.current_player == bot_player_id
+        && state.phase != GamePhase::Ended
+        && pending_landing_piece_id(&state).is_some()
+    {
+        let landing = generate_legal_ability_actions(&state)
+            .into_iter()
+            .next()
+            .ok_or_else(|| "봇이 강제 착륙 방향을 선택할 수 없습니다.".to_string())?;
+        let landing_action = AiAction::Ability(landing);
+        state = apply_ai_action(state, &landing_action)?;
+        actions.push(landing_action.clone());
+        timeline.push(ActionTimelineFrame {
+            action: landing_action,
+            state: state.clone(),
+        });
+    }
 
     Ok(BotTurnResult {
         state,
@@ -783,7 +800,7 @@ mod tests {
     use super::*;
     use crate::pieces::default_pieces::all_default_definitions;
     use crate::rules::create_board;
-    use crate::types::{ChessemblyProgramCache, Deck, GameEndReason, Piece, Square};
+    use crate::types::{ChessemblyProgramCache, Deck, GameEndReason, Piece, PieceLayer, Square};
 
     fn searchable_state() -> GameState {
         let definitions: HashMap<_, _> = all_default_definitions()
@@ -846,6 +863,9 @@ mod tests {
                     in_pocket: false,
                     captured: false,
                     has_moved: false,
+                    current_ammo: 0,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
                     state: HashMap::new(),
                     move_option_cooldowns: HashMap::new(),
                 },
@@ -1840,6 +1860,9 @@ mod tests {
                 in_pocket: square.is_none(),
                 captured: false,
                 has_moved: true,
+                current_ammo: 0,
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
                 state: definition.initial_state(),
                 move_option_cooldowns: HashMap::new(),
             },

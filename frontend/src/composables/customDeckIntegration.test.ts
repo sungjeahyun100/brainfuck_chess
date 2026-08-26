@@ -7,6 +7,7 @@ import {
   applyPieceMetadata,
   canPieceBePlacedAtStart,
   frontmostBaseRank,
+  neutralPieceCatalogId,
   customDeckPieceType,
   createPresetDeck,
   deactivateCustomPieceCatalog,
@@ -44,6 +45,13 @@ const record: CustomPieceRecord = {
   updated_at: 2,
   active: true,
 }
+
+test('direction-specific engine IDs resolve to their neutral inspector catalog entries', () => {
+  assert.equal(neutralPieceCatalogId('surface-to-air-missile-white'), 'surface-to-air-missile')
+  assert.equal(neutralPieceCatalogId('surface-to-air-missile-black'), 'surface-to-air-missile')
+  assert.equal(neutralPieceCatalogId('pawn-white'), 'pawn')
+  assert.equal(neutralPieceCatalogId('knight'), 'knight')
+})
 
 function deck(pieceType: string): SavedDeck {
   return {

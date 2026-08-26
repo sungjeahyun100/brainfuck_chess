@@ -151,6 +151,9 @@ pub struct Board {
     pub size: i32,
     /// Maps SquareId → PieceId (None means empty)
     pub squares: HashMap<SquareId, Option<PieceId>>,
+    /// Independent air-layer occupancy. Legacy states omit this field.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub air_squares: HashMap<SquareId, Option<PieceId>>,
     /// Static terrain attached to squares independently from piece occupancy.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub terrain: HashMap<SquareId, TerrainCell>,
@@ -173,6 +176,28 @@ impl Board {
     pub fn is_empty(&self, sq: &Square) -> bool {
         self.get_piece_at(sq).is_none()
     }
+
+    pub fn get_piece_at_layer(&self, sq: &Square, layer: PieceLayer) -> Option<&PieceId> {
+        match layer {
+            PieceLayer::Ground => self.get_piece_at(sq),
+            PieceLayer::Air => self.air_squares.get(&sq.to_id())?.as_ref(),
+        }
+    }
+
+    pub fn is_empty_at_layer(&self, sq: &Square, layer: PieceLayer) -> bool {
+        self.get_piece_at_layer(sq, layer).is_none()
+    }
+
+    pub fn set_piece_at_layer(&mut self, sq: Square, layer: PieceLayer, piece_id: Option<PieceId>) {
+        match layer {
+            PieceLayer::Ground => {
+                self.squares.insert(sq.to_id(), piece_id);
+            }
+            PieceLayer::Air => {
+                self.air_squares.insert(sq.to_id(), piece_id);
+            }
+        }
+    }
 }
 
 // ─── PieceDefinition ────────────────────────────────────────────────────────
@@ -183,6 +208,9 @@ pub struct PieceDefinition {
     pub name: String,
     /// Point cost for deck building (King is excluded from scoring)
     pub score: u32,
+    /// Maximum ammunition per concrete instance. Zero means no ammo resource.
+    #[serde(default)]
+    pub max_ammo: u32,
     /// Setup rank reserved for this piece before the game begins.
     #[serde(default)]
     pub deployment_zone: DeploymentZone,
@@ -353,8 +381,23 @@ pub struct MoveOptionDefinition {
     pub execution_mode: MoveOptionExecutionMode,
     #[serde(default = "default_true")]
     pub contributes_to_attack_map: bool,
+    /// Ammunition consumed when this option is committed.
+    #[serde(default)]
+    pub ammo_cost: u32,
+    /// Runtime state predicates controlling option availability.
+    #[serde(default)]
+    pub enabled_when: Vec<PieceStatePredicate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cooldown: Option<CooldownDefinition>,
+}
+
+impl MoveOptionDefinition {
+    pub fn is_enabled_for(&self, piece: &Piece) -> bool {
+        self.enabled_when
+            .iter()
+            .all(|predicate| predicate.matches(&piece.state))
+            && piece.current_ammo >= self.ammo_cost
+    }
 }
 
 const fn default_true() -> bool {
@@ -446,6 +489,8 @@ impl PieceDefinition {
                 layer_ids: default_layer_ids,
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
                 contributes_to_attack_map: true,
+                ammo_cost: 0,
+                enabled_when: Vec::new(),
                 cooldown: None,
             });
         }
@@ -553,6 +598,12 @@ impl PieceDefinition {
             }
         }
         for option in &self.move_options {
+            if let Some(error) = validate_predicates(
+                &format!("move option `{}`", option.id),
+                &option.enabled_when,
+            ) {
+                return Err(error);
+            }
             if option.layer_ids.is_empty()
                 && option.execution_mode == MoveOptionExecutionMode::MoveModifier
             {
@@ -751,6 +802,14 @@ pub enum ChessemblyDialect {
 
 // ─── Piece ──────────────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PieceLayer {
+    #[default]
+    Ground,
+    Air,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Piece {
     pub id: PieceId,
@@ -762,6 +821,15 @@ pub struct Piece {
     pub captured: bool,
     /// Whether this piece has ever moved (used for Pawn 2-step rule)
     pub has_moved: bool,
+    /// Current ammunition, initialized from the definition's max_ammo.
+    #[serde(default)]
+    pub current_ammo: u32,
+    /// The single physical layer occupied by this piece.
+    #[serde(default)]
+    pub layer: PieceLayer,
+    /// Owner airborne turns remaining. Zero while grounded.
+    #[serde(default)]
+    pub remaining_flight_turns: u32,
     /// State owned by this concrete piece instance.
     #[serde(default)]
     pub state: HashMap<String, PieceStateValue>,
@@ -778,6 +846,9 @@ impl Piece {
     pub fn initialize_from_definition(&mut self, definition: &PieceDefinition) {
         self.state = definition.initial_state();
         self.move_option_cooldowns.clear();
+        self.current_ammo = definition.max_ammo;
+        self.layer = PieceLayer::Ground;
+        self.remaining_flight_turns = 0;
     }
 }
 
@@ -942,6 +1013,7 @@ pub enum GameEndReason {
     KingCapture,
     Resignation,
     Timeout,
+    Abandonment,
     Draw,
 }
 

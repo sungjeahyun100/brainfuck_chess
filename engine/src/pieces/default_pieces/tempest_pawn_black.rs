@@ -7,6 +7,7 @@ pub fn tempest_pawn_black_definition() -> PieceDefinition {
         id: "tempest-pawn-black".into(),
         name: "Tempest Pawn".into(),
         score: 2,
+        max_ammo: 0,
         chessembly_code: "\
 move(0, -1);
 move(1, 0);

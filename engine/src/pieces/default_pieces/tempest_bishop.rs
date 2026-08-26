@@ -5,6 +5,7 @@ pub fn tempest_bishop_definition() -> PieceDefinition {
         id: "tempest-bishop".into(),
         name: "Tempest Bishop".into(),
         score: 5,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
         take-move(0, 1) 

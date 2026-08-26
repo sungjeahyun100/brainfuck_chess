@@ -34,6 +34,12 @@
               <label><input v-model="hostSideMode" type="radio" value="black" :disabled="Boolean(currentRoom)" /> Black</label>
               <label><input v-model="hostSideMode" type="radio" value="random" :disabled="Boolean(currentRoom)" /> 랜덤</label>
             </div>
+            <label>
+              <span class="limit-label">타임 컨트롤</span>
+              <select v-model="timeControl" class="text-input" :disabled="Boolean(currentRoom)">
+                <option v-for="option in TIME_CONTROLS" :key="option.id" :value="option.id">{{ option.label }}</option>
+              </select>
+            </label>
             <div class="room-code-row">
               <input v-model.trim="roomCodeInput" class="room-code-input" maxlength="6" placeholder="입장할 방 번호" />
             </div>
@@ -56,6 +62,7 @@
             <p v-if="currentRoom">
               방 맵: {{ boardMapLabel(currentRoom.map_id) }} · 방장 {{ playerLabel(currentRoom.host_side) }}
             </p>
+            <p v-if="currentRoom">타임 컨트롤: {{ timeControlLabel(currentRoom.time_control) }}</p>
             <p v-if="currentRoom">
               준비 상태: Host {{ currentRoom.host_ready ? 'Ready' : 'Not Ready' }} · Guest {{ currentRoom.guest_ready ? 'Ready' : 'Not Ready' }}
             </p>
@@ -79,6 +86,8 @@ import { useSavedDecks } from '../composables/useSavedDecks'
 import { savedDeckToPlayerDeckRequest } from '../composables/useDeckSerialization'
 import { validateSavedDeck } from '../composables/useDeckValidation'
 import { boardMapLabel } from '../boardMaps'
+import { TIME_CONTROLS, timeControlLabel } from '../timeControls'
+import type { TimeControlId } from '../types/game'
 
 const emit = defineEmits<{
   back: []
@@ -96,6 +105,7 @@ const status = ref<string | null>(null)
 const error = ref<string | null>(null)
 const pollTimer = ref<number | null>(null)
 const localPlayer = ref<LobbyPlayer | null>(null)
+const timeControl = ref<TimeControlId>('ten_five')
 
 const validDecks = computed(() => decks.value.filter(deck => validateSavedDeck(deck).valid))
 const selectedDeck = computed(() => validDecks.value.find(deck => deck.id === selectedDeckId.value) ?? null)
@@ -147,6 +157,7 @@ async function createRoom() {
       hostSide,
       savedDeckToPlayerDeckRequest(selectedDeck.value),
       selectedDeck.value.mapId,
+      timeControl.value,
     )
     currentRoom.value = room
     localPlayer.value = hostSide

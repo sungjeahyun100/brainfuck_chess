@@ -78,8 +78,7 @@ fn runtime_install_restores_source_visual_variants_and_keeps_runtime_default_ass
     // The server replaces the base image with the uploaded asset. Older code
     // also cleared variants here; runtime installation must recover them from
     // the integrity-checked raw source without losing this replacement.
-    package.definitions[0].visual.default_asset_key =
-        "data:image/svg+xml;base64,PHN2Zy8+".into();
+    package.definitions[0].visual.default_asset_key = "data:image/svg+xml;base64,PHN2Zy8+".into();
     package.definitions[0].visual.variants.clear();
 
     let mut state = empty_state();

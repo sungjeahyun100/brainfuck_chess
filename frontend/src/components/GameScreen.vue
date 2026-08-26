@@ -7,8 +7,8 @@
         <span class="player-badge" :class="`player-${viewState.current_player}`">
           {{ viewState.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
         </span>
-        <span v-if="localPlayer" class="local-badge" :class="{ waiting: !isMyTurn }">
-          {{ isBotTurn ? '봇 턴' : isMyTurn ? '내 턴' : '상대 턴' }}
+        <span v-if="localPlayer" class="local-badge" :class="{ waiting: !canControlTurn }">
+          {{ controlTurnLabel }}
         </span>
         <span v-if="botPlayer" class="bot-badge">🤖 {{ botDifficultyLabel }}</span>
         <span class="turn-badge">Turn {{ viewState.turn_number }}</span>
@@ -50,6 +50,33 @@
             <small>{{ promotionPieceLabel(choice) }}</small>
           </button>
         </div>
+      </div>
+    </div>
+
+    <div v-if="overlapSelectionPieceIds.length" class="promotion-overlay" @click.self="cancelOverlapSelection">
+      <div class="promotion-box">
+        <h3>기물 선택</h3>
+        <p>같은 칸에 있는 기물 중 선택할 기물을 고르세요.</p>
+        <div class="promotion-choices">
+          <button
+            v-for="pieceId in overlapSelectionPieceIds"
+            :key="pieceId"
+            class="promotion-choice"
+            type="button"
+            @click="chooseOverlappingPiece(pieceId)"
+          >
+            <img
+              v-if="pieceImage(pieceId)"
+              class="promotion-choice-image"
+              :src="pieceImage(pieceId)"
+              :alt="pieceAlt(pieceId)"
+            />
+            <span v-else>{{ pieceSymbol(props.state.pieces[pieceId].type_id) }}</span>
+            <strong>{{ props.state.piece_definitions[props.state.pieces[pieceId].type_id]?.name ?? props.state.pieces[pieceId].type_id }}</strong>
+            <small>{{ props.state.pieces[pieceId].layer === 'air' ? '공중 기물' : '지상 기물' }}</small>
+          </button>
+        </div>
+        <button class="overlap-cancel" type="button" @click="cancelOverlapSelection">취소</button>
       </div>
     </div>
 
@@ -99,7 +126,11 @@
           <br><small>({{ viewState.result.reason }})</small>
         </p>
         <p v-else>Draw</p>
-        <button @click="$emit('restart')">New Game</button>
+        <div class="game-over-actions">
+          <button @click="$emit('replay')">복기하기</button>
+          <button @click="copyReplayCode">{{ replayCopyStatus }}</button>
+          <button @click="$emit('restart')">New Game</button>
+        </div>
       </div>
     </div>
 
@@ -142,6 +173,17 @@
 
       <!-- Center: Board -->
       <div class="board-column">
+        <div class="game-clock" :class="clockClasses(topPlayer)">
+          <span><b>{{ playerInfo(topPlayer).nickname }}</b><small><template v-if="playerInfo(topPlayer).public_id">@{{ playerInfo(topPlayer).public_id }} · </template>{{ topPlayer.toUpperCase() }}</small></span>
+          <strong>{{ formattedClock(topPlayer) }}</strong>
+          <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
+        </div>
+
+        <div v-if="opponentAbandonmentWarning" class="abandonment-warning" role="status">
+          <strong>⚠ 상대방의 연결을 기다리는 중</strong>
+          <span>자동 기권까지 {{ formatDuration(opponentAbandonmentRemainingMs) }}</span>
+        </div>
+
         <Board
           :board="viewState.board"
           :pieces="viewState.pieces"
@@ -156,8 +198,15 @@
           :ability-mode="visibleAbilityMode"
           @square-click="onSquareClick"
           @piece-drag-start="onBoardPieceDragStart"
+          @piece-click="onBoardPieceClick"
           @square-drop="onSquareDrop"
         />
+
+        <div class="game-clock" :class="clockClasses(bottomPlayer)">
+          <span><b>{{ playerInfo(bottomPlayer).nickname }}</b><small><template v-if="playerInfo(bottomPlayer).public_id">@{{ playerInfo(bottomPlayer).public_id }} · </template>{{ bottomPlayer.toUpperCase() }}</small></span>
+          <strong>{{ formattedClock(bottomPlayer) }}</strong>
+          <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
+        </div>
 
         <div class="board-tools">
           <button
@@ -236,6 +285,19 @@
           <span>{{ blackDeck.total_score }} / {{ blackDeck.score_limit }} pts</span>
         </div>
       </div>
+
+      <aside class="game-sidebar">
+        <h3>기보</h3>
+        <div class="live-notation">
+          <div v-for="entry in liveNotation" :key="entry.ply"><span>{{ entry.ply }}. {{ entry.text }}</span></div>
+          <p v-if="!liveNotation.length">아직 착수 기록이 없습니다.</p>
+        </div>
+        <div class="sidebar-game-info">
+          <strong>{{ timeControlLabel(viewState.clock.time_control) }}</strong>
+          <span>Turn {{ viewState.turn_number }}</span>
+          <span v-if="viewState.result">{{ viewState.result.reason }}</span>
+        </div>
+      </aside>
     </div>
 
     <!-- Footer: actions -->
@@ -254,7 +316,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import type {
   AbilityDeployment,
   AiAction,
@@ -265,19 +327,31 @@ import type {
   GameState,
   MoveAction,
   MoveOptionDefinition,
+  Piece,
   PlayerId,
   Square,
   SubmitDropAction,
   SubmitMoveAction,
 } from '../types/game'
-import { isImmediateAbilityAction, moveOptionTargets, usesMoveSubmission } from '../moveOptionUi'
+import { abilityActionTargetsSquare, abilitySelectionSquares, isImmediateAbilityAction, moveOptionTargets, pendingForcedLandingPieceId, usesMoveSubmission } from '../moveOptionUi'
 import { api } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import Board from './Board.vue'
 import { applyTimelineFrame } from '../composables/useActionTimeline'
+import { CLOCK_URGENCY_THRESHOLDS_MS, timeControlLabel } from '../timeControls'
+import { encodeReplayCode } from '../replayCodec'
+import { formatLiveAction, formatNotation } from '../replayNotation'
+import {
+  blockedControlMessage,
+  canControlCurrentTurn,
+  resigningPlayer,
+  turnControlLabel,
+  type PlayMode,
+} from '../gameControlPolicy'
 
 const props = defineProps<{
   state: GameState
+  playMode: PlayMode
   localPlayer?: PlayerId | null
   roomId?: string | null
   botPlayer?: PlayerId | null
@@ -286,6 +360,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   stateUpdate: [state: GameState]
   restart: []
+  replay: []
 }>()
 
 const selectedPieceId = ref<string | null>(null)
@@ -305,8 +380,10 @@ const botThinking = ref(false)
 const botReplaying = ref(false)
 const botReplayMessage = ref<string | null>(null)
 const lastBotStats = ref<BotTurnStats | null>(null)
+const replayCopyStatus = ref('기보 복사')
 const draggedPocketPieceId = ref<string | null>(null)
 const promotionRequest = ref<{ pieceId: string; to: Square; owner: PlayerId; options: string[] } | null>(null)
+const overlapSelectionPieceIds = ref<string[]>([])
 const airdropOpen = ref(false)
 const airdropSelectedPieceId = ref<string | null>(null)
 const airdropDraft = ref<AbilityDeployment[]>([])
@@ -319,6 +396,9 @@ const botPreviewDropSquares = ref<Square[]>([])
 const botReplayState = ref<GameState | null>(null)
 let botRunSerial = 0
 let opponentAttackRequestSerial = 0
+const displayNowMs = ref(Date.now())
+const clockReceivedAtMs = ref(Date.now())
+const displayTimer = window.setInterval(() => { displayNowMs.value = Date.now() }, 200)
 
 const BOT_ACTION_PREVIEW_MS = 520
 const BOT_ACTION_SETTLE_MS = 340
@@ -346,6 +426,28 @@ const dropOptionsCache = new Map<string, DropAction[]>()
 const dropOptionsRequests = new Map<string, Promise<DropAction[]>>()
 
 const viewState = computed(() => botReplayState.value ?? props.state)
+const topPlayer = computed<PlayerId>(() => props.localPlayer ? otherPlayer(props.localPlayer) : 'black')
+const bottomPlayer = computed<PlayerId>(() => props.localPlayer ?? 'white')
+const liveNotation = computed(() => viewState.value.history.map((entry, index) => ({
+  ply: index + 1,
+  text: viewState.value.record_notation?.[index]
+    ? formatNotation(viewState.value.record_notation[index])
+    : formatLiveAction(entry.action, viewState.value, entry.turn_number),
+})))
+const estimatedServerNowMs = computed(() => (
+  viewState.value.clock.server_now_ms + Math.max(0, displayNowMs.value - clockReceivedAtMs.value)
+))
+const opponentPresence = computed(() => props.localPlayer ? viewState.value.presence?.[otherPlayer(props.localPlayer)] : undefined)
+const opponentAbandonmentWarning = computed(() => Boolean(
+  opponentPresence.value
+  && !opponentPresence.value.connected
+  && opponentPresence.value.warning_at_ms
+  && estimatedServerNowMs.value >= opponentPresence.value.warning_at_ms,
+))
+const opponentAbandonmentRemainingMs = computed(() => Math.max(
+  0,
+  (opponentPresence.value?.forfeit_at_ms ?? estimatedServerNowMs.value) - estimatedServerNowMs.value,
+))
 const whitePocket = computed(() =>
   viewState.value.players['white']?.deck.pocket_pieces ?? []
 )
@@ -358,13 +460,20 @@ const maxWhitePocketCount = computed(() => Math.max(1, ...whitePocketGroups.valu
 const maxBlackPocketCount = computed(() => Math.max(1, ...blackPocketGroups.value.map(group => group.count)))
 const whiteDeck = computed(() => viewState.value.players['white']?.deck)
 const blackDeck = computed(() => viewState.value.players['black']?.deck)
-const isMyTurn = computed(() => !props.localPlayer || props.state.current_player === props.localPlayer)
+const controlContext = computed(() => ({
+  playMode: props.playMode,
+  currentPlayer: props.state.current_player,
+  localPlayer: props.localPlayer,
+  botPlayer: props.botPlayer,
+}))
+const canControlTurn = computed(() => canControlCurrentTurn(controlContext.value))
+const controlTurnLabel = computed(() => turnControlLabel(controlContext.value))
 const isBotTurn = computed(() => Boolean(
   props.botPlayer
   && props.state.current_player === props.botPlayer
   && props.state.phase === 'playing',
 ))
-const canUsePlayerControls = computed(() => isMyTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value)
+const canUsePlayerControls = computed(() => canControlTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value)
 const visibleSelectedPieceId = computed(() => (
   botReplaying.value ? botPreviewSelectedPieceId.value : selectedPieceId.value
 ))
@@ -386,6 +495,48 @@ const lastMove = computed(() => {
   const action = history[history.length - 1]?.action
   return action?.type === 'move' ? { from: action.from, to: action.to } : null
 })
+
+function liveClockValue(player: PlayerId): number {
+  const clock = viewState.value.clock
+  const base = clock.mode === 'countdown'
+    ? (player === 'white' ? clock.white_remaining_ms ?? 0 : clock.black_remaining_ms ?? 0)
+    : (player === 'white' ? clock.white_elapsed_ms : clock.black_elapsed_ms)
+  if (viewState.value.phase !== 'playing' || clock.active_color !== player) return base
+  const delta = Math.max(0, estimatedServerNowMs.value - clock.server_now_ms)
+  return clock.mode === 'countdown' ? Math.max(0, base - delta) : base + delta
+}
+
+function formatDuration(milliseconds: number): string {
+  const seconds = Math.max(0, Math.ceil(milliseconds / 1_000))
+  const hours = Math.floor(seconds / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  const rest = seconds % 60
+  return hours > 0
+    ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
+    : `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
+}
+
+function formattedClock(player: PlayerId): string { return formatDuration(liveClockValue(player)) }
+function playerInfo(player: PlayerId) { return viewState.value.player_info[player] ?? { nickname: player === 'white' ? 'White Player' : 'Black Player', public_id: null, side: player } }
+
+async function copyReplayCode() {
+  try {
+    const record = await api.getGameRecord(props.state.id)
+    await navigator.clipboard.writeText(await encodeReplayCode(record))
+    replayCopyStatus.value = '복사 완료'
+  } catch { replayCopyStatus.value = '복사 실패' }
+  window.setTimeout(() => { replayCopyStatus.value = '기보 복사' }, 1800)
+}
+
+function clockClasses(player: PlayerId): Record<string, boolean> {
+  const remaining = liveClockValue(player)
+  const countdown = viewState.value.clock.mode === 'countdown'
+  return {
+    active: viewState.value.phase === 'playing' && viewState.value.clock.active_color === player,
+    low: countdown && remaining <= CLOCK_URGENCY_THRESHOLDS_MS.low,
+    critical: countdown && remaining <= CLOCK_URGENCY_THRESHOLDS_MS.critical,
+  }
+}
 const boardOrientation = computed(() => props.localPlayer ?? viewState.value.current_player)
 const opponentPlayer = computed<PlayerId>(() => otherPlayer(props.localPlayer ?? props.state.current_player))
 const opponentAttackButtonLabel = computed(() => {
@@ -399,7 +550,14 @@ const selectedPieceDefinition = computed(() => (
   selectedPiece.value ? props.state.piece_definitions[selectedPiece.value.type_id] ?? null : null
 ))
 const selectedPieceAbilities = computed<MoveOptionDefinition[]>(() => (
-  selectedPieceDefinition.value?.move_options?.filter(option => option.kind === 'ability') ?? []
+  selectedPieceDefinition.value?.move_options?.filter(option => (
+    option.kind === 'ability'
+      && selectedPiece.value
+      && (option.enabled_when ?? []).every(predicate => pieceStatePredicateMatches(selectedPiece.value!, predicate))
+      && ((selectedPiece.value.layer === 'air' && (selectedPiece.value.remaining_flight_turns ?? 0) === 0)
+        ? option.id === 'forced-landing'
+        : option.id !== 'forced-landing')
+  )) ?? []
 ))
 const selectedAbility = computed(() => (
   selectedPieceAbilities.value.find(ability => ability.id === activeAbilityId.value) ?? null
@@ -427,6 +585,10 @@ function abilityUnavailableReason(ability: MoveOptionDefinition): string {
   if (!selectedPiece.value) return '선택한 기물이 없습니다.'
   if (selectedPieceAbilities.value.length === 0) return '선택한 기물은 특수 능력이 없습니다.'
   if (selectedPiece.value.owner !== props.state.current_player) return '현재 턴의 기물이 아닙니다.'
+  if ((selectedPiece.value.current_ammo ?? 0) < (ability.ammo_cost ?? 0)) return '탄약이 부족합니다.'
+  if (ability.id === 'takeoff' && !hasTakeoffRoute(selectedPiece.value)) {
+    return '연속 5칸의 빈 지상 활주로가 없습니다.'
+  }
   const remaining = selectedPiece.value.move_option_cooldowns?.[ability.id]?.remaining ?? 0
   if (remaining > 0) {
     const clockLabel = ability.cooldown?.clock === 'global_turns'
@@ -435,6 +597,33 @@ function abilityUnavailableReason(ability: MoveOptionDefinition): string {
     return `${remaining}번의 ${clockLabel}을 마친 뒤 다시 사용할 수 있습니다.`
   }
   return ''
+}
+
+function pieceStatePredicateMatches(
+  piece: Piece,
+  predicate: import('../types/game').PieceStatePredicate,
+): boolean {
+  const actual = piece.state[predicate.key]
+  if ('equals' in predicate.condition) return actual === predicate.condition.equals
+  return actual !== undefined && actual !== predicate.condition.not_equals
+}
+
+function hasTakeoffRoute(piece: Piece): boolean {
+  if (!piece.current_square || piece.layer !== 'ground') return false
+  const directions = [
+    [1, 0], [-1, 0], [0, 1], [0, -1],
+    [1, 1], [1, -1], [-1, 1], [-1, -1],
+  ]
+  return directions.some(([dx, dy]) => {
+    for (let distance = 1; distance <= 5; distance += 1) {
+      const file = piece.current_square!.file + dx * distance
+      const rank = piece.current_square!.rank + dy * distance
+      if (file < 0 || rank < 0 || file >= props.state.board.size || rank >= props.state.board.size) return false
+      if (props.state.board.squares[`${file}_${rank}`]) return false
+      if (distance === 5 && props.state.board.air_squares?.[`${file}_${rank}`]) return false
+    }
+    return true
+  })
 }
 const botDifficultyLabel = computed(() => {
   const labels: Record<BotDifficulty, string> = {
@@ -538,17 +727,23 @@ function removePieceFromBoard(state: GameState, pieceId: string) {
   for (const [id, occupant] of Object.entries(state.board.squares)) {
     if (occupant === pieceId) state.board.squares[id] = null
   }
+  for (const [id, occupant] of Object.entries(state.board.air_squares ?? {})) {
+    if (occupant === pieceId) state.board.air_squares![id] = null
+  }
 }
 
 function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
   const next = cloneGameState(state)
   const movedPiece = next.pieces[action.piece_id]
-  const isCastling = movedPiece?.type_id === 'king'
+  const occupancy = movedPiece?.layer === 'air'
+    ? (next.board.air_squares ??= {})
+    : next.board.squares
+  const isCastling = movedPiece?.layer !== 'air' && movedPiece?.type_id === 'king'
     && Math.abs(action.to.file - action.from.file) === 2
     && action.to.rank === action.from.rank
-  next.board.squares[squareId(action.from)] = null
+  occupancy[squareId(action.from)] = null
 
-  const capturedPieceId = action.captured_piece_id ?? next.board.squares[squareId(action.to)] ?? undefined
+  const capturedPieceId = action.captured_piece_id ?? occupancy[squareId(action.to)] ?? undefined
   if (capturedPieceId) {
     removePieceFromBoard(next, capturedPieceId)
     const capturedPiece = next.pieces[capturedPieceId]
@@ -583,7 +778,7 @@ function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
     }
   }
 
-  next.board.squares[squareId(action.to)] = action.piece_id
+  occupancy[squareId(action.to)] = action.piece_id
   if (movedPiece) {
     movedPiece.current_square = action.to
     movedPiece.has_moved = true
@@ -594,6 +789,9 @@ function applyMoveForReplay(state: GameState, action: MoveAction): GameState {
         (promotedDefinition?.state_schema ?? []).map(entry => [entry.key, entry.default_value]),
       )
       movedPiece.move_option_cooldowns = {}
+      movedPiece.current_ammo = promotedDefinition?.max_ammo ?? 0
+      movedPiece.layer = 'ground'
+      movedPiece.remaining_flight_turns = 0
     }
   }
   for (const update of action.effects.piece_state_updates) {
@@ -755,6 +953,13 @@ async function runBotTurn() {
 }
 
 watch(
+  () => props.state.clock.server_now_ms,
+  () => { clockReceivedAtMs.value = Date.now() },
+)
+
+onUnmounted(() => window.clearInterval(displayTimer))
+
+watch(
   () => [
     props.state.id,
     props.state.current_player,
@@ -776,10 +981,22 @@ watch(
   },
 )
 
+watch(
+  () => pendingForcedLandingPieceId(props.state),
+  async (pieceId) => {
+    if (!pieceId || !canControlTurn.value || isBotTurn.value || props.state.phase !== 'playing') return
+    const options = await selectBoardPiece(pieceId)
+    if (!options || selectedPieceId.value !== pieceId) return
+    await toggleAbilityMode('forced-landing')
+  },
+  { immediate: true },
+)
+
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
   amazon: 'A', guhang: 'G', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-bishop': 'B', 'tempest-knight': 'N', 'bouncing-bishop': 'B', 'bouncing-rook': 'R', 'bouncing-queen': 'Q', nightrider: 'N', windmill: 'W',
   'pawn-white': '♙', 'pawn-black': '♟', 'tempest-pawn-white': '♙', 'tempest-pawn-black': '♟', 'bouncing-pawn-white': '♙', 'bouncing-pawn-black': '♟', 'dozer-white': 'D', 'dozer-black': 'D',
+  tank: '🛡', bomber: '✈', 'surface-to-air-missile-white': '▲', 'surface-to-air-missile-black': '▲',
 }
 function pieceSymbol(typeId: string): string {
   return PIECE_SYMBOLS[typeId] ?? '?'
@@ -873,6 +1090,7 @@ function cancelPromotion() {
 }
 
 function clearSelection() {
+  overlapSelectionPieceIds.value = []
   selectedPieceId.value = null
   selectedPocketPieceId.value = null
   draggedPocketPieceId.value = null
@@ -882,6 +1100,34 @@ function clearSelection() {
   movableSquares.value = []
   attackSquares.value = []
   dropSquares.value = []
+}
+
+function overlappingFriendlyPieceIds(square: Square): string[] {
+  const key = squareId(square)
+  const groundId = props.state.board.squares[key] ?? null
+  const airId = props.state.board.air_squares?.[key] ?? null
+  if (!groundId || !airId) return []
+  const ground = props.state.pieces[groundId]
+  const air = props.state.pieces[airId]
+  return ground && air && ground.owner === air.owner && ground.owner === props.state.current_player
+    ? [groundId, airId]
+    : []
+}
+
+function openOverlapSelection(square: Square): boolean {
+  const pieceIds = overlappingFriendlyPieceIds(square)
+  if (pieceIds.length < 2) return false
+  overlapSelectionPieceIds.value = pieceIds
+  return true
+}
+
+function cancelOverlapSelection() {
+  overlapSelectionPieceIds.value = []
+}
+
+async function chooseOverlappingPiece(pieceId: string) {
+  cancelOverlapSelection()
+  await selectBoardPiece(pieceId)
 }
 
 function actionCacheKey(pieceId?: string, abilityId?: string | null): string {
@@ -996,13 +1242,15 @@ async function toggleAbilityMode(abilityId: string) {
     airdropOpen.value = true
   }
   const immediateActions = options.abilityActions.filter(isImmediateAbilityAction)
-  if (immediateActions.length === 1) {
+  const actorSquare = props.state.pieces[pieceId]?.current_square
+  const selfTargets = abilitySelectionSquares(options.abilityActions, actorSquare)
+  if (immediateActions.length === 1 && selfTargets.length === 0) {
     await submitImmediateAbility(immediateActions[0])
     return
   }
   if (selectedPieceId.value === pieceId && abilityMode.value && activeAbilityId.value === abilityId) {
-    legalTargetSquares.value = options.legalTargets
-    movableSquares.value = options.movable
+    legalTargetSquares.value = [...options.legalTargets, ...selfTargets]
+    movableSquares.value = [...options.movable, ...selfTargets]
     attackSquares.value = options.captures
   }
 }
@@ -1178,7 +1426,8 @@ async function submitAbility(pieceId: string, to: Square) {
   const abilityId = activeAbilityId.value
   if (!abilityId) return
   const options = await loadPieceOptions(pieceId, abilityId)
-  const candidates = options.abilityActions.filter(action => action.to && sameSquare(action.to, to))
+  const actorSquare = props.state.pieces[pieceId]?.current_square
+  const candidates = options.abilityActions.filter(action => abilityActionTargetsSquare(action, actorSquare, to))
   if (candidates.length === 0) { clearSelection(); return }
   let chosen = candidates[0]
   if (candidates.length > 1) {
@@ -1231,7 +1480,7 @@ async function onSquareClick(sq: Square) {
   error.value = null
   if (promotionRequest.value) return
   if (!canUsePlayerControls.value) {
-    error.value = '상대 턴입니다.'
+    error.value = blockedControlMessage(controlContext.value)
     clearSelection()
     return
   }
@@ -1257,6 +1506,10 @@ async function onSquareClick(sq: Square) {
       }
       return
     }
+    if (props.state.pieces[selectedPieceId.value]?.layer === 'air') {
+      await submitMove(selectedPieceId.value, sq)
+      return
+    }
     if (pieceId && piece && piece.owner === currentPlayer && pieceId !== selectedPieceId.value) {
       await selectBoardPiece(pieceId)
       return
@@ -1266,6 +1519,7 @@ async function onSquareClick(sq: Square) {
   }
 
   // ── Select own piece ──
+  if (openOverlapSelection(sq)) return
   if (pieceId && piece && piece.owner === currentPlayer) {
     await selectBoardPiece(pieceId)
   } else {
@@ -1276,7 +1530,7 @@ async function onSquareClick(sq: Square) {
 async function onPocketClick(pieceId: string) {
   error.value = null
   if (!canUsePlayerControls.value) {
-    error.value = '상대 턴입니다.'
+    error.value = blockedControlMessage(controlContext.value)
     clearSelection()
     return
   }
@@ -1294,6 +1548,27 @@ function onBoardPieceDragStart(pieceId: string) {
     return
   }
 
+  void selectBoardPiece(pieceId)
+}
+
+function onBoardPieceClick(pieceId: string) {
+  error.value = null
+  if (!canUsePlayerControls.value) {
+    clearSelection()
+    return
+  }
+  const piece = props.state.pieces[pieceId]
+  if (!piece) return
+  if (piece.layer === 'air' && piece.owner !== props.state.current_player && piece.current_square) {
+    void onSquareClick(piece.current_square)
+    return
+  }
+  if (piece.owner !== props.state.current_player) return
+  if (abilityMode.value && activeAbilityId.value === 'bomb' && selectedPieceId.value === pieceId && piece.current_square) {
+    void submitAbility(pieceId, piece.current_square)
+    return
+  }
+  if (!abilityMode.value && piece.current_square && openOverlapSelection(piece.current_square)) return
   void selectBoardPiece(pieceId)
 }
 
@@ -1342,13 +1617,13 @@ async function onResign() {
   error.value = null
   if (props.state.phase === 'ended') return
 
-  const resigningPlayer = props.localPlayer ?? props.state.current_player
+  const resigningSide = resigningPlayer(controlContext.value)
   if (!window.confirm('정말 기권하시겠습니까?')) return
 
   try {
     const newState = props.roomId
-      ? await api.resignRoom(props.roomId, resigningPlayer)
-      : await api.resignGame(props.state.id, resigningPlayer)
+      ? await api.resignRoom(props.roomId, resigningSide)
+      : await api.resignGame(props.state.id, resigningSide)
     clearSelection()
     emit('stateUpdate', newState)
   } catch (e: unknown) {
@@ -1361,6 +1636,34 @@ async function onResign() {
 .game-screen { display: flex; flex-direction: column; gap: 12px; padding: 16px; position: relative; }
 
 .header { display: flex; align-items: center; gap: 16px; }
+.game-clock {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(15, 23, 34, 0.88);
+  color: #a8b1c2;
+  width: min(80vw, 80vh);
+}
+.game-clock strong { grid-row: span 2; font: 700 1.8rem/1 ui-monospace, monospace; color: #eef2f7; }
+.game-clock > span { display: grid; }.game-clock > span small { color: #a8b1c2; }
+.game-clock small { font-size: 0.75rem; }
+.game-clock.active { border-color: #d9a441; box-shadow: inset 3px 0 #d9a441; }
+.game-clock.low strong { color: #ffb56b; }
+.game-clock.critical strong { color: #ff7d7d; }
+.abandonment-warning {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 181, 107, 0.5);
+  border-radius: 8px;
+  background: rgba(96, 54, 14, 0.45);
+  color: #ffd7ad;
+}
 .title-en { font-size: 0.55em; font-weight: 400; opacity: 0.65; margin-left: 6px; }
 .player-badge { padding: 4px 10px; border-radius: 6px; font-weight: bold; }
 .player-badge.player-white { background: #eee; color: #333; }
@@ -1415,7 +1718,7 @@ async function onResign() {
   to { background: rgba(217, 164, 65, 0.16); }
 }
 
-.main-layout { display: flex; gap: 16px; align-items: flex-start; justify-content: center; }
+.main-layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; justify-content: center; }
 .main-layout.locked { pointer-events: none; opacity: 0.78; }
 
 .board-column {
@@ -1425,6 +1728,10 @@ async function onResign() {
   gap: 10px;
   min-width: 0;
 }
+.game-sidebar { width: 290px; max-height: 82vh; overflow: auto; display: grid; gap: 12px; padding: 12px; border-radius: 10px; background: rgba(19,26,39,.92); border: 1px solid rgba(255,255,255,.1); }
+.live-notation { display: grid; gap: 4px; color: #dbe2ec; }.live-notation > div { padding: 7px 8px; border-radius: 5px; background: rgba(255,255,255,.045); }.live-notation p { color: #a8b1c2; }
+.sidebar-game-info { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); color: #a8b1c2; }
+.game-over-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
 .board-tools {
   width: min(80vw, 80vh);
@@ -1619,6 +1926,10 @@ async function onResign() {
   border-color: #1976d2; background: #e3f2fd;
 }
 .promotion-choice-image { width: 48px; height: 48px; }
+.overlap-cancel {
+  margin-top: 16px; padding: 8px 18px; border: 0; border-radius: 6px;
+  background: #d9e2ec; color: #1f2933; cursor: pointer;
+}
 
 .airdrop-overlay {
   position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center;
@@ -1661,6 +1972,7 @@ async function onResign() {
     width: min(320px, 100%);
     flex: 1 1 220px;
   }
+  .game-sidebar { width: 100%; max-height: none; order: 3; }
   .board-column,
   .selected-piece-panel {
     width: 100%;

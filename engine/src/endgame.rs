@@ -1,5 +1,13 @@
-use crate::legal_moves::{machine_gun_barrage_targets, mortar_barrage_targets};
-use crate::pieces::default_pieces::{MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID};
+use crate::legal_moves::{
+    bomber_landing_targets, machine_gun_barrage_targets, mortar_barrage_targets,
+    pending_landing_piece_id,
+};
+use crate::pieces::default_pieces::{
+    BOMBER_BOMB_ABILITY_ID, BOMBER_LAND_ABILITY_ID, BOMBER_TAKEOFF_ABILITY_ID,
+    INTERCEPT_ABILITY_ID, MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID,
+    TANK_FIRE_ABILITY_ID,
+};
+use crate::rules::get_base_zone_squares;
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -26,7 +34,7 @@ fn is_en_passant_capture(game_state: &GameState, action: &MoveAction) -> bool {
     let Some(piece) = game_state.pieces.get(&action.piece_id) else {
         return false;
     };
-    if !is_pawn_type(&piece.type_id) {
+    if piece.layer != PieceLayer::Ground || !is_pawn_type(&piece.type_id) {
         return false;
     }
     if action.from.file == action.to.file || !game_state.board.is_empty(&action.to) {
@@ -71,7 +79,7 @@ pub fn has_living_king(game_state: &GameState, player_id: &PlayerId) -> bool {
 /// If the captured piece is a King, the game ends immediately.
 pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameState {
     // Detect what is on the destination square before moving
-    let target_piece_id = game_state.board.get_piece_at(&action.to).cloned();
+    let target_piece_id = action.captured_piece_id.clone();
     let target_is_king = target_piece_id.as_ref().and_then(|id| {
         game_state
             .pieces
@@ -81,6 +89,7 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
     });
     // Move the piece
     game_state = move_piece_on_board(game_state, &action);
+    consume_option_ammo(&mut game_state, &action.piece_id, &action.move_option_id);
 
     // Promote when the moving piece's definition allows this target type.
     if let Some(promotion_type) = action.promotion.as_ref() {
@@ -111,6 +120,8 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
     if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
         piece.has_moved = true;
     }
+
+    replenish_ammo_on_home_entry(&mut game_state, &action.piece_id, action.from, action.to);
 
     for update in &action.effects.piece_state_updates {
         let Some(piece) = game_state.pieces.get(&update.piece_id) else {
@@ -214,6 +225,25 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         TurnAction::Drop(action) => action.player_id.clone(),
         TurnAction::Ability(action) => action.player_id.clone(),
     };
+    let is_forced_landing = matches!(
+        &action,
+        TurnAction::Ability(ability) if ability.ability_id == BOMBER_LAND_ABILITY_ID
+    );
+    let airborne_before = if is_forced_landing {
+        Vec::new()
+    } else {
+        game_state
+            .pieces
+            .values()
+            .filter(|piece| {
+                piece.owner == player_id
+                    && piece.is_on_board()
+                    && piece.layer == PieceLayer::Air
+                    && piece.remaining_flight_turns > 0
+            })
+            .map(|piece| piece.id.clone())
+            .collect::<Vec<_>>()
+    };
     let newly_set_cooldowns: std::collections::HashSet<(PieceId, String)> = match &action {
         TurnAction::Move(action) => action
             .effects
@@ -221,11 +251,9 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
             .iter()
             .map(|update| (update.piece_id.clone(), update.move_option_id.clone()))
             .collect(),
-        TurnAction::Ability(action) => std::iter::once((
-            action.piece_id.clone(),
-            action.ability_id.clone(),
-        ))
-        .collect(),
+        TurnAction::Ability(action) => {
+            std::iter::once((action.piece_id.clone(), action.ability_id.clone())).collect()
+        }
         TurnAction::Drop(_) => Default::default(),
     };
 
@@ -241,9 +269,18 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         action,
     });
 
-    tick_move_option_cooldowns(&mut game_state, &player_id, &newly_set_cooldowns);
+    if !is_forced_landing {
+        tick_move_option_cooldowns(&mut game_state, &player_id, &newly_set_cooldowns);
+        for piece_id in airborne_before {
+            if let Some(piece) = game_state.pieces.get_mut(&piece_id) {
+                piece.remaining_flight_turns = piece.remaining_flight_turns.saturating_sub(1);
+            }
+        }
+        resolve_unlandable_bombers(&mut game_state, &player_id);
+    }
 
-    if game_state.phase != GamePhase::Ended && game_state.result.is_none() {
+    let landing_pending = pending_landing_piece_id(&game_state).is_some();
+    if game_state.phase != GamePhase::Ended && game_state.result.is_none() && !landing_pending {
         game_state.current_player = if player_id == "white" {
             "black".into()
         } else {
@@ -268,16 +305,100 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
         .and_then(|option| option.cooldown.as_ref())
         .map(|cooldown| cooldown.turns)
         .filter(|turns| *turns > 0);
-    if let (Some(piece), Some(remaining)) =
-        (state.pieces.get_mut(&action.piece_id), cooldown_turns)
+    if let (Some(piece), Some(remaining)) = (state.pieces.get_mut(&action.piece_id), cooldown_turns)
     {
-        piece.move_option_cooldowns.insert(
-            action.ability_id.clone(),
-            CooldownState { remaining },
-        );
+        piece
+            .move_option_cooldowns
+            .insert(action.ability_id.clone(), CooldownState { remaining });
     }
+    consume_option_ammo(&mut state, &action.piece_id, &action.ability_id);
 
     match action.ability_id.as_str() {
+        TANK_FIRE_ABILITY_ID => {
+            if let Some(impact) = action.to {
+                apply_ground_blast(&mut state, impact, &action.player_id);
+            }
+        }
+        BOMBER_TAKEOFF_ABILITY_ID => {
+            let Some(to) = action.to else {
+                return state;
+            };
+            let Some(from) = state
+                .pieces
+                .get(&action.piece_id)
+                .and_then(|piece| piece.current_square)
+            else {
+                return state;
+            };
+            state
+                .board
+                .set_piece_at_layer(from, PieceLayer::Ground, None);
+            state
+                .board
+                .set_piece_at_layer(to, PieceLayer::Air, Some(action.piece_id.clone()));
+            if let Some(piece) = state.pieces.get_mut(&action.piece_id) {
+                piece.current_square = Some(to);
+                piece.layer = PieceLayer::Air;
+                piece.remaining_flight_turns = 5;
+                piece
+                    .state
+                    .insert("airborne".into(), PieceStateValue::Boolean(true));
+            }
+        }
+        BOMBER_BOMB_ABILITY_ID => {
+            if let Some(origin) = state
+                .pieces
+                .get(&action.piece_id)
+                .and_then(|piece| piece.current_square)
+            {
+                apply_ground_blast(&mut state, origin, &action.player_id);
+            }
+        }
+        INTERCEPT_ABILITY_ID => {
+            let Some(target_id) = action.target_piece_id else {
+                return state;
+            };
+            if remove_captured_piece(&mut state, &target_id, &action.player_id) {
+                state.phase = GamePhase::Ended;
+                state.result = Some(GameResult {
+                    winner: Some(action.player_id.clone()),
+                    reason: GameEndReason::KingCapture,
+                });
+            }
+        }
+        BOMBER_LAND_ABILITY_ID => {
+            let Some(to) = action.to else {
+                return state;
+            };
+            let Some(from) = state
+                .pieces
+                .get(&action.piece_id)
+                .and_then(|piece| piece.current_square)
+            else {
+                return state;
+            };
+            state.board.set_piece_at_layer(from, PieceLayer::Air, None);
+            state
+                .board
+                .set_piece_at_layer(to, PieceLayer::Ground, Some(action.piece_id.clone()));
+            let home = get_base_zone_squares(&action.player_id, state.board.size);
+            let max_ammo = state
+                .pieces
+                .get(&action.piece_id)
+                .and_then(|piece| state.piece_definitions.get(&piece.type_id))
+                .map_or(0, |definition| definition.max_ammo);
+            if let Some(piece) = state.pieces.get_mut(&action.piece_id) {
+                piece.current_square = Some(to);
+                piece.layer = PieceLayer::Ground;
+                piece.remaining_flight_turns = 0;
+                piece
+                    .state
+                    .insert("airborne".into(), PieceStateValue::Boolean(false));
+                if home.contains(&to) {
+                    piece.current_ammo = max_ammo;
+                }
+            }
+        }
         MORTAR_BARRAGE_ABILITY_ID => {
             let targets = action
                 .to
@@ -385,12 +506,15 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
                     pocket.in_pocket = false;
                 }
                 if let Some(player) = state.players.get_mut(&action.player_id) {
-                    player.deck.pocket_pieces.retain(|id| id != &deployment.pocket_piece_id);
+                    player
+                        .deck
+                        .pocket_pieces
+                        .retain(|id| id != &deployment.pocket_piece_id);
                 }
-                state.board.squares.insert(
-                    deployment.to.to_id(),
-                    Some(deployment.pocket_piece_id),
-                );
+                state
+                    .board
+                    .squares
+                    .insert(deployment.to.to_id(), Some(deployment.pocket_piece_id));
             }
         }
         "recall" => {
@@ -425,6 +549,44 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
     state
 }
 
+fn apply_ground_blast(game_state: &mut GameState, center: Square, acting_player: &PlayerId) {
+    let targets = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .filter_map(|(dx, dy)| {
+            let square = Square::new(center.file + dx, center.rank + dy);
+            game_state.board.get_piece_at(&square).cloned()
+        })
+        .collect::<Vec<_>>();
+    let mut removed_enemy_king = false;
+    let mut removed_friendly_king = false;
+    for target_id in targets {
+        let target_owner = game_state
+            .pieces
+            .get(&target_id)
+            .map(|piece| piece.owner.clone());
+        if remove_captured_piece(game_state, &target_id, acting_player) {
+            if target_owner.as_ref() == Some(acting_player) {
+                removed_friendly_king = true;
+            } else {
+                removed_enemy_king = true;
+            }
+        }
+    }
+    if removed_enemy_king || removed_friendly_king {
+        game_state.phase = GamePhase::Ended;
+        game_state.result = Some(GameResult {
+            winner: if removed_enemy_king {
+                Some(acting_player.clone())
+            } else if acting_player == "white" {
+                Some("black".into())
+            } else {
+                Some("white".into())
+            },
+            reason: GameEndReason::KingCapture,
+        });
+    }
+}
+
 /// Normalized piece-removal path shared by capture-like actions. It updates the
 /// board, concrete piece state, and capture record, and reports royal removal.
 fn remove_captured_piece(
@@ -436,12 +598,13 @@ fn remove_captured_piece(
         return false;
     };
     let square = piece.current_square;
+    let layer = piece.layer;
     let is_king = game_state
         .piece_definitions
         .get(&piece.type_id)
         .is_some_and(is_royal_piece);
     if let Some(square) = square {
-        game_state.board.squares.insert(square.to_id(), None);
+        game_state.board.set_piece_at_layer(square, layer, None);
     }
     if let Some(piece) = game_state.pieces.get_mut(piece_id) {
         piece.captured = true;
@@ -454,6 +617,37 @@ fn remove_captured_piece(
         }
     }
     is_king
+}
+
+fn resolve_unlandable_bombers(game_state: &mut GameState, owner: &PlayerId) {
+    let crashed = game_state
+        .pieces
+        .values()
+        .filter(|piece| {
+            piece.owner == *owner
+                && piece.is_on_board()
+                && piece.layer == PieceLayer::Air
+                && piece.remaining_flight_turns == 0
+                && piece.state.get("airborne") == Some(&PieceStateValue::Boolean(true))
+                && bomber_landing_targets(game_state, piece).is_empty()
+        })
+        .map(|piece| piece.id.clone())
+        .collect::<Vec<_>>();
+    for piece_id in crashed {
+        let Some((square, layer)) = game_state
+            .pieces
+            .get(&piece_id)
+            .and_then(|piece| piece.current_square.map(|square| (square, piece.layer)))
+        else {
+            continue;
+        };
+        game_state.board.set_piece_at_layer(square, layer, None);
+        if let Some(piece) = game_state.pieces.get_mut(&piece_id) {
+            piece.captured = true;
+            piece.current_square = None;
+            piece.in_pocket = false;
+        }
+    }
 }
 
 fn tick_move_option_cooldowns(
@@ -494,6 +688,43 @@ fn tick_move_option_cooldowns(
         piece
             .move_option_cooldowns
             .retain(|_, cooldown| cooldown.remaining > 0);
+    }
+}
+
+fn consume_option_ammo(game_state: &mut GameState, piece_id: &PieceId, option_id: &str) {
+    let (ammo_cost, max_ammo) = game_state
+        .pieces
+        .get(piece_id)
+        .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+        .map(|definition| {
+            let ammo_cost = definition
+                .move_options
+                .iter()
+                .find(|option| option.id == option_id)
+                .map_or(0, |option| option.ammo_cost);
+            (ammo_cost, definition.max_ammo)
+        })
+        .unwrap_or((0, 0));
+    if let Some(piece) = game_state.pieces.get_mut(piece_id) {
+        piece.current_ammo = piece.current_ammo.saturating_sub(ammo_cost);
+    }
+    if ammo_cost > 0 && max_ammo > 0 {
+        replenish_depleted_ammo_at_home(game_state, piece_id, max_ammo);
+    }
+}
+
+fn replenish_depleted_ammo_at_home(game_state: &mut GameState, piece_id: &PieceId, max_ammo: u32) {
+    let should_replenish = game_state.pieces.get(piece_id).is_some_and(|piece| {
+        piece.current_ammo == 0
+            && piece.layer == PieceLayer::Ground
+            && piece.current_square.is_some_and(|square| {
+                get_base_zone_squares(&piece.owner, game_state.board.size).contains(&square)
+            })
+    });
+    if should_replenish {
+        if let Some(piece) = game_state.pieces.get_mut(piece_id) {
+            piece.current_ammo = max_ammo;
+        }
     }
 }
 
@@ -544,19 +775,27 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
 fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameState {
-    let moved_piece_type = game_state
+    let moved_piece = game_state
         .pieces
         .get(&action.piece_id)
-        .map(|p| p.type_id.clone());
-    let is_castling = moved_piece_type
-        .as_deref()
-        .map(is_king_type)
-        .unwrap_or(false)
+        .map(|piece| (piece.type_id.clone(), piece.layer));
+    let moved_layer = moved_piece
+        .as_ref()
+        .map(|(_, layer)| *layer)
+        .unwrap_or_default();
+    let is_castling = moved_layer == PieceLayer::Ground
+        && moved_piece
+            .as_ref()
+            .map(|(type_id, _)| type_id.as_str())
+            .map(is_king_type)
+            .unwrap_or(false)
         && (action.to.file - action.from.file).abs() == 2
         && action.to.rank == action.from.rank;
 
     // Remove piece from source square
-    game_state.board.squares.insert(action.from.to_id(), None);
+    game_state
+        .board
+        .set_piece_at_layer(action.from, moved_layer, None);
 
     // Capture target piece if present (including en passant capture square).
     let mut capture_square = action.to;
@@ -564,7 +803,11 @@ fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameSt
         capture_square = Square::new(action.to.file, action.from.rank);
     }
 
-    if let Some(captured_id) = game_state.board.get_piece_at(&capture_square).cloned() {
+    if let Some(captured_id) = game_state
+        .board
+        .get_piece_at_layer(&capture_square, moved_layer)
+        .cloned()
+    {
         let record_for_player = game_state
             .players
             .values()
@@ -615,8 +858,7 @@ fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameSt
     // Place piece on destination
     game_state
         .board
-        .squares
-        .insert(action.to.to_id(), Some(action.piece_id.clone()));
+        .set_piece_at_layer(action.to, moved_layer, Some(action.piece_id.clone()));
 
     // Update piece position
     if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
@@ -624,4 +866,32 @@ fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameSt
     }
 
     game_state
+}
+
+fn replenish_ammo_on_home_entry(
+    game_state: &mut GameState,
+    piece_id: &PieceId,
+    from: Square,
+    to: Square,
+) {
+    let Some(piece) = game_state.pieces.get(piece_id) else {
+        return;
+    };
+    if piece.layer != PieceLayer::Ground {
+        return;
+    }
+    let owner = piece.owner.clone();
+    let max_ammo = game_state
+        .piece_definitions
+        .get(&piece.type_id)
+        .map_or(0, |definition| definition.max_ammo);
+    if max_ammo == 0 {
+        return;
+    }
+    let home = get_base_zone_squares(&owner, game_state.board.size);
+    if !home.contains(&from) && home.contains(&to) {
+        if let Some(piece) = game_state.pieces.get_mut(piece_id) {
+            piece.current_ammo = max_ammo;
+        }
+    }
 }

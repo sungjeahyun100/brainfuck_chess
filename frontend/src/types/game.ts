@@ -23,6 +23,8 @@ export interface Board {
   size: number
   /** SquareId → PieceId | null */
   squares: Record<SquareId, PieceId | null>
+  /** Independent air-layer occupancy at the same coordinates. */
+  air_squares?: Record<SquareId, PieceId | null>
   /** SquareId → terrain that remains on the square when pieces move. */
   terrain?: Record<SquareId, TerrainCell>
 }
@@ -37,6 +39,7 @@ export interface PieceDefinition {
   id: PieceTypeId
   name: string
   score: number
+  max_ammo?: number
   deployment_zone: DeploymentZone
   chessembly_code: string
   chessembly_version: string
@@ -104,6 +107,8 @@ export interface MoveOptionDefinition {
   layer_ids: string[]
   execution_mode: MoveOptionExecutionMode
   contributes_to_attack_map: boolean
+  ammo_cost?: number
+  enabled_when?: PieceStatePredicate[]
   cooldown?: CooldownDefinition
 }
 
@@ -127,6 +132,9 @@ export interface Piece {
   in_pocket: boolean
   captured: boolean
   has_moved: boolean
+  current_ammo?: number
+  layer?: 'ground' | 'air'
+  remaining_flight_turns?: number
   state: Record<string, PieceStateValue>
   move_option_cooldowns: Record<string, { remaining: number }>
 }
@@ -256,7 +264,36 @@ export interface BotTurnResponse {
 
 export type GamePhase = 'setup' | 'playing' | 'ended'
 
-export type GameEndReason = 'king_capture' | 'resignation' | 'timeout' | 'draw'
+export type GameEndReason = 'king_capture' | 'resignation' | 'timeout' | 'abandonment' | 'draw'
+
+export type TimeControlId = 'five_zero' | 'ten_zero' | 'five_three' | 'ten_five' | 'fifteen_ten' | 'unlimited'
+
+export interface GameClock {
+  time_control: TimeControlId
+  mode: 'countdown' | 'unlimited'
+  initial_time_ms: number | null
+  increment_ms: number
+  active_color: PlayerId
+  turn_started_at_ms?: number | null
+  server_now_ms: number
+  white_remaining_ms?: number | null
+  black_remaining_ms?: number | null
+  white_elapsed_ms: number
+  black_elapsed_ms: number
+}
+
+export interface PlayerPresence {
+  connected: boolean
+  disconnected_at_ms?: number | null
+  warning_at_ms?: number | null
+  forfeit_at_ms?: number | null
+}
+
+export interface GamePlayerInfo {
+  public_id: string | null
+  nickname: string
+  side: PlayerId
+}
 
 export interface GameResult {
   winner?: PlayerId
@@ -289,6 +326,10 @@ export interface GameState {
     action: TurnAction
   }>
   result?: GameResult
+  clock: GameClock
+  presence?: { white: PlayerPresence; black: PlayerPresence }
+  player_info: Record<PlayerId, GamePlayerInfo>
+  record_notation?: import('./gameRecord').RecordedNotationAction[]
 }
 
 export interface AttackMap {

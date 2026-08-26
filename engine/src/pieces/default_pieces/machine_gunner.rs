@@ -15,6 +15,7 @@ take-move(0, -1);"
         id: "machine-gunner".into(),
         name: "기관총 사수".into(),
         score: 8,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: movement.clone(),
         chessembly_version: "1.0".into(),
@@ -40,6 +41,8 @@ take-move(0, -1);"
                 layer_ids: vec!["machine_gunner_step".into()],
                 execution_mode: MoveOptionExecutionMode::MoveModifier,
                 contributes_to_attack_map: true,
+                ammo_cost: 0,
+                enabled_when: Vec::new(),
                 cooldown: None,
             },
             MoveOptionDefinition {
@@ -50,6 +53,8 @@ take-move(0, -1);"
                 layer_ids: Vec::new(),
                 execution_mode: MoveOptionExecutionMode::StandaloneAction,
                 contributes_to_attack_map: false,
+                ammo_cost: 0,
+                enabled_when: Vec::new(),
                 cooldown: Some(CooldownDefinition {
                     turns: 2,
                     clock: CooldownClock::OwnerTurns,

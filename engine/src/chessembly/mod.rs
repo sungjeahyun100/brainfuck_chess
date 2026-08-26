@@ -24,6 +24,7 @@ pub fn run_chessembly_layer_for_piece(
     let program = game_state.chessembly_layer_program(&piece.type_id, layer);
     let ctx = ExecutionContext {
         board: &game_state.board,
+        layer: piece.layer,
         initial_square: piece.current_square.unwrap_or(Square::new(0, 0)),
         all_definitions: &game_state.piece_definitions,
         all_pieces: &game_state.pieces,
@@ -49,6 +50,7 @@ pub fn run_chessembly_layer_for_piece_checked(
     let program = game_state.chessembly_layer_program(&piece.type_id, layer);
     let ctx = ExecutionContext {
         board: &game_state.board,
+        layer: piece.layer,
         initial_square: piece.current_square.unwrap_or(Square::new(0, 0)),
         all_definitions: &game_state.piece_definitions,
         all_pieces: &game_state.pieces,

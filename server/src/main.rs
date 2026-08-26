@@ -15,12 +15,17 @@ mod app_state;
 mod auth;
 mod custom_piece;
 mod database;
+mod game_record;
 mod request_guard;
 mod routes;
 mod stores;
+mod time_control;
 
+use account::ProfileVisibility;
 use app_state::AppState;
+use game_record::{GameRecordOwnership, GameRecordPlayer};
 use stores::RoomStore;
+use time_control::{now_ms, GameView, StoredGame, TimeControlId};
 
 use brainfuck_chess_engine::{
     actions::submit_action as submit_engine_action,
@@ -30,7 +35,8 @@ use brainfuck_chess_engine::{
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_ability_actions, generate_piece_legal_drop_actions,
-        generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
+        generate_piece_legal_move_actions, generate_piece_legal_move_actions_with_options,
+        MoveGenerationOptions,
     },
     pieces::default_pieces::all_default_definitions,
     rules::{
@@ -51,6 +57,14 @@ struct CreateGameRequest {
     board_variant: BoardVariant,
     white_deck: PlayerDeckSpec,
     black_deck: PlayerDeckSpec,
+    #[serde(default)]
+    time_control: TimeControlId,
+    #[serde(default)]
+    local_side: Option<PlayerId>,
+    #[serde(default)]
+    local_nickname: Option<String>,
+    #[serde(default)]
+    guest_nickname: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -75,6 +89,8 @@ struct MultiplayerRoom {
     host_ready: bool,
     guest_ready: bool,
     game_id: Option<String>,
+    #[serde(default)]
+    time_control: TimeControlId,
 }
 
 #[derive(Deserialize)]
@@ -87,6 +103,8 @@ struct CreateRoomRequest {
     host_side: PlayerId,
     client_id: String,
     deck: PlayerDeckSpec,
+    #[serde(default)]
+    time_control: TimeControlId,
 }
 
 fn resolve_board_map(
@@ -141,8 +159,16 @@ struct ResignGameRequest {
     player_id: PlayerId,
 }
 
+#[derive(Deserialize)]
+struct HeartbeatRequest {
+    client_id: String,
+    player_id: PlayerId,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 struct PlayerDeckSpec {
+    #[serde(default)]
+    name: Option<String>,
     starting: Vec<StartingPieceSpec>,
     pocket: Vec<DeckPieceRef>,
 }
@@ -171,7 +197,7 @@ enum DeckPieceRef {
 #[derive(Serialize)]
 struct GameResponse {
     id: String,
-    state: GameState,
+    state: GameView,
 }
 
 #[derive(Deserialize)]
@@ -250,7 +276,7 @@ struct BotTurnStats {
 #[derive(Debug, Serialize)]
 struct BotTurnResponse {
     ok: bool,
-    game_state: GameState,
+    game_state: GameView,
     actions: Vec<AiAction>,
     timeline: Vec<brainfuck_chess_engine::ai::ActionTimelineFrame>,
     stats: BotTurnStats,
@@ -293,6 +319,12 @@ struct LabPieceSpec {
     state: HashMap<String, PieceStateValue>,
     #[serde(default)]
     move_option_cooldowns: HashMap<String, CooldownState>,
+    #[serde(default)]
+    current_ammo: Option<u32>,
+    #[serde(default)]
+    layer: PieceLayer,
+    #[serde(default)]
+    remaining_flight_turns: u32,
 }
 
 #[derive(Clone, Deserialize)]
@@ -302,6 +334,8 @@ struct LabPocketPieceSpec {
     owner: PlayerId,
     #[serde(default)]
     state: HashMap<String, PieceStateValue>,
+    #[serde(default)]
+    current_ammo: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -316,6 +350,12 @@ struct LabPieceOptionsRequest {
     move_option_id: Option<String>,
     #[serde(default)]
     global_state: HashMap<String, i32>,
+}
+
+#[derive(Deserialize)]
+struct LabApplyActionRequest {
+    lab: LabPieceOptionsRequest,
+    action: TurnAction,
 }
 
 #[derive(Clone, Deserialize)]
@@ -348,6 +388,7 @@ struct LabPieceOptionsResponse {
     piece_definitions: HashMap<PieceTypeId, PieceDefinition>,
     piece_states: HashMap<PieceId, HashMap<String, PieceStateValue>>,
     piece_cooldowns: HashMap<PieceId, HashMap<String, CooldownState>>,
+    piece_runtime: HashMap<PieceId, Piece>,
 }
 
 #[derive(Debug, Serialize)]
@@ -380,8 +421,17 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
         | "airborne"
         | "green-camp"
         | "mortar"
+        | "tank"
+        | "bomber"
         | "machine-gunner"
         | "machine_gunner" => Some(raw_piece_type.replace('_', "-")),
+        "surface-to-air-missile"
+        | "surface-to-air-missile-white"
+        | "surface-to-air-missile-black" => Some(if player_id == "white" {
+            "surface-to-air-missile-white".into()
+        } else {
+            "surface-to-air-missile-black".into()
+        }),
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
             "pawn-white".into()
         } else {
@@ -493,6 +543,11 @@ fn build_player_deck(
             in_pocket: false,
             captured: false,
             has_moved: false,
+            current_ammo: definitions
+                .get(&type_id)
+                .map_or(0, |definition| definition.max_ammo),
+            layer: PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: definitions
                 .get(&type_id)
                 .map(PieceDefinition::initial_state)
@@ -518,6 +573,11 @@ fn build_player_deck(
             in_pocket: true,
             captured: false,
             has_moved: false,
+            current_ammo: definitions
+                .get(&type_id)
+                .map_or(0, |definition| definition.max_ammo),
+            layer: PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: definitions
                 .get(&type_id)
                 .map(PieceDefinition::initial_state)
@@ -705,7 +765,7 @@ fn build_lab_game_state(
                 lab_piece.square.to_id()
             ));
         }
-        if !board.is_empty(&lab_piece.square) {
+        if !board.is_empty_at_layer(&lab_piece.square, lab_piece.layer) {
             return Err(format!(
                 "{} 칸에 이미 기물이 있습니다.",
                 lab_piece.square.to_id()
@@ -758,13 +818,14 @@ fn build_lab_game_state(
             in_pocket: false,
             captured: false,
             has_moved: false,
+            current_ammo: lab_piece.current_ammo.unwrap_or(definition.max_ammo),
+            layer: lab_piece.layer,
+            remaining_flight_turns: lab_piece.remaining_flight_turns,
             state: piece_state,
             move_option_cooldowns: lab_piece.move_option_cooldowns.clone(),
         };
 
-        board
-            .squares
-            .insert(lab_piece.square.to_id(), Some(piece_id.clone()));
+        board.set_piece_at_layer(lab_piece.square, lab_piece.layer, Some(piece_id.clone()));
         if lab_piece.owner == "white" {
             white_starting.push(piece_id.clone());
         } else {
@@ -816,6 +877,9 @@ fn build_lab_game_state(
                 in_pocket: true,
                 captured: false,
                 has_moved: false,
+                current_ammo: lab_piece.current_ammo.unwrap_or(definition.max_ammo),
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
                 state: piece_state,
                 move_option_cooldowns: HashMap::new(),
             },
@@ -903,6 +967,7 @@ fn materialize_neutral_deck(
     }
 
     PlayerDeckSpec {
+        name: spec.name.clone(),
         starting: spec
             .starting
             .iter()
@@ -993,13 +1058,15 @@ async fn start_room_game(
     app: &AppState,
 ) -> Result<Option<GameResponse>, String> {
     if let Some(game_id) = &room.game_id {
-        let state = app
+        let mut state = app
             .games
-            .get(game_id)
+            .get_mut(game_id)
             .ok_or_else(|| "방의 게임을 찾을 수 없습니다.".to_string())?;
+        let now = now_ms();
+        state.adjudicate(now);
         return Ok(Some(GameResponse {
             id: game_id.clone(),
-            state: state.clone(),
+            state: state.view(now),
         }));
     }
 
@@ -1038,10 +1105,191 @@ async fn start_room_game(
         black_deck,
         packages,
     )?;
+    let (white_owner, black_owner) = if room.host_side == "white" {
+        (host_owner, guest_owner)
+    } else {
+        (guest_owner, host_owner)
+    };
+    let (record_players, record_ownership) =
+        game_record_players(app, white_owner, black_owner).await;
 
     room.game_id = Some(game_id.clone());
-    app.games.insert(game_id.clone(), state.clone());
-    Ok(Some(GameResponse { id: game_id, state }))
+    let now = now_ms();
+    let stored = StoredGame::new_with_players_and_deck_names(
+        state,
+        room.time_control,
+        true,
+        now,
+        record_players,
+        record_ownership,
+        HashMap::from([
+            (
+                "white".into(),
+                white_deck
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "white deck".into()),
+            ),
+            (
+                "black".into(),
+                black_deck
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "black deck".into()),
+            ),
+        ]),
+        room.map_id.clone(),
+    );
+    let view = stored.view(now);
+    app.games.insert(game_id.clone(), stored);
+    Ok(Some(GameResponse {
+        id: game_id,
+        state: view,
+    }))
+}
+
+async fn game_record_players(
+    app: &AppState,
+    white_owner: &str,
+    black_owner: &str,
+) -> (HashMap<PlayerId, GameRecordPlayer>, GameRecordOwnership) {
+    let white_registered = app
+        .accounts
+        .authenticated_user(white_owner)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    let black_registered = app
+        .accounts
+        .authenticated_user(black_owner)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    let white = game_record_player(app, white_owner, "white").await;
+    let black = game_record_player(app, black_owner, "black").await;
+    let persist = white_registered || black_registered;
+    (
+        HashMap::from([("white".into(), white), ("black".into(), black)]),
+        GameRecordOwnership {
+            white_user_id: (!white_owner.is_empty()).then(|| white_owner.to_owned()),
+            black_user_id: (!black_owner.is_empty()).then(|| black_owner.to_owned()),
+            persist,
+        },
+    )
+}
+
+async fn game_record_player(app: &AppState, owner: &str, side: &str) -> GameRecordPlayer {
+    let profile = app.accounts.authenticated_user(owner).await.ok().flatten();
+    GameRecordPlayer {
+        public_id: profile
+            .as_ref()
+            .and_then(|profile| profile.public_id.clone()),
+        nickname: profile
+            .and_then(|profile| profile.display_name)
+            .unwrap_or_else(|| {
+                if side == "white" {
+                    "White Player".into()
+                } else {
+                    "Black Player".into()
+                }
+            }),
+        side: side.into(),
+    }
+}
+
+fn normalize_game_nickname(value: Option<&str>, fallback: &str) -> Result<String, String> {
+    let nickname = value.unwrap_or(fallback).trim();
+    if nickname.is_empty()
+        || nickname.chars().count() > 30
+        || nickname.chars().any(char::is_control)
+    {
+        return Err("닉네임은 1~30자의 표시 가능한 문자여야 합니다.".into());
+    }
+    Ok(nickname.to_owned())
+}
+
+async fn singleplayer_record_players(
+    app: &AppState,
+    owner: &str,
+    local_side: &str,
+    local_nickname: Option<&str>,
+    guest_nickname: Option<&str>,
+) -> Result<(HashMap<PlayerId, GameRecordPlayer>, GameRecordOwnership), String> {
+    if local_side != "white" && local_side != "black" {
+        return Err("로컬 플레이어 진영이 올바르지 않습니다.".into());
+    }
+    let opponent_side = if local_side == "white" {
+        "black"
+    } else {
+        "white"
+    };
+    let mut local = game_record_player(app, owner, local_side).await;
+    local.nickname = normalize_game_nickname(local_nickname, &local.nickname)?;
+    let guest = GameRecordPlayer {
+        public_id: None,
+        nickname: normalize_game_nickname(guest_nickname, "Guest")?,
+        side: opponent_side.into(),
+    };
+    let registered = app
+        .accounts
+        .authenticated_user(owner)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    let mut players = HashMap::new();
+    players.insert(local_side.into(), local);
+    players.insert(opponent_side.into(), guest);
+    Ok((
+        players,
+        GameRecordOwnership {
+            white_user_id: (local_side == "white" && !owner.is_empty()).then(|| owner.to_owned()),
+            black_user_id: (local_side == "black" && !owner.is_empty()).then(|| owner.to_owned()),
+            persist: registered,
+        },
+    ))
+}
+
+async fn run_game_time_adjudicator(
+    games: stores::GameStore,
+    records: game_record::GameRecordStore,
+) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
+    loop {
+        interval.tick().await;
+        let ids = games
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        let now = now_ms();
+        for id in ids {
+            if let Some(mut game) = games.get_mut(&id) {
+                game.adjudicate(now);
+            }
+            if let Err(error) = persist_completed_record(&games, &records, &id).await {
+                eprintln!("failed to persist completed game record {id}: {error}");
+            }
+        }
+    }
+}
+
+async fn persist_completed_record(
+    games: &stores::GameStore,
+    records: &game_record::GameRecordStore,
+    game_id: &str,
+) -> Result<(), &'static str> {
+    let Some(record) = games.get(game_id).and_then(|game| game.completed_record()) else {
+        return Ok(());
+    };
+    if record.ownership.has_registered_owner() {
+        records.save(&record).await?;
+    }
+    if let Some(mut game) = games.get_mut(game_id) {
+        game.mark_record_persisted();
+    }
+    Ok(())
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -1052,6 +1300,10 @@ async fn main() {
     let state = AppState::from_env(environment)
         .await
         .unwrap_or_else(|error| panic!("server startup blocked: {error}"));
+    tokio::spawn(run_game_time_adjudicator(
+        state.games.clone(),
+        state.game_records.clone(),
+    ));
 
     // Static frontend directory — populated at Docker build time.
     // Falls back gracefully if the directory doesn't exist (dev mode).
@@ -1101,6 +1353,7 @@ async fn get_piece_scores() -> Json<HashMap<PieceTypeId, u32>> {
 #[derive(Clone, Copy, Serialize)]
 struct PieceCatalogMetadata {
     score: u32,
+    max_ammo: u32,
     deployment_zone: DeploymentZone,
 }
 
@@ -1112,6 +1365,7 @@ fn default_piece_catalog() -> HashMap<PieceTypeId, PieceCatalogMetadata> {
                 definition.id,
                 PieceCatalogMetadata {
                     score: definition.score,
+                    max_ammo: definition.max_ammo,
                     deployment_zone: definition.deployment_zone,
                 },
             )
@@ -1125,6 +1379,7 @@ fn default_piece_catalog() -> HashMap<PieceTypeId, PieceCatalogMetadata> {
         ("tempest-pawn", "tempest-pawn-white"),
         ("bouncing-pawn", "bouncing-pawn-white"),
         ("dozer", "dozer-white"),
+        ("surface-to-air-missile", "surface-to-air-missile-white"),
     ] {
         if let Some(metadata) = catalog.get(white).copied() {
             catalog.insert(neutral.into(), metadata);
@@ -1194,7 +1449,7 @@ async fn create_game(
             Json(ErrorResponse { error }),
         )
     })?;
-    let (_, board_variant) =
+    let (map_id, board_variant) =
         resolve_board_map(req.map_id.as_deref(), req.board_size, req.board_variant)
             .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let id = Uuid::new_v4().to_string();
@@ -1207,8 +1462,48 @@ async fn create_game(
         packages,
     )
     .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
-    app.games.insert(id.clone(), state.clone());
-    Ok(Json(GameResponse { id, state }))
+    let now = now_ms();
+    let (record_players, record_ownership) = if let Some(local_side) = req.local_side.as_deref() {
+        singleplayer_record_players(
+            &app,
+            &owner,
+            local_side,
+            req.local_nickname.as_deref(),
+            req.guest_nickname.as_deref(),
+        )
+        .await
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
+    } else {
+        game_record_players(&app, &owner, &owner).await
+    };
+    let stored = StoredGame::new_with_players_and_deck_names(
+        state,
+        req.time_control,
+        false,
+        now,
+        record_players,
+        record_ownership,
+        HashMap::from([
+            (
+                "white".into(),
+                req.white_deck
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "white deck".into()),
+            ),
+            (
+                "black".into(),
+                req.black_deck
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "black deck".into()),
+            ),
+        ]),
+        map_id,
+    );
+    let view = stored.view(now);
+    app.games.insert(id.clone(), stored);
+    Ok(Json(GameResponse { id, state: view }))
 }
 
 async fn create_room(
@@ -1256,6 +1551,7 @@ async fn create_room(
         host_ready: true,
         guest_ready: false,
         game_id: None,
+        time_control: req.time_control,
     };
 
     app.rooms.insert(id, room.clone());
@@ -1306,7 +1602,7 @@ async fn join_room(
     }
 
     if let Some(game_id) = &room.game_id {
-        let state = app.games.get(game_id).ok_or_else(|| {
+        let mut state = app.games.get_mut(game_id).ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
                 Json(ErrorResponse {
@@ -1314,9 +1610,11 @@ async fn join_room(
                 }),
             )
         })?;
+        let now = now_ms();
+        state.adjudicate(now);
         return Ok(Json(GameResponse {
             id: game_id.clone(),
-            state: state.clone(),
+            state: state.view(now),
         }));
     }
 
@@ -1495,7 +1793,7 @@ async fn resign_room(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<ResignRoomRequest>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
     let room = app
         .rooms
         .get(&id.to_uppercase())
@@ -1538,23 +1836,20 @@ async fn resign_room(
         )
     })?;
 
-    let state = entry.value_mut();
-    if state.phase != GamePhase::Ended {
-        state.phase = GamePhase::Ended;
-        state.result = Some(GameResult {
-            winner: Some(opponent_side(&req.player_id)),
-            reason: GameEndReason::Resignation,
-        });
+    let game = entry.value_mut();
+    if game.phase != GamePhase::Ended {
+        game.clock.stop(now_ms());
+        game.end_with_loss(&req.player_id, GameEndReason::Resignation);
     }
 
-    Ok(Json(state.clone()))
+    Ok(Json(game.view(now_ms())))
 }
 
 async fn resign_game(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<ResignGameRequest>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
     if req.player_id != "white" && req.player_id != "black" {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1573,24 +1868,74 @@ async fn resign_game(
         )
     })?;
 
-    let state = entry.value_mut();
-    if state.phase != GamePhase::Ended {
-        state.phase = GamePhase::Ended;
-        state.result = Some(GameResult {
-            winner: Some(opponent_side(&req.player_id)),
-            reason: GameEndReason::Resignation,
-        });
+    let game = entry.value_mut();
+    if game.phase != GamePhase::Ended {
+        game.clock.stop(now_ms());
+        game.end_with_loss(&req.player_id, GameEndReason::Resignation);
     }
 
-    Ok(Json(state.clone()))
+    Ok(Json(game.view(now_ms())))
+}
+
+async fn heartbeat_room(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<HeartbeatRequest>,
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
+    let room = app.rooms.get(&id.to_uppercase()).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "방을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+    let authorized = (req.player_id == room.host_side && req.client_id == room.host_client_id)
+        || (req.player_id == room.guest_side
+            && room.guest_client_id.as_deref() == Some(req.client_id.as_str()));
+    if !authorized {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "이 방의 플레이어만 heartbeat를 보낼 수 있습니다.".into(),
+            }),
+        ));
+    }
+    let game_id = room.game_id.clone().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "아직 시작되지 않은 방입니다.".into(),
+            }),
+        )
+    })?;
+    drop(room);
+    let mut game = app.games.get_mut(&game_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "방의 게임을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+    let now = now_ms();
+    game.adjudicate(now);
+    if game.phase != GamePhase::Ended {
+        game.heartbeat(&req.player_id, now);
+    }
+    Ok(Json(game.view(now)))
 }
 
 async fn get_game(
     State(app): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
-    match app.games.get(&id) {
-        Some(state) => Ok(Json(state.clone())),
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
+    match app.games.get_mut(&id) {
+        Some(mut game) => {
+            let now = now_ms();
+            game.adjudicate(now);
+            Ok(Json(game.view(now)))
+        }
         None => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -1600,11 +1945,166 @@ async fn get_game(
     }
 }
 
+async fn get_game_record(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<game_record::GameRecord>, (StatusCode, Json<ErrorResponse>)> {
+    if let Some(mut game) = app.games.get_mut(&id) {
+        let now = now_ms();
+        game.adjudicate(now);
+        let ended = game.phase == GamePhase::Ended;
+        let record = game.record.clone();
+        drop(game);
+        ensure_game_record_access(&app, &headers, &record).await?;
+        if !ended {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(ErrorResponse {
+                    error: "진행 중인 게임은 아직 기보를 내보낼 수 없습니다.".into(),
+                }),
+            ));
+        }
+        if let Err(error) = persist_completed_record(&app.games, &app.game_records, &id).await {
+            eprintln!("failed to persist completed game record {id}: {error}");
+        }
+        return Ok(Json(record));
+    }
+    match app.game_records.get(&id).await {
+        Ok(Some(record)) => {
+            ensure_game_record_access(&app, &headers, &record).await?;
+            Ok(Json(record))
+        }
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "게임 기록을 찾을 수 없습니다.".into(),
+            }),
+        )),
+        Err(_) => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "게임 기록 저장소를 사용할 수 없습니다.".into(),
+            }),
+        )),
+    }
+}
+
+async fn ensure_game_record_access(
+    app: &AppState,
+    headers: &HeaderMap,
+    record: &game_record::GameRecord,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    if app
+        .auth
+        .authenticate(headers)
+        .ok()
+        .is_some_and(|user_id| record.ownership.contains(&user_id))
+    {
+        return Ok(());
+    }
+    let Some((white_user_id, black_user_id)) = record.ownership.both_user_ids() else {
+        return Err(private_game_record_error());
+    };
+    let white = app
+        .accounts
+        .authenticated_user(white_user_id)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "계정 공개 설정을 확인할 수 없습니다.".into(),
+                }),
+            )
+        })?;
+    let black = if black_user_id == white_user_id {
+        white.clone()
+    } else {
+        app.accounts
+            .authenticated_user(black_user_id)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ErrorResponse {
+                        error: "계정 공개 설정을 확인할 수 없습니다.".into(),
+                    }),
+                )
+            })?
+    };
+    if third_party_game_record_is_public(
+        white.map(|profile| profile.profile_visibility),
+        black.map(|profile| profile.profile_visibility),
+    ) {
+        Ok(())
+    } else {
+        Err(private_game_record_error())
+    }
+}
+
+fn third_party_game_record_is_public(
+    white: Option<ProfileVisibility>,
+    black: Option<ProfileVisibility>,
+) -> bool {
+    white == Some(ProfileVisibility::Public) && black == Some(ProfileVisibility::Public)
+}
+
+fn private_game_record_error() -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: "게임 기록을 찾을 수 없습니다.".into(),
+        }),
+    )
+}
+
+async fn list_game_records(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<game_record::GameRecordSummary>>, (StatusCode, Json<ErrorResponse>)> {
+    let owner = app
+        .auth
+        .authenticate(&headers)
+        .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
+    app.accounts
+        .authenticated_user(&owner)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "계정 정보를 불러올 수 없습니다.".into(),
+                }),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "로그인 계정의 기록만 조회할 수 있습니다.".into(),
+                }),
+            )
+        })?;
+    app.game_records
+        .list_summaries_for_user_id(&owner, 50)
+        .await
+        .map(Json)
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "게임 기록 저장소를 사용할 수 없습니다.".into(),
+                }),
+            )
+        })
+}
+
 async fn submit_action(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<SubmitActionRequest>,
-) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
     let mut entry = app.games.get_mut(&id).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -1614,9 +2114,11 @@ async fn submit_action(
         )
     })?;
 
-    let state = entry.value_mut();
+    let game = entry.value_mut();
+    let now = now_ms();
+    game.adjudicate(now);
 
-    if state.phase == GamePhase::Ended {
+    if game.phase == GamePhase::Ended {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -1625,9 +2127,12 @@ async fn submit_action(
         ));
     }
 
-    match req.action {
+    let moving_player = game.current_player.clone();
+    let clock_before = game.clock.snapshot(now, true);
+    let state_before = game.state.clone();
+    let (next_state, recorded_action) = match req.action {
         SubmitAction::Move(request) => {
-            let piece = state.pieces.get(&request.piece_id).ok_or_else(|| {
+            let piece = game.pieces.get(&request.piece_id).ok_or_else(|| {
                 (
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
@@ -1635,7 +2140,7 @@ async fn submit_action(
                     }),
                 )
             })?;
-            if piece.owner != state.current_player {
+            if piece.owner != game.current_player {
                 return Err((
                     StatusCode::FORBIDDEN,
                     Json(ErrorResponse {
@@ -1649,7 +2154,7 @@ async fn submit_action(
                 move_option_id: request.move_option_id.clone(),
             };
             let matching_actions = generate_piece_legal_move_actions_with_options(
-                state,
+                &game.state,
                 &request.piece_id,
                 &move_options,
             )
@@ -1676,11 +2181,13 @@ async fn submit_action(
                     }),
                 ));
             };
-            *state = submit_engine_action(state.clone(), TurnAction::Move(legal_action.clone()))
+            let action = TurnAction::Move(legal_action.clone());
+            let state = submit_engine_action(game.state.clone(), action.clone())
                 .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+            (state, action)
         }
         SubmitAction::Drop(request) => {
-            let legal_action = generate_piece_legal_drop_actions(state, &request.piece_id)
+            let legal_action = generate_piece_legal_drop_actions(&game.state, &request.piece_id)
                 .into_iter()
                 .find(|action| action.to == request.to);
             let Some(legal_action) = legal_action else {
@@ -1691,12 +2198,14 @@ async fn submit_action(
                     }),
                 ));
             };
-            *state = submit_engine_action(state.clone(), TurnAction::Drop(legal_action))
+            let action = TurnAction::Drop(legal_action);
+            let state = submit_engine_action(game.state.clone(), action.clone())
                 .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+            (state, action)
         }
         SubmitAction::Ability(request) => {
             let legal_action = AbilityAction {
-                player_id: state.current_player.clone(),
+                player_id: game.current_player.clone(),
                 piece_id: request.piece_id,
                 ability_id: request.ability_id,
                 target_piece_id: request.target_piece_id,
@@ -1704,12 +2213,64 @@ async fn submit_action(
                 to: request.to,
                 deployments: request.deployments,
             };
-            *state = submit_engine_action(state.clone(), TurnAction::Ability(legal_action))
+            let action = TurnAction::Ability(legal_action);
+            let state = submit_engine_action(game.state.clone(), action.clone())
                 .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+            (state, action)
         }
-    }
+    };
 
-    Ok(Json(state.clone()))
+    let confirmed_at = now_ms();
+    game.adjudicate(confirmed_at);
+    if game.phase == GamePhase::Ended {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "착수 확정 전에 시간이 만료되었습니다.".into(),
+            }),
+        ));
+    }
+    game.state = next_state;
+    let next_player = game.current_player.clone();
+    let ended = game.phase == GamePhase::Ended;
+    game.clock
+        .finish_turn(&moving_player, &next_player, confirmed_at, ended);
+    let clock_after = game.clock.snapshot(confirmed_at, !ended);
+    let elapsed_ms = clock_before
+        .turn_started_at_ms
+        .map(|started| confirmed_at.saturating_sub(started))
+        .unwrap_or(0);
+    game.record.push_action(
+        moving_player.clone(),
+        recorded_action,
+        elapsed_ms,
+        player_clock_value(&clock_before, &moving_player),
+        player_clock_value(&clock_after, &moving_player),
+        clock_after,
+        &state_before,
+        game.state.clone(),
+    );
+    if ended {
+        let final_state = game.state.clone();
+        let final_clock = game.clock.snapshot(confirmed_at, false);
+        game.record
+            .finalize(&final_state, final_clock, confirmed_at);
+    }
+    Ok(Json(game.view(confirmed_at)))
+}
+
+fn player_clock_value(clock: &time_control::ClockSnapshot, player: &str) -> Option<i64> {
+    if clock.mode == time_control::TimeControlMode::Countdown {
+        if player == "white" {
+            clock.white_remaining_ms
+        } else {
+            clock.black_remaining_ms
+        }
+    } else if player == "white" {
+        Some(clock.white_elapsed_ms)
+    } else {
+        Some(clock.black_elapsed_ms)
+    }
 }
 
 async fn run_bot_turn(
@@ -1747,6 +2308,8 @@ async fn run_bot_turn(
             }),
         )
     })?;
+    let started_at = now_ms();
+    entry.adjudicate(started_at);
     if entry.phase == GamePhase::Ended || entry.result.is_some() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1764,13 +2327,57 @@ async fn run_bot_turn(
         ));
     }
 
-    let result = play_bot_turn_detailed(entry.clone(), &req.bot_player_id, difficulty)
+    let moving_player = entry.current_player.clone();
+    let clock_before = entry.clock.snapshot(started_at, true);
+    let replay_initial_state = entry.state.clone();
+    let result = play_bot_turn_detailed(entry.state.clone(), &req.bot_player_id, difficulty)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
-    *entry = result.state.clone();
+    let finished_at = now_ms();
+    entry.adjudicate(finished_at);
+    if entry.phase == GamePhase::Ended {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "봇 착수 확정 전에 시간이 만료되었습니다.".into(),
+            }),
+        ));
+    }
+    entry.state = result.state.clone();
+    let next_player = entry.current_player.clone();
+    let ended = entry.phase == GamePhase::Ended;
+    entry
+        .clock
+        .finish_turn(&moving_player, &next_player, finished_at, ended);
+    let clock_after = entry.clock.snapshot(finished_at, !ended);
+    let mut frame_before = replay_initial_state;
+    for (index, frame) in result.timeline.iter().enumerate() {
+        entry.record.push_action(
+            moving_player.clone(),
+            ai_action_to_turn_action(frame.action.clone()),
+            if index == 0 {
+                finished_at.saturating_sub(clock_before.turn_started_at_ms.unwrap_or(started_at))
+            } else {
+                0
+            },
+            player_clock_value(&clock_before, &moving_player),
+            player_clock_value(&clock_after, &moving_player),
+            clock_after.clone(),
+            &frame_before,
+            frame.state.clone(),
+        );
+        frame_before = frame.state.clone();
+    }
+    if ended {
+        let final_state = entry.state.clone();
+        let final_clock = entry.clock.snapshot(finished_at, false);
+        entry
+            .record
+            .finalize(&final_state, final_clock, finished_at);
+    }
 
     Ok(Json(BotTurnResponse {
         ok: true,
-        game_state: result.state,
+        game_state: entry.view(finished_at),
         actions: result.actions,
         timeline: result.timeline,
         stats: BotTurnStats {
@@ -1792,6 +2399,14 @@ async fn run_bot_turn(
             elapsed_ms: result.elapsed_ms,
         },
     }))
+}
+
+fn ai_action_to_turn_action(action: AiAction) -> TurnAction {
+    match action {
+        AiAction::Move(action) => TurnAction::Move(action),
+        AiAction::Drop(action) => TurnAction::Drop(action),
+        AiAction::Ability(action) => TurnAction::Ability(action),
+    }
 }
 
 async fn get_legal_moves(
@@ -1924,31 +2539,7 @@ async fn get_lab_piece_options(
     headers: HeaderMap,
     Json(req): Json<LabPieceOptionsRequest>,
 ) -> Result<Json<LabPieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let packages = if req.custom_pieces.is_empty() {
-        Vec::new()
-    } else {
-        let owner = custom_piece::authenticated_owner(&app, &headers)
-            .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
-        let deck = PlayerDeckSpec {
-            starting: req
-                .custom_pieces
-                .iter()
-                .map(|piece| StartingPieceSpec {
-                    piece: DeckPieceRef::Custom {
-                        custom_piece_id: piece.custom_piece_id.clone(),
-                        version: piece.version,
-                        content_hash: piece.content_hash.clone(),
-                        exposed_piece_key: piece.exposed_piece_key.clone(),
-                    },
-                    square: Square::new(0, 0),
-                })
-                .collect(),
-            pocket: Vec::new(),
-        };
-        resolve_custom_packages(&app, &[(owner.as_str(), &deck)])
-            .await
-            .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
-    };
+    let packages = resolve_lab_packages(&app, &headers, &req.custom_pieces).await?;
     let state = build_lab_game_state(&req, &packages)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let piece_id = PieceId::from(req.selected_piece_id.clone());
@@ -2020,11 +2611,20 @@ async fn get_lab_piece_options(
                         name: option.name.clone(),
                         description: option.description.clone(),
                         available: cooldown_remaining == 0
-                            && (option.execution_mode == MoveOptionExecutionMode::MoveModifier
-                                || !generate_piece_legal_ability_actions(
-                                    &state, &piece_id, &option.id,
+                            && option.is_enabled_for(piece)
+                            && if option.execution_mode == MoveOptionExecutionMode::MoveModifier {
+                                !generate_piece_legal_move_actions_with_options(
+                                    &state,
+                                    &piece_id,
+                                    &MoveGenerationOptions {
+                                        move_option_id: Some(option.id.clone()),
+                                    },
                                 )
-                                .is_empty()),
+                                .is_empty()
+                            } else {
+                                !generate_piece_legal_ability_actions(&state, &piece_id, &option.id)
+                                    .is_empty()
+                            },
                         kind: option.kind,
                         execution_mode: option.execution_mode,
                         cooldown_remaining,
@@ -2052,12 +2652,89 @@ async fn get_lab_piece_options(
             .iter()
             .map(|(piece_id, piece)| (piece_id.clone(), piece.move_option_cooldowns.clone()))
             .collect(),
+        piece_runtime: state.pieces.clone(),
     }))
+}
+
+async fn apply_lab_action(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<LabApplyActionRequest>,
+) -> Result<Json<GameState>, (StatusCode, Json<ErrorResponse>)> {
+    let packages = resolve_lab_packages(&app, &headers, &req.lab.custom_pieces).await?;
+    let state = build_lab_game_state(&req.lab, &packages)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    let state = submit_engine_action(state, req.action)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    Ok(Json(state))
+}
+
+async fn resolve_lab_packages(
+    app: &AppState,
+    headers: &HeaderMap,
+    custom_pieces: &[LabCustomPieceRef],
+) -> Result<Vec<CustomPiecePackage>, (StatusCode, Json<ErrorResponse>)> {
+    if custom_pieces.is_empty() {
+        return Ok(Vec::new());
+    }
+    let owner = custom_piece::authenticated_owner(app, headers)
+        .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
+    let deck = PlayerDeckSpec {
+        name: None,
+        starting: custom_pieces
+            .iter()
+            .map(|piece| StartingPieceSpec {
+                piece: DeckPieceRef::Custom {
+                    custom_piece_id: piece.custom_piece_id.clone(),
+                    version: piece.version,
+                    content_hash: piece.content_hash.clone(),
+                    exposed_piece_key: piece.exposed_piece_key.clone(),
+                },
+                square: Square::new(0, 0),
+            })
+            .collect(),
+        pocket: Vec::new(),
+    };
+    resolve_custom_packages(app, &[(owner.as_str(), &deck)])
+        .await
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FailOnceGameRecordRepository {
+        fail_next: std::sync::atomic::AtomicBool,
+        saves: std::sync::Mutex<Vec<game_record::GameRecord>>,
+    }
+
+    #[async_trait::async_trait]
+    impl game_record::GameRecordRepository for FailOnceGameRecordRepository {
+        async fn save(&self, record: &game_record::GameRecord) -> Result<(), &'static str> {
+            if self
+                .fail_next
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err("injected failure");
+            }
+            self.saves.lock().unwrap().push(record.clone());
+            Ok(())
+        }
+        async fn get(
+            &self,
+            _game_id: &str,
+        ) -> Result<Option<game_record::GameRecord>, &'static str> {
+            Ok(None)
+        }
+        async fn list_summaries_for_user_id(
+            &self,
+            _user_id: &str,
+            _limit: i64,
+        ) -> Result<Vec<game_record::GameRecordSummary>, &'static str> {
+            Ok(Vec::new())
+        }
+    }
 
     #[test]
     fn missing_app_env_is_local_only_for_debug_builds() {
@@ -2065,6 +2742,394 @@ mod tests {
         assert_eq!(resolve_app_env(None, false), "prod");
         assert_eq!(resolve_app_env(Some("prod"), true), "prod");
         assert_eq!(resolve_app_env(Some("typo"), true), "prod");
+    }
+
+    #[test]
+    fn third_party_record_visibility_requires_two_public_accounts() {
+        assert!(third_party_game_record_is_public(
+            Some(ProfileVisibility::Public),
+            Some(ProfileVisibility::Public),
+        ));
+        assert!(!third_party_game_record_is_public(
+            Some(ProfileVisibility::Public),
+            Some(ProfileVisibility::Private),
+        ));
+        assert!(!third_party_game_record_is_public(
+            Some(ProfileVisibility::Private),
+            Some(ProfileVisibility::Private),
+        ));
+        assert!(!third_party_game_record_is_public(
+            Some(ProfileVisibility::Public),
+            None,
+        ));
+    }
+
+    #[test]
+    fn guest_nickname_is_trimmed_and_rejects_empty_controls_and_excess_length() {
+        assert_eq!(
+            normalize_game_nickname(Some("  상대  "), "Guest").unwrap(),
+            "상대"
+        );
+        assert!(normalize_game_nickname(Some(""), "Guest").is_err());
+        assert!(normalize_game_nickname(Some("bad\nname"), "Guest").is_err());
+        assert!(normalize_game_nickname(Some(&"x".repeat(31)), "Guest").is_err());
+    }
+
+    #[tokio::test]
+    async fn singleplayer_metadata_follows_the_resolved_local_side_and_account_profile() {
+        let (app, _) = test_app_with_game();
+        let identity = account::VerifiedIdentity {
+            issuer: "issuer".into(),
+            subject: "single-subject".into(),
+            provider: "google".into(),
+            email: None,
+            email_verified: true,
+            display_name: Some("계정 닉네임".into()),
+            avatar_url: None,
+        };
+        app.accounts
+            .complete_google_login("single-user", &identity, None)
+            .await
+            .unwrap();
+        app.accounts
+            .update_profile("single-user", Some("single_public"), None, None)
+            .await
+            .unwrap();
+        let (players, ownership) = singleplayer_record_players(
+            &app,
+            "single-user",
+            "black",
+            Some("임시 닉네임"),
+            Some("로컬 상대"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(players["black"].nickname, "임시 닉네임");
+        assert_eq!(players["black"].public_id.as_deref(), Some("single_public"));
+        assert_eq!(players["white"].nickname, "로컬 상대");
+        assert_eq!(players["white"].public_id, None);
+        assert_eq!(ownership.black_user_id.as_deref(), Some("single-user"));
+        assert_eq!(ownership.white_user_id, None);
+        assert!(ownership.has_registered_owner());
+        assert_eq!(
+            app.accounts
+                .authenticated_user("single-user")
+                .await
+                .unwrap()
+                .unwrap()
+                .display_name
+                .as_deref(),
+            Some("계정 닉네임")
+        );
+
+        let (fallback, _) =
+            singleplayer_record_players(&app, "single-user", "white", None, Some("Guest"))
+                .await
+                .unwrap();
+        assert_eq!(fallback["white"].nickname, "계정 닉네임");
+
+        app.accounts.ensure_guest("guest-session").await.unwrap();
+        let (guest_players, guest_ownership) = singleplayer_record_players(
+            &app,
+            "guest-session",
+            "white",
+            Some("Local Guest"),
+            Some("Guest"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(guest_players["white"].nickname, "Local Guest");
+        assert_eq!(guest_ownership.white_user_id.as_deref(), Some("guest-session"));
+        assert_eq!(guest_ownership.black_user_id, None);
+        assert!(!guest_ownership.has_registered_owner());
+
+        let (_, black_guest_ownership) = singleplayer_record_players(
+            &app, "guest-session", "black", Some("Local Guest"), Some("Guest"),
+        ).await.unwrap();
+        assert_eq!(black_guest_ownership.white_user_id, None);
+        assert_eq!(black_guest_ownership.black_user_id.as_deref(), Some("guest-session"));
+        assert!(!black_guest_ownership.persist);
+    }
+
+    #[tokio::test]
+    async fn multiplayer_ownership_preserves_all_participant_sessions() {
+        let (app, _) = test_app_with_game();
+        for (user_id, subject, public_id) in [
+            ("account-a", "subject-a", "public_a"),
+            ("account-b", "subject-b", "public_b"),
+        ] {
+            let identity = account::VerifiedIdentity {
+                issuer: "issuer".into(),
+                subject: subject.into(),
+                provider: "google".into(),
+                email: None,
+                email_verified: true,
+                display_name: Some(public_id.into()),
+                avatar_url: None,
+            };
+            app.accounts
+                .complete_google_login(user_id, &identity, None)
+                .await
+                .unwrap();
+            app.accounts
+                .update_profile(user_id, Some(public_id), None, None)
+                .await
+                .unwrap();
+        }
+        app.accounts.ensure_guest("guest-a").await.unwrap();
+        app.accounts.ensure_guest("guest-b").await.unwrap();
+        assert!(app.accounts.authenticated_user("guest-a").await.unwrap().is_none());
+
+        let (players, both) = game_record_players(&app, "account-a", "account-b").await;
+        assert_eq!(players["white"].public_id.as_deref(), Some("public_a"));
+        assert_eq!(players["black"].public_id.as_deref(), Some("public_b"));
+        assert_eq!(both.white_user_id.as_deref(), Some("account-a"));
+        assert_eq!(both.black_user_id.as_deref(), Some("account-b"));
+        assert!(both.persist);
+
+        let (players, account_guest) = game_record_players(&app, "account-a", "guest-b").await;
+        assert_eq!(players["black"].public_id, None);
+        assert_eq!(account_guest.white_user_id.as_deref(), Some("account-a"));
+        assert_eq!(account_guest.black_user_id.as_deref(), Some("guest-b"));
+        assert!(account_guest.persist);
+
+        let (players, guest_account) = game_record_players(&app, "guest-a", "account-b").await;
+        assert_eq!(players["white"].public_id, None);
+        assert_eq!(guest_account.white_user_id.as_deref(), Some("guest-a"));
+        assert_eq!(guest_account.black_user_id.as_deref(), Some("account-b"));
+        assert!(guest_account.persist);
+
+        let (players, neither) = game_record_players(&app, "guest-a", "guest-b").await;
+        assert_eq!(players["white"].public_id, None);
+        assert_eq!(players["black"].public_id, None);
+        assert_eq!(neither.white_user_id.as_deref(), Some("guest-a"));
+        assert_eq!(neither.black_user_id.as_deref(), Some("guest-b"));
+        assert!(!neither.persist);
+    }
+
+    #[tokio::test]
+    async fn participant_sessions_keep_replay_access_without_granting_guest_history() {
+        let (app, game_id) = test_app_with_game();
+        let identity = account::VerifiedIdentity {
+            issuer: "issuer".into(), subject: "access-subject".into(), provider: "google".into(),
+            email: None, email_verified: true, display_name: Some("Account".into()), avatar_url: None,
+        };
+        app.accounts.complete_google_login("account", &identity, None).await.unwrap();
+        app.accounts.ensure_guest("guest-a").await.unwrap();
+        app.accounts.ensure_guest("guest-b").await.unwrap();
+        app.accounts.ensure_guest("unrelated").await.unwrap();
+        let headers = |user_id: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-user-id", user_id.parse().unwrap());
+            headers
+        };
+        let mut record = app.games.get(&game_id).unwrap().record.clone();
+
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("account".into()), black_user_id: Some("guest-a".into()), persist: true,
+        };
+        assert!(ensure_game_record_access(&app, &headers("account"), &record).await.is_ok());
+        assert!(ensure_game_record_access(&app, &headers("guest-a"), &record).await.is_ok());
+        assert_eq!(ensure_game_record_access(&app, &headers("unrelated"), &record).await.unwrap_err().0, StatusCode::NOT_FOUND);
+
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("guest-a".into()), black_user_id: Some("guest-b".into()), persist: false,
+        };
+        assert!(ensure_game_record_access(&app, &headers("guest-a"), &record).await.is_ok());
+        assert!(ensure_game_record_access(&app, &headers("guest-b"), &record).await.is_ok());
+        assert_eq!(ensure_game_record_access(&app, &headers("unrelated"), &record).await.unwrap_err().0, StatusCode::NOT_FOUND);
+
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("guest-a".into()), black_user_id: None, persist: false,
+        };
+        assert!(ensure_game_record_access(&app, &headers("guest-a"), &record).await.is_ok());
+        assert_eq!(ensure_game_record_access(&app, &headers("unrelated"), &record).await.unwrap_err().0, StatusCode::NOT_FOUND);
+
+        assert_eq!(list_game_records(State(app), headers("guest-a")).await.unwrap_err().0, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn completed_record_is_marked_only_after_a_successful_idempotent_save() {
+        let (app, game_id) = test_app_with_game();
+        {
+            let mut game = app.games.get_mut(&game_id).unwrap();
+            game.record.ownership = GameRecordOwnership {
+                white_user_id: Some("registered-user".into()),
+                black_user_id: None,
+                persist: true,
+            };
+            game.end_with_loss("black", GameEndReason::Resignation);
+            assert!(game.completed_record().is_some());
+        }
+        let repository = std::sync::Arc::new(FailOnceGameRecordRepository {
+            fail_next: std::sync::atomic::AtomicBool::new(true),
+            saves: std::sync::Mutex::new(Vec::new()),
+        });
+        let store: game_record::GameRecordStore = repository.clone();
+
+        assert!(persist_completed_record(&app.games, &store, &game_id)
+            .await
+            .is_err());
+        assert!(app
+            .games
+            .get(&game_id)
+            .unwrap()
+            .completed_record()
+            .is_some());
+
+        persist_completed_record(&app.games, &store, &game_id)
+            .await
+            .unwrap();
+        assert!(app
+            .games
+            .get(&game_id)
+            .unwrap()
+            .completed_record()
+            .is_none());
+        assert_eq!(repository.saves.lock().unwrap().len(), 1);
+
+        persist_completed_record(&app.games, &store, &game_id)
+            .await
+            .unwrap();
+        assert_eq!(repository.saves.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn guest_only_completed_record_is_not_sent_to_the_repository() {
+        let (app, game_id) = test_app_with_game();
+        {
+            let mut game = app.games.get_mut(&game_id).unwrap();
+            game.record.ownership = GameRecordOwnership::default();
+            game.end_with_loss("black", GameEndReason::Resignation);
+        }
+        let repository = std::sync::Arc::new(FailOnceGameRecordRepository {
+            fail_next: std::sync::atomic::AtomicBool::new(true),
+            saves: std::sync::Mutex::new(Vec::new()),
+        });
+        let store: game_record::GameRecordStore = repository.clone();
+        persist_completed_record(&app.games, &store, &game_id)
+            .await
+            .unwrap();
+        assert!(app
+            .games
+            .get(&game_id)
+            .unwrap()
+            .completed_record()
+            .is_none());
+        assert!(repository.saves.lock().unwrap().is_empty());
+        assert!(repository
+            .fail_next
+            .load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn record_listing_uses_internal_ownership_and_never_serializes_it() {
+        let (app, game_id) = test_app_with_game();
+        let mut record = app.games.get(&game_id).unwrap().record.clone();
+        record.players.get_mut("white").unwrap().public_id = Some("old_public_id".into());
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("stable-internal-user".into()),
+            black_user_id: Some("other-internal-user".into()),
+            persist: true,
+        };
+        app.game_records.save(&record).await.unwrap();
+
+        let listed = app
+            .game_records
+            .list_summaries_for_user_id("stable-internal-user", 50)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].game_id, game_id);
+        let exported = serde_json::to_string(&listed[0]).unwrap();
+        assert!(exported.contains("old_public_id"));
+        assert!(!exported.contains("stable-internal-user"));
+        assert!(!exported.contains("other-internal-user"));
+        assert!(!exported.contains("actions"));
+        assert!(!exported.contains("initial_state"));
+        assert!(!exported.contains("state_delta"));
+    }
+
+    #[tokio::test]
+    async fn record_access_uses_current_privacy_but_keeps_identity_snapshots() {
+        let (app, game_id) = test_app_with_game();
+        for (user_id, subject, public_id) in [
+            ("white-user", "white-subject", "white_old"),
+            ("black-user", "black-subject", "black_id"),
+        ] {
+            let identity = account::VerifiedIdentity {
+                issuer: "issuer".into(),
+                subject: subject.into(),
+                provider: "google".into(),
+                email: None,
+                email_verified: true,
+                display_name: Some(format!("{public_id} name")),
+                avatar_url: None,
+            };
+            app.accounts
+                .complete_google_login(user_id, &identity, None)
+                .await
+                .unwrap();
+            app.accounts
+                .update_profile(user_id, Some(public_id), None, None)
+                .await
+                .unwrap();
+        }
+        let mut record = app.games.get(&game_id).unwrap().record.clone();
+        record.players.get_mut("white").unwrap().public_id = Some("white_old".into());
+        record.players.get_mut("black").unwrap().public_id = Some("black_id".into());
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("white-user".into()),
+            black_user_id: Some("black-user".into()),
+            persist: true,
+        };
+        app.game_records.save(&record).await.unwrap();
+        app.games.remove(&game_id);
+
+        let mut third_party = HeaderMap::new();
+        third_party.insert("x-user-id", "third-user".parse().unwrap());
+        assert!(get_game_record(
+            State(app.clone()),
+            Path(game_id.clone()),
+            third_party.clone(),
+        )
+        .await
+        .is_ok());
+
+        app.accounts
+            .update_profile("black-user", None, None, Some(ProfileVisibility::Private))
+            .await
+            .unwrap();
+        let private_player_info = game_record_player(&app, "black-user", "black").await;
+        assert_eq!(private_player_info.public_id.as_deref(), Some("black_id"));
+        assert_eq!(private_player_info.nickname, "black_id name");
+        assert_eq!(
+            get_game_record(State(app.clone()), Path(game_id.clone()), third_party,)
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::NOT_FOUND
+        );
+
+        let mut owner = HeaderMap::new();
+        owner.insert("x-user-id", "white-user".parse().unwrap());
+        let owned = get_game_record(State(app.clone()), Path(game_id), owner)
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(owned.players["white"].public_id.as_deref(), Some("white_old"));
+
+        app.accounts
+            .update_profile("white-user", Some("white_new"), None, None)
+            .await
+            .unwrap();
+        let listed = app
+            .game_records
+            .list_summaries_for_user_id("white-user", 50)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].players["white"].public_id.as_deref(), Some("white_old"));
     }
 
     #[test]
@@ -2143,6 +3208,7 @@ mod tests {
     fn test_app_with_game() -> (AppState, String) {
         let game_id = "test-game".to_string();
         let white_deck = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "white",
                 vec![
@@ -2159,6 +3225,7 @@ mod tests {
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "black",
                 vec![StartingPieceSpec {
@@ -2172,7 +3239,10 @@ mod tests {
             build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
         remove_front_line_after_validation(&mut state);
         let app = AppState::in_memory();
-        app.games.insert(game_id.clone(), state);
+        app.games.insert(
+            game_id.clone(),
+            StoredGame::new(state, TimeControlId::Unlimited, false, now_ms()),
+        );
         (app, game_id)
     }
 
@@ -2206,6 +3276,15 @@ mod tests {
         assert_eq!(scores.get("dozer"), scores.get("dozer-white"));
         assert_eq!(scores.get("mortar"), Some(&8));
         assert_eq!(scores.get("machine-gunner"), Some(&8));
+        assert_eq!(scores.get("surface-to-air-missile"), Some(&2));
+        assert_eq!(
+            resolve_piece_type("white", "surface-to-air-missile").as_deref(),
+            Some("surface-to-air-missile-white")
+        );
+        assert_eq!(
+            resolve_piece_type("black", "surface-to-air-missile").as_deref(),
+            Some("surface-to-air-missile-black")
+        );
         assert_eq!(
             resolve_piece_type("white", "dozer").as_deref(),
             Some("dozer-white")
@@ -2220,7 +3299,13 @@ mod tests {
     async fn piece_catalog_serves_deployment_zones_from_engine_definitions() {
         let Json(catalog) = get_piece_catalog().await;
 
-        for piece_type in ["pawn", "tempest-pawn", "bouncing-pawn", "dozer"] {
+        for piece_type in [
+            "pawn",
+            "tempest-pawn",
+            "bouncing-pawn",
+            "dozer",
+            "surface-to-air-missile",
+        ] {
             assert_eq!(catalog[piece_type].deployment_zone, DeploymentZone::Front);
         }
         for piece_type in ["knight", "bishop", "rook", "queen", "king", "paratrooper"] {
@@ -2231,6 +3316,7 @@ mod tests {
     #[test]
     fn game_creation_rejects_deployment_zone_mismatches_for_both_players() {
         let valid_white = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "white",
                 vec![StartingPieceSpec {
@@ -2241,6 +3327,7 @@ mod tests {
             pocket: vec![],
         };
         let valid_black = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "black",
                 vec![StartingPieceSpec {
@@ -2351,6 +3438,9 @@ mod tests {
                     square: Square::new(3, 3),
                     state: HashMap::new(),
                     move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
                 },
                 LabPieceSpec {
                     id: "lab_black_knight_1".into(),
@@ -2359,6 +3449,9 @@ mod tests {
                     square: Square::new(3, 6),
                     state: HashMap::new(),
                     move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
                 },
             ],
         };
@@ -2415,6 +3508,9 @@ mod tests {
                 square: Square::new(3, 3),
                 state: HashMap::new(),
                 move_option_cooldowns: HashMap::new(),
+                current_ammo: None,
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
             }],
         };
 
@@ -2449,6 +3545,9 @@ mod tests {
                 square: Square::new(3, 3),
                 state: HashMap::from([("mode".into(), PieceStateValue::Text("rook".into()))]),
                 move_option_cooldowns: HashMap::new(),
+                current_ammo: None,
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
             }],
         };
 
@@ -2478,6 +3577,7 @@ mod tests {
                 piece_type: "paratrooper".into(),
                 owner: "white".into(),
                 state: HashMap::new(),
+                current_ammo: None,
             }],
         };
 
@@ -2493,6 +3593,212 @@ mod tests {
         assert!(!response.legal_drops.is_empty());
         assert!(response.moves.iter().all(|square| square.rank < 2));
         assert_eq!(response.moves.len(), response.legal_drops.len());
+    }
+
+    #[test]
+    fn lab_game_allows_ground_and_air_pieces_on_the_same_coordinate() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_bomber".into(),
+            move_option_id: None,
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![
+                LabPieceSpec {
+                    id: "lab_ground_rook".into(),
+                    piece_type: "rook".into(),
+                    owner: "black".into(),
+                    square: Square::new(3, 3),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                },
+                LabPieceSpec {
+                    id: "lab_bomber".into(),
+                    piece_type: "bomber".into(),
+                    owner: "white".into(),
+                    square: Square::new(3, 3),
+                    state: HashMap::from([("airborne".into(), PieceStateValue::Boolean(true))]),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: Some(2),
+                    layer: PieceLayer::Air,
+                    remaining_flight_turns: 3,
+                },
+            ],
+        };
+
+        let state = build_lab_game_state(&req, &[]).unwrap();
+        assert_eq!(
+            state.board.get_piece_at(&Square::new(3, 3)),
+            Some(&PieceId::from("lab_ground_rook"))
+        );
+        assert_eq!(
+            state
+                .board
+                .get_piece_at_layer(&Square::new(3, 3), PieceLayer::Air),
+            Some(&PieceId::from("lab_bomber"))
+        );
+        assert_eq!(state.pieces["lab_bomber"].current_ammo, 2);
+        assert_eq!(state.pieces["lab_bomber"].remaining_flight_turns, 3);
+    }
+
+    #[tokio::test]
+    async fn lab_surface_to_air_missile_exposes_intercept_and_its_air_target() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_sam".into(),
+            move_option_id: Some("intercept".into()),
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![
+                LabPieceSpec {
+                    id: "lab_sam".into(),
+                    piece_type: "surface-to-air-missile".into(),
+                    owner: "white".into(),
+                    square: Square::new(3, 3),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                },
+                LabPieceSpec {
+                    id: "lab_enemy_bomber".into(),
+                    piece_type: "bomber".into(),
+                    owner: "black".into(),
+                    square: Square::new(5, 4),
+                    state: HashMap::from([("airborne".into(), PieceStateValue::Boolean(true))]),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Air,
+                    remaining_flight_turns: 3,
+                },
+            ],
+        };
+
+        let response =
+            match get_lab_piece_options(State(AppState::in_memory()), HeaderMap::new(), Json(req))
+                .await
+            {
+                Ok(Json(response)) => response,
+                Err((status, Json(error))) => panic!("unexpected error {status}: {}", error.error),
+            };
+
+        let intercept = response
+            .move_options
+            .iter()
+            .find(|option| option.id == "intercept")
+            .expect("intercept must be exposed by the lab response");
+        assert_eq!(intercept.name, "격추");
+        assert!(intercept.available);
+        assert_eq!(response.legal_ability_actions.len(), 1);
+        assert_eq!(
+            response.legal_ability_actions[0].target_piece_id,
+            Some(PieceId::from("lab_enemy_bomber"))
+        );
+        assert_eq!(
+            response.legal_ability_actions[0].to,
+            Some(Square::new(5, 4))
+        );
+    }
+
+    #[tokio::test]
+    async fn lab_apply_action_uses_the_authoritative_engine_transition() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_bomber".into(),
+            move_option_id: Some("takeoff".into()),
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![LabPieceSpec {
+                id: "lab_bomber".into(),
+                piece_type: "bomber".into(),
+                owner: "white".into(),
+                square: Square::new(1, 1),
+                state: HashMap::new(),
+                move_option_cooldowns: HashMap::new(),
+                current_ammo: None,
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
+            }],
+        };
+        let state = build_lab_game_state(&req, &[]).unwrap();
+        let takeoff =
+            generate_piece_legal_ability_actions(&state, &PieceId::from("lab_bomber"), "takeoff")
+                .into_iter()
+                .find(|action| action.to == Some(Square::new(6, 1)))
+                .unwrap();
+
+        let response = apply_lab_action(
+            State(AppState::in_memory()),
+            HeaderMap::new(),
+            Json(LabApplyActionRequest {
+                lab: req,
+                action: TurnAction::Ability(takeoff),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(response.pieces["lab_bomber"].layer, PieceLayer::Air);
+        assert_eq!(response.pieces["lab_bomber"].remaining_flight_turns, 5);
+        assert_eq!(response.pieces["lab_bomber"].current_ammo, 3);
+        assert!(response.board.get_piece_at(&Square::new(1, 1)).is_none());
+        assert_eq!(
+            response
+                .board
+                .get_piece_at_layer(&Square::new(6, 1), PieceLayer::Air),
+            Some(&PieceId::from("lab_bomber"))
+        );
+    }
+
+    #[tokio::test]
+    async fn lab_apply_action_replenishes_depleted_ammo_inside_the_home_zone() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_tank".into(),
+            move_option_id: Some("tank-fire".into()),
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![LabPieceSpec {
+                id: "lab_tank".into(),
+                piece_type: "tank".into(),
+                owner: "white".into(),
+                square: Square::new(1, 1),
+                state: HashMap::new(),
+                move_option_cooldowns: HashMap::new(),
+                current_ammo: Some(1),
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
+            }],
+        };
+        let state = build_lab_game_state(&req, &[]).unwrap();
+        let shot =
+            generate_piece_legal_ability_actions(&state, &PieceId::from("lab_tank"), "tank-fire")
+                .into_iter()
+                .find(|action| action.to == Some(Square::new(1, 4)))
+                .unwrap();
+
+        let response = apply_lab_action(
+            State(AppState::in_memory()),
+            HeaderMap::new(),
+            Json(LabApplyActionRequest {
+                lab: req,
+                action: TurnAction::Ability(shot),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(response.pieces["lab_tank"].current_ammo, 3);
     }
 
     #[tokio::test]
@@ -2522,6 +3828,251 @@ mod tests {
         assert_eq!(response.history.len(), 1);
         let stored = app.games.get(&game_id).unwrap();
         assert_eq!(stored.current_player, "black");
+        assert_eq!(stored.record.actions.len(), 1);
+        assert_eq!(
+            stored.record.actions[0].notation.actor.piece_id,
+            "white_rook_1"
+        );
+        assert_eq!(
+            stored.record.actions[0].notation.actor.from,
+            Some(Square::new(0, 0))
+        );
+        assert!(matches!(
+            stored.record.actions[0].notation.kind,
+            crate::game_record::NotationActionKind::Move
+        ));
+        assert!(stored.record.actions[0]
+            .state_delta
+            .iter()
+            .any(|operation| matches!(
+                operation,
+                crate::game_record::StateDeltaOperation::Set { path, value }
+                    if path == &["turn_number".to_string()] && value == &serde_json::json!(2)
+            )));
+        let serialized = serde_json::to_value(&stored.record.actions[0]).unwrap();
+        assert!(serialized.get("state_after").is_none());
+        assert!(serialized.get("state_hash").is_none());
+        assert!(serialized.get("state_delta").is_some());
+        let compact_action_bytes = serde_json::to_vec(&stored.record.actions[0]).unwrap().len();
+        let legacy_state_bytes = serde_json::to_vec(&stored.state).unwrap().len();
+        assert!(
+            compact_action_bytes < legacy_state_bytes,
+            "compact={compact_action_bytes}, legacy_state={legacy_state_bytes}"
+        );
+        assert!(stored.record.initial_state.history.is_empty());
+        assert!(stored.record.decks.contains_key("white"));
+        assert_eq!(stored.record.actions[0].clock.active_color, "black");
+    }
+
+    #[test]
+    fn forced_landing_records_two_white_actions_before_the_black_action() {
+        let req = LabPieceOptionsRequest {
+            board_size: 12,
+            selected_piece_id: "bomber".into(),
+            move_option_id: None,
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![
+                LabPieceSpec {
+                    id: "bomber".into(),
+                    piece_type: "bomber".into(),
+                    owner: "white".into(),
+                    square: Square::new(4, 10), // e11
+                    state: HashMap::from([("airborne".into(), PieceStateValue::Boolean(true))]),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: Some(2),
+                    layer: PieceLayer::Air,
+                    remaining_flight_turns: 1,
+                },
+                LabPieceSpec {
+                    id: "black-king".into(),
+                    piece_type: "king".into(),
+                    owner: "black".into(),
+                    square: Square::new(0, 11),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                },
+            ],
+        };
+        let state = build_lab_game_state(&req, &[]).unwrap();
+        let mut stored = StoredGame::new(state, TimeControlId::FiveThree, false, 1);
+
+        let bomber_move = generate_piece_legal_move_actions(&stored.state, &"bomber".into())
+            .into_iter()
+            .find(|action| action.to == Square::new(4, 3)) // e4
+            .unwrap();
+        let before_move = stored.state.clone();
+        let after_move =
+            submit_engine_action(before_move.clone(), TurnAction::Move(bomber_move.clone()))
+                .unwrap();
+        assert_eq!(after_move.current_player, "white");
+        assert_eq!(after_move.turn_number, 1);
+        stored
+            .clock
+            .finish_turn("white", &after_move.current_player, 1_001, false);
+        let clock_after_move = stored.clock.snapshot(1_001, true);
+        assert_eq!(clock_after_move.white_remaining_ms, Some(299_000));
+        stored.record.push_action(
+            "white".into(),
+            TurnAction::Move(bomber_move),
+            0,
+            None,
+            None,
+            clock_after_move,
+            &before_move,
+            after_move.clone(),
+        );
+        stored.state = after_move;
+
+        // The engine's forced-landing runway is four squares, so e4 -> i4 is
+        // the legal equivalent of the notation grouping regression scenario.
+        let landing =
+            generate_piece_legal_ability_actions(&stored.state, &"bomber".into(), "forced-landing")
+                .into_iter()
+                .find(|action| action.to == Some(Square::new(8, 3))) // i4
+                .unwrap();
+        let before_landing = stored.state.clone();
+        let after_landing =
+            submit_engine_action(before_landing.clone(), TurnAction::Ability(landing.clone()))
+                .unwrap();
+        assert_eq!(after_landing.current_player, "black");
+        assert_eq!(after_landing.turn_number, 2);
+        stored
+            .clock
+            .finish_turn("white", &after_landing.current_player, 2_001, false);
+        let clock_after_landing = stored.clock.snapshot(2_001, true);
+        // Two seconds were consumed across both canonical actions and the
+        // three-second increment was added exactly once: 300 - 2 + 3 = 301.
+        assert_eq!(clock_after_landing.white_remaining_ms, Some(301_000));
+        stored.record.push_action(
+            "white".into(),
+            TurnAction::Ability(landing),
+            0,
+            None,
+            None,
+            clock_after_landing.clone(),
+            &before_landing,
+            after_landing.clone(),
+        );
+        stored.state = after_landing;
+
+        let black_move = generate_piece_legal_move_actions(&stored.state, &"black-king".into())
+            .into_iter()
+            .next()
+            .unwrap();
+        let before_black = stored.state.clone();
+        let after_black =
+            submit_engine_action(before_black.clone(), TurnAction::Move(black_move.clone()))
+                .unwrap();
+        stored.record.push_action(
+            "black".into(),
+            TurnAction::Move(black_move),
+            0,
+            None,
+            None,
+            clock_after_landing,
+            &before_black,
+            after_black,
+        );
+
+        assert_eq!(stored.record.actions.len(), 3);
+        assert_eq!(
+            stored
+                .record
+                .actions
+                .iter()
+                .map(|entry| entry.notation.side.as_str())
+                .collect::<Vec<_>>(),
+            vec!["white", "white", "black"]
+        );
+        assert_eq!(
+            stored
+                .record
+                .actions
+                .iter()
+                .map(|entry| entry.notation.turn_number)
+                .collect::<Vec<_>>(),
+            vec![1, 1, 2]
+        );
+        assert_eq!(
+            stored
+                .record
+                .actions
+                .iter()
+                .map(|entry| entry.notation.move_number)
+                .collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
+        assert_eq!(
+            stored.record.actions[0].notation.from,
+            Some(Square::new(4, 10))
+        );
+        assert_eq!(
+            stored.record.actions[0].notation.to,
+            Some(Square::new(4, 3))
+        );
+        assert_eq!(
+            stored.record.actions[1].notation.from,
+            Some(Square::new(4, 3))
+        );
+        assert_eq!(
+            stored.record.actions[1].notation.to,
+            Some(Square::new(8, 3))
+        );
+        assert_eq!(
+            stored.record.actions[1].notation.ability_name.as_deref(),
+            Some("강제 착륙")
+        );
+    }
+
+    #[tokio::test]
+    async fn resignation_completes_a_portable_record_with_the_authoritative_result() {
+        let (app, game_id) = test_app_with_game();
+        app.games
+            .get_mut(&game_id)
+            .unwrap()
+            .record
+            .ownership
+            .white_user_id = Some("record-owner".into());
+        let ended = resign_game(
+            State(app.clone()),
+            Path(game_id.clone()),
+            Json(ResignGameRequest {
+                player_id: "white".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-user-id", "record-owner".parse().unwrap());
+        let record = get_game_record(State(app), Path(game_id), headers)
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(
+            record.result.as_ref().map(|result| &result.reason),
+            Some(&GameEndReason::Resignation)
+        );
+        assert_eq!(
+            record
+                .result
+                .as_ref()
+                .and_then(|result| result.winner.as_deref()),
+            Some("black")
+        );
+        assert_eq!(
+            ended
+                .result
+                .as_ref()
+                .and_then(|result| result.winner.as_deref()),
+            Some("black")
+        );
+        assert!(record.final_clock.is_some());
     }
 
     #[tokio::test]
@@ -2594,6 +4145,7 @@ mod tests {
     async fn submit_move_action_applies_canonical_piece_state_effect() {
         let game_id = "windmill-game".to_string();
         let white_deck = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "white",
                 vec![
@@ -2610,6 +4162,7 @@ mod tests {
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
+            name: None,
             starting: starting_with_front_line(
                 "black",
                 vec![StartingPieceSpec {
@@ -2623,7 +4176,10 @@ mod tests {
             build_game_state(game_id.clone(), 8, &white_deck, &black_deck, vec![]).unwrap();
         remove_front_line_after_validation(&mut state);
         let app = AppState::in_memory();
-        app.games.insert(game_id.clone(), state);
+        app.games.insert(
+            game_id.clone(),
+            StoredGame::new(state, TimeControlId::Unlimited, false, now_ms()),
+        );
 
         let response = match submit_action(
             State(app),

@@ -47,21 +47,24 @@ test('logout is a server request rather than a local-only state change', async (
   assert.equal(request?.credentials, 'same-origin')
 })
 
-test('profile update sends the editable display name', async () => {
+test('profile update sends display name and profile visibility together', async () => {
   let url = ''
   let request: RequestInit | undefined
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     url = String(input)
     request = init
     return new Response(JSON.stringify({
-      user: { id: 'internal-user', publicId: 'deck_player', displayName: 'Player', avatarUrl: null },
+      user: { id: 'internal-user', publicId: 'deck_player', displayName: 'Player', avatarUrl: null, profileVisibility: 'private' },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }) as typeof fetch
 
-  await authApi.updateProfile({ displayName: '새 닉네임' })
+  await authApi.updateProfile({ displayName: '새 닉네임', profileVisibility: 'private' })
 
   assert.equal(url, '/api/auth/profile')
   assert.equal(request?.method, 'PATCH')
   assert.equal(request?.credentials, 'same-origin')
-  assert.deepEqual(JSON.parse(String(request?.body)), { displayName: '새 닉네임' })
+  assert.deepEqual(JSON.parse(String(request?.body)), {
+    displayName: '새 닉네임',
+    profileVisibility: 'private',
+  })
 })

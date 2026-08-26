@@ -50,6 +50,46 @@
           >
             {{ activeCooldownRemaining(sq.piece.move_option_cooldowns) }}
           </span>
+          <span
+            v-if="(definitions[sq.piece.type_id]?.max_ammo ?? 0) > 0"
+            class="piece-ammo-badge"
+            :title="`탄약 ${sq.piece.current_ammo}/${definitions[sq.piece.type_id].max_ammo}`"
+          >
+            {{ sq.piece.current_ammo ?? 0 }}
+          </span>
+        </span>
+        <span
+          v-if="sq.airPiece"
+          class="piece air-piece"
+          :class="`owner-${sq.airPiece.owner}`"
+          :title="`공중 · 남은 비행 ${sq.airPiece.remaining_flight_turns}턴`"
+          @click.stop="onPieceClick(sq.airPiece.id)"
+        >
+          <img
+            v-if="pieceImage(sq.airPiece)"
+            :key="pieceRenderKey(sq.airPiece)"
+            class="piece-image"
+            :src="pieceImage(sq.airPiece)"
+            :alt="pieceAlt(sq.airPiece)"
+            draggable="false"
+          />
+          <span v-else>{{ pieceSymbol(sq.airPiece.type_id) }}</span>
+          <span class="piece-flight-badge" :title="`남은 비행 ${sq.airPiece.remaining_flight_turns}턴`">
+            ✈ {{ sq.airPiece.remaining_flight_turns }}
+          </span>
+          <span
+            v-if="(definitions[sq.airPiece.type_id]?.max_ammo ?? 0) > 0"
+            class="piece-ammo-badge"
+            :title="`탄약 ${sq.airPiece.current_ammo}/${definitions[sq.airPiece.type_id].max_ammo}`"
+          >
+            {{ sq.airPiece.current_ammo ?? 0 }}
+          </span>
+          <span
+            v-if="activeCooldownRemaining(sq.airPiece.move_option_cooldowns) > 0"
+            class="piece-cooldown-badge"
+          >
+            {{ activeCooldownRemaining(sq.airPiece.move_option_cooldowns) }}
+          </span>
         </span>
       </div>
       <svg
@@ -107,6 +147,7 @@ interface SquareInfo {
   file: number
   rank: number
   piece?: Piece
+  airPiece?: Piece
   terrain?: TerrainCell
   isLight: boolean
 }
@@ -152,6 +193,7 @@ const emit = defineEmits<{
   squareClick: [square: Square]
   pieceDragStart: [pieceId: string]
   squareDrop: [square: Square | null, pieceId: string]
+  pieceClick: [pieceId: string]
 }>()
 
 function squareId(file: number, rank: number) {
@@ -173,12 +215,15 @@ const allSquares = computed((): SquareInfo[] => {
       const id = squareId(file, rank)
       const pieceId = props.board.squares[id] ?? null
       const piece = pieceId ? props.pieces[pieceId] : undefined
+      const airPieceId = props.board.air_squares?.[id] ?? null
+      const airPiece = airPieceId ? props.pieces[airPieceId] : undefined
       const terrain = props.board.terrain?.[id]
       squares.push({
         id,
         file,
         rank,
         piece,
+        airPiece,
         terrain,
         isLight: (file + rank) % 2 === 1,
       })
@@ -270,7 +315,8 @@ function squareClasses(sq: SquareInfo) {
   if (threatSquareIds.value.has(sq.id)) {
     classes.push('opponent-threat')
   }
-  if (sq.piece && sq.piece.id === props.selectedPieceId) {
+  if ((sq.piece && sq.piece.id === props.selectedPieceId)
+    || (sq.airPiece && sq.airPiece.id === props.selectedPieceId)) {
     classes.push('selected')
     if (props.abilityMode) classes.push('ability-selected')
   }
@@ -281,6 +327,10 @@ function squareClasses(sq: SquareInfo) {
     classes.push('drag-over')
   }
   return classes
+}
+
+function onPieceClick(pieceId: string) {
+  emit('pieceClick', pieceId)
 }
 
 function legalMarker(sq: SquareInfo): string | null {
@@ -599,6 +649,10 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'tempest-pawn-black': '♟',
   'dozer-white': 'D',
   'dozer-black': 'D',
+  'tank': '🛡',
+  'bomber': '✈',
+  'surface-to-air-missile-white': '▲',
+  'surface-to-air-missile-black': '▲',
 }
 
 function pieceSymbol(typeId: string): string {
@@ -803,6 +857,49 @@ function pieceAlt(piece: Piece): string {
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.air-piece {
+  position: absolute;
+  z-index: 4;
+  pointer-events: auto;
+  transform: translate(10%, -10%) scale(0.88);
+  filter: drop-shadow(0 8px 5px rgba(20, 50, 80, 0.48));
+}
+
+.piece-ammo-badge {
+  position: absolute;
+  left: -4%;
+  bottom: -4%;
+  z-index: 6;
+  display: inline-flex;
+  min-width: 1.4em;
+  height: 1.4em;
+  padding: 0 0.28em;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  background: #16834a;
+  color: #fff;
+  font-size: clamp(10px, 1.45vw, 16px);
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.piece-flight-badge {
+  position: absolute;
+  top: -10%;
+  right: -8%;
+  z-index: 6;
+  padding: 0.12em 0.35em;
+  border-radius: 999px;
+  background: #246da8;
+  color: white;
+  font-size: clamp(9px, 1.2vw, 14px);
+  font-weight: 800;
+  pointer-events: none;
 }
 
 .piece-cooldown-badge {

@@ -26,6 +26,7 @@ mod airborne;
 mod alternating_soldier;
 mod amazon;
 mod bishop;
+mod bomber;
 mod bouncing_bishop;
 mod bouncing_pawn_black;
 mod bouncing_pawn_white;
@@ -46,6 +47,9 @@ mod pawn_black;
 mod pawn_white;
 mod queen;
 mod rook;
+mod surface_to_air_missile_black;
+mod surface_to_air_missile_white;
+mod tank;
 mod tempest_bishop;
 mod tempest_knight;
 mod tempest_pawn_black;
@@ -58,6 +62,11 @@ pub use airborne::airborne_definition;
 pub use alternating_soldier::alternating_soldier_definition;
 pub use amazon::amazon_definition;
 pub use bishop::bishop_definition;
+pub use bomber::bomber_definition;
+pub(crate) use bomber::{
+    BOMBER_BOMB_ABILITY_ID, BOMBER_LANDING_DISTANCE, BOMBER_LAND_ABILITY_ID,
+    BOMBER_TAKEOFF_ABILITY_ID, BOMBER_TAKEOFF_DISTANCE,
+};
 pub use bouncing_bishop::bouncing_bishop_definition;
 pub use bouncing_pawn_black::bouncing_pawn_black_definition;
 pub use bouncing_pawn_white::bouncing_pawn_white_definition;
@@ -80,6 +89,11 @@ pub use pawn_black::pawn_black_definition;
 pub use pawn_white::pawn_white_definition;
 pub use queen::queen_definition;
 pub use rook::rook_definition;
+pub use surface_to_air_missile_black::surface_to_air_missile_black_definition;
+pub use surface_to_air_missile_white::surface_to_air_missile_white_definition;
+pub(crate) use surface_to_air_missile_white::INTERCEPT_ABILITY_ID;
+pub use tank::tank_definition;
+pub(crate) use tank::{TANK_FIRE_ABILITY_ID, TANK_FIRE_RANGE};
 pub use tempest_bishop::tempest_bishop_definition;
 pub use tempest_knight::tempest_knight_definition;
 pub use tempest_pawn_black::tempest_pawn_black_definition;
@@ -103,6 +117,8 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         airborne_definition(),
         green_camp_definition(),
         mortar_definition(),
+        tank_definition(),
+        bomber_definition(),
         machine_gunner_definition(),
         amazon_definition(),
         guhang_definition(),
@@ -117,6 +133,8 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bouncing_pawn_black_definition(),
         dozer_white_definition(),
         dozer_black_definition(),
+        surface_to_air_missile_white_definition(),
+        surface_to_air_missile_black_definition(),
         tempest_pawn_white_definition(),
         tempest_pawn_black_definition(),
         tempest_queen_definition(),

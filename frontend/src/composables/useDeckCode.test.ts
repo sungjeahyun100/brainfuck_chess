@@ -68,7 +68,7 @@ function validPayload(): Record<string, unknown> {
   }
 }
 
-test('DC2 export and import round-trip preserves map, board, placement, and pocket only', () => {
+test('DC3 export and import round-trip preserves name, map, board, placement, and pocket', () => {
   const original = savedDeck()
   original.starting = [
     { pieceType: 'king', square: { file: 4, rank: 0 } },
@@ -78,12 +78,12 @@ test('DC2 export and import round-trip preserves map, board, placement, and pock
   original.pocket = { knight: 2, bishop: 1 }
 
   const code = encodeDeckCode(original)
-  assert.match(code, /^DC2\.[A-Za-z0-9_-]+$/u)
+  assert.match(code, /^DC3\.[A-Za-z0-9_-]+$/u)
   const decoded = decodeDeckCode(code)
   assert.equal(decoded.ok, true)
   if (!decoded.ok) return
   assert.equal(JSON.stringify(decoded.value).includes('score'), false)
-  assert.equal(JSON.stringify(decoded.value).includes(original.name), false)
+  assert.equal(decoded.value.name, original.name)
 
   const imported = importDeckCode(code, original)
   assert.equal(imported.ok, true)
@@ -100,6 +100,15 @@ test('DC2 export and import round-trip preserves map, board, placement, and pock
   )
   assert.equal(imported.deck.id, original.id)
   assert.equal(imported.deck.name, original.name)
+})
+
+test('DC3 round-trip freezes the canonical custom piece identity and content hash', () => {
+  const deck = savedDeck()
+  deck.customPieces = [{ id: 'airship', version: 7, contentHash: 'sha256_frozen', exposedPieceKey: 'captain' }]
+  const decoded = decodeDeckCode(encodeDeckCode(deck))
+  assert.equal(decoded.ok, true)
+  if (!decoded.ok) return
+  assert.deepEqual(decoded.value.customPieces, deck.customPieces)
 })
 
 test('decoder accepts harmless whitespace around or inside a copied code', () => {
@@ -123,7 +132,7 @@ test('decoder returns explicit failures for malformed envelopes and payloads', (
   assert.deepEqual(decodeDeckCode(''), { ok: false, error: 'empty' })
   assert.deepEqual(decodeDeckCode('not-a-code'), { ok: false, error: 'invalid_format' })
   assert.deepEqual(decodeDeckCode('XX1.aaaa'), { ok: false, error: 'invalid_format' })
-  assert.deepEqual(decodeDeckCode('DC3.aaaa'), { ok: false, error: 'unsupported_version' })
+  assert.deepEqual(decodeDeckCode('DC4.aaaa'), { ok: false, error: 'unsupported_version' })
   assert.deepEqual(decodeDeckCode('DC1.%%%'), { ok: false, error: 'invalid_payload' })
   assert.deepEqual(decodeDeckCode(`DC1.${base64Url('not json')}`), { ok: false, error: 'invalid_payload' })
   assert.deepEqual(decodeDeckCode(`DC1.${base64Url('{"v":1')}`), { ok: false, error: 'invalid_payload' })

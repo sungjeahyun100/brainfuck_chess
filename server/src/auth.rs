@@ -16,8 +16,8 @@ use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::account::{
-    normalize_display_name, normalize_public_id, AccountUpdateError, LoginResult, UserProfile,
-    VerifiedIdentity,
+    normalize_display_name, normalize_public_id, AccountUpdateError, LoginResult,
+    ProfileVisibility, UserProfile, VerifiedIdentity,
 };
 use crate::app_state::AppState;
 
@@ -522,6 +522,8 @@ pub(crate) struct UpdateProfileRequest {
     public_id: Option<String>,
     #[serde(default)]
     display_name: Option<String>,
+    #[serde(default)]
+    profile_visibility: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -548,7 +550,10 @@ pub(crate) async fn update_profile(
             "로그인이 필요합니다.",
         );
     };
-    if input.public_id.is_none() && input.display_name.is_none() {
+    if input.public_id.is_none()
+        && input.display_name.is_none()
+        && input.profile_visibility.is_none()
+    {
         return auth_error(
             StatusCode::BAD_REQUEST,
             "empty_profile_update",
@@ -577,9 +582,34 @@ pub(crate) async fn update_profile(
         }
         None => None,
     };
+    let profile_visibility = match input.profile_visibility.as_ref() {
+        Some(serde_json::Value::String(value)) => match ProfileVisibility::parse(value) {
+            Ok(value) => Some(value),
+            Err(()) => {
+                return auth_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_profile_visibility",
+                    "계정 공개 설정은 public 또는 private이어야 합니다.",
+                )
+            }
+        },
+        Some(_) => {
+            return auth_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_profile_visibility",
+                "계정 공개 설정은 public 또는 private이어야 합니다.",
+            )
+        }
+        None => None,
+    };
     match app
         .accounts
-        .update_profile(&user_id, public_id.as_deref(), display_name.as_deref())
+        .update_profile(
+            &user_id,
+            public_id.as_deref(),
+            display_name.as_deref(),
+            profile_visibility,
+        )
         .await
     {
         Ok(user) => Json(UpdateProfileResponse { user }).into_response(),
@@ -808,5 +838,48 @@ mod tests {
         assert!(auth.validate_origin(&headers).is_err());
         headers.remove(header::ORIGIN);
         assert!(auth.validate_origin(&headers).is_err());
+    }
+
+    #[tokio::test]
+    async fn profile_update_rejects_unknown_or_null_visibility() {
+        let app = AppState::in_memory();
+        let identity = VerifiedIdentity {
+            issuer: "issuer".into(),
+            subject: "subject".into(),
+            provider: "google".into(),
+            email: None,
+            email_verified: true,
+            display_name: Some("Player".into()),
+            avatar_url: None,
+        };
+        app.accounts
+            .complete_google_login("privacy-user", &identity, None)
+            .await
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-user-id", HeaderValue::from_static("privacy-user"));
+
+        for value in [serde_json::json!("friends_only"), serde_json::Value::Null] {
+            let response = update_profile(
+                State(app.clone()),
+                headers.clone(),
+                Json(UpdateProfileRequest {
+                    public_id: None,
+                    display_name: Some("Still Player".into()),
+                    profile_visibility: Some(value),
+                }),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(
+            app.accounts
+                .authenticated_user("privacy-user")
+                .await
+                .unwrap()
+                .unwrap()
+                .profile_visibility,
+            ProfileVisibility::Public
+        );
     }
 }

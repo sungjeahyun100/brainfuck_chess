@@ -19,10 +19,13 @@ pub(crate) fn api(state: AppState) -> Router {
         .route("/piece-scores", get(get_piece_scores))
         .route("/piece-catalog", get(get_piece_catalog))
         .route("/games", post(create_game))
+        .route("/game-records", get(list_game_records))
         .route("/games/:id", get(get_game))
+        .route("/games/:id/record", get(get_game_record))
         .route("/games/:id/actions", post(submit_action))
         .route("/games/:id/bot-turn", post(run_bot_turn))
         .route("/games/:id/resign", post(resign_game))
+        .route("/rooms/:id/heartbeat", post(heartbeat_room))
         .route("/games/:id/legal-moves", get(get_legal_moves))
         .route("/games/:id/piece-attacks/:piece_id", get(get_piece_attacks))
         .route(
@@ -34,6 +37,7 @@ pub(crate) fn api(state: AppState) -> Router {
             get(get_piece_options),
         )
         .route("/lab/piece-options", post(get_lab_piece_options))
+        .route("/lab/apply-action", post(apply_lab_action))
         .route(
             "/custom-pieces",
             get(custom_piece::list).post(custom_piece::create),

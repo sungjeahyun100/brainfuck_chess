@@ -1705,6 +1705,9 @@ fn build_test_state(board_spec: TestBoard, package: &CustomPiecePackage) -> ApiR
             in_pocket: false,
             captured: false,
             has_moved: false,
+            current_ammo: definition.max_ammo,
+            layer: PieceLayer::Ground,
+            remaining_flight_turns: 0,
             state: piece_state,
             move_option_cooldowns: HashMap::new(),
         };
@@ -1857,6 +1860,7 @@ mod tests {
             exposed_piece_key: created.exposed_piece_key.clone(),
         };
         let white = crate::PlayerDeckSpec {
+            name: None,
             starting: vec![
                 crate::StartingPieceSpec {
                     piece: crate::DeckPieceRef::BuiltIn {
@@ -1875,6 +1879,7 @@ mod tests {
             pocket: vec![custom_ref],
         };
         let black = crate::PlayerDeckSpec {
+            name: None,
             starting: vec![crate::StartingPieceSpec {
                 piece: crate::DeckPieceRef::BuiltIn {
                     piece_type: "king".into(),
@@ -1949,6 +1954,7 @@ mod tests {
             guest_owner_id: Some("alice".into()),
             host_deck: Some(white),
             guest_deck: Some(crate::PlayerDeckSpec {
+                name: None,
                 starting: vec![crate::StartingPieceSpec {
                     piece: crate::DeckPieceRef::BuiltIn {
                         piece_type: "king".into(),
@@ -1963,6 +1969,7 @@ mod tests {
             host_ready: true,
             guest_ready: true,
             game_id: None,
+            time_control: crate::time_control::TimeControlId::Unlimited,
         };
         let room_game = crate::start_room_game(&mut room, &app)
             .await

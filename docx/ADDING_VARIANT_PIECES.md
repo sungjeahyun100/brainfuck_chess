@@ -61,6 +61,7 @@ pub fn wazir_definition() -> PieceDefinition {
         id: "wazir".into(),
         name: "Wazir".into(),
         score: 2,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 take-move(1, 0);
@@ -107,6 +108,8 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
 - `id`: 서버/프론트/덱에서 쓰는 타입 ID다. 소문자 kebab-case를 권장한다.
 - `name`: UI 표시명과 테스트 가독성에 쓰인다.
 - `score`: 덱 점수. King이 아니면 점수 합산 대상이다.
+- `max_ammo`: 구체 기물 인스턴스의 최대 탄약이다. 탄약을 사용하지 않으면
+  `0`으로 둔다. 런타임 `Piece.current_ammo`는 이 값으로 초기화된다.
 - `deployment_zone`: 게임 시작 시 `Front`(상대와 가까운 폰 시작 줄) 또는
   `Back`(나머지 시작 줄)에 놓이는지를 정한다. 서버 덱 검증과 덱 빌더 UI가
   이 정의를 함께 사용하므로 기물 이름이나 점수 기반 예외 목록을 추가하지 않는다.
@@ -149,6 +152,7 @@ pub fn promoter_definition() -> PieceDefinition {
         id: "promoter".into(),
         name: "Promoter".into(),
         score: 2,
+        max_ammo: 0,
         chessembly_code: "move(0, 1);".into(),
         chessembly_version: "1.0".into(),
         dialect: None,
@@ -204,6 +208,8 @@ move_options: vec![
         layer_ids: vec!["normal_move".into()],
         execution_mode: MoveOptionExecutionMode::MoveModifier,
         contributes_to_attack_map: true,
+        ammo_cost: 0,
+        enabled_when: Vec::new(),
         cooldown: None,
     },
     MoveOptionDefinition {
@@ -214,6 +220,8 @@ move_options: vec![
         layer_ids: vec!["special_move".into()],
         execution_mode: MoveOptionExecutionMode::MoveModifier,
         contributes_to_attack_map: true,
+        ammo_cost: 0,
+        enabled_when: Vec::new(),
         cooldown: Some(CooldownDefinition {
             turns: 3,
             clock: CooldownClock::OwnerTurns,
@@ -227,6 +235,10 @@ move_options: vec![
 - `enabled_when`과 `on_commit`은 `state_schema`에 선언된 기물별 상태만
   참조해야 한다.
 - `contributes_to_attack_map: false`인 옵션은 공격 맵에 포함되지 않는다.
+- `ammo_cost`는 옵션 commit 시 소비할 탄약이다. 기본값은 `0`이며
+  `Piece.current_ammo`가 부족하면 합법 행동을 생성하지 않는다.
+- 옵션의 `enabled_when`은 레이어와 별개로 옵션 자체를 활성화하는
+  `Piece.state` 조건이다.
 - `StandaloneAction`은 Chessembly 이동이 아니라 `TurnAction::Ability`로
   처리한다. 현재 일반화된 플러그인 지점이 아니며, 새 독립 행동을 추가할
   때는 `legal_moves.rs`, `actions.rs`, `endgame.rs`의 canonical 생성·검증·적용
@@ -385,6 +397,22 @@ engine/src/types.rs
 `move_layers`와 `move_options`로 설정한다. 기물별 지속 상태가 필요하면
 `state_schema`, 레이어의 `enabled_when`과 `on_commit`을 사용한다.
 
+탄약 또는 공중 기물은 다음 런타임 필드까지 함께 사용한다.
+
+```text
+PieceDefinition.max_ammo
+MoveOptionDefinition.ammo_cost
+MoveOptionDefinition.enabled_when
+Piece.current_ammo
+Piece.layer
+Piece.remaining_flight_turns
+Board.air_squares
+```
+
+`Piece.layer`의 기본값은 `ground`이며 기물은 Ground/Air 중 한 레이어만
+점유해야 한다. 저장 형식, 재보급, 레이어 충돌, 강제 착륙과 현재 탱크·폭격기
+정의는 [`docs/ammo-air-layer.md`](../docs/ammo-air-layer.md)를 참고한다.
+
 ---
 
 ## 8. 특수 룰이 필요한 경우
@@ -512,6 +540,8 @@ npm run build
 - `all_default_definitions()`에 새 정의를 넣었다.
 - 진급 기물이라면 `promotion` 조건과 `promotion_pool` 후보를 설정했다.
 - 선택형 행마라면 `move_layers`와 `move_options`를 설정했다.
+- 탄약 기물이라면 `max_ammo`, 각 옵션의 `ammo_cost`, 재보급 테스트를 설정했다.
+- 공중 기물이라면 `layer`, `air_squares`, 레이어별 이동·충돌·저장 테스트를 추가했다.
 - 독립 행동이라면 canonical 생성·검증·적용 경계를 구현했다.
 - `server/src/main.rs`의 `resolve_piece_type()`에 새 타입을 허용했다.
 - `frontend/src/composables/useDeckValidation.ts`의 카탈로그와 라벨을 갱신했다.
@@ -521,6 +551,7 @@ npm run build
 - 룰 엔진 통합 테스트를 추가했다.
 - `cargo test -p brainfuck-chess-engine`를 통과시켰다.
 - 프론트 빌드 또는 수동 UI 확인을 완료했다.
+- 일반 플레이와 기물 테스트장에서 동일한 canonical action을 실행해 확인했다.
 
 ---
 

@@ -158,3 +158,9 @@ scoreLimit = n × n - 25
 - 엔진 언어: rust
 - 프론트엔드: typescript
 - 사용 서버: GCP cloud run
+
+## 개발 문서
+
+- [새 변형기물 추가 가이드](docx/ADDING_VARIANT_PIECES.md)
+- [탄약 및 공중 레이어 기물 계약](docs/ammo-air-layer.md)
+- [커스텀 기물 엔진 런타임 계약](docs/custom-piece-engine-runtime.md)

@@ -7,6 +7,7 @@ pub fn guhang_definition() -> PieceDefinition {
         id: "guhang".into(),
         name: "구행".into(),
         score: 25,
+        max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: "\
 do
