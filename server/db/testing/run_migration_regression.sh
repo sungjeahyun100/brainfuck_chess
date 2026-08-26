@@ -16,8 +16,9 @@ fi
 
 run_fixture_sql() {
   local sql_file="$1"
-  PGDATABASE="$DISPOSABLE_ADMIN_DATABASE_URL" "$PSQL_BIN" \
-    -X --no-psqlrc --set=ON_ERROR_STOP=1 --file "$sql_file"
+  "$PSQL_BIN" \
+    -X --no-psqlrc --dbname "$DISPOSABLE_ADMIN_DATABASE_URL" \
+    --set=ON_ERROR_STOP=1 --file "$sql_file"
 }
 
 run_migration() {

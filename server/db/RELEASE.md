@@ -26,9 +26,14 @@ export ADMIN_DATABASE_URL='postgresql://postgres@127.0.0.1:5432/deck_chess'
 ```
 
 Use `.pgpass`, `PGPASSWORD`, or the proxy/organization's approved password
-mechanism. Do not put a password in this repository, reuse an application
-`DATABASE_URL`, or print the value. The runner passes the connection value to
-libpq through the environment rather than the process command line.
+mechanism. `ADMIN_DATABASE_URL` itself must not contain a password. Do not put a
+password in this repository, reuse an application `DATABASE_URL`, or print the
+value.
+
+The local `release.sh` automatically starts and later stops the installed Cloud
+SQL Auth Proxy when `ADMIN_DATABASE_URL` uses `127.0.0.1:5432` or
+`localhost:5432`. A proxy already accepting connections on that endpoint is
+reused. Direct `migrate-db.sh` use expects the configured endpoint to be ready.
 
 The runner always identifies and verifies the fixed target:
 
