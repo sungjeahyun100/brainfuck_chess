@@ -5,6 +5,12 @@ scripts executed explicitly with `psql`; they are not registered in SQLx and do
 not have migration-history checksums. Keep prod and test scripts symmetric where
 their environment boundary is the only difference.
 
+Use the repository-root `migrate-db.sh` runner for an ordered test or production
+release. The exact operator workflow, connection requirements, backup step and
+rollback policy are documented in `RELEASE.md`. The runner has explicit,
+separate prod and test manifests; it never derives one environment's SQL from
+the other environment's files.
+
 The checksum-preserved immutable history is `../migrations`, as documented in
 that directory. Do not apply those legacy files to a split-schema database.
 

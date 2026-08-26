@@ -20,3 +20,8 @@ Use a clean administrative session with no permanent `deck_chess` or
 table/schema owners and verify that both memberships and environment isolation
 are restored before commit. Apply the shared release first, then `00500`, then
 `01000`; each script is idempotent in that order.
+
+The supported operator command is `./migrate-db.sh prod` from the repository
+root. It displays the Cloud SQL target, warns about backup verification, requires
+the exact `prod` confirmation, runs preflight and finishes with the production
+runtime contract. See `../RELEASE.md` for the complete release and rollback flow.

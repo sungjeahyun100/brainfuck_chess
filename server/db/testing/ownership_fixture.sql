@@ -7,14 +7,20 @@ CREATE ROLE deck_chess_schema_owner NOLOGIN NOINHERIT;
 CREATE ROLE prod_app NOLOGIN NOINHERIT;
 CREATE ROLE test_app NOLOGIN NOINHERIT;
 
-GRANT CREATE ON DATABASE postgres TO deck_chess_schema_owner;
+SELECT format(
+    'GRANT CREATE ON DATABASE %I TO deck_chess_schema_owner',
+    current_database()
+) \gexec
 SET ROLE deck_chess_schema_owner;
 CREATE SCHEMA shared;
 CREATE SCHEMA prod;
 CREATE SCHEMA test;
 RESET ROLE;
 
-REVOKE CREATE ON DATABASE postgres FROM deck_chess_schema_owner;
+SELECT format(
+    'REVOKE CREATE ON DATABASE %I FROM deck_chess_schema_owner',
+    current_database()
+) \gexec
 
 SET ROLE deck_chess_schema_owner;
 REVOKE ALL ON SCHEMA shared, prod, test FROM PUBLIC;

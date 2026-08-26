@@ -17,3 +17,7 @@ Both scripts expect a clean administrative session with no permanent
 `deck_chess` or `deck_chess_schema_owner` membership. Required owner roles are
 granted transactionally and removed before commit, so rerunning the ordered
 scripts is safe after a successful release.
+
+Run the supported workflow as `./migrate-db.sh test` from the repository root.
+The runner uses an explicit test-only manifest and verifies the
+`deck_chess_test` runtime contract afterward. See `../RELEASE.md`.
