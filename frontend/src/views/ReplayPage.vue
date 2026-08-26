@@ -1,5 +1,6 @@
 <template>
   <main class="replay-page">
+    <template v-if="replayResult.ok && state">
     <header class="replay-header">
       <button class="btn-secondary" @click="$emit('close')">로비로</button>
       <div><p class="eyebrow">Read-only Replay</p><h2>{{ record.display_name }}</h2></div>
@@ -31,12 +32,19 @@
         <section class="replay-controls">
           <button @click="go(0)">|◀</button><button @click="go(ply - 1)">◀</button>
           <button @click="toggleAutoplay">{{ playing ? 'Ⅱ' : '▶' }}</button>
-          <button @click="go(ply + 1)">▶</button><button @click="go(record.actions.length)">▶|</button>
-          <strong>{{ ply }} / {{ record.actions.length }}</strong>
+          <button @click="go(ply + 1)">▶</button><button @click="go(actionCount)">▶|</button>
+          <strong>{{ ply }} / {{ actionCount }}</strong>
         </section>
         <section class="game-info"><h3>게임 정보</h3><p>{{ timeControlLabel(record.time_control) }}</p><p>{{ record.ruleset_version }} · {{ record.chessembly_version }}</p><p v-if="record.result">{{ record.result.reason }}</p></section>
       </aside>
     </div>
+    </template>
+    <section v-else class="replay-error" role="alert">
+      <p class="eyebrow">Read-only Replay</p>
+      <h2>리플레이를 불러올 수 없습니다.</h2>
+      <p>리플레이 데이터 복원 중 오류가 발생했습니다.</p>
+      <button class="btn-secondary" @click="$emit('close')">로비로</button>
+    </section>
   </main>
 </template>
 
@@ -45,7 +53,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import Board from '../components/Board.vue'
 import { encodeReplayCode } from '../replayCodec'
 import { formatNotation, groupNotation, squareName } from '../replayNotation'
-import { buildReplayFrames } from '../replayState'
+import { buildReplayFramesResult } from '../replayState'
 import { timeControlLabel } from '../timeControls'
 import type { PlayerId } from '../types/game'
 import type { GameRecord } from '../types/gameRecord'
@@ -58,8 +66,9 @@ const replaySides: PlayerId[] = ['white', 'black']
 const ply = ref(0), playing = ref(false), copyStatus = ref('기보 복사')
 const deckCopyStatus = ref<Record<PlayerId, string>>({ white: '덱 코드 복사', black: '덱 코드 복사' })
 let timer: number | null = null
-const frames = computed(() => buildReplayFrames(props.record))
-const state = computed(() => frames.value[ply.value])
+const replayResult = computed(() => buildReplayFramesResult(props.record))
+const actionCount = computed(() => replayResult.value.ok ? props.record.actions.length : 0)
+const state = computed(() => replayResult.value.ok ? replayResult.value.frames[ply.value] ?? null : null)
 const activeClock = computed(() => ply.value === 0 ? props.record.initial_clock : props.record.actions[ply.value - 1].clock)
 const notationRows = computed(() => groupNotation(props.record.actions))
 const compatibilityWarning = computed(() => props.record.format_version !== 2 || props.record.ruleset_version !== 'deck-chess-1' || props.record.chessembly_version !== 'chessembly-1')
@@ -76,8 +85,8 @@ async function copyDeck(side: PlayerId) {
 }
 function clockText(player: PlayerId) { const clock = activeClock.value; const ms = clock.mode === 'countdown' ? (player === 'white' ? clock.white_remaining_ms ?? 0 : clock.black_remaining_ms ?? 0) : (player === 'white' ? clock.white_elapsed_ms : clock.black_elapsed_ms); const seconds = Math.ceil(ms / 1000); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}` }
 function stop() { playing.value = false; if (timer !== null) window.clearInterval(timer); timer = null }
-function go(next: number) { ply.value = Math.max(0, Math.min(props.record.actions.length, next)); if (ply.value === props.record.actions.length) stop() }
-function toggleAutoplay() { if (playing.value) { stop(); return } playing.value = true; timer = window.setInterval(() => go(ply.value + 1), 900) }
+function go(next: number) { ply.value = Math.max(0, Math.min(actionCount.value, next)); if (ply.value === actionCount.value) stop() }
+function toggleAutoplay() { if (!replayResult.value.ok) return; if (playing.value) { stop(); return } playing.value = true; timer = window.setInterval(() => go(ply.value + 1), 900) }
 async function copyCode() { try { await navigator.clipboard.writeText(await encodeReplayCode(props.record)); copyStatus.value = '복사 완료' } catch { copyStatus.value = '복사 실패' } window.setTimeout(() => { copyStatus.value = '기보 복사' }, 1800) }
 function keydown(event: KeyboardEvent) { const target = event.target as HTMLElement | null; if (target?.matches('input, textarea, select, [contenteditable="true"]')) return; if (event.key === 'ArrowLeft') { event.preventDefault(); go(ply.value - 1) } else if (event.key === 'ArrowRight') { event.preventDefault(); go(ply.value + 1) } }
 onMounted(() => { window.addEventListener('keydown', keydown) }); onUnmounted(() => { stop(); window.removeEventListener('keydown', keydown) })
@@ -85,6 +94,8 @@ onMounted(() => { window.addEventListener('keydown', keydown) }); onUnmounted(()
 
 <style scoped>
 .replay-page { padding: 16px; }
+.replay-error { display: grid; justify-items: start; gap: 12px; max-width: 620px; margin: 12vh auto 0; padding: 28px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(19,26,39,.94); }
+.replay-error p { color: #a8b1c2; }
 .replay-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .replay-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
 .compatibility-warning { grid-column: 1/-1; padding: 10px; border: 1px solid #d9a441; border-radius: 8px; color: #f4dfb0; }

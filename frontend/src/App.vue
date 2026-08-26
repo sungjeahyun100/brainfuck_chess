@@ -13,6 +13,7 @@
     <GameScreen
       v-else-if="gameState"
       :state="gameState"
+      :play-mode="playMode"
       :local-player="localPlayer"
       :room-id="currentRoom?.id ?? null"
       :bot-player="playMode === 'bot' ? botPlayer : null"
@@ -110,6 +111,7 @@ import { useSavedDecks } from './composables/useSavedDecks'
 import { serializeNeutralDeck } from './composables/useDeckSerialization'
 import { validateSavedDeck } from './composables/useDeckValidation'
 import { mapSinglePlayerDecks, resolveLocalSide } from './singlePlayerSetup'
+import type { PlayMode } from './gameControlPolicy'
 
 const savedDecks = useSavedDecks()
 const view = ref<AppView>('home')
@@ -122,7 +124,7 @@ const pieceLabInitial = ref<{ pieceType: string | null; boardSize: number | null
 const gameState = ref<GameState | null>(null)
 const currentRoom = ref<MultiplayerRoom | null>(null)
 const localPlayer = ref<LobbyPlayer | null>(null)
-const playMode = ref<'single' | 'bot' | 'multiplayer'>('single')
+const playMode = ref<PlayMode>('single')
 const botDifficulty = ref<BotDifficulty>('normal')
 const lobbyError = ref<string | null>(null)
 const gamePollTimer = ref<number | null>(null)

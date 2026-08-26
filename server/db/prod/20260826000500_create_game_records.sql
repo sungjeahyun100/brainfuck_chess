@@ -5,22 +5,43 @@ SELECT pg_advisory_xact_lock(hashtextextended('deck-chess-prod-create-game-recor
 
 DO $admin_guard$
 BEGIN
-    IF current_user IN ('deck_chess', 'deck_chess_test') THEN
-        RAISE EXCEPTION 'run the prod game-record migration as the database administrator, not runtime role %', current_user;
+    IF session_user IN ('deck_chess', 'deck_chess_test') THEN
+        RAISE EXCEPTION 'run the prod game-record migration as the database administrator, not runtime role %', session_user;
     END IF;
-    IF to_regnamespace('prod') IS NULL OR to_regclass('shared.users') IS NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'prod')
+       OR NOT EXISTS (
+           SELECT 1 FROM pg_class relation
+           JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+           WHERE namespace.nspname = 'shared' AND relation.relname = 'users'
+             AND relation.relkind IN ('r', 'p')
+       ) THEN
         RAISE EXCEPTION 'shared/prod schema split must be applied before game records';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'deck_chess_schema_owner')
+       OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'deck_chess')
        OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'prod_app')
        OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'test_app') THEN
         RAISE EXCEPTION 'schema-owner and application roles must exist before game records';
     END IF;
-    EXECUTE format('GRANT deck_chess_schema_owner TO %I', current_user);
+    IF EXISTS (
+        SELECT 1 FROM pg_auth_members membership
+        JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+        JOIN pg_roles member_role ON member_role.oid = membership.member
+        WHERE granted_role.rolname IN ('deck_chess', 'deck_chess_schema_owner')
+          AND member_role.rolname = session_user
+    ) THEN
+        RAISE EXCEPTION 'administrator % must not retain migration owner memberships before migration', session_user;
+    END IF;
+    EXECUTE format('GRANT deck_chess TO %I', session_user);
+    EXECUTE format('GRANT deck_chess_schema_owner TO %I', session_user);
 END
 $admin_guard$;
 
+-- shared.users remains owned by the production runtime role after the schema
+-- split, so only that owner context may grant the FK prerequisites.
+SET LOCAL ROLE deck_chess;
 GRANT SELECT, REFERENCES ON shared.users TO deck_chess_schema_owner;
+RESET ROLE;
 
 DO $normalize_existing_owner$
 BEGIN
@@ -162,8 +183,23 @@ RESET ROLE;
 
 DO $remove_admin_membership$
 BEGIN
-    EXECUTE format('REVOKE deck_chess_schema_owner FROM %I', current_user);
+    EXECUTE format('REVOKE deck_chess_schema_owner FROM %I', session_user);
+    EXECUTE format('REVOKE deck_chess FROM %I', session_user);
 END
 $remove_admin_membership$;
+
+DO $verify_membership_cleanup$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_auth_members membership
+        JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+        JOIN pg_roles member_role ON member_role.oid = membership.member
+        WHERE granted_role.rolname IN ('deck_chess', 'deck_chess_schema_owner')
+          AND member_role.rolname = session_user
+    ) THEN
+        RAISE EXCEPTION 'temporary prod migration owner membership was not removed';
+    END IF;
+END
+$verify_membership_cleanup$;
 
 COMMIT;

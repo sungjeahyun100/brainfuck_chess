@@ -12,3 +12,8 @@ order:
 
 The first grants `test_app` only SELECT/INSERT/UPDATE on `test.game_records`; the
 second backfills legacy test rows. Neither script reads or writes `prod`.
+
+Both scripts expect a clean administrative session with no permanent
+`deck_chess` or `deck_chess_schema_owner` membership. Required owner roles are
+granted transactionally and removed before commit, so rerunning the ordered
+scripts is safe after a successful release.

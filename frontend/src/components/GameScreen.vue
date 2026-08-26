@@ -7,8 +7,8 @@
         <span class="player-badge" :class="`player-${viewState.current_player}`">
           {{ viewState.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
         </span>
-        <span v-if="localPlayer" class="local-badge" :class="{ waiting: !isMyTurn }">
-          {{ isBotTurn ? '봇 턴' : isMyTurn ? '내 턴' : '상대 턴' }}
+        <span v-if="localPlayer" class="local-badge" :class="{ waiting: !canControlTurn }">
+          {{ controlTurnLabel }}
         </span>
         <span v-if="botPlayer" class="bot-badge">🤖 {{ botDifficultyLabel }}</span>
         <span class="turn-badge">Turn {{ viewState.turn_number }}</span>
@@ -341,9 +341,17 @@ import { applyTimelineFrame } from '../composables/useActionTimeline'
 import { CLOCK_URGENCY_THRESHOLDS_MS, timeControlLabel } from '../timeControls'
 import { encodeReplayCode } from '../replayCodec'
 import { formatLiveAction, formatNotation } from '../replayNotation'
+import {
+  blockedControlMessage,
+  canControlCurrentTurn,
+  resigningPlayer,
+  turnControlLabel,
+  type PlayMode,
+} from '../gameControlPolicy'
 
 const props = defineProps<{
   state: GameState
+  playMode: PlayMode
   localPlayer?: PlayerId | null
   roomId?: string | null
   botPlayer?: PlayerId | null
@@ -452,13 +460,20 @@ const maxWhitePocketCount = computed(() => Math.max(1, ...whitePocketGroups.valu
 const maxBlackPocketCount = computed(() => Math.max(1, ...blackPocketGroups.value.map(group => group.count)))
 const whiteDeck = computed(() => viewState.value.players['white']?.deck)
 const blackDeck = computed(() => viewState.value.players['black']?.deck)
-const isMyTurn = computed(() => !props.localPlayer || props.state.current_player === props.localPlayer)
+const controlContext = computed(() => ({
+  playMode: props.playMode,
+  currentPlayer: props.state.current_player,
+  localPlayer: props.localPlayer,
+  botPlayer: props.botPlayer,
+}))
+const canControlTurn = computed(() => canControlCurrentTurn(controlContext.value))
+const controlTurnLabel = computed(() => turnControlLabel(controlContext.value))
 const isBotTurn = computed(() => Boolean(
   props.botPlayer
   && props.state.current_player === props.botPlayer
   && props.state.phase === 'playing',
 ))
-const canUsePlayerControls = computed(() => isMyTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value)
+const canUsePlayerControls = computed(() => canControlTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value)
 const visibleSelectedPieceId = computed(() => (
   botReplaying.value ? botPreviewSelectedPieceId.value : selectedPieceId.value
 ))
@@ -969,7 +984,7 @@ watch(
 watch(
   () => pendingForcedLandingPieceId(props.state),
   async (pieceId) => {
-    if (!pieceId || !isMyTurn.value || isBotTurn.value || props.state.phase !== 'playing') return
+    if (!pieceId || !canControlTurn.value || isBotTurn.value || props.state.phase !== 'playing') return
     const options = await selectBoardPiece(pieceId)
     if (!options || selectedPieceId.value !== pieceId) return
     await toggleAbilityMode('forced-landing')
@@ -1465,7 +1480,7 @@ async function onSquareClick(sq: Square) {
   error.value = null
   if (promotionRequest.value) return
   if (!canUsePlayerControls.value) {
-    error.value = '상대 턴입니다.'
+    error.value = blockedControlMessage(controlContext.value)
     clearSelection()
     return
   }
@@ -1515,7 +1530,7 @@ async function onSquareClick(sq: Square) {
 async function onPocketClick(pieceId: string) {
   error.value = null
   if (!canUsePlayerControls.value) {
-    error.value = '상대 턴입니다.'
+    error.value = blockedControlMessage(controlContext.value)
     clearSelection()
     return
   }
@@ -1602,13 +1617,13 @@ async function onResign() {
   error.value = null
   if (props.state.phase === 'ended') return
 
-  const resigningPlayer = props.localPlayer ?? props.state.current_player
+  const resigningSide = resigningPlayer(controlContext.value)
   if (!window.confirm('정말 기권하시겠습니까?')) return
 
   try {
     const newState = props.roomId
-      ? await api.resignRoom(props.roomId, resigningPlayer)
-      : await api.resignGame(props.state.id, resigningPlayer)
+      ? await api.resignRoom(props.roomId, resigningSide)
+      : await api.resignGame(props.state.id, resigningSide)
     clearSelection()
     emit('stateUpdate', newState)
   } catch (e: unknown) {

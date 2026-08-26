@@ -14,3 +14,9 @@ order:
 
 The scripts never create or read `test.game_records`. Existing rows whose
 current public ID cannot be matched remain nullable and private to third parties.
+
+Use a clean administrative session with no permanent `deck_chess` or
+`deck_chess_schema_owner` membership. The scripts temporarily assume the actual
+table/schema owners and verify that both memberships and environment isolation
+are restored before commit. Apply the shared release first, then `00500`, then
+`01000`; each script is idempotent in that order.

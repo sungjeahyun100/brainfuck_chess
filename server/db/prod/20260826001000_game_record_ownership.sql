@@ -4,17 +4,36 @@ SELECT pg_advisory_xact_lock(hashtextextended('deck-chess-prod-game-record-owner
 
 DO $admin_guard$
 BEGIN
-    IF current_user IN ('deck_chess', 'deck_chess_test') THEN
-        RAISE EXCEPTION 'run the prod ownership migration as the database administrator, not runtime role %', current_user;
+    IF session_user IN ('deck_chess', 'deck_chess_test') THEN
+        RAISE EXCEPTION 'run the prod ownership migration as the database administrator, not runtime role %', session_user;
     END IF;
-    IF to_regclass('prod.game_records') IS NULL THEN
-        RAISE EXCEPTION 'apply 20260826000500_create_game_records.sql before the ownership migration';
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'deck_chess_schema_owner') THEN
+        RAISE EXCEPTION 'schema-owner role must exist before the ownership migration';
     END IF;
-    EXECUTE format('GRANT deck_chess_schema_owner TO %I', current_user);
+    IF EXISTS (
+        SELECT 1 FROM pg_auth_members membership
+        JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+        JOIN pg_roles member_role ON member_role.oid = membership.member
+        WHERE granted_role.rolname = 'deck_chess_schema_owner'
+          AND member_role.rolname = session_user
+    ) THEN
+        RAISE EXCEPTION 'administrator % must not retain schema-owner membership before migration', session_user;
+    END IF;
+    EXECUTE format('GRANT deck_chess_schema_owner TO %I', session_user);
 END
 $admin_guard$;
 
 SET LOCAL ROLE deck_chess_schema_owner;
+
+-- Resolve isolated objects only after assuming the schema owner. The Cloud SQL
+-- administrator intentionally has no permanent prod schema USAGE.
+DO $game_records_guard$
+BEGIN
+    IF to_regclass('prod.game_records') IS NULL THEN
+        RAISE EXCEPTION 'apply 20260826000500_create_game_records.sql before the ownership migration';
+    END IF;
+END
+$game_records_guard$;
 
 ALTER TABLE prod.game_records
     ADD COLUMN IF NOT EXISTS white_user_id TEXT,
@@ -85,8 +104,22 @@ RESET ROLE;
 
 DO $remove_admin_membership$
 BEGIN
-    EXECUTE format('REVOKE deck_chess_schema_owner FROM %I', current_user);
+    EXECUTE format('REVOKE deck_chess_schema_owner FROM %I', session_user);
 END
 $remove_admin_membership$;
+
+DO $verify_membership_cleanup$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_auth_members membership
+        JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+        JOIN pg_roles member_role ON member_role.oid = membership.member
+        WHERE granted_role.rolname = 'deck_chess_schema_owner'
+          AND member_role.rolname = session_user
+    ) THEN
+        RAISE EXCEPTION 'temporary prod schema-owner administrator membership was not removed';
+    END IF;
+END
+$verify_membership_cleanup$;
 
 COMMIT;
