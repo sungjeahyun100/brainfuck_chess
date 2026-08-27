@@ -14,3 +14,9 @@ scripts may grant those roles to the administrative session only inside their
 transaction, must `RESET ROLE`, and must revoke and verify the temporary
 membership before commit. A failure rolls the membership changes back together
 with the schema change.
+
+The repository-tracked `release.sh` and `migrate-db.sh` are the canonical
+release entry points. They run the read-only `admin/preflight.sql`, ordered
+shared/environment migrations, and the matching read-only runtime contract
+before deployment. Local credentials remain environment variables and are
+never stored in these scripts.

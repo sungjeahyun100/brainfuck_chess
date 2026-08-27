@@ -197,7 +197,9 @@ shared insert/update가 필요한 이유다. rating/achievement 같은 향후 �
    적용한 뒤 `server/db/prod/20260826001000_game_record_ownership.sql`을 적용한다.
 3. test release는 production 파일 대신
    `server/db/test/20260826000500_create_game_records.sql`과
-   `server/db/test/20260826001000_game_record_ownership.sql`만 순서대로 적용한다.
+   `server/db/test/20260826001000_game_record_ownership.sql`,
+   `server/db/test/20260827000000_challenge_clears.sql`을 순서대로 적용한다.
+   production release도 동일한 순서의 `prod` Challenge migration을 적용한다.
 4. `server/db/admin/verify_environment_isolation.sql`로 양쪽 runtime role의
    GameRecord INSERT/UPSERT/SELECT와 반대 schema 차단을 확인한다.
 5. 새 application revision은 shared visibility column과 현재 환경의 ownership
