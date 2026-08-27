@@ -2900,6 +2900,7 @@ async fn resolve_lab_packages(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use brainfuck_chess_engine::legal_moves::generate_piece_legal_move_actions;
 
     struct FailOnceGameRecordRepository {
         fail_next: std::sync::atomic::AtomicBool,

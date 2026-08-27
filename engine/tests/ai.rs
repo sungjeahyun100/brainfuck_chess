@@ -328,9 +328,9 @@ fn difficulty_limits_are_bounded_as_configured() {
     let easy = BotDifficulty::Easy.limits();
     let normal = BotDifficulty::Normal.limits();
     let hard = BotDifficulty::Hard.limits();
-    assert_eq!((easy.max_depth_actions, easy.max_nodes), (1, 500));
-    assert_eq!((normal.max_depth_actions, normal.max_nodes), (2, 3_000));
-    assert_eq!((hard.max_depth_actions, hard.max_nodes), (3, 10_000));
+    assert_eq!((easy.max_depth_actions, easy.max_nodes), (3, 500));
+    assert_eq!((normal.max_depth_actions, normal.max_nodes), (4, 3_000));
+    assert_eq!((hard.max_depth_actions, hard.max_nodes), (5, 10_000));
     assert!(easy.hard_time_ms < normal.hard_time_ms);
     assert!(normal.hard_time_ms < hard.hard_time_ms);
 }

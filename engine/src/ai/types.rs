@@ -47,19 +47,19 @@ impl BotDifficulty {
     pub const fn limits(self) -> SearchLimits {
         match self {
             Self::Easy => SearchLimits {
-                max_depth_actions: 1,
+                max_depth_actions: 3,
                 max_nodes: 500,
                 soft_time_ms: 50,
                 hard_time_ms: 100,
             },
             Self::Normal => SearchLimits {
-                max_depth_actions: 2,
+                max_depth_actions: 4,
                 max_nodes: 3_000,
                 soft_time_ms: 150,
                 hard_time_ms: 300,
             },
             Self::Hard => SearchLimits {
-                max_depth_actions: 3,
+                max_depth_actions: 5,
                 max_nodes: 10_000,
                 soft_time_ms: 400,
                 hard_time_ms: 800,
