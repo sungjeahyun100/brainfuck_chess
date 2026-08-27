@@ -13,6 +13,7 @@ use uuid::Uuid;
 mod account;
 mod app_state;
 mod auth;
+mod challenge;
 mod custom_piece;
 mod database;
 mod game_record;
@@ -35,8 +36,7 @@ use brainfuck_chess_engine::{
     legal_moves::{
         generate_legal_drop_actions, generate_legal_move_actions, generate_piece_attack_squares,
         generate_piece_legal_ability_actions, generate_piece_legal_drop_actions,
-        generate_piece_legal_move_actions, generate_piece_legal_move_actions_with_options,
-        MoveGenerationOptions,
+        generate_piece_legal_move_actions_with_options, MoveGenerationOptions,
     },
     pieces::default_pieces::all_default_definitions,
     rules::{
@@ -65,6 +65,14 @@ struct CreateGameRequest {
     local_nickname: Option<String>,
     #[serde(default)]
     guest_nickname: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateChallengeGameRequest {
+    player_deck: PlayerDeckSpec,
+    #[serde(default)]
+    local_nickname: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -505,6 +513,7 @@ fn build_player_deck(
     pieces: &mut HashMap<PieceId, Piece>,
     definitions: &HashMap<PieceTypeId, PieceDefinition>,
     packages: &HashMap<(String, u32), CustomPiecePackage>,
+    enforce_user_validation: bool,
 ) -> Result<Deck, String> {
     let base_zone: HashSet<SquareId> = get_base_zone_squares(&player_id.to_string(), board_size)
         .into_iter()
@@ -599,9 +608,11 @@ fn build_player_deck(
 
     deck.total_score = calculate_deck_score(&deck, pieces, definitions);
 
-    let validation = validate_deck(&deck, board_size, pieces, definitions);
-    if !validation.valid {
-        return Err(validation.errors.join(" "));
+    if enforce_user_validation {
+        let validation = validate_deck(&deck, board_size, pieces, definitions);
+        if !validation.valid {
+            return Err(validation.errors.join(" "));
+        }
     }
 
     Ok(deck)
@@ -622,6 +633,8 @@ fn build_game_state(
         white_spec,
         black_spec,
         packages,
+        true,
+        true,
     )
 }
 
@@ -632,6 +645,8 @@ fn build_game_state_with_variant(
     white_spec: &PlayerDeckSpec,
     black_spec: &PlayerDeckSpec,
     packages: Vec<CustomPiecePackage>,
+    validate_white_as_user_deck: bool,
+    validate_black_as_user_deck: bool,
 ) -> Result<GameState, String> {
     if board_size < 8 {
         return Err("보드 크기는 최소 8이어야 합니다.".into());
@@ -676,6 +691,7 @@ fn build_game_state_with_variant(
         &mut state.pieces,
         &state.piece_definitions,
         &package_index,
+        validate_white_as_user_deck,
     )?;
     let black_deck = build_player_deck(
         "black",
@@ -685,6 +701,7 @@ fn build_game_state_with_variant(
         &mut state.pieces,
         &state.piece_definitions,
         &package_index,
+        validate_black_as_user_deck,
     )?;
 
     let mut players = HashMap::new();
@@ -1104,6 +1121,8 @@ async fn start_room_game(
         white_deck,
         black_deck,
         packages,
+        true,
+        true,
     )?;
     let (white_owner, black_owner) = if room.host_side == "white" {
         (host_owner, guest_owner)
@@ -1255,6 +1274,7 @@ async fn singleplayer_record_players(
 async fn run_game_time_adjudicator(
     games: stores::GameStore,
     records: game_record::GameRecordStore,
+    challenge_progress: challenge::ChallengeProgressStore,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
     loop {
@@ -1268,7 +1288,9 @@ async fn run_game_time_adjudicator(
             if let Some(mut game) = games.get_mut(&id) {
                 game.adjudicate(now);
             }
-            if let Err(error) = persist_completed_record(&games, &records, &id).await {
+            if let Err(error) =
+                persist_completed_record(&games, &records, &challenge_progress, &id).await
+            {
                 eprintln!("failed to persist completed game record {id}: {error}");
             }
         }
@@ -1278,13 +1300,35 @@ async fn run_game_time_adjudicator(
 async fn persist_completed_record(
     games: &stores::GameStore,
     records: &game_record::GameRecordStore,
+    challenge_progress: &challenge::ChallengeProgressStore,
     game_id: &str,
 ) -> Result<(), &'static str> {
-    let Some(record) = games.get(game_id).and_then(|game| game.completed_record()) else {
+    let Some((record, challenge_context)) = games.get(game_id).and_then(|game| {
+        game.completed_record()
+            .map(|record| (record, game.challenge.clone()))
+    }) else {
         return Ok(());
     };
     if record.ownership.has_registered_owner() {
         records.save(&record).await?;
+    }
+    if let Some(context) = challenge_context {
+        let player_won = record
+            .result
+            .as_ref()
+            .and_then(|result| result.winner.as_deref())
+            == Some(context.metadata.player_id.as_str());
+        if player_won {
+            if let Some(user_id) = context.registered_user_id.as_deref() {
+                challenge_progress
+                    .record_clear(
+                        user_id,
+                        &context.metadata.id,
+                        record.ended_at_ms.unwrap_or_else(now_ms),
+                    )
+                    .await?;
+            }
+        }
     }
     if let Some(mut game) = games.get_mut(game_id) {
         game.mark_record_persisted();
@@ -1296,6 +1340,9 @@ async fn persist_completed_record(
 
 #[tokio::main]
 async fn main() {
+    challenge::validate_registry(&challenge::definitions()).unwrap_or_else(|error| {
+        panic!("server startup blocked by invalid Challenge definitions: {error}")
+    });
     let environment = app_env();
     let state = AppState::from_env(environment)
         .await
@@ -1303,6 +1350,7 @@ async fn main() {
     tokio::spawn(run_game_time_adjudicator(
         state.games.clone(),
         state.game_records.clone(),
+        state.challenge_progress.clone(),
     ));
 
     // Static frontend directory — populated at Docker build time.
@@ -1392,6 +1440,137 @@ async fn get_piece_catalog() -> Json<HashMap<PieceTypeId, PieceCatalogMetadata>>
     Json(default_piece_catalog())
 }
 
+async fn list_challenges(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<challenge::ChallengeSummary>>, (StatusCode, Json<ErrorResponse>)> {
+    let owner = custom_piece::authenticated_owner(&app, &headers).ok();
+    let cleared = if let Some(owner) = owner.as_deref() {
+        app.challenge_progress
+            .list_clears(owner)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ErrorResponse {
+                        error: "Challenge 클리어 기록을 불러오지 못했습니다.".into(),
+                    }),
+                )
+            })?
+            .into_iter()
+            .map(|clear| clear.challenge_id)
+            .collect::<HashSet<_>>()
+    } else {
+        HashSet::new()
+    };
+    Ok(Json(
+        challenge::definitions()
+            .into_iter()
+            .filter(|definition| definition.enabled)
+            .map(|definition| challenge::ChallengeSummary {
+                id: definition.id,
+                name: definition.name,
+                description: definition.description,
+                board_size: definition.board_size,
+                map_id: format!(
+                    "standard-{}x{}",
+                    definition.board_size, definition.board_size
+                ),
+                bot_difficulty: definition.bot_difficulty,
+                time_control: definition.time_control,
+                cleared: cleared.contains(definition.id),
+            })
+            .collect(),
+    ))
+}
+
+async fn create_challenge_game(
+    State(app): State<AppState>,
+    Path(challenge_id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<CreateChallengeGameRequest>,
+) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let definition = challenge::find(&challenge_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "Challenge를 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+    let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
+    let packages = resolve_custom_packages(&app, &[(&owner, &req.player_deck)])
+        .await
+        .map_err(|error| {
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ErrorResponse { error }),
+            )
+        })?;
+    let opponent_deck = challenge::opponent_deck(&definition, "black");
+    let id = Uuid::new_v4().to_string();
+    let state = build_game_state_with_variant(
+        id.clone(),
+        definition.board_size,
+        BoardVariant::Plain,
+        &req.player_deck,
+        &opponent_deck,
+        packages,
+        true,
+        false,
+    )
+    .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    let now = now_ms();
+    let (record_players, record_ownership) = singleplayer_record_players(
+        &app,
+        &owner,
+        "white",
+        req.local_nickname.as_deref(),
+        Some("Challenge Bot"),
+    )
+    .await
+    .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    let registered_user_id = record_ownership
+        .white_user_id
+        .clone()
+        .filter(|_| record_ownership.persist);
+    let mut stored = StoredGame::new_with_players_and_deck_names(
+        state,
+        definition.time_control,
+        false,
+        now,
+        record_players,
+        record_ownership,
+        HashMap::from([
+            (
+                "white".into(),
+                req.player_deck
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Player Deck".into()),
+            ),
+            ("black".into(), definition.name.into()),
+        ]),
+        format!(
+            "standard-{}x{}",
+            definition.board_size, definition.board_size
+        ),
+    );
+    stored.set_challenge(challenge::ChallengeGameContext {
+        metadata: challenge::ChallengeGameMetadata {
+            id: definition.id.into(),
+            name: definition.name.into(),
+            player_id: "white".into(),
+            bot_player_id: "black".into(),
+            bot_difficulty: definition.bot_difficulty,
+        },
+        registered_user_id,
+    });
+    let view = stored.view(now);
+    app.games.insert(id.clone(), stored);
+    Ok(Json(GameResponse { id, state: view }))
+}
+
 fn app_env() -> &'static str {
     let configured = std::env::var("APP_ENV").ok();
     resolve_app_env(configured.as_deref(), cfg!(debug_assertions))
@@ -1460,6 +1639,8 @@ async fn create_game(
         &req.white_deck,
         &req.black_deck,
         packages,
+        true,
+        true,
     )
     .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let now = now_ms();
@@ -1965,7 +2146,10 @@ async fn get_game_record(
                 }),
             ));
         }
-        if let Err(error) = persist_completed_record(&app.games, &app.game_records, &id).await {
+        if let Err(error) =
+            persist_completed_record(&app.games, &app.game_records, &app.challenge_progress, &id)
+                .await
+        {
             eprintln!("failed to persist completed game record {id}: {error}");
         }
         return Ok(Json(record));
@@ -2286,7 +2470,7 @@ async fn run_bot_turn(
             }),
         ));
     }
-    let difficulty = match req.difficulty.as_deref().unwrap_or("normal") {
+    let requested_difficulty = match req.difficulty.as_deref().unwrap_or("normal") {
         "easy" => BotDifficulty::Easy,
         "normal" => BotDifficulty::Normal,
         "hard" => BotDifficulty::Hard,
@@ -2309,6 +2493,19 @@ async fn run_bot_turn(
         )
     })?;
     let started_at = now_ms();
+    let difficulty = if let Some(context) = entry.challenge.as_ref() {
+        if req.bot_player_id != context.metadata.bot_player_id {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "Challenge 봇 진영은 서버 정의로 고정됩니다.".into(),
+                }),
+            ));
+        }
+        context.metadata.bot_difficulty
+    } else {
+        requested_difficulty
+    };
     entry.adjudicate(started_at);
     if entry.phase == GamePhase::Ended || entry.result.is_some() {
         return Err((
@@ -2839,15 +3036,27 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(guest_players["white"].nickname, "Local Guest");
-        assert_eq!(guest_ownership.white_user_id.as_deref(), Some("guest-session"));
+        assert_eq!(
+            guest_ownership.white_user_id.as_deref(),
+            Some("guest-session")
+        );
         assert_eq!(guest_ownership.black_user_id, None);
         assert!(!guest_ownership.has_registered_owner());
 
         let (_, black_guest_ownership) = singleplayer_record_players(
-            &app, "guest-session", "black", Some("Local Guest"), Some("Guest"),
-        ).await.unwrap();
+            &app,
+            "guest-session",
+            "black",
+            Some("Local Guest"),
+            Some("Guest"),
+        )
+        .await
+        .unwrap();
         assert_eq!(black_guest_ownership.white_user_id, None);
-        assert_eq!(black_guest_ownership.black_user_id.as_deref(), Some("guest-session"));
+        assert_eq!(
+            black_guest_ownership.black_user_id.as_deref(),
+            Some("guest-session")
+        );
         assert!(!black_guest_ownership.persist);
     }
 
@@ -2878,7 +3087,12 @@ mod tests {
         }
         app.accounts.ensure_guest("guest-a").await.unwrap();
         app.accounts.ensure_guest("guest-b").await.unwrap();
-        assert!(app.accounts.authenticated_user("guest-a").await.unwrap().is_none());
+        assert!(app
+            .accounts
+            .authenticated_user("guest-a")
+            .await
+            .unwrap()
+            .is_none());
 
         let (players, both) = game_record_players(&app, "account-a", "account-b").await;
         assert_eq!(players["white"].public_id.as_deref(), Some("public_a"));
@@ -2911,10 +3125,18 @@ mod tests {
     async fn participant_sessions_keep_replay_access_without_granting_guest_history() {
         let (app, game_id) = test_app_with_game();
         let identity = account::VerifiedIdentity {
-            issuer: "issuer".into(), subject: "access-subject".into(), provider: "google".into(),
-            email: None, email_verified: true, display_name: Some("Account".into()), avatar_url: None,
+            issuer: "issuer".into(),
+            subject: "access-subject".into(),
+            provider: "google".into(),
+            email: None,
+            email_verified: true,
+            display_name: Some("Account".into()),
+            avatar_url: None,
         };
-        app.accounts.complete_google_login("account", &identity, None).await.unwrap();
+        app.accounts
+            .complete_google_login("account", &identity, None)
+            .await
+            .unwrap();
         app.accounts.ensure_guest("guest-a").await.unwrap();
         app.accounts.ensure_guest("guest-b").await.unwrap();
         app.accounts.ensure_guest("unrelated").await.unwrap();
@@ -2926,26 +3148,76 @@ mod tests {
         let mut record = app.games.get(&game_id).unwrap().record.clone();
 
         record.ownership = GameRecordOwnership {
-            white_user_id: Some("account".into()), black_user_id: Some("guest-a".into()), persist: true,
+            white_user_id: Some("account".into()),
+            black_user_id: Some("guest-a".into()),
+            persist: true,
         };
-        assert!(ensure_game_record_access(&app, &headers("account"), &record).await.is_ok());
-        assert!(ensure_game_record_access(&app, &headers("guest-a"), &record).await.is_ok());
-        assert_eq!(ensure_game_record_access(&app, &headers("unrelated"), &record).await.unwrap_err().0, StatusCode::NOT_FOUND);
+        assert!(
+            ensure_game_record_access(&app, &headers("account"), &record)
+                .await
+                .is_ok()
+        );
+        assert!(
+            ensure_game_record_access(&app, &headers("guest-a"), &record)
+                .await
+                .is_ok()
+        );
+        assert_eq!(
+            ensure_game_record_access(&app, &headers("unrelated"), &record)
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::NOT_FOUND
+        );
 
         record.ownership = GameRecordOwnership {
-            white_user_id: Some("guest-a".into()), black_user_id: Some("guest-b".into()), persist: false,
+            white_user_id: Some("guest-a".into()),
+            black_user_id: Some("guest-b".into()),
+            persist: false,
         };
-        assert!(ensure_game_record_access(&app, &headers("guest-a"), &record).await.is_ok());
-        assert!(ensure_game_record_access(&app, &headers("guest-b"), &record).await.is_ok());
-        assert_eq!(ensure_game_record_access(&app, &headers("unrelated"), &record).await.unwrap_err().0, StatusCode::NOT_FOUND);
+        assert!(
+            ensure_game_record_access(&app, &headers("guest-a"), &record)
+                .await
+                .is_ok()
+        );
+        assert!(
+            ensure_game_record_access(&app, &headers("guest-b"), &record)
+                .await
+                .is_ok()
+        );
+        assert_eq!(
+            ensure_game_record_access(&app, &headers("unrelated"), &record)
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::NOT_FOUND
+        );
 
         record.ownership = GameRecordOwnership {
-            white_user_id: Some("guest-a".into()), black_user_id: None, persist: false,
+            white_user_id: Some("guest-a".into()),
+            black_user_id: None,
+            persist: false,
         };
-        assert!(ensure_game_record_access(&app, &headers("guest-a"), &record).await.is_ok());
-        assert_eq!(ensure_game_record_access(&app, &headers("unrelated"), &record).await.unwrap_err().0, StatusCode::NOT_FOUND);
+        assert!(
+            ensure_game_record_access(&app, &headers("guest-a"), &record)
+                .await
+                .is_ok()
+        );
+        assert_eq!(
+            ensure_game_record_access(&app, &headers("unrelated"), &record)
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::NOT_FOUND
+        );
 
-        assert_eq!(list_game_records(State(app), headers("guest-a")).await.unwrap_err().0, StatusCode::FORBIDDEN);
+        assert_eq!(
+            list_game_records(State(app), headers("guest-a"))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[tokio::test]
@@ -2967,9 +3239,11 @@ mod tests {
         });
         let store: game_record::GameRecordStore = repository.clone();
 
-        assert!(persist_completed_record(&app.games, &store, &game_id)
-            .await
-            .is_err());
+        assert!(
+            persist_completed_record(&app.games, &store, &app.challenge_progress, &game_id)
+                .await
+                .is_err()
+        );
         assert!(app
             .games
             .get(&game_id)
@@ -2977,7 +3251,7 @@ mod tests {
             .completed_record()
             .is_some());
 
-        persist_completed_record(&app.games, &store, &game_id)
+        persist_completed_record(&app.games, &store, &app.challenge_progress, &game_id)
             .await
             .unwrap();
         assert!(app
@@ -2988,7 +3262,7 @@ mod tests {
             .is_none());
         assert_eq!(repository.saves.lock().unwrap().len(), 1);
 
-        persist_completed_record(&app.games, &store, &game_id)
+        persist_completed_record(&app.games, &store, &app.challenge_progress, &game_id)
             .await
             .unwrap();
         assert_eq!(repository.saves.lock().unwrap().len(), 1);
@@ -3007,7 +3281,7 @@ mod tests {
             saves: std::sync::Mutex::new(Vec::new()),
         });
         let store: game_record::GameRecordStore = repository.clone();
-        persist_completed_record(&app.games, &store, &game_id)
+        persist_completed_record(&app.games, &store, &app.challenge_progress, &game_id)
             .await
             .unwrap();
         assert!(app
@@ -3117,7 +3391,10 @@ mod tests {
             .await
             .unwrap()
             .0;
-        assert_eq!(owned.players["white"].public_id.as_deref(), Some("white_old"));
+        assert_eq!(
+            owned.players["white"].public_id.as_deref(),
+            Some("white_old")
+        );
 
         app.accounts
             .update_profile("white-user", Some("white_new"), None, None)
@@ -3129,7 +3406,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].players["white"].public_id.as_deref(), Some("white_old"));
+        assert_eq!(
+            listed[0].players["white"].public_id.as_deref(),
+            Some("white_old")
+        );
     }
 
     #[test]
@@ -3177,6 +3457,151 @@ mod tests {
             square: Square::new(file, rank),
         }));
         back_rank
+    }
+
+    fn valid_player_deck(board_size: i32) -> PlayerDeckSpec {
+        let front_rank = if board_size >= 10 { 2 } else { 1 };
+        let mut starting = vec![StartingPieceSpec {
+            piece: built_in("king"),
+            square: Square::new(board_size / 2, 0),
+        }];
+        starting.extend((0..board_size).map(|file| StartingPieceSpec {
+            piece: built_in("pawn"),
+            square: Square::new(file, front_rank),
+        }));
+        PlayerDeckSpec {
+            name: Some("Player Deck".into()),
+            starting,
+            pocket: vec![],
+        }
+    }
+
+    #[test]
+    fn challenge_factory_reuses_game_state_with_authoritative_official_decks() {
+        for definition in challenge::definitions() {
+            let player = valid_player_deck(definition.board_size);
+            let opponent = challenge::opponent_deck(&definition, "black");
+            let state = build_game_state_with_variant(
+                format!("challenge-{}", definition.id),
+                definition.board_size,
+                BoardVariant::Plain,
+                &player,
+                &opponent,
+                vec![],
+                true,
+                false,
+            )
+            .unwrap();
+            assert_eq!(state.board.size, definition.board_size);
+            assert_eq!(
+                state.players["black"].deck.total_score,
+                match definition.id {
+                    "tempest_horde" => 118,
+                    "raining_men" => 118,
+                    "tempest_set" => 62,
+                    _ => unreachable!(),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn challenge_request_rejects_client_supplied_opponent_deck() {
+        let payload = serde_json::json!({
+            "player_deck": { "name": "Player", "starting": [], "pocket": [] },
+            "opponent_deck": { "starting": [], "pocket": [] }
+        });
+        assert!(serde_json::from_value::<CreateChallengeGameRequest>(payload).is_err());
+    }
+
+    #[test]
+    fn challenge_bot_state_includes_paratrooper_drops_and_tempest_moves() {
+        let raining = challenge::find("raining_men").unwrap();
+        let mut raining_state = build_game_state_with_variant(
+            "raining".into(),
+            12,
+            BoardVariant::Plain,
+            &valid_player_deck(12),
+            &challenge::opponent_deck(&raining, "black"),
+            vec![],
+            true,
+            false,
+        )
+        .unwrap();
+        raining_state.current_player = "black".into();
+        assert!(generate_legal_drop_actions(&raining_state)
+            .iter()
+            .any(|action| { raining_state.pieces[&action.piece_id].type_id == "paratrooper" }));
+
+        let horde = challenge::find("tempest_horde").unwrap();
+        let mut horde_state = build_game_state_with_variant(
+            "horde".into(),
+            12,
+            BoardVariant::Plain,
+            &valid_player_deck(12),
+            &challenge::opponent_deck(&horde, "black"),
+            vec![],
+            true,
+            false,
+        )
+        .unwrap();
+        horde_state.current_player = "black".into();
+        let pawn_id = horde_state
+            .pieces
+            .values()
+            .find(|piece| {
+                piece.owner == "black" && piece.type_id == "tempest-pawn-black" && !piece.in_pocket
+            })
+            .unwrap()
+            .id
+            .clone();
+        assert!(
+            !brainfuck_chess_engine::legal_moves::generate_piece_legal_move_actions(
+                &horde_state,
+                &pawn_id,
+            )
+            .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn only_an_authoritative_player_win_records_a_challenge_clear() {
+        for (loser, should_clear) in [("black", true), ("white", false)] {
+            let (app, game_id) = test_app_with_game();
+            {
+                let mut game = app.games.get_mut(&game_id).unwrap();
+                game.record.ownership = GameRecordOwnership {
+                    white_user_id: Some("registered-user".into()),
+                    black_user_id: None,
+                    persist: true,
+                };
+                game.set_challenge(challenge::ChallengeGameContext {
+                    metadata: challenge::ChallengeGameMetadata {
+                        id: "tempest_horde".into(),
+                        name: "템페스트 호드".into(),
+                        player_id: "white".into(),
+                        bot_player_id: "black".into(),
+                        bot_difficulty: BotDifficulty::Normal,
+                    },
+                    registered_user_id: Some("registered-user".into()),
+                });
+                game.end_with_loss(loser, GameEndReason::Resignation);
+            }
+            persist_completed_record(
+                &app.games,
+                &app.game_records,
+                &app.challenge_progress,
+                &game_id,
+            )
+            .await
+            .unwrap();
+            let clears = app
+                .challenge_progress
+                .list_clears("registered-user")
+                .await
+                .unwrap();
+            assert_eq!(!clears.is_empty(), should_clear);
+        }
     }
 
     fn remove_front_line_after_validation(state: &mut GameState) {

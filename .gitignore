@@ -2,6 +2,8 @@
 /frontend/dist
 /frontend/node_modules
 /reinstall-image.sh
+/migrate-db.sh
+/release.sh
 .env
 .env.*
 !.env.example

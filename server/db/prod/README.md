@@ -11,6 +11,8 @@ order:
    `prod.game_records` table and grants `prod_app` only SELECT/INSERT/UPDATE.
 2. `20260826001000_game_record_ownership.sql` performs the lossless ownership
    backfill for an existing table and is a safe no-op for new empty tables.
+3. `20260827000000_challenge_clears.sql` creates account-owned Challenge clear
+   records without granting test roles access to production data.
 
 The scripts never create or read `test.game_records`. Existing rows whose
 current public ID cannot be matched remain nullable and private to third parties.

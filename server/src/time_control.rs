@@ -1,5 +1,6 @@
+use crate::challenge::{ChallengeGameContext, ChallengeGameMetadata};
 use crate::game_record::{
-    GameRecord, GameRecordOwnership, GameRecordPlayer, RecordedNotationAction,
+    GameMode, GameRecord, GameRecordOwnership, GameRecordPlayer, RecordedNotationAction,
 };
 use brainfuck_chess_engine::types::{GameEndReason, GamePhase, GameResult, GameState, PlayerId};
 use serde::{Deserialize, Serialize};
@@ -237,6 +238,7 @@ pub(crate) struct StoredGame {
     presence: Option<PresenceState>,
     pub(crate) record: GameRecord,
     record_persisted: bool,
+    pub(crate) challenge: Option<ChallengeGameContext>,
 }
 
 #[derive(Debug, Serialize)]
@@ -248,6 +250,8 @@ pub(crate) struct GameView {
     pub(crate) presence: Option<PresenceSnapshot>,
     pub(crate) player_info: HashMap<PlayerId, GameRecordPlayer>,
     pub(crate) record_notation: Vec<RecordedNotationAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) challenge: Option<ChallengeGameMetadata>,
 }
 
 impl Deref for GameView {
@@ -327,7 +331,14 @@ impl StoredGame {
             presence,
             record,
             record_persisted: false,
+            challenge: None,
         }
+    }
+
+    pub(crate) fn set_challenge(&mut self, context: ChallengeGameContext) {
+        self.record.game_mode = GameMode::Challenge;
+        self.record.challenge_id = Some(context.metadata.id.clone());
+        self.challenge = Some(context);
     }
 
     pub(crate) fn heartbeat(&mut self, player: &str, now_ms: i64) {
@@ -370,6 +381,10 @@ impl StoredGame {
                 .iter()
                 .map(|entry| entry.notation.clone())
                 .collect(),
+            challenge: self
+                .challenge
+                .as_ref()
+                .map(|context| context.metadata.clone()),
         }
     }
 

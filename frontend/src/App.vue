@@ -16,7 +16,7 @@
       :play-mode="playMode"
       :local-player="localPlayer"
       :room-id="currentRoom?.id ?? null"
-      :bot-player="playMode === 'bot' ? botPlayer : null"
+      :bot-player="playMode === 'bot' || playMode === 'challenge' ? botPlayer : null"
       :bot-difficulty="botDifficulty"
       @state-update="onGameStateUpdate"
       @restart="restartToLobby"
@@ -58,6 +58,12 @@
       v-else-if="view === 'game-history'"
       @back="navigate('home')"
       @loaded="openReplay"
+    />
+    <Challenges
+      v-else-if="view === 'challenges'"
+      @back="navigate('home')"
+      @deck-building="navigate('deck-library')"
+      @started="startChallengeGame"
     />
     <DeckSelect
       v-else-if="view === 'single-select'"
@@ -105,6 +111,7 @@ import CustomPieceWorkshop from './views/CustomPieceWorkshop.vue'
 import ReplayImport from './views/ReplayImport.vue'
 import ReplayPage from './views/ReplayPage.vue'
 import GameHistory from './views/GameHistory.vue'
+import Challenges from './views/Challenges.vue'
 import type { GameRecord } from './types/gameRecord'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
 import { useSavedDecks } from './composables/useSavedDecks'
@@ -255,6 +262,15 @@ async function startBotGame(selection: BotDeckSelection) {
   } catch (e: unknown) {
     lobbyError.value = e instanceof Error ? e.message : String(e)
   }
+}
+
+function startChallengeGame(payload: { state: GameState }) {
+  lobbyError.value = null
+  playMode.value = 'challenge'
+  localPlayer.value = payload.state.challenge?.player_id ?? 'white'
+  botDifficulty.value = payload.state.challenge?.bot_difficulty ?? 'normal'
+  currentRoom.value = null
+  gameState.value = payload.state
 }
 
 function startMultiplayerGame(payload: { state: GameState; room: MultiplayerRoom; localPlayer: LobbyPlayer }) {

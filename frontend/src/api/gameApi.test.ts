@@ -59,3 +59,21 @@ test('singleplayer create request sends only side and per-game nicknames as play
   assert.equal('public_id' in body, false)
   assert.equal('user_id' in body, false)
 })
+
+test('challenge create request sends a player deck but no opponent or rule settings', async () => {
+  let url = ''
+  let body: Record<string, unknown> = {}
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    url = String(input)
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return new Response(JSON.stringify({ id: 'challenge-game', state: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+  const playerDeck = { name: 'My Deck', starting: [], pocket: [] }
+  await api.createChallengeGame('tempest_horde', playerDeck, 'Player')
+  assert.equal(url, '/api/challenges/tempest_horde/games')
+  assert.deepEqual(body.player_deck, playerDeck)
+  assert.equal(body.local_nickname, 'Player')
+  for (const forbidden of ['opponent_deck', 'board_size', 'bot_difficulty', 'challenge_result', 'cleared']) {
+    assert.equal(forbidden in body, false)
+  }
+})

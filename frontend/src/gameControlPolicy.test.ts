@@ -40,6 +40,12 @@ test('bot mode permits only the human side and keeps bot messaging', () => {
   assert.equal(blockedControlMessage(context('bot', 'black', 'white', 'black')), '봇 턴입니다.')
 })
 
+test('challenge mode uses the same human-only turn control as bot mode', () => {
+  assert.equal(canControlCurrentTurn(context('challenge', 'white', 'white', 'black')), true)
+  assert.equal(canControlCurrentTurn(context('challenge', 'black', 'white', 'black')), false)
+  assert.equal(turnControlLabel(context('challenge', 'black', 'white', 'black')), '봇 턴')
+})
+
 test('multiplayer permits only the local side', () => {
   assert.equal(canControlCurrentTurn(context('multiplayer', 'black', 'black')), true)
   assert.equal(canControlCurrentTurn(context('multiplayer', 'white', 'black')), false)

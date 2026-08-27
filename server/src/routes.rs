@@ -19,6 +19,8 @@ pub(crate) fn api(state: AppState) -> Router {
         .route("/piece-scores", get(get_piece_scores))
         .route("/piece-catalog", get(get_piece_catalog))
         .route("/games", post(create_game))
+        .route("/challenges", get(list_challenges))
+        .route("/challenges/:id/games", post(create_challenge_game))
         .route("/game-records", get(list_game_records))
         .route("/games/:id", get(get_game))
         .route("/games/:id/record", get(get_game_record))

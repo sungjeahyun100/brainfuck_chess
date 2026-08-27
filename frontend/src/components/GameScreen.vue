@@ -2,7 +2,10 @@
   <div class="game-screen">
     <!-- Header -->
     <div class="header">
-      <h2>덱체스 <small class="title-en">Deck Chess</small></h2>
+      <h2>
+        {{ state.challenge?.name ?? '덱체스' }}
+        <small class="title-en">{{ state.challenge ? 'Challenge · 상대: 봇' : 'Deck Chess' }}</small>
+      </h2>
       <div class="turn-info">
         <span class="player-badge" :class="`player-${viewState.current_player}`">
           {{ viewState.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
@@ -120,7 +123,10 @@
     <!-- Game over overlay -->
     <div v-if="viewState.phase === 'ended'" class="game-over-overlay">
       <div class="game-over-box">
-        <h2>Game Over</h2>
+        <h2 v-if="state.challenge">
+          {{ viewState.result?.winner === state.challenge.player_id ? 'Challenge 클리어' : 'Challenge 실패' }}
+        </h2>
+        <h2 v-else>Game Over</h2>
         <p v-if="viewState.result?.winner">
           {{ viewState.result.winner === 'white' ? '⬜ White' : '⬛ Black' }} wins!
           <br><small>({{ viewState.result.reason }})</small>

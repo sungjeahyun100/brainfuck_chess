@@ -15,6 +15,14 @@ pub(crate) const GAME_RECORD_FORMAT_VERSION: u32 = 2;
 pub(crate) const RULESET_VERSION: &str = "deck-chess-1";
 pub(crate) const CHESSEMBLY_VERSION: &str = "chessembly-1";
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum GameMode {
+    #[default]
+    Standard,
+    Challenge,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GameRecordPlayer {
     pub(crate) public_id: Option<String>,
@@ -161,6 +169,8 @@ pub(crate) struct GameRecordSummary {
     pub(crate) players: HashMap<PlayerId, GameRecordPlayer>,
     pub(crate) time_control: TimeControlId,
     pub(crate) owner_side: PlayerId,
+    pub(crate) game_mode: GameMode,
+    pub(crate) challenge_id: Option<String>,
 }
 
 impl GameRecordSummary {
@@ -179,6 +189,8 @@ impl GameRecordSummary {
             players: record.players.clone(),
             time_control: record.time_control,
             owner_side: owner_side.into(),
+            game_mode: record.game_mode,
+            challenge_id: record.challenge_id.clone(),
         }
     }
 }
@@ -202,6 +214,10 @@ pub(crate) struct GameRecord {
     pub(crate) decks: HashMap<PlayerId, DeckSnapshot>,
     pub(crate) actions: Vec<RecordedAction>,
     pub(crate) final_clock: Option<ClockSnapshot>,
+    #[serde(default)]
+    pub(crate) game_mode: GameMode,
+    #[serde(default)]
+    pub(crate) challenge_id: Option<String>,
 }
 
 impl GameRecord {
@@ -213,7 +229,10 @@ impl GameRecord {
         initial_clock: ClockSnapshot,
         ownership: GameRecordOwnership,
     ) -> Self {
-        let map_id = format!("standard-{}x{}", initial_state.board.size, initial_state.board.size);
+        let map_id = format!(
+            "standard-{}x{}",
+            initial_state.board.size, initial_state.board.size
+        );
         Self::new_with_deck_names(
             initial_state,
             players,
@@ -238,10 +257,16 @@ impl GameRecord {
     ) -> Self {
         initial_state.history.clear();
         let decks = build_deck_snapshots(&initial_state, &deck_names, &map_id);
-        let white = players.get("white").and_then(|p| p.public_id.as_deref())
-            .or_else(|| players.get("white").map(|p| p.nickname.as_str())).unwrap_or("white");
-        let black = players.get("black").and_then(|p| p.public_id.as_deref())
-            .or_else(|| players.get("black").map(|p| p.nickname.as_str())).unwrap_or("black");
+        let white = players
+            .get("white")
+            .and_then(|p| p.public_id.as_deref())
+            .or_else(|| players.get("white").map(|p| p.nickname.as_str()))
+            .unwrap_or("white");
+        let black = players
+            .get("black")
+            .and_then(|p| p.public_id.as_deref())
+            .or_else(|| players.get("black").map(|p| p.nickname.as_str()))
+            .unwrap_or("black");
         Self {
             ownership,
             format_version: GAME_RECORD_FORMAT_VERSION,
@@ -259,6 +284,8 @@ impl GameRecord {
             decks,
             actions: Vec::new(),
             final_clock: None,
+            game_mode: GameMode::Standard,
+            challenge_id: None,
         }
     }
 
@@ -307,15 +334,23 @@ fn piece_name(state: &GameState, piece: &Piece) -> String {
         .unwrap_or_else(|| piece.type_id.clone())
 }
 
-fn custom_piece_snapshot(state: &GameState, piece_type_id: &str) -> Option<CustomDeckPieceSnapshot> {
+fn custom_piece_snapshot(
+    state: &GameState,
+    piece_type_id: &str,
+) -> Option<CustomDeckPieceSnapshot> {
     let rest = piece_type_id.strip_prefix("custom:")?;
     let (custom_piece_id, version_and_key) = rest.rsplit_once(":v")?;
     let (version, exposed_piece_key) = version_and_key.split_once(':')?;
     let version = version.parse().ok()?;
-    let manifest = state.custom_piece_manifest.iter().find(|entry| entry.exposed_type_id == piece_type_id)?;
+    let manifest = state
+        .custom_piece_manifest
+        .iter()
+        .find(|entry| entry.exposed_type_id == piece_type_id)?;
     Some(CustomDeckPieceSnapshot {
-        custom_piece_id: custom_piece_id.into(), version,
-        content_hash: manifest.content_hash.clone(), exposed_piece_key: exposed_piece_key.into(),
+        custom_piece_id: custom_piece_id.into(),
+        version,
+        content_hash: manifest.content_hash.clone(),
+        exposed_piece_key: exposed_piece_key.into(),
     })
 }
 
@@ -353,13 +388,18 @@ fn build_deck_snapshots(
             let mut counts = HashMap::<(String, String), u32>::new();
             for id in &player.deck.pocket_pieces {
                 if let Some(piece) = state.pieces.get(id) {
-                    *counts.entry((piece.type_id.clone(), piece_name(state, piece))).or_default() += 1;
+                    *counts
+                        .entry((piece.type_id.clone(), piece_name(state, piece)))
+                        .or_default() += 1;
                 }
             }
             let mut pocket = counts
                 .into_iter()
                 .map(|((piece_type_id, piece_name), count)| DeckPocketSnapshot {
-                    custom_piece: custom_piece_snapshot(state, &piece_type_id), piece_type_id, piece_name, count
+                    custom_piece: custom_piece_snapshot(state, &piece_type_id),
+                    piece_type_id,
+                    piece_name,
+                    count,
                 })
                 .collect::<Vec<_>>();
             pocket.sort_by(|left, right| left.piece_name.cmp(&right.piece_name));
@@ -737,7 +777,7 @@ impl GameRecordRepository for PostgresGameRecordRepository {
         user_id: &str,
         limit: i64,
     ) -> Result<Vec<GameRecordSummary>, &'static str> {
-        let rows = sqlx::query(&format!("SELECT id, display_name, started_at_ms, ended_at_ms, record->'result' AS result, record->'players' AS players, record->'time_control' AS time_control, CASE WHEN black_user_id=$1 THEN 'black' ELSE 'white' END AS owner_side FROM {} WHERE white_user_id=$1 OR black_user_id=$1 ORDER BY started_at_ms DESC LIMIT $2", self.table))
+        let rows = sqlx::query(&format!("SELECT id, display_name, started_at_ms, ended_at_ms, record->'result' AS result, record->'players' AS players, record->'time_control' AS time_control, COALESCE(record->'game_mode', '\"standard\"'::jsonb) AS game_mode, record->>'challenge_id' AS challenge_id, CASE WHEN black_user_id=$1 THEN 'black' ELSE 'white' END AS owner_side FROM {} WHERE white_user_id=$1 OR black_user_id=$1 ORDER BY started_at_ms DESC LIMIT $2", self.table))
             .bind(user_id).bind(limit.clamp(1, 100)).fetch_all(&self.pool).await.map_err(|_| "unavailable")?;
         rows.into_iter()
             .map(|row| {
@@ -746,10 +786,24 @@ impl GameRecordRepository for PostgresGameRecordRepository {
                     display_name: row.try_get("display_name").map_err(|_| "unavailable")?,
                     started_at_ms: row.try_get("started_at_ms").map_err(|_| "unavailable")?,
                     ended_at_ms: row.try_get("ended_at_ms").map_err(|_| "unavailable")?,
-                    result: serde_json::from_value(row.try_get("result").map_err(|_| "unavailable")?).map_err(|_| "unavailable")?,
-                    players: serde_json::from_value(row.try_get("players").map_err(|_| "unavailable")?).map_err(|_| "unavailable")?,
-                    time_control: serde_json::from_value(row.try_get("time_control").map_err(|_| "unavailable")?).map_err(|_| "unavailable")?,
+                    result: serde_json::from_value(
+                        row.try_get("result").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
+                    players: serde_json::from_value(
+                        row.try_get("players").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
+                    time_control: serde_json::from_value(
+                        row.try_get("time_control").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
                     owner_side: row.try_get("owner_side").map_err(|_| "unavailable")?,
+                    game_mode: serde_json::from_value(
+                        row.try_get("game_mode").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
+                    challenge_id: row.try_get("challenge_id").map_err(|_| "unavailable")?,
                 })
             })
             .collect()

@@ -300,6 +300,14 @@ export interface GameResult {
   reason: GameEndReason
 }
 
+export interface ChallengeGameMetadata {
+  id: string
+  name: string
+  player_id: PlayerId
+  bot_player_id: PlayerId
+  bot_difficulty: BotDifficulty
+}
+
 export interface GameState {
   id: string
   board: Board
@@ -330,6 +338,7 @@ export interface GameState {
   presence?: { white: PlayerPresence; black: PlayerPresence }
   player_info: Record<PlayerId, GamePlayerInfo>
   record_notation?: import('./gameRecord').RecordedNotationAction[]
+  challenge?: ChallengeGameMetadata
 }
 
 export interface AttackMap {

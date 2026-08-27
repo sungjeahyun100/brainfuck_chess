@@ -49,6 +49,17 @@ export interface PlayerDeckRequest {
   pocket: DeckPieceRequest[]
 }
 
+export interface ChallengeSummary {
+  id: string
+  name: string
+  description: string
+  board_size: number
+  map_id: BoardMapId
+  bot_difficulty: BotDifficulty
+  time_control: TimeControlId
+  cleared: boolean
+}
+
 export interface MultiplayerRoom {
   id: string
   board_size: number
@@ -170,6 +181,21 @@ function getClientId(): string {
 }
 
 export const api = {
+  listChallenges(): Promise<ChallengeSummary[]> {
+    return request('/api/challenges')
+  },
+
+  createChallengeGame(
+    challengeId: string,
+    playerDeck: PlayerDeckRequest,
+    localNickname?: string,
+  ): Promise<{ id: string; state: GameState }> {
+    return request(`/api/challenges/${encodeURIComponent(challengeId)}/games`, {
+      method: 'POST',
+      body: JSON.stringify({ player_deck: playerDeck, local_nickname: localNickname }),
+    })
+  },
+
   getPieceScores(): Promise<Record<string, number>> {
     return request('/api/piece-scores')
   },

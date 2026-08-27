@@ -29,8 +29,10 @@ export interface GameRecord {
   started_at_ms: number; ended_at_ms?: number | null; result?: GameResult | null
   players: Record<PlayerId, GameRecordPlayer>; time_control: TimeControlId
   initial_state: ReplayInitialState; initial_clock: GameClock; decks: Record<PlayerId, DeckSnapshot>; actions: RecordedAction[]; final_clock?: GameClock | null
+  game_mode?: 'standard' | 'challenge'; challenge_id?: string | null
 }
 export interface GameRecordSummary {
   game_id: string; display_name: string; started_at_ms: number; ended_at_ms?: number | null
   result?: GameResult | null; players: Record<PlayerId, GameRecordPlayer>; time_control: TimeControlId; owner_side: PlayerId
+  game_mode?: 'standard' | 'challenge'; challenge_id?: string | null
 }
