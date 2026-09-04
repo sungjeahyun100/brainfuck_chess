@@ -10,10 +10,22 @@
       <p v-if="compatibilityWarning" class="compatibility-warning">이 게임 기록은 현재 게임 버전과 완전히 호환되지 않을 수 있습니다.</p>
       <section class="replay-board-area">
         <div class="replay-player"><div><strong>{{ record.players.black.nickname }}</strong><small v-if="record.players.black.public_id">@{{ record.players.black.public_id }}</small></div><b>{{ clockText('black') }}</b></div>
-        <div class="replay-board-readonly" aria-label="읽기 전용 리플레이 보드">
-          <Board :board="state.board" :pieces="state.pieces" :definitions="state.piece_definitions" :selected-piece-id="null" :movable-squares="[]" :attack-squares="[]" :threat-squares="[]" :drop-squares="[]" :last-move="lastMove" orientation="white" :ability-mode="false" />
+        <div class="replay-board-readonly" :class="{ 'annotation-active': annotationMode }" aria-label="읽기 전용 리플레이 보드">
+          <Board ref="boardRef" :board="state.board" :pieces="state.pieces" :definitions="state.piece_definitions" :selected-piece-id="null" :movable-squares="[]" :attack-squares="[]" :threat-squares="[]" :drop-squares="[]" :last-move="lastMove" orientation="white" :ability-mode="false" :annotation-mode="annotationMode" />
         </div>
         <div class="replay-player"><div><strong>{{ record.players.white.nickname }}</strong><small v-if="record.players.white.public_id">@{{ record.players.white.public_id }}</small></div><b>{{ clockText('white') }}</b></div>
+        <section class="replay-controls" aria-label="리플레이 재생 조작">
+          <button @click="go(0)">|◀</button><button @click="go(ply - 1)">◀</button>
+          <button @click="toggleAutoplay">{{ playing ? 'Ⅱ' : '▶' }}</button>
+          <button @click="go(ply + 1)">▶</button><button @click="go(actionCount)">▶|</button>
+          <strong>{{ ply }} / {{ actionCount }}</strong>
+          <div class="annotation-controls">
+            <button type="button" :class="{ active: annotationMode }" :aria-pressed="annotationMode" @click="annotationMode = !annotationMode">
+              화살표 그리기
+            </button>
+            <button type="button" @click="boardRef?.clearAnnotations()">표시 지우기</button>
+          </div>
+        </section>
       </section>
       <aside class="replay-sidebar">
         <section><h3>덱</h3><div class="deck-summary" v-for="side in replaySides" :key="side">
@@ -29,12 +41,6 @@
             </button>
           </div></div>
         </div></section>
-        <section class="replay-controls">
-          <button @click="go(0)">|◀</button><button @click="go(ply - 1)">◀</button>
-          <button @click="toggleAutoplay">{{ playing ? 'Ⅱ' : '▶' }}</button>
-          <button @click="go(ply + 1)">▶</button><button @click="go(actionCount)">▶|</button>
-          <strong>{{ ply }} / {{ actionCount }}</strong>
-        </section>
         <section class="game-info"><h3>게임 정보</h3><p>{{ timeControlLabel(record.time_control) }}</p><p>{{ record.ruleset_version }} · {{ record.chessembly_version }}</p><p v-if="record.result">{{ record.result.reason }}</p></section>
       </aside>
     </div>
@@ -64,6 +70,8 @@ const props = defineProps<{ record: GameRecord }>()
 defineEmits<{ close: [] }>()
 const replaySides: PlayerId[] = ['white', 'black']
 const ply = ref(0), playing = ref(false), copyStatus = ref('기보 복사')
+const annotationMode = ref(false)
+const boardRef = ref<InstanceType<typeof Board> | null>(null)
 const deckCopyStatus = ref<Record<PlayerId, string>>({ white: '덱 코드 복사', black: '덱 코드 복사' })
 let timer: number | null = null
 const replayResult = computed(() => buildReplayFramesResult(props.record))
@@ -105,12 +113,19 @@ onMounted(() => { window.addEventListener('keydown', keydown) }); onUnmounted(()
 .compatibility-warning { grid-column: 1/-1; padding: 10px; border: 1px solid #d9a441; border-radius: 8px; color: #f4dfb0; }
 .replay-board-area { display: grid; gap: 10px; max-width: 920px; }
 .replay-board-readonly { pointer-events: none; }
+.replay-board-readonly.annotation-active { pointer-events: auto; }
 .replay-player { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(19,26,39,.92); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; }
 .replay-player div { display: grid; }.replay-player small { color: #a8b1c2; }.replay-player b { font: 700 1.5rem ui-monospace, monospace; }
 .replay-sidebar { display: grid; gap: 14px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; padding: 14px; background: rgba(19,26,39,.94); border-radius: 10px; }
 .notation-list { display: grid; gap: 4px; margin-top: 8px; }.notation-row { display: flex; justify-content: space-between; text-align: left; padding: 8px; border: 0; border-radius: 6px; background: rgba(255,255,255,.05); color: inherit; }.notation-row.active { background: rgba(217,164,65,.25); outline: 1px solid #d9a441; }
 .notation-full-move { display: grid; grid-template-columns: 2rem 1fr; gap: 4px; align-items: start; }.notation-full-move > b { padding-top: 8px; }.notation-entries { display: grid; gap: 4px; }.deck-summary { display: grid; gap: 4px; margin-top: 8px; padding: 8px; background: rgba(255,255,255,.04); border-radius: 6px; }.deck-summary small { color: #a8b1c2; }
-.replay-controls { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }.replay-controls strong { grid-column: 1/-1; text-align: center; }
+.replay-controls { width: 100%; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }.replay-controls strong { grid-column: 1/-1; text-align: center; }
+.replay-controls button { min-height: 44px; }
+.annotation-controls { grid-column: 1/-1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.annotation-controls button.active { background: #2e8b57; color: white; }
 .game-info { display: grid; gap: 5px; color: #a8b1c2; }
-@media (max-width: 1000px) { .replay-layout { grid-template-columns: 1fr; }.replay-sidebar { position: static; max-height: none; } }
+@media (max-width: 1000px) {
+  .replay-layout { grid-template-columns: 1fr; }
+  .replay-sidebar { position: static; max-height: none; }
+}
 </style>

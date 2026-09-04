@@ -3,6 +3,7 @@
     <div
       ref="boardElement"
       class="board"
+      :class="{ 'annotation-mode': annotationMode }"
       :style="{ '--size': board.size }"
       @contextmenu.prevent
       @pointerdown="onBoardPointerDown"
@@ -179,6 +180,7 @@ const props = defineProps<{
   orientation?: PlayerId
   abilityMode?: boolean
   showCoordinates?: boolean
+  annotationMode?: boolean
 }>()
 
 function pieceImage(piece: Piece): string | undefined {
@@ -349,6 +351,7 @@ function onSquareClick(sq: SquareInfo) {
 }
 
 function onSquarePointerDown(event: PointerEvent, sq: SquareInfo) {
+  if (props.annotationMode) return
   if (event.button !== 0 || !sq.piece) return
 
   pointerDrag.value = {
@@ -364,6 +367,11 @@ function onSquarePointerDown(event: PointerEvent, sq: SquareInfo) {
 }
 
 function onBoardPointerDown(event: PointerEvent) {
+  if (props.annotationMode && event.button === 0) {
+    startAnnotationDrag(event)
+    return
+  }
+
   if (event.button === 0) {
     const squareId = squareIdFromClientPoint(event.clientX, event.clientY)
     if (squareId && !props.board.squares[squareId]) {
@@ -374,6 +382,10 @@ function onBoardPointerDown(event: PointerEvent) {
 
   if (event.button !== 2) return
 
+  startAnnotationDrag(event)
+}
+
+function startAnnotationDrag(event: PointerEvent) {
   const from = squareIdFromClientPoint(event.clientX, event.clientY)
   if (!from) return
 
@@ -446,6 +458,8 @@ function onWindowRightPointerUp(event: PointerEvent) {
 
   if (!to) return
 
+  if (event.button === 0) suppressNextClick = true
+
   if (to === drag.from) {
     toggleHighlight(to)
     return
@@ -490,6 +504,8 @@ function clearAnnotations() {
   arrows.value = []
   highlightedSquares.value = []
 }
+
+defineExpose({ clearAnnotations })
 
 function preventRightDragContextMenu(event: MouseEvent) {
   if (!rightDrag.value) return
@@ -815,6 +831,11 @@ function pieceAlt(piece: Piece): string {
   height: 100%;
   pointer-events: none;
   z-index: 4;
+}
+
+.board.annotation-mode {
+  cursor: crosshair;
+  touch-action: none;
 }
 
 .board-arrow {
