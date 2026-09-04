@@ -571,6 +571,7 @@ function displayPieceSymbol(pieceType: DeckPieceType): string {
     king: '♔',
     queen: '♕',
     amazon: 'A',
+    'prime-minister': '총',
     'cannon-rook': 'C',
     'tempest-queen': 'Q',
     'tempest-rook': 'T',

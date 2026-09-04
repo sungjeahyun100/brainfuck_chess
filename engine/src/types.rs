@@ -208,6 +208,14 @@ pub struct PieceDefinition {
     pub name: String,
     /// Point cost for deck building (King is excluded from scoring)
     pub score: u32,
+    /// Material value used by the AI while this piece is on the board.
+    /// Missing values fall back to `score` for legacy and custom definitions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_board_value: Option<u32>,
+    /// Material value used by the AI while this piece is in a pocket.
+    /// Missing values fall back to `score` for legacy and custom definitions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_pocket_value: Option<u32>,
     /// Maximum ammunition per concrete instance. Zero means no ammo resource.
     #[serde(default)]
     pub max_ammo: u32,
@@ -448,6 +456,14 @@ pub enum MovegenBackend {
 }
 
 impl PieceDefinition {
+    pub fn ai_board_value(&self) -> u32 {
+        self.ai_board_value.unwrap_or(self.score)
+    }
+
+    pub fn ai_pocket_value(&self) -> u32 {
+        self.ai_pocket_value.unwrap_or(self.score)
+    }
+
     pub fn movegen_backend(&self) -> MovegenBackend {
         // The first optimization pass keeps behavior identical. Native
         // backends can be introduced piece-by-piece with parity tests.

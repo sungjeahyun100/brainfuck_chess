@@ -15,6 +15,8 @@ take-move(0, -1);"
         id: "mortar".into(),
         name: "박격포병".into(),
         score: 8,
+        ai_board_value: None,
+        ai_pocket_value: None,
         max_ammo: 1,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: movement.clone(),

@@ -1,12 +1,13 @@
 use std::cmp::Ordering;
 
+use crate::ai::beam::tactical_impact;
 use crate::ai::types::AiAction;
 use crate::types::{
     ActionEffects, CooldownUpdate, GameState, GlobalStateUpdate, PieceStateUpdate, PieceStateValue,
     PieceTypeTransition, PlayerId,
 };
 
-fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
+fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32, i32) {
     match action {
         AiAction::Move(action) => {
             let Some(captured) = action
@@ -15,25 +16,87 @@ fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
                 .and_then(|id| state.pieces.get(id))
                 .and_then(|piece| state.piece_definitions.get(&piece.type_id))
             else {
-                return (2, 0);
+                return (2, 0, 0);
             };
             if captured.is_king {
-                (5, u32::MAX)
+                (7, u32::MAX, 0)
             } else {
-                (4, captured.score)
+                (6, captured.score, 0)
             }
         }
-        AiAction::Drop(_) => (3, 0),
-        AiAction::Ability(_) => (3, 0),
+        AiAction::Drop(action) => {
+            if action.captured_piece_id.is_some() {
+                let impact = tactical_impact(state, &AiAction::Drop(action.clone()));
+                return (
+                    if impact.captures_king { 7 } else { 6 },
+                    impact.removed_enemy_value,
+                    0,
+                );
+            }
+            (3, 0, drop_positional_score(state, action))
+        }
+        AiAction::Ability(_) => {
+            let impact = tactical_impact(state, action);
+            if impact.captures_king {
+                (7, u32::MAX, 0)
+            } else if impact.removed_enemy_pieces > 0 {
+                (
+                    6,
+                    impact.removed_enemy_value,
+                    impact.removed_enemy_pieces as i32,
+                )
+            } else {
+                (3, 0, 0)
+            }
+        }
     }
 }
 
+fn drop_positional_score(state: &GameState, action: &crate::types::DropAction) -> i32 {
+    let center_twice = state.board.size - 1;
+    let center_distance =
+        (action.to.file * 2 - center_twice).abs() + (action.to.rank * 2 - center_twice).abs();
+    let center_bonus = state.board.size * 2 - center_distance;
+    let king_bonus = |owner_matches: bool, weight: i32| {
+        state
+            .pieces
+            .values()
+            .find(|piece| {
+                (piece.owner == action.player_id) == owner_matches
+                    && piece.is_on_board()
+                    && state
+                        .piece_definitions
+                        .get(&piece.type_id)
+                        .is_some_and(|definition| definition.is_king)
+            })
+            .and_then(|king| king.current_square)
+            .map_or(0, |square| {
+                let distance = (square.file - action.to.file)
+                    .abs()
+                    .max((square.rank - action.to.rank).abs());
+                (state.board.size - distance).max(0) * weight
+            })
+    };
+    center_bonus + king_bonus(false, 3) + king_bonus(true, 1)
+}
+
 pub fn order_ai_actions(state: &GameState, actions: &mut [AiAction], _bot_player_id: &PlayerId) {
-    actions.sort_by(|left, right| {
-        action_priority(state, right)
-            .cmp(&action_priority(state, left))
+    let mut scored = actions
+        .iter()
+        .cloned()
+        .map(|action| {
+            let priority = action_priority(state, &action);
+            (action, priority)
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|(left, left_priority), (right, right_priority)| {
+        right_priority
+            .cmp(left_priority)
             .then_with(|| canonical_action_cmp(left, right))
     });
+    for (target, (action, _)) in actions.iter_mut().zip(scored) {
+        *target = action;
+    }
 }
 
 pub(crate) fn order_quiescence_actions(state: &GameState, actions: &mut [AiAction]) {

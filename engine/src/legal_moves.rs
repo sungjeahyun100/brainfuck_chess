@@ -1131,6 +1131,7 @@ pub fn is_legal_ability_action(game_state: &GameState, action: &AbilityAction) -
 /// Generate every standalone ability action available to the current player.
 pub fn generate_legal_ability_actions(game_state: &GameState) -> Vec<AbilityAction> {
     fn canonical_airdrop_actions(
+        game_state: &GameState,
         player_id: &PlayerId,
         actor_id: &PieceId,
         singles: Vec<AbilityAction>,
@@ -1141,71 +1142,135 @@ pub fn generate_legal_ability_actions(game_state: &GameState) -> Vec<AbilityActi
                 by_piece.entry(piece_id).or_default().push(to);
             }
         }
-        let choices = by_piece.into_iter().collect::<Vec<_>>();
+        let mut semantic_groups = HashMap::<
+            (
+                PieceTypeId,
+                u32,
+                PieceLayer,
+                u32,
+                Vec<(String, PieceStateValue)>,
+                Vec<(String, u32)>,
+            ),
+            Vec<(PieceId, Vec<Square>)>,
+        >::new();
+        for (piece_id, squares) in by_piece {
+            let Some(piece) = game_state.pieces.get(&piece_id) else {
+                continue;
+            };
+            let mut state = piece
+                .state
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect::<Vec<_>>();
+            state.sort_by(|left, right| left.0.cmp(&right.0));
+            let mut cooldowns = piece
+                .move_option_cooldowns
+                .iter()
+                .map(|(key, value)| (key.clone(), value.remaining))
+                .collect::<Vec<_>>();
+            cooldowns.sort_by(|left, right| left.0.cmp(&right.0));
+            semantic_groups
+                .entry((
+                    piece.type_id.clone(),
+                    piece.current_ammo,
+                    piece.layer,
+                    piece.remaining_flight_turns,
+                    state,
+                    cooldowns,
+                ))
+                .or_default()
+                .push((piece_id, squares));
+        }
+        let mut groups = semantic_groups.into_values().collect::<Vec<_>>();
+        groups.sort_by(|left, right| left[0].0.cmp(&right[0].0));
+        struct ChoiceGroup {
+            piece_ids: Vec<PieceId>,
+            squares: std::collections::HashSet<Square>,
+        }
+        let mut choices = Vec::<ChoiceGroup>::new();
+        let mut all_squares = std::collections::HashSet::new();
+        for mut group in groups {
+            group.sort_by(|left, right| left.0.cmp(&right.0));
+            let squares = group
+                .iter()
+                .flat_map(|(_, squares)| squares.iter().copied())
+                .collect::<std::collections::HashSet<_>>();
+            all_squares.extend(squares.iter().copied());
+            let max_useful_instances = squares.len();
+            choices.push(ChoiceGroup {
+                piece_ids: group
+                    .into_iter()
+                    .map(|(piece_id, _)| piece_id)
+                    .take(max_useful_instances)
+                    .collect(),
+                squares,
+            });
+        }
+        let mut squares = all_squares.into_iter().collect::<Vec<_>>();
+        squares.sort_by_key(|square| (square.file, square.rank));
         let mut actions = Vec::new();
         let mut deployments = Vec::new();
-        let mut occupied = std::collections::HashSet::new();
+        let mut used_per_group = vec![0_usize; choices.len()];
+
+        struct BuildContext<'a> {
+            squares: &'a [Square],
+            choices: &'a [ChoiceGroup],
+            player_id: &'a PlayerId,
+            actor_id: &'a PieceId,
+        }
 
         fn extend(
             index: usize,
-            choices: &[(PieceId, Vec<Square>)],
-            player_id: &PlayerId,
-            actor_id: &PieceId,
+            context: &BuildContext<'_>,
             deployments: &mut Vec<AbilityDeployment>,
-            occupied: &mut std::collections::HashSet<SquareId>,
+            used_per_group: &mut [usize],
             actions: &mut Vec<AbilityAction>,
         ) {
-            if index == choices.len() {
+            if index == context.squares.len() {
+                if !deployments.is_empty() {
+                    actions.push(AbilityAction {
+                        player_id: context.player_id.clone(),
+                        piece_id: context.actor_id.clone(),
+                        ability_id: "airdrop".into(),
+                        target_piece_id: None,
+                        pocket_piece_id: None,
+                        to: None,
+                        deployments: deployments.clone(),
+                    });
+                }
                 return;
             }
-            extend(
-                index + 1,
-                choices,
-                player_id,
-                actor_id,
-                deployments,
-                occupied,
-                actions,
-            );
-            let (pocket_piece_id, squares) = &choices[index];
-            for to in squares {
-                if !occupied.insert(to.to_id()) {
+            extend(index + 1, context, deployments, used_per_group, actions);
+            let to = context.squares[index];
+            for group_index in 0..context.choices.len() {
+                let group = &context.choices[group_index];
+                let used = used_per_group[group_index];
+                if used >= group.piece_ids.len() || !group.squares.contains(&to) {
                     continue;
                 }
+                let pocket_piece_id = group.piece_ids[used].clone();
+                used_per_group[group_index] += 1;
                 deployments.push(AbilityDeployment {
-                    pocket_piece_id: pocket_piece_id.clone(),
-                    to: *to,
+                    pocket_piece_id,
+                    to,
                 });
-                actions.push(AbilityAction {
-                    player_id: player_id.clone(),
-                    piece_id: actor_id.clone(),
-                    ability_id: "airdrop".into(),
-                    target_piece_id: None,
-                    pocket_piece_id: None,
-                    to: None,
-                    deployments: deployments.clone(),
-                });
-                extend(
-                    index + 1,
-                    choices,
-                    player_id,
-                    actor_id,
-                    deployments,
-                    occupied,
-                    actions,
-                );
+                extend(index + 1, context, deployments, used_per_group, actions);
                 deployments.pop();
-                occupied.remove(&to.to_id());
+                used_per_group[group_index] -= 1;
             }
         }
 
-        extend(
-            0,
-            &choices,
+        let context = BuildContext {
+            squares: &squares,
+            choices: &choices,
             player_id,
             actor_id,
+        };
+        extend(
+            0,
+            &context,
             &mut deployments,
-            &mut occupied,
+            &mut used_per_group,
             &mut actions,
         );
         actions
@@ -1239,7 +1304,12 @@ pub fn generate_legal_ability_actions(game_state: &GameState) -> Vec<AbilityActi
                 let actions =
                     generate_piece_legal_ability_actions(game_state, &piece_id, &option_id);
                 if option_id == "airdrop" {
-                    canonical_airdrop_actions(&game_state.current_player, &piece_id, actions)
+                    canonical_airdrop_actions(
+                        game_state,
+                        &game_state.current_player,
+                        &piece_id,
+                        actions,
+                    )
                 } else {
                     actions
                 }

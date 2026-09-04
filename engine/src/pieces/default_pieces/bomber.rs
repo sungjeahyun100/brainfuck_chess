@@ -34,6 +34,8 @@ take-move(-1, -1) repeat(1);"
         id: "bomber".into(),
         name: "폭격기".into(),
         score: 13,
+        ai_board_value: None,
+        ai_pocket_value: None,
         max_ammo: 3,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: ground.clone(),

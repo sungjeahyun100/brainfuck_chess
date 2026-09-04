@@ -18,6 +18,8 @@ take-move(-1, -1);"
         id: "green-camp".into(),
         name: "그린캠프".into(),
         score: 5,
+        ai_board_value: None,
+        ai_pocket_value: None,
         max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: movement.clone(),

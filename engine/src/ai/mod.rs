@@ -1,3 +1,4 @@
+mod beam;
 mod evaluate;
 mod move_ordering;
 mod search;

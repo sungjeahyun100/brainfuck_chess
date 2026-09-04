@@ -20,6 +20,8 @@ do peek(-1, 0) while take-move(-1, 0) repeat(1);"
         id: "cannon-rook".into(),
         name: "Cannon Rook".into(),
         score: 7,
+        ai_board_value: None,
+        ai_pocket_value: None,
         max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: rook_code.clone(),

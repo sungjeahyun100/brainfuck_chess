@@ -14,6 +14,8 @@ take-move(-1, 0) take-move(-1, 0);"
         id: "tank".into(),
         name: "탱크".into(),
         score: 12,
+        ai_board_value: None,
+        ai_pocket_value: None,
         max_ammo: 3,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: movement.clone(),

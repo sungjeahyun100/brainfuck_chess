@@ -4,7 +4,7 @@ import type { CustomPieceImage } from './customPiece'
 export type LobbyPlayer = 'white' | 'black'
 export type DeckPieceType = string
 export type DeploymentZone = 'front' | 'back'
-export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'challenges' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop' | 'replay-import' | 'game-history'
+export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'bot-debugger' | 'challenges' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop' | 'replay-import' | 'game-history'
 
 export interface PieceCatalogItem {
   id: DeckPieceType

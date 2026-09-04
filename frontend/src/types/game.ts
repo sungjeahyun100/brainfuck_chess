@@ -249,8 +249,46 @@ export interface ActionTimelineFrame {
 }
 
 export interface BotTurnStats {
+  score: number
   searched_nodes: number
   depth_reached: number
+  completed_depth: number
+  iterations_started: number
+  iterations_completed: number
+  qnodes: number
+  beta_cutoffs: number
+  tt_probes: number
+  tt_hits: number
+  tt_cutoffs: number
+  tt_stores: number
+  aspiration_searches: number
+  aspiration_researches: number
+  aspiration_fail_lows: number
+  aspiration_fail_highs: number
+  generated_legal_actions: number
+  unique_canonical_actions: number
+  beam_selected_actions: number
+  mandatory_tactical_actions: number
+  drop_actions_generated: number
+  drop_actions_selected: number
+  board_optional_actions_generated: number
+  board_optional_actions_selected: number
+  quiet_drop_actions_generated: number
+  quiet_drop_actions_selected: number
+  normal_nodes: number
+  move_generation_nanos: number
+  canonical_deduplication_nanos: number
+  move_ordering_nanos: number
+  root_generated_legal_actions: number
+  root_unique_canonical_actions: number
+  root_beam_selected_actions: number
+  root_mandatory_tactical_actions: number
+  root_drop_actions_generated: number
+  root_drop_actions_selected: number
+  root_board_optional_actions_generated: number
+  root_board_optional_actions_selected: number
+  root_quiet_drop_actions_generated: number
+  root_quiet_drop_actions_selected: number
   elapsed_ms: number
 }
 

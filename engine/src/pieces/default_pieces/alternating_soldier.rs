@@ -18,6 +18,8 @@ take-move(-1, -1);"
         id: "alternating-soldier".into(),
         name: "교대병".into(),
         score: 4,
+        ai_board_value: None,
+        ai_pocket_value: None,
         max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: movement.clone(),

@@ -18,6 +18,7 @@
       :room-id="currentRoom?.id ?? null"
       :bot-player="playMode === 'bot' || playMode === 'challenge' ? botPlayer : null"
       :bot-difficulty="botDifficulty"
+      :debug-bot-metrics="botDebugMode"
       @state-update="onGameStateUpdate"
       @restart="restartToLobby"
       @replay="openReplayFromGame"
@@ -79,6 +80,13 @@
       @deck-building="navigate('deck-library')"
       @start-bot="startBotGame"
     />
+    <BotDebugger
+      v-else-if="view === 'bot-debugger'"
+      :initial-selection="lastBotDebugSelection"
+      @back="navigate('home')"
+      @deck-building="navigate('deck-library')"
+      @start="startBotDebugGame"
+    />
     <MultiplayerLobby
       v-else
       @back="navigate('home')"
@@ -105,6 +113,7 @@ import LobbyHome from './views/LobbyHome.vue'
 import DeckLibrary from './views/DeckLibrary.vue'
 import DeckEditor from './views/DeckEditor.vue'
 import DeckSelect from './views/DeckSelect.vue'
+import BotDebugger from './views/BotDebugger.vue'
 import MultiplayerLobby from './views/MultiplayerLobby.vue'
 import PieceLab from './views/PieceLab.vue'
 import CustomPieceWorkshop from './views/CustomPieceWorkshop.vue'
@@ -133,6 +142,8 @@ const currentRoom = ref<MultiplayerRoom | null>(null)
 const localPlayer = ref<LobbyPlayer | null>(null)
 const playMode = ref<PlayMode>('single')
 const botDifficulty = ref<BotDifficulty>('normal')
+const botDebugMode = ref(false)
+const lastBotDebugSelection = ref<BotDeckSelection | null>(null)
 const lobbyError = ref<string | null>(null)
 const gamePollTimer = ref<number | null>(null)
 const replayRecord = ref<GameRecord | null>(null)
@@ -143,6 +154,7 @@ function navigate(nextView: AppView) {
   stopGamePolling()
   lobbyError.value = null
   replayRecord.value = null
+  botDebugMode.value = false
   if (nextView !== 'deck-editor' && nextView !== 'piece-lab') {
     editingDeckId.value = null
   }
@@ -214,6 +226,7 @@ function ensureSameMap(firstMapId: string, secondMapId: string) {
 async function startSingleGame(selection: SingleDeckSelection) {
   lobbyError.value = null
   playMode.value = 'single'
+  botDebugMode.value = false
   try {
     const localDeck = getValidDeck(selection.localDeckId)
     const opponentDeck = getValidDeck(selection.opponentDeckId)
@@ -238,8 +251,18 @@ async function startSingleGame(selection: SingleDeckSelection) {
 }
 
 async function startBotGame(selection: BotDeckSelection) {
+  await startConfiguredBotGame(selection, false)
+}
+
+async function startBotDebugGame(selection: BotDeckSelection) {
+  lastBotDebugSelection.value = selection
+  await startConfiguredBotGame(selection, true)
+}
+
+async function startConfiguredBotGame(selection: BotDeckSelection, debug: boolean) {
   lobbyError.value = null
   playMode.value = 'bot'
+  botDebugMode.value = debug
   botDifficulty.value = selection.difficulty
   try {
     const humanDeck = getValidDeck(selection.humanDeckId)
@@ -254,12 +277,13 @@ async function startBotGame(selection: BotDeckSelection) {
       serializeNeutralDeck(blackDeck, 'black'),
       humanDeck.mapId,
       selection.timeControl,
-      { localSide: selection.humanSide, guestNickname: `${selection.difficulty} Bot` },
+      { localSide: selection.humanSide, guestNickname: `${selection.difficulty} Bot${debug ? ' (Debug)' : ''}` },
     )
     localPlayer.value = selection.humanSide
     currentRoom.value = null
     gameState.value = state
   } catch (e: unknown) {
+    if (debug) botDebugMode.value = false
     lobbyError.value = e instanceof Error ? e.message : String(e)
   }
 }
@@ -267,6 +291,7 @@ async function startBotGame(selection: BotDeckSelection) {
 function startChallengeGame(payload: { state: GameState }) {
   lobbyError.value = null
   playMode.value = 'challenge'
+  botDebugMode.value = false
   localPlayer.value = payload.state.challenge?.player_id ?? 'white'
   botDifficulty.value = payload.state.challenge?.bot_difficulty ?? 'normal'
   currentRoom.value = null
@@ -275,6 +300,7 @@ function startChallengeGame(payload: { state: GameState }) {
 
 function startMultiplayerGame(payload: { state: GameState; room: MultiplayerRoom; localPlayer: LobbyPlayer }) {
   playMode.value = 'multiplayer'
+  botDebugMode.value = false
   localPlayer.value = payload.localPlayer
   currentRoom.value = payload.room
   gameState.value = payload.state
@@ -293,13 +319,15 @@ function onGameStateUpdate(state: GameState) {
 }
 
 function restartToLobby() {
+  const returnToBotDebugger = botDebugMode.value
   stopGamePolling()
   gameState.value = null
   currentRoom.value = null
   localPlayer.value = null
   lobbyError.value = null
+  botDebugMode.value = false
   sessionStorage.removeItem(ACTIVE_MATCH_KEY)
-  view.value = 'home'
+  view.value = returnToBotDebugger ? 'bot-debugger' : 'home'
 }
 
 function stopGamePolling() {

@@ -3,8 +3,8 @@
     <!-- Header -->
     <div class="header">
       <h2>
-        {{ state.challenge?.name ?? '덱체스' }}
-        <small class="title-en">{{ state.challenge ? 'Challenge · 상대: 봇' : 'Deck Chess' }}</small>
+        {{ state.challenge?.name ?? (debugBotMetrics ? '봇 디버거' : '덱체스') }}
+        <small class="title-en">{{ state.challenge ? 'Challenge · 상대: 봇' : debugBotMetrics ? 'Production Bot Test' : 'Deck Chess' }}</small>
       </h2>
       <div class="turn-info">
         <span class="player-badge" :class="`player-${viewState.current_player}`">
@@ -298,6 +298,59 @@
           <div v-for="entry in liveNotation" :key="entry.ply"><span>{{ entry.ply }}. {{ entry.text }}</span></div>
           <p v-if="!liveNotation.length">아직 착수 기록이 없습니다.</p>
         </div>
+        <details v-if="debugBotMetrics" class="bot-debug-panel" open>
+          <summary>봇 디버그 수치</summary>
+          <template v-if="lastBotStats">
+            <div class="bot-debug-summary">
+              <span><small>평가 점수</small><strong>{{ signedNumber(lastBotStats.score) }}</strong></span>
+              <span><small>완료/도달 깊이</small><strong>{{ lastBotStats.completed_depth }} / {{ lastBotStats.depth_reached }}</strong></span>
+              <span><small>탐색 노드</small><strong>{{ lastBotStats.searched_nodes.toLocaleString() }}</strong></span>
+              <span><small>소요 시간</small><strong>{{ lastBotStats.elapsed_ms }}ms</strong></span>
+              <span><small>TT 적중률</small><strong>{{ percent(lastBotStats.tt_hits, lastBotStats.tt_probes) }}</strong></span>
+              <span><small>Beta cutoffs</small><strong>{{ lastBotStats.beta_cutoffs.toLocaleString() }}</strong></span>
+            </div>
+            <div class="bot-branching-flow">
+              <strong>Actions</strong>
+              <span>{{ lastBotStats.root_generated_legal_actions.toLocaleString() }} <i>→</i> {{ lastBotStats.root_unique_canonical_actions.toLocaleString() }} <i>→</i> {{ lastBotStats.root_beam_selected_actions.toLocaleString() }}</span>
+              <small>generated → canonical unique → beam selected</small>
+              <strong>Drops</strong>
+              <span>{{ lastBotStats.root_drop_actions_generated.toLocaleString() }} <i>→</i> {{ lastBotStats.root_drop_actions_selected.toLocaleString() }}</span>
+              <small>generated → selected</small>
+              <strong>Optional Board</strong>
+              <span>{{ lastBotStats.root_board_optional_actions_generated.toLocaleString() }} <i>→</i> {{ lastBotStats.root_board_optional_actions_selected.toLocaleString() }}</span>
+              <small>generated → selected</small>
+              <strong>Quiet Drop</strong>
+              <span>{{ lastBotStats.root_quiet_drop_actions_generated.toLocaleString() }} <i>→</i> {{ lastBotStats.root_quiet_drop_actions_selected.toLocaleString() }}</span>
+              <small>generated → selected</small>
+            </div>
+            <dl class="bot-debug-details">
+              <div><dt>Root mandatory tactical</dt><dd>{{ lastBotStats.root_mandatory_tactical_actions.toLocaleString() }}</dd></div>
+              <div><dt>Normal / qsearch 노드</dt><dd>{{ lastBotStats.normal_nodes.toLocaleString() }} / {{ lastBotStats.qnodes.toLocaleString() }}</dd></div>
+              <div><dt>반복 완료/시작</dt><dd>{{ lastBotStats.iterations_completed }} / {{ lastBotStats.iterations_started }}</dd></div>
+              <div><dt>TT probe / hit</dt><dd>{{ lastBotStats.tt_probes.toLocaleString() }} / {{ lastBotStats.tt_hits.toLocaleString() }}</dd></div>
+              <div><dt>TT cutoff / store</dt><dd>{{ lastBotStats.tt_cutoffs.toLocaleString() }} / {{ lastBotStats.tt_stores.toLocaleString() }}</dd></div>
+              <div><dt>Aspiration 재탐색</dt><dd>{{ lastBotStats.aspiration_researches }} / {{ lastBotStats.aspiration_searches }}</dd></div>
+              <div><dt>Fail low / high</dt><dd>{{ lastBotStats.aspiration_fail_lows }} / {{ lastBotStats.aspiration_fail_highs }}</dd></div>
+              <div><dt>Move generation</dt><dd>{{ nanosToMs(lastBotStats.move_generation_nanos) }}</dd></div>
+              <div><dt>Canonical dedup</dt><dd>{{ nanosToMs(lastBotStats.canonical_deduplication_nanos) }}</dd></div>
+              <div><dt>Move ordering</dt><dd>{{ nanosToMs(lastBotStats.move_ordering_nanos) }}</dd></div>
+            </dl>
+            <div class="bot-debug-session">
+              <strong>현재 테스트 합계</strong>
+              <small>{{ botDebugSummary.turns }}턴 · {{ botDebugSummary.totalNodes.toLocaleString() }}노드 · 평균 {{ Math.round(botDebugSummary.averageElapsedMs) }}ms</small>
+              <small>최대 완료 깊이 {{ botDebugSummary.maxCompletedDepth }} · TT 적중률 {{ nullablePercent(botDebugSummary.ttHitRate) }} · {{ nullableRate(botDebugSummary.nodesPerSecond) }}</small>
+            </div>
+            <div class="bot-debug-history">
+              <div v-for="turn in [...botDebugTurns].reverse()" :key="turn.turnNumber">
+                <b>T{{ turn.turnNumber }}</b>
+                <span :title="turn.action">{{ turn.action }}</span>
+                <small>{{ signedNumber(turn.stats.score) }} · {{ turn.stats.searched_nodes.toLocaleString() }}n · {{ turn.stats.elapsed_ms }}ms</small>
+              </div>
+            </div>
+            <button class="bot-debug-copy" type="button" @click="copyBotDebugData">{{ botDebugCopyStatus }}</button>
+          </template>
+          <p v-else>봇이 첫 수를 계산하면 탐색 수치가 여기에 기록됩니다.</p>
+        </details>
         <div class="sidebar-game-info">
           <strong>{{ timeControlLabel(viewState.clock.time_control) }}</strong>
           <span>Turn {{ viewState.turn_number }}</span>
@@ -354,6 +407,7 @@ import {
   turnControlLabel,
   type PlayMode,
 } from '../gameControlPolicy'
+import { ratioPercent, summarizeBotDebugTurns, type BotDebugTurn } from '../botDebugMetrics'
 
 const props = defineProps<{
   state: GameState
@@ -362,6 +416,7 @@ const props = defineProps<{
   roomId?: string | null
   botPlayer?: PlayerId | null
   botDifficulty?: BotDifficulty
+  debugBotMetrics?: boolean
 }>()
 const emit = defineEmits<{
   stateUpdate: [state: GameState]
@@ -386,6 +441,8 @@ const botThinking = ref(false)
 const botReplaying = ref(false)
 const botReplayMessage = ref<string | null>(null)
 const lastBotStats = ref<BotTurnStats | null>(null)
+const botDebugTurns = ref<BotDebugTurn[]>([])
+const botDebugCopyStatus = ref('디버그 JSON 복사')
 const replayCopyStatus = ref('기보 복사')
 const draggedPocketPieceId = ref<string | null>(null)
 const promotionRequest = ref<{ pieceId: string; to: Square; owner: PlayerId; options: string[] } | null>(null)
@@ -643,8 +700,45 @@ const botStatusTitle = computed(() => {
   if (botThinking.value && !botReplaying.value) return '봇이 수를 계산하고 있습니다...'
   if (botReplaying.value) return '봇이 수를 두고 있습니다'
   if (botError.value) return '봇 턴 실행 실패'
-  return '봇 대전'
+  return props.debugBotMetrics ? '봇 디버그 실행' : '봇 대전'
 })
+const botDebugSummary = computed(() => summarizeBotDebugTurns(botDebugTurns.value))
+
+function signedNumber(value: number): string {
+  return value > 0 ? `+${value.toLocaleString()}` : value.toLocaleString()
+}
+
+function percent(numerator: number, denominator: number): string {
+  return nullablePercent(ratioPercent(numerator, denominator))
+}
+
+function nullablePercent(value: number | null): string {
+  return value === null ? '—' : `${value.toFixed(1)}%`
+}
+
+function nullableRate(value: number | null): string {
+  return value === null ? '처리 속도 —' : `${Math.round(value).toLocaleString()} 노드/초`
+}
+
+function nanosToMs(value: number): string {
+  return value > 0 ? `${(value / 1_000_000).toFixed(2)}ms` : 'release 계측 꺼짐'
+}
+
+async function copyBotDebugData() {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify({
+      game_id: props.state.id,
+      bot_player: props.botPlayer,
+      difficulty: props.botDifficulty ?? 'normal',
+      summary: botDebugSummary.value,
+      turns: botDebugTurns.value,
+    }, null, 2))
+    botDebugCopyStatus.value = '복사 완료'
+  } catch {
+    botDebugCopyStatus.value = '복사 실패'
+  }
+  window.setTimeout(() => { botDebugCopyStatus.value = '디버그 JSON 복사' }, 1_800)
+}
 
 function playerName(player: PlayerId): string {
   return player === 'white' ? 'White' : 'Black'
@@ -934,6 +1028,13 @@ async function runBotTurn() {
     )
     if (runId !== botRunSerial) return
     lastBotStats.value = response.stats
+    if (props.debugBotMetrics) {
+      botDebugTurns.value = [...botDebugTurns.value, {
+        turnNumber: props.state.turn_number,
+        action: response.actions.map(actionLabel).join(' + '),
+        stats: response.stats,
+      }].slice(-50)
+    }
     await replayBotTurn(response.actions, response.game_state, runId, response.timeline)
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e)
@@ -957,6 +1058,15 @@ async function runBotTurn() {
     }
   }
 }
+
+watch(
+  () => props.state.id,
+  () => {
+    lastBotStats.value = null
+    botDebugTurns.value = []
+    botDebugCopyStatus.value = '디버그 JSON 복사'
+  },
+)
 
 watch(
   () => props.state.clock.server_now_ms,
@@ -1000,7 +1110,7 @@ watch(
 
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
-  amazon: 'A', guhang: 'G', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-bishop': 'B', 'tempest-knight': 'N', 'bouncing-bishop': 'B', 'bouncing-rook': 'R', 'bouncing-queen': 'Q', nightrider: 'N', windmill: 'W',
+  amazon: 'A', guhang: 'G', 'prime-minister': '총', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-bishop': 'B', 'tempest-knight': 'N', 'bouncing-bishop': 'B', 'bouncing-rook': 'R', 'bouncing-queen': 'Q', nightrider: 'N', windmill: 'W',
   'pawn-white': '♙', 'pawn-black': '♟', 'tempest-pawn-white': '♙', 'tempest-pawn-black': '♟', 'bouncing-pawn-white': '♙', 'bouncing-pawn-black': '♟', 'dozer-white': 'D', 'dozer-black': 'D',
   tank: '🛡', bomber: '✈', 'surface-to-air-missile-white': '▲', 'surface-to-air-missile-black': '▲',
 }
@@ -1736,6 +1846,24 @@ async function onResign() {
 }
 .game-sidebar { width: 290px; max-height: 82vh; overflow: auto; display: grid; gap: 12px; padding: 12px; border-radius: 10px; background: rgba(19,26,39,.92); border: 1px solid rgba(255,255,255,.1); }
 .live-notation { display: grid; gap: 4px; color: #dbe2ec; }.live-notation > div { padding: 7px 8px; border-radius: 5px; background: rgba(255,255,255,.045); }.live-notation p { color: #a8b1c2; }
+.bot-debug-panel { padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); color: #dbe2ec; }
+.bot-debug-panel summary { cursor: pointer; color: #f4dfb0; font-weight: 700; }
+.bot-debug-panel > p { margin: 10px 0 0; color: #a8b1c2; font-size: .82rem; line-height: 1.45; }
+.bot-debug-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.bot-debug-summary span { display: grid; gap: 2px; padding: 7px; border-radius: 6px; background: rgba(217,164,65,.08); }
+.bot-debug-summary small, .bot-debug-session small { color: #a8b1c2; }
+.bot-debug-summary strong { font: 700 .92rem/1.2 ui-monospace, monospace; }
+.bot-branching-flow { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; margin-top: 10px; padding: 9px; border-radius: 6px; background: rgba(255,255,255,.04); }
+.bot-branching-flow span { text-align: right; font-family: ui-monospace, monospace; }.bot-branching-flow i { color: #d9a441; font-style: normal; }
+.bot-branching-flow small { grid-column: 1 / -1; color: #a8b1c2; }
+.bot-debug-details { display: grid; gap: 4px; margin: 10px 0; font-size: .78rem; }
+.bot-debug-details div { display: flex; justify-content: space-between; gap: 8px; }
+.bot-debug-details dt { color: #a8b1c2; }.bot-debug-details dd { margin: 0; font-family: ui-monospace, monospace; }
+.bot-debug-session { display: grid; gap: 3px; padding: 9px 0; border-block: 1px solid rgba(255,255,255,.08); }
+.bot-debug-history { display: grid; gap: 4px; max-height: 160px; overflow: auto; margin-top: 8px; }
+.bot-debug-history > div { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 2px 7px; padding: 6px; border-radius: 5px; background: rgba(255,255,255,.04); }
+.bot-debug-history span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.bot-debug-history small { grid-column: 2; color: #a8b1c2; }
+.bot-debug-copy { width: 100%; margin-top: 8px; padding: 7px; border: 1px solid rgba(217,164,65,.38); border-radius: 6px; background: rgba(217,164,65,.08); color: #f4dfb0; cursor: pointer; }
 .sidebar-game-info { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); color: #a8b1c2; }
 .game-over-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 

@@ -1,6 +1,11 @@
+use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::actions::{apply_canonical_action, submit_action};
+use crate::ai::beam::{
+    canonicalize_actions, select_beam_actions, tactical_impact, BeamPolicy, NodeKind,
+    PocketPieceKey,
+};
 use crate::ai::evaluate::{evaluate, evaluate_without_king_capture_threat, WIN_SCORE};
 use crate::ai::move_ordering::{order_ai_actions, order_quiescence_actions};
 use crate::ai::transposition_table::{
@@ -12,11 +17,10 @@ use crate::ai::types::{
 };
 use crate::legal_moves::{
     generate_legal_ability_actions, generate_legal_drop_actions, generate_legal_move_actions,
-    generate_piece_legal_ability_actions, generate_piece_legal_drop_actions,
-    pending_landing_piece_id,
+    generate_piece_legal_drop_actions, pending_landing_piece_id,
 };
 use crate::types::{
-    AbilityAction, DropAction, GamePhase, GameState, MoveAction, PlayerId, TurnAction,
+    AbilityAction, DropAction, GamePhase, GameState, MoveAction, PieceId, PlayerId, TurnAction,
 };
 
 const MAX_QUIESCENCE_PLIES: u8 = 8;
@@ -46,6 +50,61 @@ pub fn generate_ai_actions(state: &GameState) -> Vec<AiAction> {
         .collect()
 }
 
+struct GeneratedSearchActions {
+    actions: Vec<AiAction>,
+    generated_count: usize,
+    generated_drop_count: usize,
+}
+
+/// Search generation keeps one concrete representative for interchangeable
+/// pocket pieces while retaining the expanded legal count for diagnostics.
+fn generate_search_actions(state: &GameState) -> GeneratedSearchActions {
+    if state.phase == GamePhase::Ended || state.result.is_some() {
+        return GeneratedSearchActions {
+            actions: Vec::new(),
+            generated_count: 0,
+            generated_drop_count: 0,
+        };
+    }
+
+    let moves = generate_legal_move_actions(state);
+    let abilities = generate_legal_ability_actions(state);
+    let mut pocket_groups: HashMap<PocketPieceKey, (PieceId, usize)> = HashMap::new();
+    if let Some(player) = state.players.get(&state.current_player) {
+        for piece_id in &player.deck.pocket_pieces {
+            let Some(key) = PocketPieceKey::from_id(state, piece_id) else {
+                continue;
+            };
+            pocket_groups
+                .entry(key)
+                .and_modify(|(_, count)| *count += 1)
+                .or_insert_with(|| (piece_id.clone(), 1));
+        }
+    }
+    let mut groups = pocket_groups.into_values().collect::<Vec<_>>();
+    groups.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut drops = Vec::new();
+    let mut generated_drop_count = 0;
+    for (representative, count) in groups {
+        let representative_actions = generate_piece_legal_drop_actions(state, &representative);
+        generated_drop_count += representative_actions.len().saturating_mul(count);
+        drops.extend(representative_actions.into_iter().map(AiAction::Drop));
+    }
+
+    let generated_count = moves.len() + generated_drop_count + abilities.len();
+    let actions = moves
+        .into_iter()
+        .map(AiAction::Move)
+        .chain(drops)
+        .chain(abilities.into_iter().map(AiAction::Ability))
+        .collect();
+    GeneratedSearchActions {
+        actions,
+        generated_count,
+        generated_drop_count,
+    }
+}
+
 pub fn apply_ai_action(state: GameState, action: &AiAction) -> Result<GameState, String> {
     submit_action(state, to_turn_action(action))
 }
@@ -68,6 +127,8 @@ struct SearchContext<'a> {
     started: Instant,
     stats: SearchStats,
     transposition_table: Option<TranspositionTable>,
+    beam_enabled: bool,
+    beam_policy: BeamPolicy,
 }
 
 impl SearchContext<'_> {
@@ -127,6 +188,7 @@ fn alpha_beta(
         return SearchOutcome::Aborted;
     }
     context.stats.searched_nodes += 1;
+    context.stats.normal_nodes += 1;
     context.stats.depth_reached = context.stats.depth_reached.max(ply);
     if depth == 0 {
         return quiescence_search(state, alpha, beta, 0, context, false);
@@ -171,7 +233,10 @@ fn alpha_beta(
     }
 
     let maximizing = &state.current_player == context.bot_player_id;
-    let mut actions = generate_ai_actions(&state);
+    let table_best_action = table_entry
+        .as_ref()
+        .and_then(|entry| entry.best_action.as_ref());
+    let actions = prepare_search_actions(&state, NodeKind::Interior, table_best_action, context);
     if actions.is_empty() {
         let score = evaluate(&state, context.bot_player_id);
         store_table_entry(
@@ -186,13 +251,6 @@ fn alpha_beta(
         );
         return SearchOutcome::Complete(score);
     }
-    order_ai_actions(&state, &mut actions, context.bot_player_id);
-    if let Some(best_action) = table_entry.and_then(|entry| entry.best_action) {
-        if let Some(index) = actions.iter().position(|action| action == &best_action) {
-            actions.swap(0, index);
-        }
-    }
-
     let mut best = if maximizing { i32::MIN } else { i32::MAX };
     let mut best_action = None;
     for action in actions {
@@ -258,12 +316,7 @@ fn is_noisy_drop(action: &DropAction) -> bool {
 }
 
 fn is_noisy_ability(state: &GameState, action: &AbilityAction) -> bool {
-    matches!(action.ability_id.as_str(), "recall" | "intercept")
-        && action
-            .target_piece_id
-            .as_ref()
-            .and_then(|id| state.pieces.get(id))
-            .is_some_and(|target| target.owner != action.player_id)
+    tactical_impact(state, &AiAction::Ability(action.clone())).is_mandatory()
 }
 
 fn generate_quiescence_actions(state: &GameState) -> Vec<AiAction> {
@@ -294,33 +347,15 @@ fn generate_quiescence_actions(state: &GameState) -> Vec<AiAction> {
             .map(AiAction::Drop)
     });
 
-    let mut recall_actor_ids = state
-        .pieces
-        .iter()
-        .filter_map(|(piece_id, piece)| {
-            (piece.owner == state.current_player
-                && piece.is_on_board()
-                && state
-                    .piece_definitions
-                    .get(&piece.type_id)
-                    .is_some_and(|definition| {
-                        definition
-                            .move_options
-                            .iter()
-                            .any(|option| option.id == "recall")
-                    }))
-            .then_some(piece_id.clone())
-        })
-        .collect::<Vec<_>>();
-    recall_actor_ids.sort();
-    let abilities = recall_actor_ids.into_iter().flat_map(|piece_id| {
-        generate_piece_legal_ability_actions(state, &piece_id, "recall")
-            .into_iter()
-            .filter(|action| is_noisy_ability(state, action))
-            .map(AiAction::Ability)
-    });
+    let abilities = generate_legal_ability_actions(state)
+        .into_iter()
+        .filter(|action| is_noisy_ability(state, action))
+        .map(AiAction::Ability);
 
-    let mut actions = moves.chain(drops).chain(abilities).collect::<Vec<_>>();
+    let mut actions = canonicalize_actions(
+        state,
+        moves.chain(drops).chain(abilities).collect::<Vec<_>>(),
+    );
     order_quiescence_actions(state, &mut actions);
     actions
 }
@@ -450,6 +485,111 @@ fn prioritize_action(actions: &mut [AiAction], priority: Option<&AiAction>) {
     if let Some(index) = actions.iter().position(|action| action == priority) {
         actions.swap(0, index);
     }
+}
+
+fn prepare_search_actions(
+    state: &GameState,
+    kind: NodeKind,
+    priority: Option<&AiAction>,
+    context: &mut SearchContext<'_>,
+) -> Vec<AiAction> {
+    #[cfg(debug_assertions)]
+    let generation_started = Instant::now();
+    let generated = generate_search_actions(state);
+    #[cfg(debug_assertions)]
+    {
+        context.stats.move_generation_nanos = context
+            .stats
+            .move_generation_nanos
+            .saturating_add(generation_started.elapsed().as_nanos() as u64);
+    }
+    context.stats.generated_legal_actions = context
+        .stats
+        .generated_legal_actions
+        .saturating_add(generated.generated_count as u64);
+    context.stats.drop_actions_generated = context
+        .stats
+        .drop_actions_generated
+        .saturating_add(generated.generated_drop_count as u64);
+
+    #[cfg(debug_assertions)]
+    let dedup_started = Instant::now();
+    let mut actions = canonicalize_actions(state, generated.actions);
+    #[cfg(debug_assertions)]
+    {
+        context.stats.canonical_deduplication_nanos = context
+            .stats
+            .canonical_deduplication_nanos
+            .saturating_add(dedup_started.elapsed().as_nanos() as u64);
+    }
+    context.stats.unique_canonical_actions = context
+        .stats
+        .unique_canonical_actions
+        .saturating_add(actions.len() as u64);
+
+    #[cfg(debug_assertions)]
+    let ordering_started = Instant::now();
+    order_ai_actions(state, &mut actions, context.bot_player_id);
+    prioritize_action(&mut actions, priority);
+    #[cfg(debug_assertions)]
+    {
+        context.stats.move_ordering_nanos = context
+            .stats
+            .move_ordering_nanos
+            .saturating_add(ordering_started.elapsed().as_nanos() as u64);
+    }
+
+    let unique_count = actions.len();
+    let (selected, counts) = select_beam_actions(
+        state,
+        actions,
+        kind,
+        context.beam_enabled,
+        priority,
+        context.beam_policy,
+    );
+    context.stats.beam_selected_actions = context
+        .stats
+        .beam_selected_actions
+        .saturating_add(counts.selected as u64);
+    context.stats.mandatory_tactical_actions = context
+        .stats
+        .mandatory_tactical_actions
+        .saturating_add(counts.mandatory as u64);
+    context.stats.drop_actions_selected = context
+        .stats
+        .drop_actions_selected
+        .saturating_add(counts.drops_selected as u64);
+    context.stats.board_optional_actions_generated = context
+        .stats
+        .board_optional_actions_generated
+        .saturating_add(counts.board_optional_generated as u64);
+    context.stats.board_optional_actions_selected = context
+        .stats
+        .board_optional_actions_selected
+        .saturating_add(counts.board_optional_selected as u64);
+    context.stats.quiet_drop_actions_generated = context
+        .stats
+        .quiet_drop_actions_generated
+        .saturating_add(counts.quiet_drop_generated as u64);
+    context.stats.quiet_drop_actions_selected = context
+        .stats
+        .quiet_drop_actions_selected
+        .saturating_add(counts.quiet_drop_selected as u64);
+    if kind == NodeKind::Root {
+        context.stats.root_generated_legal_actions = generated.generated_count as u64;
+        context.stats.root_unique_canonical_actions = unique_count as u64;
+        context.stats.root_beam_selected_actions = counts.selected as u64;
+        context.stats.root_mandatory_tactical_actions = counts.mandatory as u64;
+        context.stats.root_drop_actions_generated = generated.generated_drop_count as u64;
+        context.stats.root_drop_actions_selected = counts.drops_selected as u64;
+        context.stats.root_board_optional_actions_generated =
+            counts.board_optional_generated as u64;
+        context.stats.root_board_optional_actions_selected = counts.board_optional_selected as u64;
+        context.stats.root_quiet_drop_actions_generated = counts.quiet_drop_generated as u64;
+        context.stats.root_quiet_drop_actions_selected = counts.quiet_drop_selected as u64;
+    }
+    selected
 }
 
 fn search_root(
@@ -639,14 +779,6 @@ fn choose_bot_action_with_config(
     aspiration_initial_delta: i32,
 ) -> Option<BotDecision> {
     let started = Instant::now();
-    let mut actions = generate_ai_actions(state);
-    order_ai_actions(state, &mut actions, bot_player_id);
-
-    if actions.is_empty() {
-        return None;
-    }
-    let fallback_action = actions[0].clone();
-
     let mut context = SearchContext {
         bot_player_id,
         limits: &limits,
@@ -655,7 +787,14 @@ fn choose_bot_action_with_config(
         transposition_table: options
             .use_transposition_table
             .then(|| TranspositionTable::new(limits.max_nodes.min(65_536) as usize)),
+        beam_enabled: options.beam_enabled,
+        beam_policy: BeamPolicy::default(),
     };
+    let actions = prepare_search_actions(state, NodeKind::Root, None, &mut context);
+    if actions.is_empty() {
+        return None;
+    }
+    let fallback_action = actions[0].clone();
     let mut last_completed = None;
     let mut previous_iteration_best = None;
     let mut previous_completed_score = None;
@@ -748,6 +887,7 @@ pub fn play_bot_turn_detailed(
     let searched_nodes = decision.searched_nodes;
     let depth_reached = decision.depth_reached;
     let completed_depth = decision.completed_depth;
+    let score = decision.score;
     let stats = decision.stats;
     let action = decision.action;
     state = apply_ai_action(state, &action)?;
@@ -777,6 +917,7 @@ pub fn play_bot_turn_detailed(
         state,
         actions,
         timeline,
+        score,
         searched_nodes,
         depth_reached,
         completed_depth,
@@ -913,6 +1054,8 @@ mod tests {
             started: Instant::now(),
             stats: SearchStats::default(),
             transposition_table: Some(TranspositionTable::new(100)),
+            beam_enabled: false,
+            beam_policy: BeamPolicy::default(),
         };
         assert_eq!(
             alpha_beta(state, 3, 0, i32::MIN + 1, i32::MAX, &mut context),
@@ -983,6 +1126,7 @@ mod tests {
             SearchOptions {
                 use_transposition_table,
                 use_aspiration_window,
+                beam_enabled: false,
             },
             aspiration_delta,
         )
@@ -1120,6 +1264,8 @@ mod tests {
             started: Instant::now(),
             stats: SearchStats::default(),
             transposition_table: None,
+            beam_enabled: false,
+            beam_policy: BeamPolicy::default(),
         };
 
         let result = search_iteration(&state, &actions, 2, Some(0), true, 1, &mut context)
@@ -1286,6 +1432,8 @@ mod tests {
             started: Instant::now(),
             stats: SearchStats::default(),
             transposition_table: Some(TranspositionTable::new(100)),
+            beam_enabled: false,
+            beam_policy: BeamPolicy::default(),
         };
         let result = quiescence_search(state, i32::MIN + 1, i32::MAX, qply, &mut context, true);
         (result, context.stats)
@@ -1794,6 +1942,7 @@ mod tests {
                 limits,
                 SearchOptions {
                     use_transposition_table: false,
+                    beam_enabled: false,
                     ..SearchOptions::default()
                 },
                 ASPIRATION_INITIAL_DELTA,
@@ -1804,7 +1953,10 @@ mod tests {
                 &"white".into(),
                 BotDifficulty::Normal,
                 limits,
-                SearchOptions::default(),
+                SearchOptions {
+                    beam_enabled: false,
+                    ..SearchOptions::default()
+                },
                 ASPIRATION_INITIAL_DELTA,
             )
             .unwrap_or_else(|| panic!("{name} produced no TT decision"));
@@ -1818,6 +1970,65 @@ mod tests {
             hits > 0,
             "representative searches should exercise TT lookup"
         );
+    }
+
+    #[test]
+    fn large_pocket_search_reports_deduplication_and_beam_reduction() {
+        let mut state = searchable_state();
+        state.board.size = 12;
+        for index in 0..25 {
+            add_test_piece(
+                &mut state,
+                &format!("bulk-para-{index:02}"),
+                "white",
+                "paratrooper",
+                None,
+            );
+        }
+        let generated = generate_search_actions(&state);
+        let unique = canonicalize_actions(&state, generated.actions.clone());
+        assert!(generated.generated_count > unique.len());
+        assert!(generated.generated_drop_count > 25);
+        assert_eq!(
+            generated
+                .actions
+                .iter()
+                .filter(|action| matches!(action, AiAction::Drop(_)))
+                .count()
+                * 25,
+            generated.generated_drop_count
+        );
+
+        let limits = SearchLimits {
+            max_depth_actions: 1,
+            max_nodes: 100_000,
+            soft_time_ms: 10_000,
+            hard_time_ms: 20_000,
+        };
+        let run = |beam_enabled| {
+            choose_bot_action_with_limits_and_options(
+                &state,
+                &"white".into(),
+                BotDifficulty::Normal,
+                limits,
+                SearchOptions {
+                    beam_enabled,
+                    ..SearchOptions::default()
+                },
+            )
+            .unwrap()
+        };
+        let without = run(false);
+        let with = run(true);
+        assert!(generate_ai_actions(&state).contains(&without.action));
+        assert!(generate_ai_actions(&state).contains(&with.action));
+        assert_eq!(
+            without.stats.beam_selected_actions,
+            without.stats.unique_canonical_actions
+        );
+        assert!(with.stats.beam_selected_actions < with.stats.unique_canonical_actions);
+        assert!(with.stats.drop_actions_selected < with.stats.drop_actions_generated);
+        assert!(with.completed_depth >= without.completed_depth);
     }
 
     fn add_test_piece(

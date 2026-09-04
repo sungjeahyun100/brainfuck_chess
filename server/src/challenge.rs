@@ -19,6 +19,8 @@ pub(crate) struct OfficialPlacement {
     pub(crate) piece_type: &'static str,
     /// Coordinates are authored from White's side and mirrored for the bot.
     pub(crate) square: Square,
+    /// Official challenges may deliberately start outside normal deck setup zones.
+    pub(crate) allow_nonstandard_zone: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -71,6 +73,15 @@ fn placement(piece_type: &'static str, file: i32, rank: i32) -> OfficialPlacemen
     OfficialPlacement {
         piece_type,
         square: Square::new(file, rank),
+        allow_nonstandard_zone: false,
+    }
+}
+
+fn nonstandard_placement(piece_type: &'static str, file: i32, rank: i32) -> OfficialPlacement {
+    OfficialPlacement {
+        piece_type,
+        square: Square::new(file, rank),
+        allow_nonstandard_zone: true,
     }
 }
 
@@ -88,7 +99,7 @@ pub(crate) fn definitions() -> Vec<ChallengeDefinition> {
         placement("tempest-knight", 7, 0),
         placement("tempest-rook", 8, 0),
     ];
-    tempest_set.extend((1..=8).map(|file| placement("tempest-pawn", file, 2)));
+    tempest_set.extend((0..10).map(|file| nonstandard_placement("tempest-pawn", file, 1)));
 
     vec![
         ChallengeDefinition {
@@ -169,12 +180,14 @@ pub(crate) fn validate_registry(definitions: &[ChallengeDefinition]) -> Result<(
             {
                 return Err(format!("{}: 잘못된 시작 배치입니다.", definition.id));
             }
-            if !can_piece_be_placed_at_start(
-                piece,
-                &"white".into(),
-                entry.square,
-                definition.board_size,
-            ) {
+            if !entry.allow_nonstandard_zone
+                && !can_piece_be_placed_at_start(
+                    piece,
+                    &"white".into(),
+                    entry.square,
+                    definition.board_size,
+                )
+            {
                 return Err(format!(
                     "{}: {} 배치 구역이 잘못되었습니다.",
                     definition.id, entry.piece_type
@@ -377,6 +390,29 @@ mod tests {
         assert!(registry.iter().any(|entry| entry.id == "tempest_horde"));
         assert!(registry.iter().any(|entry| entry.id == "raining_men"));
         assert!(registry.iter().any(|entry| entry.id == "tempest_set"));
+    }
+
+    #[test]
+    fn tempest_set_has_a_complete_pawn_rank_next_to_the_black_home_rank() {
+        let tempest_set = find("tempest_set").unwrap();
+        let black_deck = opponent_deck(&tempest_set, "black");
+        let pawn_squares = black_deck
+            .starting
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    &entry.piece,
+                    DeckPieceRef::BuiltIn { piece_type } if piece_type == "tempest-pawn"
+                )
+            })
+            .map(|entry| (entry.square.file, entry.square.rank))
+            .collect::<HashSet<_>>();
+
+        assert_eq!(pawn_squares.len(), 10);
+        assert_eq!(
+            pawn_squares,
+            (0..10).map(|file| (file, 8)).collect::<HashSet<_>>()
+        );
     }
 
     #[test]

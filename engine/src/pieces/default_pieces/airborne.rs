@@ -18,6 +18,8 @@ take-move(-1, -1);"
         id: "airborne".into(),
         name: "공수부대".into(),
         score: 6,
+        ai_board_value: None,
+        ai_pocket_value: None,
         max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: movement.clone(),

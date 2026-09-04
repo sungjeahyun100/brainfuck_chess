@@ -308,6 +308,34 @@ fn benchmark_positions() -> Vec<BenchmarkPosition> {
     ]
 }
 
+fn large_pocket_position() -> BenchmarkPosition {
+    let mut state = empty_state("12x12-large-pocket");
+    state.board = create_board(12);
+    add_board_piece(&mut state, "wk", "white", "king", Square::new(0, 0));
+    add_board_piece(&mut state, "wr", "white", "rook", Square::new(5, 1));
+    add_board_piece(
+        &mut state,
+        "gunner",
+        "white",
+        "machine-gunner",
+        Square::new(4, 4),
+    );
+    add_board_piece(&mut state, "bk", "black", "king", Square::new(11, 11));
+    add_board_piece(&mut state, "enemy", "black", "rook", Square::new(5, 4));
+    for index in 0..25 {
+        add_pocket_piece(
+            &mut state,
+            &format!("bulk-paratrooper-{index:02}"),
+            "white",
+            "paratrooper",
+        );
+    }
+    BenchmarkPosition {
+        name: "12x12-large-pocket",
+        state,
+    }
+}
+
 fn qsearch_horizon_positions() -> Vec<BenchmarkPosition> {
     let mut recapture = empty_state("qsearch-recapture");
     add_board_piece(&mut recapture, "wk", "white", "king", Square::new(0, 0));
@@ -484,18 +512,22 @@ fn benchmark_positions_match_with_transposition_table_enabled_and_disabled() {
             SearchOptions {
                 use_transposition_table: true,
                 use_aspiration_window: false,
+                beam_enabled: false,
             },
             SearchOptions {
                 use_transposition_table: true,
                 use_aspiration_window: true,
+                beam_enabled: false,
             },
             SearchOptions {
                 use_transposition_table: false,
                 use_aspiration_window: false,
+                beam_enabled: false,
             },
             SearchOptions {
                 use_transposition_table: false,
                 use_aspiration_window: true,
+                beam_enabled: false,
             },
         ];
         let decisions = configurations.map(|options| {
@@ -637,6 +669,68 @@ fn ai_search_difficulty_budgets() {
                 started.elapsed().as_secs_f64() * 1_000.0,
             );
         }
+    }
+}
+
+#[test]
+#[ignore = "12x12 adaptive-beam A/B benchmark; run explicitly with --ignored --nocapture"]
+fn adaptive_beam_large_pocket_comparison() {
+    let position = large_pocket_position();
+    let limits = BotDifficulty::Normal.limits();
+    for beam_enabled in [false, true] {
+        let mut completed_depth = 0_u64;
+        let mut reached_depth = 0_u64;
+        let mut nodes = 0_u64;
+        let mut normal_nodes = 0_u64;
+        let mut qnodes = 0_u64;
+        let mut elapsed_ms = 0.0;
+        let mut last_stats = None;
+        for _ in 0..5 {
+            let started = Instant::now();
+            let decision = choose_bot_action_with_limits_and_options(
+                &position.state,
+                &"white".into(),
+                BotDifficulty::Normal,
+                limits,
+                SearchOptions {
+                    beam_enabled,
+                    ..SearchOptions::default()
+                },
+            )
+            .unwrap();
+            elapsed_ms += started.elapsed().as_secs_f64() * 1_000.0;
+            assert!(action_is_legal(&position.state, &decision.action));
+            completed_depth += u64::from(decision.completed_depth);
+            reached_depth += u64::from(decision.depth_reached);
+            nodes += decision.searched_nodes;
+            normal_nodes += decision.stats.normal_nodes;
+            qnodes += decision.stats.qnodes;
+            last_stats = Some(decision.stats);
+        }
+        let stats = last_stats.unwrap();
+        println!(
+            "beam_enabled={} legal={} unique={} selected={} mandatory={} drops_generated={} drops_selected={} board_optional_generated={} board_optional_selected={} quiet_drop_generated={} quiet_drop_selected={} avg_completed_depth={:.2} avg_reached_depth={:.2} avg_nodes={:.1} avg_normal_nodes={:.1} avg_qnodes={:.1} avg_elapsed_ms={:.3} last_move_generation_ms={:.3} last_dedup_ms={:.3} last_ordering_ms={:.3}",
+            beam_enabled,
+            stats.root_generated_legal_actions,
+            stats.root_unique_canonical_actions,
+            stats.root_beam_selected_actions,
+            stats.root_mandatory_tactical_actions,
+            stats.root_drop_actions_generated,
+            stats.root_drop_actions_selected,
+            stats.root_board_optional_actions_generated,
+            stats.root_board_optional_actions_selected,
+            stats.root_quiet_drop_actions_generated,
+            stats.root_quiet_drop_actions_selected,
+            completed_depth as f64 / 5.0,
+            reached_depth as f64 / 5.0,
+            nodes as f64 / 5.0,
+            normal_nodes as f64 / 5.0,
+            qnodes as f64 / 5.0,
+            elapsed_ms / 5.0,
+            stats.move_generation_nanos as f64 / 1_000_000.0,
+            stats.canonical_deduplication_nanos as f64 / 1_000_000.0,
+            stats.move_ordering_nanos as f64 / 1_000_000.0,
+        );
     }
 }
 

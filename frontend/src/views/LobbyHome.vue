@@ -11,6 +11,7 @@
       <button class="home-action" @click="$emit('navigate', 'single-select')">싱글플레이</button>
       <button class="home-action" @click="$emit('navigate', 'multiplayer')">멀티플레이</button>
       <button class="home-action" @click="$emit('navigate', 'bot-select')">봇 플레이</button>
+      <button class="home-action" @click="$emit('navigate', 'bot-debugger')">봇 디버거</button>
       <button class="home-action" @click="$emit('navigate', 'challenges')">챌린지</button>
       <button class="home-action" @click="$emit('navigate', 'deck-library')">덱 빌딩</button>
       <button class="home-action" @click="$emit('navigate', 'piece-lab')">기물 테스트장</button>

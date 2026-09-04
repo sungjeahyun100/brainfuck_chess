@@ -11,6 +11,8 @@ macro_rules! legacy_piece_definition {
     ($($field:tt)*) => {{
         PieceDefinition {
             $($field)*
+            ai_board_value: None,
+            ai_pocket_value: None,
             state_schema: Vec::new(),
             move_layers: Vec::new(),
             move_options: Vec::new(),
@@ -45,6 +47,7 @@ mod nightrider;
 mod paratrooper;
 mod pawn_black;
 mod pawn_white;
+mod prime_minister;
 mod queen;
 mod rook;
 mod surface_to_air_missile_black;
@@ -87,6 +90,7 @@ pub use nightrider::nightrider_definition;
 pub use paratrooper::paratrooper_definition;
 pub use pawn_black::pawn_black_definition;
 pub use pawn_white::pawn_white_definition;
+pub use prime_minister::prime_minister_definition;
 pub use queen::queen_definition;
 pub use rook::rook_definition;
 pub use surface_to_air_missile_black::surface_to_air_missile_black_definition;
@@ -127,6 +131,7 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bouncing_bishop_definition(),
         bouncing_rook_definition(),
         bouncing_queen_definition(),
+        prime_minister_definition(),
         pawn_white_definition(),
         pawn_black_definition(),
         bouncing_pawn_white_definition(),

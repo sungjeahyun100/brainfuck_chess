@@ -21,6 +21,7 @@ const scores: Record<string, number> = {
   bishop: 3,
   knight: 3,
   pawn: 1,
+  'prime-minister': 7,
   dozer: 3,
   'bouncing-pawn': 2,
   'tempest-pawn': 2,
@@ -30,6 +31,14 @@ applyPieceMetadata(Object.fromEntries(pieceCatalog.map(piece => [piece.id, {
   score: scores[piece.id] ?? 1,
   deployment_zone: frontPieces.has(piece.id) ? 'front' : 'back',
 }])))
+
+test('국무총리 is available in the built-in deck catalog at score 7', () => {
+  const primeMinister = pieceCatalog.find(piece => piece.id === 'prime-minister')
+
+  assert.equal(primeMinister?.name, '국무총리')
+  assert.equal(primeMinister?.score, 7)
+  assert.equal(primeMinister?.canPocket, true)
+})
 
 function savedDeck(): SavedDeck {
   const preset = createPresetDeck(8)

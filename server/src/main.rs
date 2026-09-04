@@ -263,6 +263,7 @@ struct BotTurnRequest {
 
 #[derive(Debug, Serialize)]
 struct BotTurnStats {
+    score: i32,
     searched_nodes: u64,
     depth_reached: u8,
     completed_depth: u8,
@@ -278,6 +279,30 @@ struct BotTurnStats {
     aspiration_researches: u64,
     aspiration_fail_lows: u64,
     aspiration_fail_highs: u64,
+    generated_legal_actions: u64,
+    unique_canonical_actions: u64,
+    beam_selected_actions: u64,
+    mandatory_tactical_actions: u64,
+    drop_actions_generated: u64,
+    drop_actions_selected: u64,
+    board_optional_actions_generated: u64,
+    board_optional_actions_selected: u64,
+    quiet_drop_actions_generated: u64,
+    quiet_drop_actions_selected: u64,
+    normal_nodes: u64,
+    move_generation_nanos: u64,
+    canonical_deduplication_nanos: u64,
+    move_ordering_nanos: u64,
+    root_generated_legal_actions: u64,
+    root_unique_canonical_actions: u64,
+    root_beam_selected_actions: u64,
+    root_mandatory_tactical_actions: u64,
+    root_drop_actions_generated: u64,
+    root_drop_actions_selected: u64,
+    root_board_optional_actions_generated: u64,
+    root_board_optional_actions_selected: u64,
+    root_quiet_drop_actions_generated: u64,
+    root_quiet_drop_actions_selected: u64,
     elapsed_ms: u64,
 }
 
@@ -414,6 +439,8 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
         | "nightrider"
         | "amazon"
         | "guhang"
+        | "prime-minister"
+        | "prime_minister"
         | "cannon-rook"
         | "cannon_rook"
         | "tempest-rook"
@@ -2578,6 +2605,7 @@ async fn run_bot_turn(
         actions: result.actions,
         timeline: result.timeline,
         stats: BotTurnStats {
+            score: result.score,
             searched_nodes: result.searched_nodes,
             depth_reached: result.depth_reached,
             completed_depth: result.completed_depth,
@@ -2593,6 +2621,32 @@ async fn run_bot_turn(
             aspiration_researches: result.stats.aspiration_researches,
             aspiration_fail_lows: result.stats.aspiration_fail_lows,
             aspiration_fail_highs: result.stats.aspiration_fail_highs,
+            generated_legal_actions: result.stats.generated_legal_actions,
+            unique_canonical_actions: result.stats.unique_canonical_actions,
+            beam_selected_actions: result.stats.beam_selected_actions,
+            mandatory_tactical_actions: result.stats.mandatory_tactical_actions,
+            drop_actions_generated: result.stats.drop_actions_generated,
+            drop_actions_selected: result.stats.drop_actions_selected,
+            board_optional_actions_generated: result.stats.board_optional_actions_generated,
+            board_optional_actions_selected: result.stats.board_optional_actions_selected,
+            quiet_drop_actions_generated: result.stats.quiet_drop_actions_generated,
+            quiet_drop_actions_selected: result.stats.quiet_drop_actions_selected,
+            normal_nodes: result.stats.normal_nodes,
+            move_generation_nanos: result.stats.move_generation_nanos,
+            canonical_deduplication_nanos: result.stats.canonical_deduplication_nanos,
+            move_ordering_nanos: result.stats.move_ordering_nanos,
+            root_generated_legal_actions: result.stats.root_generated_legal_actions,
+            root_unique_canonical_actions: result.stats.root_unique_canonical_actions,
+            root_beam_selected_actions: result.stats.root_beam_selected_actions,
+            root_mandatory_tactical_actions: result.stats.root_mandatory_tactical_actions,
+            root_drop_actions_generated: result.stats.root_drop_actions_generated,
+            root_drop_actions_selected: result.stats.root_drop_actions_selected,
+            root_board_optional_actions_generated: result
+                .stats
+                .root_board_optional_actions_generated,
+            root_board_optional_actions_selected: result.stats.root_board_optional_actions_selected,
+            root_quiet_drop_actions_generated: result.stats.root_quiet_drop_actions_generated,
+            root_quiet_drop_actions_selected: result.stats.root_quiet_drop_actions_selected,
             elapsed_ms: result.elapsed_ms,
         },
     }))
@@ -3499,7 +3553,7 @@ mod tests {
                 match definition.id {
                     "tempest_horde" => 118,
                     "raining_men" => 118,
-                    "tempest_set" => 62,
+                    "tempest_set" => 66,
                     _ => unreachable!(),
                 }
             );
@@ -3682,6 +3736,11 @@ mod tests {
         assert_eq!(scores.get("tempest-knight"), Some(&5));
         assert_eq!(scores.get("bouncing-rook"), Some(&6));
         assert_eq!(scores.get("bouncing-queen"), Some(&13));
+        assert_eq!(scores.get("prime-minister"), Some(&7));
+        assert_eq!(
+            resolve_piece_type("white", "prime_minister").as_deref(),
+            Some("prime-minister")
+        );
         assert_eq!(scores.get("pawn"), scores.get("pawn-white"));
         assert_eq!(scores.get("tempest-pawn"), Some(&2));
         assert_eq!(scores.get("tempest-pawn"), scores.get("tempest-pawn-white"));
