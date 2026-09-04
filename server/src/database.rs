@@ -17,10 +17,18 @@ pub(crate) async fn verify_database_contract(
          AND to_regclass('{}.custom_piece_versions') IS NOT NULL \
          AND to_regclass('{}.custom_piece_images') IS NOT NULL \
          AND to_regclass('{}.game_records') IS NOT NULL \
+         AND to_regclass('{}.game_analysis_trees') IS NOT NULL \
+         AND to_regclass('{}.game_analysis_nodes') IS NOT NULL \
          AND to_regclass('{}.challenge_clears') IS NOT NULL \
          AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='shared' AND table_name='users' AND column_name='profile_visibility') \
          AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='white_user_id') \
-         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='black_user_id')",
+         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='black_user_id') \
+         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='retention_mode') \
+         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='expires_at_ms')",
+        data_schema.name(),
+        data_schema.name(),
+        data_schema.name(),
+        data_schema.name(),
         data_schema.name(),
         data_schema.name(),
         data_schema.name(),
@@ -99,7 +107,12 @@ impl DataSchema {
     pub(crate) fn table(self, table: &str) -> String {
         debug_assert!(matches!(
             table,
-            "custom_piece_versions" | "custom_piece_images" | "game_records" | "challenge_clears"
+            "custom_piece_versions"
+                | "custom_piece_images"
+                | "game_records"
+                | "game_analysis_trees"
+                | "game_analysis_nodes"
+                | "challenge_clears"
         ));
         format!("{}.{}", self.name(), table)
     }

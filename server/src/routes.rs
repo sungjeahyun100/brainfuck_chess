@@ -1,4 +1,4 @@
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
 use crate::app_state::AppState;
@@ -24,6 +24,24 @@ pub(crate) fn api(state: AppState) -> Router {
         .route("/game-records", get(list_game_records))
         .route("/games/:id", get(get_game))
         .route("/games/:id/record", get(get_game_record))
+        .route("/games/:id/retention", patch(update_game_retention))
+        .route(
+            "/games/:id/analysis",
+            get(list_analysis_trees).post(create_analysis_tree),
+        )
+        .route("/games/:id/analysis/options", post(get_analysis_options))
+        .route(
+            "/games/:id/analysis/:tree_id",
+            patch(rename_analysis_tree).delete(delete_analysis_tree),
+        )
+        .route(
+            "/games/:id/analysis/:tree_id/nodes",
+            post(append_analysis_node),
+        )
+        .route(
+            "/games/:id/analysis/:tree_id/nodes/:node_id",
+            delete(delete_analysis_subtree),
+        )
         .route("/games/:id/actions", post(submit_action))
         .route("/games/:id/bot-turn", post(run_bot_turn))
         .route("/games/:id/resign", post(resign_game))

@@ -30,9 +30,18 @@ export interface GameRecord {
   players: Record<PlayerId, GameRecordPlayer>; time_control: TimeControlId
   initial_state: ReplayInitialState; initial_clock: GameClock; decks: Record<PlayerId, DeckSnapshot>; actions: RecordedAction[]; final_clock?: GameClock | null
   game_mode?: 'standard' | 'challenge'; challenge_id?: string | null
+  retention_mode?: 'auto' | 'permanent'; expires_at_ms?: number | null
 }
 export interface GameRecordSummary {
   game_id: string; display_name: string; started_at_ms: number; ended_at_ms?: number | null
   result?: GameResult | null; players: Record<PlayerId, GameRecordPlayer>; time_control: TimeControlId; owner_side: PlayerId
   game_mode?: 'standard' | 'challenge'; challenge_id?: string | null
+  retention_mode: 'auto' | 'permanent'; expires_at_ms?: number | null; analysis_count: number
+}
+
+export interface AnalysisNode {
+  id: string; parent_node_id?: string | null; action: TurnAction; state_after: GameState; state_hash: string; created_at_ms: number
+}
+export interface AnalysisTree {
+  id: string; game_id: string; name: string; base_ply: number; version: number; created_at_ms: number; updated_at_ms: number; nodes: AnalysisNode[]
 }

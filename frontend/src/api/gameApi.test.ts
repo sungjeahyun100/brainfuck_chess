@@ -77,3 +77,32 @@ test('challenge create request sends a player deck but no opponent or rule setti
     assert.equal(forbidden in body, false)
   }
 })
+
+test('analysis writes send canonical actions, parent identity, version, and no client state', async () => {
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(input), body: JSON.parse(String(init?.body ?? '{}')) })
+    return new Response(JSON.stringify({ id: 'tree', game_id: 'game', name: 'V', base_ply: 3, version: 2, nodes: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+  const action = {
+    type: 'move', player_id: 'white', piece_id: 'rook', from: { file: 0, rank: 0 }, to: { file: 0, rank: 1 }, move_option_id: 'normal', source_layer_ids: [],
+    effects: { global_state_updates: [], piece_state_updates: [], cooldown_updates: [] },
+  } as TurnAction
+  await api.createAnalysis('game', 3, action)
+  await api.appendAnalysis('game', { id: 'tree', game_id: 'game', name: 'V', base_ply: 3, version: 2, created_at_ms: 0, updated_at_ms: 0, nodes: [] }, 'parent', action)
+  assert.equal(calls[0]?.url, '/api/games/game/analysis')
+  assert.equal(calls[0]?.body.base_ply, 3)
+  assert.equal('state_after' in calls[0]!.body, false)
+  assert.equal(calls[1]?.body.parent_node_id, 'parent')
+  assert.equal(calls[1]?.body.expected_version, 2)
+})
+
+test('retention update only sends the requested permanent state', async () => {
+  let body: Record<string, unknown> = {}
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body))
+    return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+  await api.updateGameRetention('game', true)
+  assert.deepEqual(body, { permanent: true })
+})

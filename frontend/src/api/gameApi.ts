@@ -14,9 +14,10 @@ import type {
   Square,
   SubmitAction,
   TimeControlId,
+  TurnAction,
 } from '../types/game'
 import type { PieceCatalogMetadata } from '../types/deck'
-import type { GameRecord } from '../types/gameRecord'
+import type { AnalysisTree, GameRecord } from '../types/gameRecord'
 
 const BASE = '/api/games'
 const ROOM_BASE = '/api/rooms'
@@ -163,6 +164,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(err.error ?? res.statusText)
   }
+  if (res.status === 204) return undefined as T
   return res.json()
 }
 
@@ -235,6 +237,38 @@ export const api = {
 
   listGameRecords(): Promise<import('../types/gameRecord').GameRecordSummary[]> {
     return request('/api/game-records')
+  },
+
+  updateGameRetention(id: string, permanent: boolean): Promise<GameRecord> {
+    return request(`${BASE}/${id}/retention`, { method: 'PATCH', body: JSON.stringify({ permanent }) })
+  },
+
+  listAnalysis(id: string): Promise<AnalysisTree[]> {
+    return request(`${BASE}/${id}/analysis`)
+  },
+
+  getAnalysisOptions(id: string, position: { base_ply: number; tree_id?: string; node_id?: string }, pieceId: string, moveOptionId?: string): Promise<{ moves: MoveAction[]; drops: DropAction[]; ability_actions: import('../types/game').AbilityAction[] }> {
+    return request(`${BASE}/${id}/analysis/options`, { method: 'POST', body: JSON.stringify({ ...position, piece_id: pieceId, move_option_id: moveOptionId }) })
+  },
+
+  createAnalysis(id: string, basePly: number, action: TurnAction, name?: string): Promise<AnalysisTree> {
+    return request(`${BASE}/${id}/analysis`, { method: 'POST', body: JSON.stringify({ base_ply: basePly, action: withTurnActionType(action), name, request_id: crypto.randomUUID() }) })
+  },
+
+  appendAnalysis(id: string, tree: AnalysisTree, parentNodeId: string, action: TurnAction): Promise<AnalysisTree> {
+    return request(`${BASE}/${id}/analysis/${tree.id}/nodes`, { method: 'POST', body: JSON.stringify({ parent_node_id: parentNodeId, action: withTurnActionType(action), expected_version: tree.version, request_id: crypto.randomUUID() }) })
+  },
+
+  renameAnalysis(id: string, tree: AnalysisTree, name: string): Promise<AnalysisTree> {
+    return request(`${BASE}/${id}/analysis/${tree.id}`, { method: 'PATCH', body: JSON.stringify({ name, expected_version: tree.version }) })
+  },
+
+  deleteAnalysis(id: string, treeId: string): Promise<void> {
+    return request(`${BASE}/${id}/analysis/${treeId}`, { method: 'DELETE' })
+  },
+
+  deleteAnalysisSubtree(id: string, tree: AnalysisTree, nodeId: string): Promise<AnalysisTree> {
+    return request(`${BASE}/${id}/analysis/${tree.id}/nodes/${nodeId}`, { method: 'DELETE', body: JSON.stringify({ expected_version: tree.version }) })
   },
 
   submitAction(id: string, action: SubmitAction): Promise<GameState> {

@@ -13,6 +13,8 @@ order:
    backfill for an existing table and is a safe no-op for new empty tables.
 3. `20260827000000_challenge_clears.sql` creates account-owned Challenge clear
    records without granting test roles access to production data.
+4. `20260904000000_analysis_retention.sql` adds safe legacy retention defaults,
+   analysis trees/nodes, cascade deletion, and the cleanup permission.
 
 The scripts never create or read `test.game_records`. Existing rows whose
 current public ID cannot be matched remain nullable and private to third parties.

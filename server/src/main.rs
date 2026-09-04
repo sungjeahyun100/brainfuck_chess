@@ -11,6 +11,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
 mod account;
+mod analysis;
 mod app_state;
 mod auth;
 mod challenge;
@@ -1324,6 +1325,16 @@ async fn run_game_time_adjudicator(
     }
 }
 
+async fn run_game_record_cleanup(records: game_record::GameRecordStore) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
+    loop {
+        interval.tick().await;
+        if let Err(error) = records.cleanup_expired(now_ms()).await {
+            eprintln!("failed to clean expired game records: {error}");
+        }
+    }
+}
+
 async fn persist_completed_record(
     games: &stores::GameStore,
     records: &game_record::GameRecordStore,
@@ -1379,6 +1390,7 @@ async fn main() {
         state.game_records.clone(),
         state.challenge_progress.clone(),
     ));
+    tokio::spawn(run_game_record_cleanup(state.game_records.clone()));
 
     // Static frontend directory — populated at Docker build time.
     // Falls back gracefully if the directory doesn't exist (dev mode).
@@ -2179,6 +2191,21 @@ async fn get_game_record(
         {
             eprintln!("failed to persist completed game record {id}: {error}");
         }
+        if record.ownership.has_registered_owner() {
+            return match app.game_records.get(&id).await {
+                Ok(Some(stored)) => {
+                    ensure_game_record_access(&app, &headers, &stored).await?;
+                    Ok(Json(stored))
+                }
+                Ok(None) => Err((
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorResponse {
+                        error: "게임 기록을 찾을 수 없습니다.".into(),
+                    }),
+                )),
+                Err(_) => Err(repository_error("unavailable")),
+            };
+        }
         return Ok(Json(record));
     }
     match app.game_records.get(&id).await {
@@ -2297,10 +2324,10 @@ async fn list_game_records(
                 }),
             )
         })?;
-    app.game_records
+    let mut summaries = app
+        .game_records
         .list_summaries_for_user_id(&owner, 50)
         .await
-        .map(Json)
         .map_err(|_| {
             (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -2308,7 +2335,508 @@ async fn list_game_records(
                     error: "게임 기록 저장소를 사용할 수 없습니다.".into(),
                 }),
             )
+        })?;
+    for summary in &mut summaries {
+        summary.analysis_count = app
+            .analyses
+            .list(&summary.game_id, &owner)
+            .await
+            .map_err(repository_error)?
+            .len() as i64;
+    }
+    Ok(Json(summaries))
+}
+
+#[derive(Deserialize)]
+struct UpdateRetentionRequest {
+    permanent: bool,
+}
+
+async fn update_game_retention(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateRetentionRequest>,
+) -> Result<Json<game_record::GameRecord>, (StatusCode, Json<ErrorResponse>)> {
+    let owner = authenticated_record_owner(&app, &headers, &id).await?;
+    app.game_records
+        .set_retention(&id, &owner, request.permanent, now_ms())
+        .await
+        .map_err(repository_error)?
+        .map(Json)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "게임 기록을 찾을 수 없습니다.".into(),
+                }),
+            )
         })
+}
+
+#[derive(Deserialize)]
+struct AnalysisPosition {
+    base_ply: u32,
+    tree_id: Option<String>,
+    node_id: Option<String>,
+}
+#[derive(Deserialize)]
+struct AnalysisOptionsRequest {
+    #[serde(flatten)]
+    position: AnalysisPosition,
+    piece_id: String,
+    move_option_id: Option<String>,
+}
+#[derive(Serialize)]
+struct AnalysisOptionsResponse {
+    moves: Vec<MoveAction>,
+    drops: Vec<DropAction>,
+    ability_actions: Vec<AbilityAction>,
+}
+#[derive(Deserialize)]
+struct CreateAnalysisRequest {
+    base_ply: u32,
+    name: Option<String>,
+    action: TurnAction,
+    request_id: String,
+}
+#[derive(Deserialize)]
+struct AppendAnalysisRequest {
+    parent_node_id: String,
+    action: TurnAction,
+    expected_version: i64,
+    request_id: String,
+}
+#[derive(Deserialize)]
+struct RenameAnalysisRequest {
+    name: String,
+    expected_version: i64,
+}
+#[derive(Deserialize)]
+struct DeleteAnalysisRequest {
+    expected_version: i64,
+}
+
+async fn authenticated_record_owner(
+    app: &AppState,
+    headers: &HeaderMap,
+    game_id: &str,
+) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    let owner = app
+        .auth
+        .authenticate(headers)
+        .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
+    let record = app
+        .game_records
+        .get(game_id)
+        .await
+        .map_err(repository_error)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "게임 기록을 찾을 수 없습니다.".into(),
+                }),
+            )
+        })?;
+    if !record.ownership.contains(&owner) {
+        return Err(private_game_record_error());
+    }
+    Ok(owner)
+}
+
+fn repository_error(error: &'static str) -> (StatusCode, Json<ErrorResponse>) {
+    let (status, message) = match error {
+        "forbidden" => (StatusCode::FORBIDDEN, "수정 권한이 없습니다."),
+        "conflict" => (
+            StatusCode::CONFLICT,
+            "다른 탭에서 분석 라인이 변경되었습니다. 새로고침 후 다시 시도하세요.",
+        ),
+        "invalid_parent" => (StatusCode::BAD_REQUEST, "유효하지 않은 분석 분기입니다."),
+        _ => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "저장소를 사용할 수 없습니다.",
+        ),
+    };
+    (
+        status,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
+}
+
+async fn owned_record_and_trees(
+    app: &AppState,
+    headers: &HeaderMap,
+    game_id: &str,
+) -> Result<
+    (String, game_record::GameRecord, Vec<analysis::AnalysisTree>),
+    (StatusCode, Json<ErrorResponse>),
+> {
+    let owner = authenticated_record_owner(app, headers, game_id).await?;
+    let record = app
+        .game_records
+        .get(game_id)
+        .await
+        .map_err(repository_error)?
+        .ok_or_else(|| private_game_record_error())?;
+    let trees = app
+        .analyses
+        .list(game_id, &owner)
+        .await
+        .map_err(repository_error)?;
+    validate_analysis_trees(&record, &trees)?;
+    Ok((owner, record, trees))
+}
+
+fn validate_analysis_trees(
+    record: &game_record::GameRecord,
+    trees: &[analysis::AnalysisTree],
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    for tree in trees {
+        let base = record.state_at_ply(tree.base_ply).map_err(|_| {
+            (
+                StatusCode::CONFLICT,
+                Json(ErrorResponse {
+                    error: "분석 기준 상태의 무결성 검증에 실패했습니다.".into(),
+                }),
+            )
+        })?;
+        let mut verified = HashMap::<String, GameState>::new();
+        let mut pending = tree.nodes.iter().collect::<Vec<_>>();
+        while !pending.is_empty() {
+            let Some(index) = pending.iter().position(|node| {
+                node.parent_node_id.is_none()
+                    || node
+                        .parent_node_id
+                        .as_ref()
+                        .is_some_and(|parent| verified.contains_key(parent))
+            }) else {
+                return Err((
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: "분석 부모 노드의 무결성 검증에 실패했습니다.".into(),
+                    }),
+                ));
+            };
+            let node = pending.swap_remove(index);
+            let parent = node
+                .parent_node_id
+                .as_ref()
+                .and_then(|parent_id| verified.get(parent_id).cloned())
+                .unwrap_or_else(|| base.clone());
+            let expected = analysis::normalized_state(
+                submit_engine_action(parent, node.action.clone()).map_err(|_| {
+                    (
+                        StatusCode::CONFLICT,
+                        Json(ErrorResponse {
+                            error: "분석 수의 합법성 재검증에 실패했습니다.".into(),
+                        }),
+                    )
+                })?,
+            );
+            let expected_hash = analysis::state_hash(&expected).map_err(repository_error)?;
+            if expected_hash != node.state_hash
+                || analysis::state_hash(&node.state_after).map_err(repository_error)?
+                    != node.state_hash
+            {
+                return Err((
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: "분석 상태 무결성 검증에 실패했습니다.".into(),
+                    }),
+                ));
+            }
+            verified.insert(node.id.clone(), expected);
+        }
+    }
+    Ok(())
+}
+
+fn analysis_state(
+    record: &game_record::GameRecord,
+    trees: &[analysis::AnalysisTree],
+    position: &AnalysisPosition,
+) -> Result<GameState, (StatusCode, Json<ErrorResponse>)> {
+    match (&position.tree_id, &position.node_id) {
+        (None, None) => record.state_at_ply(position.base_ply).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "유효하지 않은 기준 ply입니다.".into(),
+                }),
+            )
+        }),
+        (Some(tree_id), Some(node_id)) => {
+            let tree = trees
+                .iter()
+                .find(|tree| &tree.id == tree_id && tree.base_ply == position.base_ply)
+                .ok_or_else(|| private_game_record_error())?;
+            let node = tree
+                .nodes
+                .iter()
+                .find(|node| &node.id == node_id)
+                .ok_or_else(|| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorResponse {
+                            error: "분석 노드를 찾을 수 없습니다.".into(),
+                        }),
+                    )
+                })?;
+            if analysis::state_hash(&node.state_after).map_err(repository_error)? != node.state_hash
+            {
+                return Err((
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: "분석 상태 무결성 검증에 실패했습니다.".into(),
+                    }),
+                ));
+            }
+            Ok(node.state_after.clone())
+        }
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "분석 위치가 올바르지 않습니다.".into(),
+            }),
+        )),
+    }
+}
+
+async fn list_analysis_trees(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<analysis::AnalysisTree>>, (StatusCode, Json<ErrorResponse>)> {
+    let (owner, _, _) = owned_record_and_trees(&app, &headers, &id).await?;
+    app.analyses
+        .list(&id, &owner)
+        .await
+        .map(Json)
+        .map_err(repository_error)
+}
+
+async fn get_analysis_options(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<AnalysisOptionsRequest>,
+) -> Result<Json<AnalysisOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let (_, record, trees) = owned_record_and_trees(&app, &headers, &id).await?;
+    let state = analysis_state(&record, &trees, &request.position)?;
+    let piece_id: PieceId = request.piece_id.into();
+    let moves = generate_piece_legal_move_actions_with_options(
+        &state,
+        &piece_id,
+        &MoveGenerationOptions {
+            move_option_id: request.move_option_id,
+        },
+    );
+    let drops = generate_piece_legal_drop_actions(&state, &piece_id);
+    let ability_actions = state
+        .pieces
+        .get(&piece_id)
+        .and_then(|piece| state.piece_definitions.get(&piece.type_id))
+        .map(|definition| {
+            definition
+                .move_options
+                .iter()
+                .flat_map(|option| {
+                    generate_piece_legal_ability_actions(&state, &piece_id, &option.id)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(Json(AnalysisOptionsResponse {
+        moves,
+        drops,
+        ability_actions,
+    }))
+}
+
+async fn create_analysis_tree(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<CreateAnalysisRequest>,
+) -> Result<Json<analysis::AnalysisTree>, (StatusCode, Json<ErrorResponse>)> {
+    let (owner, record, _) = owned_record_and_trees(&app, &headers, &id).await?;
+    if request.request_id.len() > 100 || request.request_id.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "잘못된 요청 식별자입니다.".into(),
+            }),
+        ));
+    }
+    let state = record.state_at_ply(request.base_ply).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "유효하지 않은 기준 ply입니다.".into(),
+            }),
+        )
+    })?;
+    let next = submit_engine_action(state, request.action.clone())
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    let count = app
+        .analyses
+        .list(&id, &owner)
+        .await
+        .map_err(repository_error)?
+        .len();
+    let name = normalized_analysis_name(
+        request
+            .name
+            .as_deref()
+            .unwrap_or(&format!("Variation {}", count + 1)),
+    )?;
+    let tree = analysis::new_tree(
+        id,
+        owner,
+        name,
+        request.base_ply,
+        request.action,
+        next,
+        now_ms(),
+        request.request_id.clone(),
+    )
+    .map_err(repository_error)?;
+    app.analyses
+        .create(tree, &request.request_id)
+        .await
+        .map(Json)
+        .map_err(repository_error)
+}
+
+async fn append_analysis_node(
+    State(app): State<AppState>,
+    Path((id, tree_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<AppendAnalysisRequest>,
+) -> Result<Json<analysis::AnalysisTree>, (StatusCode, Json<ErrorResponse>)> {
+    if request.request_id.is_empty() || request.request_id.len() > 100 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "잘못된 요청 식별자입니다.".into(),
+            }),
+        ));
+    }
+    let (owner, record, trees) = owned_record_and_trees(&app, &headers, &id).await?;
+    let tree = trees
+        .iter()
+        .find(|tree| tree.id == tree_id)
+        .ok_or_else(|| private_game_record_error())?;
+    let position = AnalysisPosition {
+        base_ply: tree.base_ply,
+        tree_id: Some(tree_id.clone()),
+        node_id: Some(request.parent_node_id.clone()),
+    };
+    let state = analysis_state(&record, &trees, &position)?;
+    let next = analysis::normalized_state(
+        submit_engine_action(state, request.action.clone())
+            .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?,
+    );
+    let node = analysis::AnalysisNode {
+        id: Uuid::new_v4().to_string(),
+        parent_node_id: Some(request.parent_node_id),
+        action: request.action,
+        state_hash: analysis::state_hash(&next).map_err(repository_error)?,
+        state_after: next,
+        created_at_ms: now_ms(),
+        request_id: request.request_id.clone(),
+    };
+    app.analyses
+        .append(
+            &tree_id,
+            &owner,
+            node,
+            request.expected_version,
+            &request.request_id,
+        )
+        .await
+        .map_err(repository_error)?
+        .map(Json)
+        .ok_or_else(|| private_game_record_error())
+}
+
+fn normalized_analysis_name(name: &str) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 80 {
+        Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "분석 이름은 1~80자로 입력하세요.".into(),
+            }),
+        ))
+    } else {
+        Ok(name.into())
+    }
+}
+
+async fn rename_analysis_tree(
+    State(app): State<AppState>,
+    Path((id, tree_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<RenameAnalysisRequest>,
+) -> Result<Json<analysis::AnalysisTree>, (StatusCode, Json<ErrorResponse>)> {
+    let (owner, _, trees) = owned_record_and_trees(&app, &headers, &id).await?;
+    if !trees.iter().any(|tree| tree.id == tree_id) {
+        return Err(private_game_record_error());
+    }
+    let name = normalized_analysis_name(&request.name)?;
+    app.analyses
+        .rename(&tree_id, &owner, &name, request.expected_version, now_ms())
+        .await
+        .map_err(repository_error)?
+        .map(Json)
+        .ok_or_else(private_game_record_error)
+}
+async fn delete_analysis_tree(
+    State(app): State<AppState>,
+    Path((id, tree_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let (owner, _, trees) = owned_record_and_trees(&app, &headers, &id).await?;
+    if !trees.iter().any(|tree| tree.id == tree_id) {
+        return Err(private_game_record_error());
+    }
+    if app
+        .analyses
+        .delete_tree(&tree_id, &owner)
+        .await
+        .map_err(repository_error)?
+    {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(private_game_record_error())
+    }
+}
+async fn delete_analysis_subtree(
+    State(app): State<AppState>,
+    Path((id, tree_id, node_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<DeleteAnalysisRequest>,
+) -> Result<Json<analysis::AnalysisTree>, (StatusCode, Json<ErrorResponse>)> {
+    let (owner, _, trees) = owned_record_and_trees(&app, &headers, &id).await?;
+    if !trees.iter().any(|tree| tree.id == tree_id) {
+        return Err(private_game_record_error());
+    }
+    app.analyses
+        .delete_subtree(
+            &tree_id,
+            &owner,
+            &node_id,
+            request.expected_version,
+            now_ms(),
+        )
+        .await
+        .map_err(repository_error)?
+        .map(Json)
+        .ok_or_else(private_game_record_error)
 }
 
 async fn submit_action(

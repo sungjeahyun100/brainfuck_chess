@@ -4,6 +4,9 @@
 DO $contract$
 DECLARE
     challenge_table oid;
+    game_records_table oid;
+    analysis_trees_table oid;
+    analysis_nodes_table oid;
 BEGIN
     IF EXISTS (
         SELECT 1
@@ -13,6 +16,8 @@ BEGIN
             ('test', 'custom_piece_versions'),
             ('test', 'custom_piece_images'),
             ('test', 'game_records'),
+            ('test', 'game_analysis_trees'),
+            ('test', 'game_analysis_nodes'),
             ('test', 'challenge_clears')
         ) required(schema_name, table_name)
         WHERE NOT EXISTS (
@@ -31,6 +36,8 @@ BEGIN
             ('shared', 'users', 'profile_visibility'),
             ('test', 'game_records', 'white_user_id'),
             ('test', 'game_records', 'black_user_id'),
+            ('test', 'game_records', 'retention_mode'),
+            ('test', 'game_records', 'expires_at_ms'),
             ('test', 'challenge_clears', 'user_id'),
             ('test', 'challenge_clears', 'challenge_id'),
             ('test', 'challenge_clears', 'first_cleared_at_ms')
@@ -53,6 +60,10 @@ BEGIN
     JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
     WHERE namespace.nspname = 'test' AND relation.relname = 'challenge_clears'
       AND relation.relkind IN ('r', 'p');
+
+    SELECT relation.oid INTO STRICT game_records_table FROM pg_class relation JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace WHERE namespace.nspname='test' AND relation.relname='game_records';
+    SELECT relation.oid INTO STRICT analysis_trees_table FROM pg_class relation JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace WHERE namespace.nspname='test' AND relation.relname='game_analysis_trees';
+    SELECT relation.oid INTO STRICT analysis_nodes_table FROM pg_class relation JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace WHERE namespace.nspname='test' AND relation.relname='game_analysis_nodes';
 
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint constraint_record
@@ -78,6 +89,13 @@ BEGIN
        OR has_table_privilege('test_app', challenge_table, 'UPDATE')
        OR has_table_privilege('test_app', challenge_table, 'DELETE') THEN
         RAISE EXCEPTION 'test runtime role privileges violate the environment contract';
+    END IF;
+    IF NOT has_table_privilege('test_app', game_records_table, 'DELETE')
+       OR NOT has_table_privilege('test_app', analysis_trees_table, 'SELECT,INSERT,UPDATE,DELETE')
+       OR NOT has_table_privilege('test_app', analysis_nodes_table, 'SELECT,INSERT,UPDATE,DELETE')
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=analysis_trees_table AND confrelid=game_records_table AND confdeltype='c')
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=analysis_nodes_table AND confrelid=analysis_trees_table AND confdeltype='c') THEN
+        RAISE EXCEPTION 'test analysis/retention privilege or cascade contract is invalid';
     END IF;
     IF NOT pg_has_role('deck_chess_test', 'test_app', 'MEMBER')
        OR pg_has_role('deck_chess_test', 'prod_app', 'MEMBER') THEN

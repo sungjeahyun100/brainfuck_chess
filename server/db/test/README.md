@@ -10,9 +10,12 @@ order:
 1. `20260826000500_create_game_records.sql`
 2. `20260826001000_game_record_ownership.sql`
 3. `20260827000000_challenge_clears.sql`
+4. `20260904000000_analysis_retention.sql`
 
-The first grants `test_app` only SELECT/INSERT/UPDATE on `test.game_records`; the
-second backfills legacy test rows. Neither script reads or writes `prod`.
+The first grants `test_app` SELECT/INSERT/UPDATE on `test.game_records`; the
+second backfills legacy test rows, and the analysis/retention migration adds the
+DELETE privilege required by bounded expiry cleanup. No script reads or writes
+`prod`.
 
 Both scripts expect a clean administrative session with no permanent
 `deck_chess` or `deck_chess_schema_owner` membership. Required owner roles are

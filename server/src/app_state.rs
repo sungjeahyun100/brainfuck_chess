@@ -1,6 +1,7 @@
 use crate::stores::{AccountStore, CustomPieceStore, GameStore, RoomStore};
 use crate::{
     account::{InMemoryAccountRepository, PostgresAccountRepository},
+    analysis::{AnalysisStore, InMemoryAnalysisRepository, PostgresAnalysisRepository},
     auth::AuthState,
     challenge::{
         ChallengeProgressStore, InMemoryChallengeProgressRepository,
@@ -20,6 +21,7 @@ pub(crate) struct AppState {
     pub(crate) accounts: AccountStore,
     pub(crate) auth: AuthState,
     pub(crate) game_records: GameRecordStore,
+    pub(crate) analyses: AnalysisStore,
     pub(crate) challenge_progress: ChallengeProgressStore,
 }
 
@@ -35,6 +37,7 @@ impl AppState {
             custom_pieces,
             auth: AuthState::for_tests(),
             game_records: std::sync::Arc::new(InMemoryGameRecordRepository::default()),
+            analyses: std::sync::Arc::new(InMemoryAnalysisRepository::default()),
             challenge_progress: std::sync::Arc::new(InMemoryChallengeProgressRepository::default()),
         }
     }
@@ -42,10 +45,11 @@ impl AppState {
     pub(crate) async fn from_env(app_env: &str) -> Result<Self, String> {
         let auth = AuthState::from_env(app_env)?;
         let data_schema = DataSchema::for_app_env(app_env)?;
-        let (custom_pieces, accounts, game_records, challenge_progress): (
+        let (custom_pieces, accounts, game_records, analyses, challenge_progress): (
             CustomPieceStore,
             AccountStore,
             GameRecordStore,
+            AnalysisStore,
             ChallengeProgressStore,
         ) = match std::env::var("DATABASE_URL") {
             Ok(database_url) => {
@@ -66,6 +70,7 @@ impl AppState {
                         pool.clone(),
                         data_schema,
                     )),
+                    std::sync::Arc::new(PostgresAnalysisRepository::new(pool.clone(), data_schema)),
                     std::sync::Arc::new(PostgresChallengeProgressRepository::new(
                         pool,
                         data_schema,
@@ -84,7 +89,15 @@ impl AppState {
                     std::sync::Arc::new(InMemoryGameRecordRepository::default());
                 let challenge_progress: ChallengeProgressStore =
                     std::sync::Arc::new(InMemoryChallengeProgressRepository::default());
-                (custom_pieces, accounts, game_records, challenge_progress)
+                let analyses: AnalysisStore =
+                    std::sync::Arc::new(InMemoryAnalysisRepository::default());
+                (
+                    custom_pieces,
+                    accounts,
+                    game_records,
+                    analyses,
+                    challenge_progress,
+                )
             }
             Err(_) => return Err(format!("DATABASE_URL is required for APP_ENV={app_env}")),
         };
@@ -95,6 +108,7 @@ impl AppState {
             accounts,
             auth,
             game_records,
+            analyses,
             challenge_progress,
         })
     }
