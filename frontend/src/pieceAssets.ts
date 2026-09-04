@@ -36,6 +36,8 @@ import pawnBlack from './assets/pieces/pawn-black.svg'
 import pawnWhite from './assets/pieces/pawn-white.svg'
 import paratrooperBlack from './assets/pieces/paratrooper-black.svg'
 import paratrooperWhite from './assets/pieces/paratrooper-white.svg'
+import primeMinisterBlack from './assets/pieces/prime-minister-black.svg'
+import primeMinisterWhite from './assets/pieces/prime-minister-white.svg'
 import guardBlack from './assets/pieces/guard-black.svg'
 import guardWhite from './assets/pieces/guard-white.svg'
 import airborneBlack from './assets/pieces/airborne-black.svg'
@@ -80,6 +82,7 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   nightrider: { white: nightriderWhite, black: nightriderBlack },
   pawn: { white: pawnWhite, black: pawnBlack },
   paratrooper: { white: paratrooperWhite, black: paratrooperBlack },
+  'prime-minister': { white: primeMinisterWhite, black: primeMinisterBlack },
   'alternating-soldier': { white: guardWhite, black: guardBlack },
   airborne: { white: airborneWhite, black: airborneBlack },
   'green-camp': { white: greenCampWhite, black: greenCampBlack },
