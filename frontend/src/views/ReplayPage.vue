@@ -11,7 +11,7 @@
       <section class="replay-board-area">
         <div class="replay-player"><div><strong>{{ record.players.black.nickname }}</strong><small v-if="record.players.black.public_id">@{{ record.players.black.public_id }}</small></div><b>{{ clockText('black') }}</b></div>
         <div class="replay-board-readonly" aria-label="읽기 전용 리플레이 보드">
-          <Board ref="boardRef" :board="state.board" :pieces="state.pieces" :definitions="state.piece_definitions" :selected-piece-id="selectedPieceId" :movable-squares="movableSquares" :attack-squares="attackSquares" :threat-squares="[]" :drop-squares="dropSquares" :last-move="lastMove" orientation="white" :ability-mode="false" @square-click="onSquareClick" @piece-click="selectPiece" @piece-drag-start="selectPiece" @square-drop="onSquareDrop" />
+          <Board ref="boardRef" :board="state.board" :pieces="state.pieces" :definitions="state.piece_definitions" :selected-piece-id="selectedPieceId" :movable-squares="movableSquares" :attack-squares="attackSquares" :threat-squares="[]" :drop-squares="dropSquares" :last-move="lastMove" orientation="white" :ability-mode="false" @square-click="onSquareClick" @piece-click="onBoardPieceClick" @piece-drag-start="selectPiece" @square-drop="onSquareDrop" />
         </div>
         <div class="replay-player"><div><strong>{{ record.players.white.nickname }}</strong><small v-if="record.players.white.public_id">@{{ record.players.white.public_id }}</small></div><b>{{ clockText('white') }}</b></div>
         <section class="replay-controls" aria-label="리플레이 재생 조작">
@@ -71,7 +71,7 @@ import Board from '../components/Board.vue'
 import { encodeReplayCode } from '../replayCodec'
 import { formatLiveAction, formatNotation, groupNotation, squareName } from '../replayNotation'
 import { applyStateDelta, buildReplayFramesResult } from '../replayState'
-import { analysisPosition, reconcileOptimisticNode } from '../replayAnalysis'
+import { actionIdentity, analysisPosition, reconcileOptimisticNode } from '../replayAnalysis'
 import { abilityActionTargetsSquare, abilitySelectionSquares, isImmediateAbilityAction, moveOptionTargets } from '../moveOptionUi'
 import { timeControlLabel } from '../timeControls'
 import type { PlayerId, Square, TurnAction } from '../types/game'
@@ -145,7 +145,7 @@ async function selectPiece(pieceId: string) {
     const options=await api.getAnalysisOptions(props.record.game_id,position(),pieceId)
     if (selectedPieceId.value !== pieceId) return
     legalActions.value=[...options.moves,...options.drops,...options.ability_actions]
-    actionPreviews.value=options.previews
+    actionPreviews.value=options.previews??[]
     if(import.meta.env.DEV)console.debug('analysis_selection_timing',{networkAndLegalMs:performance.now()-started,actions:legalActions.value.length})
   } catch(cause){ analysisError.value=cause instanceof Error?cause.message:String(cause);clearSelection() }
 }
@@ -153,8 +153,9 @@ function sameSquare(a:Square|undefined,b:Square){return !!a&&a.file===b.file&&a.
 function actionChoiceLabel(action:TurnAction){if(action.type==='move')return action.promotion?`승격: ${action.promotion}`:`이동: ${action.move_option_id}`;if(action.type==='ability')return `능력: ${action.ability_id}`;return '포켓 배치'}
 function chooseAction(actions:TurnAction[]){if(actions.length<=1)return actions[0];const answer=window.prompt(actions.map((action,index)=>`${index+1}. ${actionChoiceLabel(action)}`).join('\n'));const index=Number(answer)-1;return Number.isInteger(index)?actions[index]:undefined}
 async function onSquareClick(square: Square) { if (!state.value) return; const pieceId=state.value.board.squares[`${square.file}_${square.rank}`]; if (!selectedPieceId.value) { if(pieceId) await selectPiece(pieceId); return } const actorSquare=state.value.pieces[selectedPieceId.value]?.current_square;const action=chooseAction(legalActions.value.filter(candidate=>sameSquare(candidate.to,square)||(candidate.type==='ability'&&abilityActionTargetsSquare(candidate,actorSquare,square)))); if(!action){if(pieceId) await selectPiece(pieceId);else clearSelection();return} await playAnalysisAction(action) }
+async function onBoardPieceClick(pieceId:string){const piece=state.value?.pieces[pieceId];if(selectedPieceId.value&&piece?.current_square){await onSquareClick(piece.current_square);return}await selectPiece(pieceId)}
 async function onSquareDrop(square: Square|null,pieceId:string){if(!square)return;await selectPiece(pieceId);await onSquareClick(square)}
-function sameAction(left:TurnAction,right:TurnAction){return JSON.stringify(left)===JSON.stringify(right)}
+function sameAction(left:TurnAction,right:TurnAction){return actionIdentity(left)===actionIdentity(right)}
 function previewFor(action:TurnAction){return actionPreviews.value.find(item=>sameAction(item.action,action))}
 function enqueuePersistence(job:()=>Promise<void>, basePly:number){
   persistenceQueue=persistenceQueue.then(job).catch(async cause=>{
@@ -171,9 +172,10 @@ async function playAnalysisAction(action: TurnAction) {
   const interactionStarted=performance.now()
   analysisError.value=null
   const preview=previewFor(action)
-  if(!preview){analysisError.value='분석 수의 local preview를 확인할 수 없습니다.';clearSelection();return}
+  if(!preview){await persistWithoutPreview(action);return}
   if(!state.value){analysisError.value='현재 분석 상태를 확인할 수 없습니다.';clearSelection();return}
-  const localState=applyStateDelta(state.value,preview.state_delta)
+  let localState
+  try{localState=applyStateDelta(state.value,preview.state_delta)}catch{await persistWithoutPreview(action);return}
   if(!activeTree.value){
     const actual=props.record.actions[ply.value]?.action
     if(actual&&sameAction(actual,action)){go(ply.value+1);return}
@@ -202,6 +204,24 @@ async function playAnalysisAction(action: TurnAction) {
     tree.version=result.version;tree.updated_at_ms=result.updated_at_ms;replaceLocalNode(tree,localId,result.node)
     if(import.meta.env.DEV)console.debug('analysis_persistence_timing',{kind:'append',networkAndServerMs:performance.now()-writeStarted})
   },basePly)
+}
+async function persistWithoutPreview(action:TurnAction){
+  const tree=activeTree.value,parent=activeNode.value,basePly=tree?.base_ply??ply.value
+  try{
+    if(!tree){
+      const actual=props.record.actions[ply.value]?.action
+      if(actual&&sameAction(actual,action)){go(ply.value+1);return}
+      const created=await api.createAnalysis(props.record.game_id,ply.value,action)
+      trees.value.push(created);activeTree.value=created;activeNode.value=created.nodes[0]??null
+    }else if(parent){
+      const result=await api.appendAnalysis(props.record.game_id,tree,parent.id,action)
+      tree.version=result.version;tree.updated_at_ms=result.updated_at_ms;tree.nodes.push(result.node);activeNode.value=result.node
+    }
+  }catch(cause){
+    analysisError.value=cause instanceof Error?cause.message:String(cause)
+    try{trees.value=await api.listAnalysis(props.record.game_id)}catch{trees.value=[]}
+    activeTree.value=null;activeNode.value=null;ply.value=basePly
+  }finally{clearSelection()}
 }
 function replaceTree(tree:AnalysisTree){const index=trees.value.findIndex(item=>item.id===tree.id);if(index>=0)trees.value[index]=tree}
 function openNode(tree:AnalysisTree,node:AnalysisNode){activeTree.value=tree;activeNode.value=node;ply.value=tree.base_ply;clearSelection()}

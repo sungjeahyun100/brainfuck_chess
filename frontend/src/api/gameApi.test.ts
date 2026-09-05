@@ -82,7 +82,10 @@ test('analysis writes send canonical actions, parent identity, version, and no c
   const calls: Array<{ url: string; body: Record<string, unknown> }> = []
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(input), body: JSON.parse(String(init?.body ?? '{}')) })
-    return new Response(JSON.stringify({ id: 'tree', game_id: 'game', name: 'V', base_ply: 3, version: 2, nodes: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    const response = calls.length === 1
+      ? { id: 'tree', game_id: 'game', name: 'V', base_ply: 3, version: 2, nodes: [] }
+      : { node: { id: 'child', parent_node_id: 'parent', action, state_after: {}, state_hash: 'hash', created_at_ms: 1 }, version: 3, updated_at_ms: 1 }
+    return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }) as typeof fetch
   const action = {
     type: 'move', player_id: 'white', piece_id: 'rook', from: { file: 0, rank: 0 }, to: { file: 0, rank: 1 }, move_option_id: 'normal', source_layer_ids: [],
@@ -95,6 +98,20 @@ test('analysis writes send canonical actions, parent identity, version, and no c
   assert.equal('state_after' in calls[0]!.body, false)
   assert.equal(calls[1]?.body.parent_node_id, 'parent')
   assert.equal(calls[1]?.body.expected_version, 2)
+})
+
+test('analysis append accepts the previous whole-tree response during rolling deploys', async () => {
+  const action = {
+    type: 'drop', player_id: 'white', piece_id: 'reserve', to: { file: 2, rank: 2 },
+  } as TurnAction
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    id: 'tree', game_id: 'game', name: 'V', base_ply: 3, version: 4,
+    created_at_ms: 0, updated_at_ms: 9,
+    nodes: [{ id: 'new-node', parent_node_id: 'parent', action: { to: { rank: 2, file: 2 }, piece_id: 'reserve', type: 'drop', player_id: 'white' }, state_after: {}, state_hash: 'hash', created_at_ms: 8 }],
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+  const result = await api.appendAnalysis('game', { id: 'tree', game_id: 'game', name: 'V', base_ply: 3, version: 3, created_at_ms: 0, updated_at_ms: 0, nodes: [] }, 'parent', action)
+  assert.equal(result.node.id, 'new-node')
+  assert.equal(result.version, 4)
 })
 
 test('retention update only sends the requested permanent state', async () => {

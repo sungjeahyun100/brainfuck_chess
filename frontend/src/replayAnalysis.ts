@@ -8,6 +8,20 @@ export interface AnalysisPositionRequest {
   pending_actions?: TurnAction[]
 }
 
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, canonicalValue(child)]))
+  }
+  return value
+}
+
+export function actionIdentity(action: TurnAction): string {
+  return JSON.stringify(canonicalValue(action))
+}
+
 /** Resolve the persisted cursor and the optimistic suffix independently. */
 export function analysisPosition(
   tree: AnalysisTree | null,

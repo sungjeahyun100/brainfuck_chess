@@ -18,6 +18,7 @@ import type {
 } from '../types/game'
 import type { PieceCatalogMetadata } from '../types/deck'
 import type { AnalysisActionPreview, AnalysisAppendResult, AnalysisTree, GameRecord } from '../types/gameRecord'
+import { actionIdentity } from '../replayAnalysis.ts'
 
 const BASE = '/api/games'
 const ROOM_BASE = '/api/rooms'
@@ -256,7 +257,12 @@ export const api = {
   },
 
   appendAnalysis(id: string, tree: AnalysisTree, parentNodeId: string, action: TurnAction): Promise<AnalysisAppendResult> {
-    return request(`${BASE}/${id}/analysis/${tree.id}/nodes`, { method: 'POST', body: JSON.stringify({ parent_node_id: parentNodeId, action: withTurnActionType(action), expected_version: tree.version, request_id: crypto.randomUUID() }) })
+    return request<AnalysisAppendResult | AnalysisTree>(`${BASE}/${id}/analysis/${tree.id}/nodes`, { method: 'POST', body: JSON.stringify({ parent_node_id: parentNodeId, action: withTurnActionType(action), expected_version: tree.version, request_id: crypto.randomUUID() }) }).then(response => {
+      if ('node' in response) return response
+      const node = [...response.nodes].reverse().find(candidate => candidate.parent_node_id === parentNodeId && actionIdentity(candidate.action) === actionIdentity(action))
+      if (!node) throw new Error('저장된 분석 노드를 확인할 수 없습니다.')
+      return { node, version: response.version, updated_at_ms: response.updated_at_ms }
+    })
   },
 
   renameAnalysis(id: string, tree: AnalysisTree, name: string): Promise<AnalysisTree> {

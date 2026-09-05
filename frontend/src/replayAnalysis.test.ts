@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { analysisPosition, reconcileOptimisticNode } from './replayAnalysis.ts'
+import { actionIdentity, analysisPosition, reconcileOptimisticNode } from './replayAnalysis.ts'
 import type { AnalysisNode, AnalysisTree } from './types/gameRecord.ts'
 import type { GameState, TurnAction } from './types/game.ts'
 
@@ -40,4 +40,10 @@ test('returning to a persisted parent creates a sibling branch position', () => 
   assert.deepEqual(analysisPosition(value, d, 0), {
     base_ply: 10, tree_id: 'tree', node_id: 'b', pending_actions: [d.action],
   })
+})
+
+test('canonical action matching ignores JSON property insertion order', () => {
+  const left = action('piece')
+  const right = { to: { rank: 0, file: 0 }, piece_id: 'piece', player_id: 'white', type: 'drop' } as TurnAction
+  assert.equal(actionIdentity(left), actionIdentity(right))
 })
