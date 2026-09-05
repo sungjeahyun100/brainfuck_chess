@@ -2379,6 +2379,8 @@ struct AnalysisPosition {
     base_ply: u32,
     tree_id: Option<String>,
     node_id: Option<String>,
+    #[serde(default)]
+    pending_actions: Vec<TurnAction>,
 }
 #[derive(Deserialize)]
 struct AnalysisOptionsRequest {
@@ -2392,6 +2394,13 @@ struct AnalysisOptionsResponse {
     moves: Vec<MoveAction>,
     drops: Vec<DropAction>,
     ability_actions: Vec<AbilityAction>,
+    previews: Vec<AnalysisActionPreview>,
+}
+#[derive(Serialize)]
+struct AnalysisActionPreview {
+    action: TurnAction,
+    state_delta: Vec<game_record::StateDeltaOperation>,
+    state_hash: String,
 }
 #[derive(Deserialize)]
 struct CreateAnalysisRequest {
@@ -2537,16 +2546,30 @@ fn validate_analysis_trees(
                 })?,
             );
             let expected_hash = analysis::state_hash(&expected).map_err(repository_error)?;
-            if expected_hash != node.state_hash
-                || analysis::state_hash(&node.state_after).map_err(repository_error)?
-                    != node.state_hash
-            {
+            let actual_hash = analysis::state_hash(&node.state_after).map_err(repository_error)?;
+            let legacy_hash = analysis::is_legacy_state_hash(&node.state_hash);
+            if expected_hash != actual_hash || (!legacy_hash && actual_hash != node.state_hash) {
+                eprintln!(
+                    "analysis_integrity_failure game_id={} variation_id={} node_id={} parent_node_id={} base_ply={} expected_hash={} actual_hash={} stored_hash={}",
+                    record.game_id,
+                    tree.id,
+                    node.id,
+                    node.parent_node_id.as_deref().unwrap_or("<root>"),
+                    tree.base_ply,
+                    expected_hash,
+                    actual_hash,
+                    node.state_hash,
+                );
                 return Err((
                     StatusCode::CONFLICT,
                     Json(ErrorResponse {
                         error: "분석 상태 무결성 검증에 실패했습니다.".into(),
                     }),
                 ));
+            }
+            if legacy_hash {
+                #[cfg(debug_assertions)]
+                eprintln!("analysis_legacy_hash_verified game_id={} variation_id={} node_id={} parent_node_id={} base_ply={} canonical_hash={}", record.game_id, tree.id, node.id, node.parent_node_id.as_deref().unwrap_or("<root>"), tree.base_ply, actual_hash);
             }
             verified.insert(node.id.clone(), expected);
         }
@@ -2559,7 +2582,15 @@ fn analysis_state(
     trees: &[analysis::AnalysisTree],
     position: &AnalysisPosition,
 ) -> Result<GameState, (StatusCode, Json<ErrorResponse>)> {
-    match (&position.tree_id, &position.node_id) {
+    if position.pending_actions.len() > 32 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "저장 대기 중인 분석 수가 너무 많습니다.".into(),
+            }),
+        ));
+    }
+    let state = match (&position.tree_id, &position.node_id) {
         (None, None) => record.state_at_ply(position.base_ply).map_err(|_| {
             (
                 StatusCode::BAD_REQUEST,
@@ -2585,8 +2616,57 @@ fn analysis_state(
                         }),
                     )
                 })?;
-            if analysis::state_hash(&node.state_after).map_err(repository_error)? != node.state_hash
-            {
+            let parent = if let Some(parent_id) = node.parent_node_id.as_deref() {
+                let parent = tree
+                    .nodes
+                    .iter()
+                    .find(|candidate| candidate.id == parent_id)
+                    .ok_or_else(|| {
+                        (
+                            StatusCode::CONFLICT,
+                            Json(ErrorResponse {
+                                error: "분석 부모 노드의 무결성 검증에 실패했습니다.".into(),
+                            }),
+                        )
+                    })?;
+                let parent_actual_hash =
+                    analysis::state_hash(&parent.state_after).map_err(repository_error)?;
+                if !analysis::is_legacy_state_hash(&parent.state_hash)
+                    && parent_actual_hash != parent.state_hash
+                {
+                    return Err((
+                        StatusCode::CONFLICT,
+                        Json(ErrorResponse {
+                            error: "분석 부모 노드의 무결성 검증에 실패했습니다.".into(),
+                        }),
+                    ));
+                }
+                parent.state_after.clone()
+            } else {
+                record.state_at_ply(tree.base_ply).map_err(|_| {
+                    (
+                        StatusCode::CONFLICT,
+                        Json(ErrorResponse {
+                            error: "분석 기준 상태의 무결성 검증에 실패했습니다.".into(),
+                        }),
+                    )
+                })?
+            };
+            let expected = analysis::normalized_state(
+                submit_engine_action(parent, node.action.clone()).map_err(|_| {
+                    (
+                        StatusCode::CONFLICT,
+                        Json(ErrorResponse {
+                            error: "분석 수의 합법성 재검증에 실패했습니다.".into(),
+                        }),
+                    )
+                })?,
+            );
+            let expected_hash = analysis::state_hash(&expected).map_err(repository_error)?;
+            let actual_hash = analysis::state_hash(&node.state_after).map_err(repository_error)?;
+            let legacy_hash = analysis::is_legacy_state_hash(&node.state_hash);
+            if expected_hash != actual_hash || (!legacy_hash && actual_hash != node.state_hash) {
+                eprintln!("analysis_integrity_failure game_id={} variation_id={} node_id={} parent_node_id={} base_ply={} expected_hash={} actual_hash={} stored_hash={}", record.game_id, tree.id, node.id, node.parent_node_id.as_deref().unwrap_or("<root>"), tree.base_ply, expected_hash, actual_hash, node.state_hash);
                 return Err((
                     StatusCode::CONFLICT,
                     Json(ErrorResponse {
@@ -2594,7 +2674,11 @@ fn analysis_state(
                     }),
                 ));
             }
-            Ok(node.state_after.clone())
+            if legacy_hash {
+                #[cfg(debug_assertions)]
+                eprintln!("analysis_legacy_hash_verified game_id={} variation_id={} node_id={} parent_node_id={} base_ply={} canonical_hash={}", record.game_id, tree.id, node.id, node.parent_node_id.as_deref().unwrap_or("<root>"), tree.base_ply, actual_hash);
+            }
+            Ok(expected)
         }
         _ => Err((
             StatusCode::BAD_REQUEST,
@@ -2602,7 +2686,16 @@ fn analysis_state(
                 error: "분석 위치가 올바르지 않습니다.".into(),
             }),
         )),
-    }
+    }?;
+    position
+        .pending_actions
+        .iter()
+        .cloned()
+        .try_fold(state, |state, action| {
+            submit_engine_action(state, action)
+                .map(analysis::normalized_state)
+                .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))
+        })
 }
 
 async fn list_analysis_trees(
@@ -2624,8 +2717,24 @@ async fn get_analysis_options(
     headers: HeaderMap,
     Json(request): Json<AnalysisOptionsRequest>,
 ) -> Result<Json<AnalysisOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let (_, record, trees) = owned_record_and_trees(&app, &headers, &id).await?;
+    let started = std::time::Instant::now();
+    let owner = authenticated_record_owner(&app, &headers, &id).await?;
+    let record = app
+        .game_records
+        .get(&id)
+        .await
+        .map_err(repository_error)?
+        .ok_or_else(private_game_record_error)?;
+    let trees = if request.position.tree_id.is_some() {
+        app.analyses
+            .list(&id, &owner)
+            .await
+            .map_err(repository_error)?
+    } else {
+        Vec::new()
+    };
     let state = analysis_state(&record, &trees, &request.position)?;
+    let state_ready = started.elapsed();
     let piece_id: PieceId = request.piece_id.into();
     let moves = generate_piece_legal_move_actions_with_options(
         &state,
@@ -2635,7 +2744,7 @@ async fn get_analysis_options(
         },
     );
     let drops = generate_piece_legal_drop_actions(&state, &piece_id);
-    let ability_actions = state
+    let ability_actions: Vec<AbilityAction> = state
         .pieces
         .get(&piece_id)
         .and_then(|piece| state.piece_definitions.get(&piece.type_id))
@@ -2649,10 +2758,40 @@ async fn get_analysis_options(
                 .collect()
         })
         .unwrap_or_default();
+    let legal_ready = started.elapsed();
+    let actions = moves
+        .iter()
+        .cloned()
+        .map(TurnAction::Move)
+        .chain(drops.iter().cloned().map(TurnAction::Drop))
+        .chain(ability_actions.iter().cloned().map(TurnAction::Ability));
+    let previews = actions
+        .filter_map(|action| {
+            let next = submit_engine_action(state.clone(), action.clone()).ok()?;
+            let state_after = analysis::normalized_state(next);
+            let state_hash = analysis::state_hash(&state_after).ok()?;
+            let state_delta = game_record::build_state_delta(&state, &state_after);
+            Some(AnalysisActionPreview {
+                action,
+                state_delta,
+                state_hash,
+            })
+        })
+        .collect();
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "analysis_options_timing game_id={} state_us={} legal_us={} preview_us={} total_us={}",
+        id,
+        state_ready.as_micros(),
+        (legal_ready - state_ready).as_micros(),
+        (started.elapsed() - legal_ready).as_micros(),
+        started.elapsed().as_micros(),
+    );
     Ok(Json(AnalysisOptionsResponse {
         moves,
         drops,
         ability_actions,
+        previews,
     }))
 }
 
@@ -2662,7 +2801,13 @@ async fn create_analysis_tree(
     headers: HeaderMap,
     Json(request): Json<CreateAnalysisRequest>,
 ) -> Result<Json<analysis::AnalysisTree>, (StatusCode, Json<ErrorResponse>)> {
-    let (owner, record, _) = owned_record_and_trees(&app, &headers, &id).await?;
+    let owner = authenticated_record_owner(&app, &headers, &id).await?;
+    let record = app
+        .game_records
+        .get(&id)
+        .await
+        .map_err(repository_error)?
+        .ok_or_else(private_game_record_error)?;
     if request.request_id.len() > 100 || request.request_id.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -2716,7 +2861,8 @@ async fn append_analysis_node(
     Path((id, tree_id)): Path<(String, String)>,
     headers: HeaderMap,
     Json(request): Json<AppendAnalysisRequest>,
-) -> Result<Json<analysis::AnalysisTree>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<analysis::AnalysisAppendResult>, (StatusCode, Json<ErrorResponse>)> {
+    let started = std::time::Instant::now();
     if request.request_id.is_empty() || request.request_id.len() > 100 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -2725,7 +2871,19 @@ async fn append_analysis_node(
             }),
         ));
     }
-    let (owner, record, trees) = owned_record_and_trees(&app, &headers, &id).await?;
+    let owner = authenticated_record_owner(&app, &headers, &id).await?;
+    let record = app
+        .game_records
+        .get(&id)
+        .await
+        .map_err(repository_error)?
+        .ok_or_else(private_game_record_error)?;
+    let trees = app
+        .analyses
+        .list(&id, &owner)
+        .await
+        .map_err(repository_error)?;
+    let validation_ready = started.elapsed();
     let tree = trees
         .iter()
         .find(|tree| tree.id == tree_id)
@@ -2734,6 +2892,7 @@ async fn append_analysis_node(
         base_ply: tree.base_ply,
         tree_id: Some(tree_id.clone()),
         node_id: Some(request.parent_node_id.clone()),
+        pending_actions: Vec::new(),
     };
     let state = analysis_state(&record, &trees, &position)?;
     let next = analysis::normalized_state(
@@ -2749,7 +2908,9 @@ async fn append_analysis_node(
         created_at_ms: now_ms(),
         request_id: request.request_id.clone(),
     };
-    app.analyses
+    let transition_ready = started.elapsed();
+    let result = app
+        .analyses
         .append(
             &tree_id,
             &owner,
@@ -2759,8 +2920,20 @@ async fn append_analysis_node(
         )
         .await
         .map_err(repository_error)?
-        .map(Json)
-        .ok_or_else(|| private_game_record_error())
+        .ok_or_else(|| private_game_record_error())?;
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "analysis_append_timing game_id={} variation_id={} node_id={} parent_node_id={} validation_us={} transition_us={} persistence_us={} total_us={}",
+        id,
+        tree_id,
+        result.node.id,
+        result.node.parent_node_id.as_deref().unwrap_or("<root>"),
+        validation_ready.as_micros(),
+        (transition_ready - validation_ready).as_micros(),
+        (started.elapsed() - transition_ready).as_micros(),
+        started.elapsed().as_micros(),
+    );
+    Ok(Json(result))
 }
 
 fn normalized_analysis_name(name: &str) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
@@ -4252,6 +4425,157 @@ mod tests {
             StoredGame::new(state, TimeControlId::Unlimited, false, now_ms()),
         );
         (app, game_id)
+    }
+
+    #[tokio::test]
+    async fn replay_analysis_persists_four_plies_and_branches_from_the_selected_parent() {
+        let (app, game_id) = test_app_with_game();
+        let mut record = app.games.get(&game_id).unwrap().record.clone();
+        record.ownership = GameRecordOwnership {
+            white_user_id: Some("analysis-owner".into()),
+            black_user_id: None,
+            persist: true,
+        };
+        app.game_records.save(&record).await.unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-user-id", "analysis-owner".parse().unwrap());
+
+        let first = generate_legal_move_actions(&record.initial_state)
+            .into_iter()
+            .next()
+            .expect("white has a legal analysis move");
+        let tree = create_analysis_tree(
+            State(app.clone()),
+            Path(game_id.clone()),
+            headers.clone(),
+            Json(CreateAnalysisRequest {
+                base_ply: 0,
+                name: None,
+                action: TurnAction::Move(first),
+                request_id: "create-four-ply".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let mut parent = tree.nodes[0].clone();
+        let reply_piece = parent
+            .state_after
+            .pieces
+            .values()
+            .find(|piece| {
+                piece.owner == parent.state_after.current_player && piece.current_square.is_some()
+            })
+            .expect("reply side has a board piece")
+            .id
+            .to_string();
+        let options = get_analysis_options(
+            State(app.clone()),
+            Path(game_id.clone()),
+            headers.clone(),
+            Json(AnalysisOptionsRequest {
+                position: AnalysisPosition {
+                    base_ply: 0,
+                    tree_id: Some(tree.id.clone()),
+                    node_id: Some(parent.id.clone()),
+                    pending_actions: Vec::new(),
+                },
+                piece_id: reply_piece,
+                move_option_id: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(!options.moves.is_empty());
+        assert_eq!(
+            options.previews.len(),
+            options.moves.len() + options.drops.len() + options.ability_actions.len()
+        );
+        let mut version = tree.version;
+        let mut second_node = None;
+        for index in 1..4 {
+            let action = generate_legal_move_actions(&parent.state_after)
+                .into_iter()
+                .next()
+                .expect("analysis line has a legal continuation");
+            let appended = append_analysis_node(
+                State(app.clone()),
+                Path((game_id.clone(), tree.id.clone())),
+                headers.clone(),
+                Json(AppendAnalysisRequest {
+                    parent_node_id: parent.id.clone(),
+                    action: TurnAction::Move(action),
+                    expected_version: version,
+                    request_id: format!("append-{index}"),
+                }),
+            )
+            .await
+            .unwrap()
+            .0;
+            assert_eq!(
+                appended.node.parent_node_id.as_deref(),
+                Some(parent.id.as_str())
+            );
+            if index == 1 {
+                second_node = Some(appended.node.clone());
+            }
+            parent = appended.node;
+            version = appended.version;
+        }
+
+        let branch_parent = second_node.expect("second analysis ply exists");
+        let existing_child = app.analyses.list(&game_id, "analysis-owner").await.unwrap()[0]
+            .nodes
+            .iter()
+            .find(|node| node.parent_node_id.as_deref() == Some(branch_parent.id.as_str()))
+            .unwrap()
+            .action
+            .clone();
+        let alternative = generate_legal_move_actions(&branch_parent.state_after)
+            .into_iter()
+            .map(TurnAction::Move)
+            .find(|action| {
+                serde_json::to_value(action).unwrap()
+                    != serde_json::to_value(&existing_child).unwrap()
+            })
+            .expect("branch parent has an alternative move");
+        let branch = append_analysis_node(
+            State(app.clone()),
+            Path((game_id.clone(), tree.id.clone())),
+            headers,
+            Json(AppendAnalysisRequest {
+                parent_node_id: branch_parent.id.clone(),
+                action: alternative,
+                expected_version: version,
+                request_id: "branch-d".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(
+            branch.node.parent_node_id.as_deref(),
+            Some(branch_parent.id.as_str())
+        );
+
+        let stored = app.analyses.list(&game_id, "analysis-owner").await.unwrap();
+        validate_analysis_trees(&record, &stored).unwrap();
+        assert_eq!(stored[0].nodes.len(), 5);
+        assert_eq!(
+            stored[0]
+                .nodes
+                .iter()
+                .filter(|node| node.parent_node_id.as_deref() == Some(branch_parent.id.as_str()))
+                .count(),
+            2
+        );
+        let mut legacy = stored.clone();
+        for node in &mut legacy[0].nodes {
+            node.state_hash = "sha256:legacy-stream-order-hash".into();
+        }
+        validate_analysis_trees(&record, &legacy)
+            .expect("legacy hashes retain semantic validation");
     }
 
     #[tokio::test]

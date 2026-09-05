@@ -17,7 +17,7 @@ import type {
   TurnAction,
 } from '../types/game'
 import type { PieceCatalogMetadata } from '../types/deck'
-import type { AnalysisTree, GameRecord } from '../types/gameRecord'
+import type { AnalysisActionPreview, AnalysisAppendResult, AnalysisTree, GameRecord } from '../types/gameRecord'
 
 const BASE = '/api/games'
 const ROOM_BASE = '/api/rooms'
@@ -247,7 +247,7 @@ export const api = {
     return request(`${BASE}/${id}/analysis`)
   },
 
-  getAnalysisOptions(id: string, position: { base_ply: number; tree_id?: string; node_id?: string }, pieceId: string, moveOptionId?: string): Promise<{ moves: MoveAction[]; drops: DropAction[]; ability_actions: import('../types/game').AbilityAction[] }> {
+  getAnalysisOptions(id: string, position: { base_ply: number; tree_id?: string; node_id?: string; pending_actions?: TurnAction[] }, pieceId: string, moveOptionId?: string): Promise<{ moves: MoveAction[]; drops: DropAction[]; ability_actions: import('../types/game').AbilityAction[]; previews: AnalysisActionPreview[] }> {
     return request(`${BASE}/${id}/analysis/options`, { method: 'POST', body: JSON.stringify({ ...position, piece_id: pieceId, move_option_id: moveOptionId }) })
   },
 
@@ -255,7 +255,7 @@ export const api = {
     return request(`${BASE}/${id}/analysis`, { method: 'POST', body: JSON.stringify({ base_ply: basePly, action: withTurnActionType(action), name, request_id: crypto.randomUUID() }) })
   },
 
-  appendAnalysis(id: string, tree: AnalysisTree, parentNodeId: string, action: TurnAction): Promise<AnalysisTree> {
+  appendAnalysis(id: string, tree: AnalysisTree, parentNodeId: string, action: TurnAction): Promise<AnalysisAppendResult> {
     return request(`${BASE}/${id}/analysis/${tree.id}/nodes`, { method: 'POST', body: JSON.stringify({ parent_node_id: parentNodeId, action: withTurnActionType(action), expected_version: tree.version, request_id: crypto.randomUUID() }) })
   },
 

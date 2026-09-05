@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use brainfuck_chess_engine::types::{GameState, TurnAction};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use std::{
@@ -39,14 +40,43 @@ pub(crate) struct AnalysisTree {
     pub(crate) request_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct AnalysisAppendResult {
+    pub(crate) node: AnalysisNode,
+    pub(crate) version: i64,
+    pub(crate) updated_at_ms: i64,
+}
+
 pub(crate) fn normalized_state(mut state: GameState) -> GameState {
     state.history.clear();
     state
 }
 
 pub(crate) fn state_hash(state: &GameState) -> Result<String, &'static str> {
-    let bytes = serde_json::to_vec(&normalized_state(state.clone())).map_err(|_| "unavailable")?;
-    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+    let mut value =
+        serde_json::to_value(normalized_state(state.clone())).map_err(|_| "unavailable")?;
+    canonicalize_json(&mut value);
+    let bytes = serde_json::to_vec(&value).map_err(|_| "unavailable")?;
+    Ok(format!("sha256-canonical:{:x}", Sha256::digest(bytes)))
+}
+
+pub(crate) fn is_legacy_state_hash(hash: &str) -> bool {
+    hash.starts_with("sha256:") && !hash.starts_with("sha256-canonical:")
+}
+
+fn canonicalize_json(value: &mut Value) {
+    match value {
+        Value::Array(values) => values.iter_mut().for_each(canonicalize_json),
+        Value::Object(values) => {
+            for child in values.values_mut() {
+                canonicalize_json(child);
+            }
+            let mut entries = std::mem::take(values).into_iter().collect::<Vec<_>>();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            values.extend(entries);
+        }
+        _ => {}
+    }
 }
 
 #[async_trait]
@@ -68,7 +98,7 @@ pub(crate) trait AnalysisRepository: Send + Sync {
         node: AnalysisNode,
         expected_version: i64,
         request_id: &str,
-    ) -> Result<Option<AnalysisTree>, &'static str>;
+    ) -> Result<Option<AnalysisAppendResult>, &'static str>;
     async fn rename(
         &self,
         tree_id: &str,
@@ -128,7 +158,7 @@ impl AnalysisRepository for InMemoryAnalysisRepository {
         node: AnalysisNode,
         version: i64,
         _request_id: &str,
-    ) -> Result<Option<AnalysisTree>, &'static str> {
+    ) -> Result<Option<AnalysisAppendResult>, &'static str> {
         let mut trees = self.0.write().map_err(|_| "unavailable")?;
         let Some(tree) = trees.get_mut(tree_id) else {
             return Ok(None);
@@ -141,7 +171,17 @@ impl AnalysisRepository for InMemoryAnalysisRepository {
             .iter()
             .any(|entry| entry.request_id == node.request_id)
         {
-            return Ok(Some(tree.clone()));
+            let existing = tree
+                .nodes
+                .iter()
+                .find(|entry| entry.request_id == node.request_id)
+                .expect("idempotency match disappeared")
+                .clone();
+            return Ok(Some(AnalysisAppendResult {
+                node: existing,
+                version: tree.version,
+                updated_at_ms: tree.updated_at_ms,
+            }));
         }
         if tree.version != version {
             return Err("conflict");
@@ -153,10 +193,14 @@ impl AnalysisRepository for InMemoryAnalysisRepository {
         {
             return Err("invalid_parent");
         }
-        tree.nodes.push(node);
+        tree.nodes.push(node.clone());
         tree.version += 1;
         tree.updated_at_ms = crate::time_control::now_ms();
-        Ok(Some(tree.clone()))
+        Ok(Some(AnalysisAppendResult {
+            node,
+            version: tree.version,
+            updated_at_ms: tree.updated_at_ms,
+        }))
     }
     async fn rename(
         &self,
@@ -259,6 +303,45 @@ impl PostgresAnalysisRepository {
             .list_by_clause("trees.id=$1 AND trees.owner_user_id=$2", tree_id, owner)
             .await?;
         Ok(trees.pop())
+    }
+    async fn get_append_result(
+        &self,
+        tree_id: &str,
+        owner: &str,
+        request_id: &str,
+    ) -> Result<Option<AnalysisAppendResult>, &'static str> {
+        let row = sqlx::query(&format!(
+            "SELECT trees.version, trees.updated_at_ms, nodes.id, nodes.parent_node_id, nodes.action, nodes.state_after, nodes.state_hash, nodes.request_id, nodes.created_at_ms FROM {} nodes JOIN {} trees ON trees.id=nodes.analysis_tree_id WHERE nodes.analysis_tree_id=$1 AND nodes.request_id=$2 AND trees.owner_user_id=$3",
+            self.nodes, self.trees
+        ))
+        .bind(tree_id)
+        .bind(request_id)
+        .bind(owner)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|_| "unavailable")?;
+        row.map(|row| {
+            Ok(AnalysisAppendResult {
+                node: AnalysisNode {
+                    id: row.try_get("id").map_err(|_| "unavailable")?,
+                    parent_node_id: row.try_get("parent_node_id").map_err(|_| "unavailable")?,
+                    action: serde_json::from_value(
+                        row.try_get("action").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
+                    state_after: serde_json::from_value(
+                        row.try_get("state_after").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
+                    state_hash: row.try_get("state_hash").map_err(|_| "unavailable")?,
+                    request_id: row.try_get("request_id").map_err(|_| "unavailable")?,
+                    created_at_ms: row.try_get("created_at_ms").map_err(|_| "unavailable")?,
+                },
+                version: row.try_get("version").map_err(|_| "unavailable")?,
+                updated_at_ms: row.try_get("updated_at_ms").map_err(|_| "unavailable")?,
+            })
+        })
+        .transpose()
     }
     async fn list_by_clause(
         &self,
@@ -365,8 +448,10 @@ impl AnalysisRepository for PostgresAnalysisRepository {
         node: AnalysisNode,
         version: i64,
         request_id: &str,
-    ) -> Result<Option<AnalysisTree>, &'static str> {
-        if sqlx::query_scalar::<_, bool>(&format!("SELECT EXISTS(SELECT 1 FROM {} nodes JOIN {} trees ON trees.id=nodes.analysis_tree_id WHERE nodes.analysis_tree_id=$1 AND nodes.request_id=$2 AND trees.owner_user_id=$3)",self.nodes,self.trees)).bind(tree_id).bind(request_id).bind(owner).fetch_one(&self.pool).await.map_err(|_|"unavailable")? { return self.get_tree(tree_id,owner).await }
+    ) -> Result<Option<AnalysisAppendResult>, &'static str> {
+        if let Some(existing) = self.get_append_result(tree_id, owner, request_id).await? {
+            return Ok(Some(existing));
+        }
         let mut tx = self.pool.begin().await.map_err(|_| "unavailable")?;
         let updated=sqlx::query(&format!("UPDATE {} SET version=version+1,updated_at_ms=$4 WHERE id=$1 AND owner_user_id=$2 AND version=$3",self.trees)).bind(tree_id).bind(owner).bind(version).bind(node.created_at_ms).execute(&mut *tx).await.map_err(|_| "unavailable")?.rows_affected();
         if updated == 0 {
@@ -379,7 +464,7 @@ impl AnalysisRepository for PostgresAnalysisRepository {
         }
         sqlx::query(&format!("INSERT INTO {} (id,analysis_tree_id,parent_node_id,action,state_after,state_hash,request_id,created_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (analysis_tree_id,request_id) DO NOTHING",self.nodes)).bind(&node.id).bind(tree_id).bind(node.parent_node_id.as_deref()).bind(serde_json::to_value(&node.action).map_err(|_| "unavailable")?).bind(serde_json::to_value(&node.state_after).map_err(|_| "unavailable")?).bind(&node.state_hash).bind(request_id).bind(node.created_at_ms).execute(&mut *tx).await.map_err(|_| "invalid_parent")?;
         tx.commit().await.map_err(|_| "unavailable")?;
-        self.get_tree(tree_id, owner).await
+        self.get_append_result(tree_id, owner, request_id).await
     }
     async fn rename(
         &self,
@@ -535,9 +620,10 @@ mod tests {
         .unwrap();
         let root = tree.nodes[0].id.clone();
         let tree = repository.create(tree, "create").await.unwrap();
-        let tree = repository
+        let tree_id = tree.id.clone();
+        let first = repository
             .append(
-                &tree.id,
+                &tree_id,
                 "owner",
                 node("a", Some(&root), "a"),
                 tree.version,
@@ -546,30 +632,30 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let tree = repository
+        let second = repository
             .append(
-                &tree.id,
+                &tree_id,
                 "owner",
                 node("b", Some(&root), "b"),
-                tree.version,
+                first.version,
                 "b",
             )
             .await
             .unwrap()
             .unwrap();
-        let tree = repository
+        let third = repository
             .append(
-                &tree.id,
+                &tree_id,
                 "owner",
                 node("a-child", Some("a"), "a-child"),
-                tree.version,
+                second.version,
                 "a-child",
             )
             .await
             .unwrap()
             .unwrap();
         let tree = repository
-            .delete_subtree(&tree.id, "owner", "a", tree.version, 4)
+            .delete_subtree(&tree_id, "owner", "a", third.version, 4)
             .await
             .unwrap()
             .unwrap();
@@ -630,7 +716,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(retried.nodes.len(), updated.nodes.len());
+        assert_eq!(retried.node.id, updated.node.id);
+        assert_eq!(retried.version, updated.version);
         assert_eq!(
             repository
                 .append(
@@ -655,5 +742,16 @@ mod tests {
             state_hash(&original).unwrap(),
             state_hash(&tampered).unwrap()
         );
+    }
+
+    #[test]
+    fn state_hash_is_independent_of_hash_map_insertion_order() {
+        let mut left = state();
+        left.global_state.insert("alpha".into(), 1);
+        left.global_state.insert("beta".into(), 2);
+        let mut right = state();
+        right.global_state.insert("beta".into(), 2);
+        right.global_state.insert("alpha".into(), 1);
+        assert_eq!(state_hash(&left).unwrap(), state_hash(&right).unwrap());
     }
 }

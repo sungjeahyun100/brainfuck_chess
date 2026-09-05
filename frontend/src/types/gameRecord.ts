@@ -41,7 +41,11 @@ export interface GameRecordSummary {
 
 export interface AnalysisNode {
   id: string; parent_node_id?: string | null; action: TurnAction; state_after: GameState; state_hash: string; created_at_ms: number
+  /** Present only while an optimistic node is waiting for server persistence. */
+  pending?: boolean
 }
 export interface AnalysisTree {
   id: string; game_id: string; name: string; base_ply: number; version: number; created_at_ms: number; updated_at_ms: number; nodes: AnalysisNode[]
 }
+export interface AnalysisAppendResult { node: AnalysisNode; version: number; updated_at_ms: number }
+export interface AnalysisActionPreview { action: TurnAction; state_delta: StateDeltaOperation[]; state_hash: string }

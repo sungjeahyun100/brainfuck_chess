@@ -647,7 +647,7 @@ fn replay_state_value(state: &GameState) -> Value {
     value
 }
 
-fn build_state_delta(before: &GameState, after: &GameState) -> Vec<StateDeltaOperation> {
+pub(crate) fn build_state_delta(before: &GameState, after: &GameState) -> Vec<StateDeltaOperation> {
     let mut operations = Vec::new();
     diff_values(
         &replay_state_value(before),
