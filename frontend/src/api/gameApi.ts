@@ -330,7 +330,12 @@ export const api = {
   },
 
   getAnalysisOptions(id: string, position: { base_ply: number; tree_id?: string; node_id?: string; pending_actions?: TurnAction[] }, pieceId: string, moveOptionId?: string): Promise<{ moves: MoveAction[]; drops: DropAction[]; ability_actions: import('../types/game').AbilityAction[]; previews: AnalysisActionPreview[] }> {
-    return request(`${BASE}/${id}/analysis/options`, { method: 'POST', body: JSON.stringify({ ...position, piece_id: pieceId, move_option_id: moveOptionId }) })
+    return request<{ moves: MoveAction[]; drops: DropAction[]; ability_actions: import('../types/game').AbilityAction[]; previews: AnalysisActionPreview[] }>(`${BASE}/${id}/analysis/options`, { method: 'POST', body: JSON.stringify({ ...position, piece_id: pieceId, move_option_id: moveOptionId }) }).then(response => ({
+      ...response,
+      moves: response.moves.map(move => ({ ...move, type: 'move' })),
+      drops: response.drops.map(drop => ({ ...drop, type: 'drop' })),
+      ability_actions: response.ability_actions.map(action => ({ ...action, type: 'ability' })),
+    }))
   },
 
   createAnalysis(id: string, basePly: number, action: TurnAction, name?: string): Promise<AnalysisTree> {

@@ -102,6 +102,29 @@ test('piece lab action adds the move discriminator omitted by legal-action respo
   assert.equal(body.action.piece_id, 'lab-rook')
 })
 
+test('analysis options add discriminators omitted by server action arrays', async () => {
+  const move = {
+    player_id: 'white', piece_id: 'rook', from: { file: 0, rank: 0 }, to: { file: 0, rank: 1 },
+    move_option_id: 'normal', source_layer_ids: [],
+    effects: { global_state_updates: [], piece_state_updates: [], cooldown_updates: [] },
+  }
+  const drop = { player_id: 'white', piece_id: 'reserve', to: { file: 1, rank: 1 } }
+  const ability = { player_id: 'white', piece_id: 'mortar', ability_id: 'barrage', deployments: [] }
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    moves: [move],
+    drops: [drop],
+    ability_actions: [ability],
+    previews: [{ action: { type: 'move', ...move }, state_delta: [], state_hash: 'hash' }],
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+
+  const result = await api.getAnalysisOptions('game', { base_ply: 0 }, 'rook')
+
+  assert.equal(result.moves[0]?.type, 'move')
+  assert.equal(result.drops[0]?.type, 'drop')
+  assert.equal(result.ability_actions[0]?.type, 'ability')
+  assert.deepEqual(result.moves[0], result.previews[0]?.action)
+})
+
 test('singleplayer create request sends only side and per-game nicknames as player metadata', async () => {
   let body: Record<string, unknown> = {}
   globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
