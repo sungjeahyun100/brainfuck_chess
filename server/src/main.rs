@@ -18,6 +18,7 @@ mod challenge;
 mod custom_piece;
 mod database;
 mod game_record;
+mod profiling;
 mod request_guard;
 mod routes;
 mod stores;
@@ -27,7 +28,7 @@ use account::ProfileVisibility;
 use app_state::AppState;
 use game_record::{GameRecordOwnership, GameRecordPlayer};
 use stores::RoomStore;
-use time_control::{now_ms, GameView, StoredGame, TimeControlId};
+use time_control::{now_ms, GameSyncView, GameView, StoredGame, TimeControlId};
 
 use brainfuck_chess_engine::{
     actions::submit_action as submit_engine_action,
@@ -172,6 +173,10 @@ struct ResignGameRequest {
 struct HeartbeatRequest {
     client_id: String,
     player_id: PlayerId,
+    #[serde(default)]
+    catalog_revision: Option<u64>,
+    #[serde(default)]
+    latest_ply: usize,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -334,7 +339,6 @@ struct PieceAttacksResponse {
 #[derive(Serialize)]
 struct PieceOptionsResponse {
     moves: Vec<MoveAction>,
-    attacks: Vec<Square>,
     ability_actions: Vec<AbilityAction>,
 }
 
@@ -2101,7 +2105,9 @@ async fn heartbeat_room(
     State(app): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<HeartbeatRequest>,
-) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<GameSyncView>, (StatusCode, Json<ErrorResponse>)> {
+    #[cfg(feature = "profiling")]
+    let handler_started = std::time::Instant::now();
     let room = app.rooms.get(&id.to_uppercase()).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -2130,6 +2136,8 @@ async fn heartbeat_room(
         )
     })?;
     drop(room);
+    #[cfg(feature = "profiling")]
+    let guard_started = std::time::Instant::now();
     let mut game = app.games.get_mut(&game_id).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -2143,7 +2151,28 @@ async fn heartbeat_room(
     if game.phase != GamePhase::Ended {
         game.heartbeat(&req.player_id, now);
     }
-    Ok(Json(game.view(now)))
+    #[cfg(feature = "profiling")]
+    let view_started = std::time::Instant::now();
+    let view = game.sync_view(now, req.catalog_revision, req.latest_ply);
+    #[cfg(feature = "profiling")]
+    let view_nanos = view_started.elapsed().as_nanos() as u64;
+    drop(game);
+    #[cfg(feature = "profiling")]
+    {
+        let guard_nanos = guard_started.elapsed().as_nanos() as u64;
+        let handler_nanos = handler_started.elapsed().as_nanos() as u64;
+        let serialization_started = std::time::Instant::now();
+        let response_bytes = serde_json::to_vec(&view).map_or(0, |json| json.len() as u64);
+        let serialization_nanos = serialization_started.elapsed().as_nanos() as u64;
+        profiling::record_heartbeat(
+            handler_nanos,
+            guard_nanos,
+            view_nanos,
+            serialization_nanos,
+            response_bytes,
+        );
+    }
+    Ok(Json(view))
 }
 
 async fn get_game(
@@ -3451,8 +3480,10 @@ async fn get_piece_options(
     Path((id, piece_id)): Path<(String, String)>,
     Query(query): Query<PieceOptionsQuery>,
 ) -> Result<Json<PieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    #[cfg(feature = "profiling")]
+    let started = std::time::Instant::now();
     let piece_id = PieceId::from(piece_id);
-    match app.games.get(&id) {
+    let response = match app.games.get(&id) {
         Some(state) => {
             let ability_actions = query
                 .move_option_id
@@ -3470,10 +3501,8 @@ async fn get_piece_options(
             } else {
                 Vec::new()
             };
-            let attacks = generate_piece_attack_squares(&state, &piece_id);
             Ok(Json(PieceOptionsResponse {
                 moves,
-                attacks,
                 ability_actions,
             }))
         }
@@ -3483,7 +3512,18 @@ async fn get_piece_options(
                 error: "게임을 찾을 수 없습니다.".into(),
             }),
         )),
+    };
+    #[cfg(feature = "profiling")]
+    brainfuck_chess_engine::profiling::record_piece_options(started.elapsed());
+    #[cfg(feature = "profiling")]
+    if let Ok(Json(body)) = &response {
+        let serialization_started = std::time::Instant::now();
+        let _ = serde_json::to_vec(body);
+        profiling::record_piece_options_serialization(
+            serialization_started.elapsed().as_nanos() as u64
+        );
     }
+    response
 }
 
 async fn get_lab_piece_options(
@@ -4427,6 +4467,185 @@ mod tests {
         (app, game_id)
     }
 
+    #[test]
+    #[ignore = "payload diagnostic; run explicitly with --ignored --nocapture"]
+    fn game_view_payload_profile() {
+        const ITERATIONS: u32 = 200;
+
+        fn measure(name: &str, state: GameState) {
+            let full_store = AppState::in_memory();
+            full_store.games.insert(
+                "profile".into(),
+                StoredGame::new(state.clone(), TimeControlId::Unlimited, true, now_ms()),
+            );
+            let full_guard_started = std::time::Instant::now();
+            for _ in 0..ITERATIONS {
+                let game = full_store.games.get_mut("profile").unwrap();
+                std::hint::black_box(game.view(now_ms()));
+            }
+            let full_guard_us = (full_guard_started.elapsed() / ITERATIONS).as_micros();
+
+            let sync_store = AppState::in_memory();
+            sync_store.games.insert(
+                "profile".into(),
+                StoredGame::new(state.clone(), TimeControlId::Unlimited, true, now_ms()),
+            );
+            let sync_since_ply = state.history.len();
+            let sync_guard_started = std::time::Instant::now();
+            for _ in 0..ITERATIONS {
+                let mut game = sync_store.games.get_mut("profile").unwrap();
+                std::hint::black_box(game.sync_view(now_ms(), Some(1), sync_since_ply));
+            }
+            let sync_guard_us = (sync_guard_started.elapsed() / ITERATIONS).as_micros();
+
+            let mut game = StoredGame::new(state, TimeControlId::Unlimited, true, now_ms());
+            let clone_started = std::time::Instant::now();
+            for _ in 0..ITERATIONS {
+                std::hint::black_box(game.state.clone());
+            }
+            let clone_us = (clone_started.elapsed() / ITERATIONS).as_micros();
+
+            let full_view_started = std::time::Instant::now();
+            for _ in 0..ITERATIONS {
+                std::hint::black_box(game.view(now_ms()));
+            }
+            let full_view_us = (full_view_started.elapsed() / ITERATIONS).as_micros();
+            let full_sample = game.view(now_ms());
+            let full_serialization_started = std::time::Instant::now();
+            let mut full_bytes = 0;
+            for _ in 0..ITERATIONS {
+                full_bytes = serde_json::to_vec(&full_sample).unwrap().len();
+            }
+            let full_serialization_us =
+                (full_serialization_started.elapsed() / ITERATIONS).as_micros();
+
+            let since_ply = game.state.history.len();
+            let sync_view_started = std::time::Instant::now();
+            for _ in 0..ITERATIONS {
+                std::hint::black_box(game.sync_view(now_ms(), Some(1), since_ply));
+            }
+            let sync_view_us = (sync_view_started.elapsed() / ITERATIONS).as_micros();
+            let sync_sample = game.sync_view(now_ms(), Some(1), since_ply);
+            let sync_serialization_started = std::time::Instant::now();
+            let mut sync_bytes = 0;
+            for _ in 0..ITERATIONS {
+                sync_bytes = serde_json::to_vec(&sync_sample).unwrap().len();
+            }
+            let sync_serialization_us =
+                (sync_serialization_started.elapsed() / ITERATIONS).as_micros();
+
+            let full_value = serde_json::to_value(game.view(now_ms())).unwrap();
+            let catalog_bytes = serde_json::to_vec(&full_value["piece_definitions"])
+                .unwrap()
+                .len();
+            let history_bytes = serde_json::to_vec(&full_value["history"]).unwrap().len();
+            println!(
+                "{name},before,{full_bytes},{full_view_us},{clone_us},{full_serialization_us},{catalog_bytes},{history_bytes},{full_guard_us}"
+            );
+            println!("{name},after,{sync_bytes},{sync_view_us},0,{sync_serialization_us},0,0,{sync_guard_us}");
+        }
+
+        let (app, game_id) = test_app_with_game();
+        let initial = app.games.get(&game_id).unwrap().state.clone();
+        let sample_action =
+            generate_piece_legal_move_actions(&initial, &PieceId::from("white_rook_1"))
+                .into_iter()
+                .next()
+                .unwrap();
+        let sample_record = ActionRecord {
+            turn_number: 1,
+            player_id: "white".into(),
+            action: TurnAction::Move(sample_action),
+        };
+
+        println!("scenario,variant,bytes,view_construction_us,state_clone_us,serialization_us,catalog_bytes,history_bytes,dashmap_guard_us");
+        measure("initial-8x8", initial.clone());
+
+        let mut fifty_ply = initial.clone();
+        fifty_ply.history = vec![sample_record.clone(); 50];
+        measure("50-ply-8x8", fifty_ply);
+
+        let mut two_hundred_ply = initial.clone();
+        two_hundred_ply.history = vec![sample_record.clone(); 200];
+        measure("200-ply-8x8", two_hundred_ply);
+
+        let mut large = initial.clone();
+        large.board = create_board(12);
+        for piece in large.pieces.values() {
+            if let Some(square) = piece.current_square {
+                large
+                    .board
+                    .squares
+                    .insert(square.to_id(), Some(piece.id.clone()));
+            }
+        }
+        measure("12x12", large);
+
+        let mut custom = initial;
+        let mut definition = custom.piece_definitions["rook"].clone();
+        definition.id = "custom-profile-rook".into();
+        custom
+            .piece_definitions
+            .insert(definition.id.clone(), definition);
+        custom.pieces.get_mut("white_rook_1").unwrap().type_id = "custom-profile-rook".into();
+        custom.rebuild_chessembly_cache();
+        measure("custom-piece", custom);
+    }
+
+    #[test]
+    fn heartbeat_sync_omits_unchanged_catalog_runtime_and_full_history() {
+        let (app, game_id) = test_app_with_game();
+        let mut game = app.games.get_mut(&game_id).unwrap();
+
+        let initial_json = serde_json::to_value(game.view(now_ms())).unwrap();
+        assert!(initial_json.get("piece_definitions").is_some());
+        assert!(initial_json.get("chessembly_program_cache").is_none());
+
+        let reconnect = game.sync_view(now_ms(), None, 0);
+        let catalog_revision = reconnect.catalog_revision;
+        assert!(reconnect.catalog.is_some());
+        let reconnect_json = serde_json::to_value(&reconnect).unwrap();
+        assert_eq!(reconnect_json["dynamic"]["board"], initial_json["board"]);
+        assert_eq!(
+            reconnect_json["catalog"]["piece_definitions"],
+            initial_json["piece_definitions"]
+        );
+
+        let steady = game.sync_view(now_ms(), Some(catalog_revision), 0);
+        let steady_json = serde_json::to_value(&steady).unwrap();
+        assert!(steady.catalog.is_none());
+        assert!(steady_json["dynamic"].get("piece_definitions").is_none());
+        assert!(steady_json["dynamic"].get("history").is_none());
+        assert!(steady_json.get("chessembly_program_cache").is_none());
+    }
+
+    #[test]
+    fn heartbeat_history_is_incremental_and_mismatch_has_full_recovery() {
+        let (app, game_id) = test_app_with_game();
+        let mut game = app.games.get_mut(&game_id).unwrap();
+        let action = generate_piece_legal_move_actions(&game.state, &PieceId::from("white_rook_1"))
+            .into_iter()
+            .next()
+            .unwrap();
+        game.state.history.push(ActionRecord {
+            turn_number: 1,
+            player_id: "white".into(),
+            action: TurnAction::Move(action),
+        });
+
+        let incremental = game.sync_view(now_ms(), Some(1), 0);
+        assert_eq!(incremental.latest_ply, 1);
+        assert_eq!(incremental.new_history.len(), 1);
+        assert!(!incremental.resync_required);
+
+        let caught_up = game.sync_view(now_ms(), Some(1), 1);
+        assert!(caught_up.new_history.is_empty());
+
+        let recovered = game.sync_view(now_ms(), Some(1), 99);
+        assert!(recovered.resync_required);
+        assert_eq!(recovered.new_history.len(), 1);
+    }
+
     #[tokio::test]
     async fn replay_analysis_persists_four_plies_and_branches_from_the_selected_parent() {
         let (app, game_id) = test_app_with_game();
@@ -4733,6 +4952,8 @@ mod tests {
 
         assert!(!response.moves.is_empty());
         assert!(response.moves.iter().all(|m| m.piece_id == piece_id));
+        let json = serde_json::to_value(response).unwrap();
+        assert!(json.get("attacks").is_none());
     }
 
     #[tokio::test]

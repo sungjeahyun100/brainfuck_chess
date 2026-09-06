@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
@@ -49,16 +49,40 @@ fn is_rook_piece(piece: &Piece) -> bool {
     piece.type_id == "rook"
 }
 
-fn push_action_if_unique(actions: &mut Vec<MoveAction>, action: MoveAction) {
-    let exists = actions.iter().any(|m| {
-        m.piece_id == action.piece_id
-            && m.to == action.to
-            && m.promotion == action.promotion
-            && m.move_option_id == action.move_option_id
-            && m.source_layer_ids == action.source_layer_ids
-            && m.effects == action.effects
-    });
-    if !exists {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MoveActionKey {
+    piece_id: PieceId,
+    to: Square,
+    promotion: Option<PieceTypeId>,
+    move_option_id: String,
+    source_layer_ids: Vec<String>,
+    effects: ActionEffects,
+}
+
+impl From<&MoveAction> for MoveActionKey {
+    fn from(action: &MoveAction) -> Self {
+        Self {
+            piece_id: action.piece_id.clone(),
+            to: action.to,
+            promotion: action.promotion.clone(),
+            move_option_id: action.move_option_id.clone(),
+            source_layer_ids: action.source_layer_ids.clone(),
+            effects: action.effects.clone(),
+        }
+    }
+}
+
+fn push_action_if_unique(
+    actions: &mut Vec<MoveAction>,
+    seen: &mut HashSet<MoveActionKey>,
+    action: MoveAction,
+) {
+    #[cfg(feature = "profiling")]
+    let started = Instant::now();
+    let is_new = seen.insert(MoveActionKey::from(&action));
+    #[cfg(feature = "profiling")]
+    crate::profiling::record_deduplication(started.elapsed());
+    if is_new {
         actions.push(action);
     }
 }
@@ -82,6 +106,7 @@ struct MoveBuildContext<'a> {
 /// when the moving piece's definition has a matching promotion rule.
 fn push_move_or_promotions(
     actions: &mut Vec<MoveAction>,
+    seen: &mut HashSet<MoveActionKey>,
     context: &MoveBuildContext<'_>,
     to: Square,
     captured_piece_id: Option<PieceId>,
@@ -112,6 +137,7 @@ fn push_move_or_promotions(
         for promo in promotion_options {
             push_action_if_unique(
                 actions,
+                seen,
                 MoveAction {
                     player_id: context.player_id.clone(),
                     piece_id: context.piece_id.clone(),
@@ -128,6 +154,7 @@ fn push_move_or_promotions(
     } else {
         push_action_if_unique(
             actions,
+            seen,
             MoveAction {
                 player_id: context.player_id.clone(),
                 piece_id: context.piece_id.clone(),
@@ -145,6 +172,7 @@ fn push_move_or_promotions(
 
 fn append_actions_from_result(
     actions: &mut Vec<MoveAction>,
+    seen: &mut HashSet<MoveActionKey>,
     result: &ChessemblyResult,
     context: &MoveBuildContext<'_>,
 ) {
@@ -181,7 +209,7 @@ fn append_actions_from_result(
             }
         }
 
-        push_move_or_promotions(actions, context, to, captured_piece_id, &effects);
+        push_move_or_promotions(actions, seen, context, to, captured_piece_id, &effects);
     }
 
     for to in result.attack_squares.iter().copied() {
@@ -206,7 +234,14 @@ fn append_actions_from_result(
         let effects =
             effects_for_candidate(result, to, context.piece_id, context.option, context.layer);
 
-        push_move_or_promotions(actions, context, to, Some(captured_piece_id), &effects);
+        push_move_or_promotions(
+            actions,
+            seen,
+            context,
+            to,
+            Some(captured_piece_id),
+            &effects,
+        );
     }
 }
 
@@ -274,8 +309,15 @@ fn can_use_move_option(piece: &Piece, option: &MoveOptionDefinition) -> bool {
 /// attacked squares (including empty threatened squares) without making
 /// those squares executable move targets.
 pub fn generate_piece_attack_squares(game_state: &GameState, piece_id: &PieceId) -> Vec<Square> {
-    game_state.ensure_chessembly_cache();
+    #[cfg(feature = "profiling")]
+    let started = Instant::now();
+    let attacked = generate_piece_attack_squares_inner(game_state, piece_id);
+    #[cfg(feature = "profiling")]
+    crate::profiling::record_piece_attacks(started.elapsed());
+    attacked
+}
 
+fn generate_piece_attack_squares_inner(game_state: &GameState, piece_id: &PieceId) -> Vec<Square> {
     let Some(piece) = game_state.pieces.get(piece_id) else {
         return Vec::new();
     };
@@ -356,8 +398,20 @@ pub fn generate_piece_legal_move_actions_with_options(
     piece_id: &PieceId,
     options: &MoveGenerationOptions,
 ) -> Vec<MoveAction> {
-    game_state.ensure_chessembly_cache();
+    #[cfg(feature = "profiling")]
+    let started = Instant::now();
+    let actions =
+        generate_piece_legal_move_actions_with_options_inner(game_state, piece_id, options);
+    #[cfg(feature = "profiling")]
+    crate::profiling::record_piece_moves(started.elapsed(), actions.len());
+    actions
+}
 
+fn generate_piece_legal_move_actions_with_options_inner(
+    game_state: &GameState,
+    piece_id: &PieceId,
+    options: &MoveGenerationOptions,
+) -> Vec<MoveAction> {
     let player_id = &game_state.current_player;
 
     if pending_landing_piece_id(game_state).is_some() {
@@ -366,6 +420,7 @@ pub fn generate_piece_legal_move_actions_with_options(
 
     // A turn allows exactly one action: either one move or one pocket drop.
     let mut actions = Vec::new();
+    let mut seen = HashSet::new();
     let empty_maps = HashMap::new();
 
     let Some(piece) = game_state.pieces.get(piece_id) else {
@@ -424,7 +479,7 @@ pub fn generate_piece_legal_move_actions_with_options(
             option: selected_option,
             layer,
         };
-        append_actions_from_result(&mut actions, &result, &context);
+        append_actions_from_result(&mut actions, &mut seen, &result, &context);
     }
 
     if enabled_layers.is_empty() {
@@ -456,6 +511,7 @@ pub fn generate_piece_legal_move_actions_with_options(
     for candidate in interaction_moves {
         push_move_or_promotions(
             &mut actions,
+            &mut seen,
             &interaction_context,
             candidate.to,
             candidate.captured_piece_id,
@@ -480,6 +536,7 @@ pub fn generate_piece_legal_move_actions_with_options(
                             {
                                 push_action_if_unique(
                                     &mut actions,
+                                    &mut seen,
                                     MoveAction {
                                         player_id: player_id.clone(),
                                         piece_id: piece_id.clone(),
@@ -575,6 +632,7 @@ pub fn generate_piece_legal_move_actions_with_options(
 
                 push_action_if_unique(
                     &mut actions,
+                    &mut seen,
                     MoveAction {
                         player_id: player_id.clone(),
                         piece_id: piece_id.clone(),

@@ -375,7 +375,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onUnmounted, watch } from 'vue'
 import type {
   AbilityDeployment,
   AiAction,
@@ -1293,6 +1293,7 @@ async function loadPieceOptions(pieceId: string, abilityId: string | null = null
 }
 
 async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | null> {
+  const profileStarted = import.meta.env.DEV ? performance.now() : null
   const piece = props.state.pieces[pieceId]
   if (!piece || piece.owner !== props.state.current_player) {
     clearSelection()
@@ -1312,9 +1313,31 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
     const options = await loadPieceOptions(pieceId)
     if (selectedPieceId.value !== pieceId || abilityMode.value) return options
 
+    const stateUpdateStarted = profileStarted !== null ? performance.now() : null
     legalTargetSquares.value = options.legalTargets
     movableSquares.value = options.movable
     attackSquares.value = options.captures
+    if (profileStarted !== null) {
+      await nextTick()
+      requestAnimationFrame(() => {
+        const renderedAt = performance.now()
+        performance.measure('piece-options:click_to_render_ms', {
+          start: profileStarted,
+          end: renderedAt,
+          detail: { pieceId },
+        })
+        performance.measure('piece-options:state_update_to_render_ms', {
+          start: stateUpdateStarted!,
+          end: renderedAt,
+          detail: { pieceId },
+        })
+        console.debug(`[profiling] ${JSON.stringify({
+          path: 'piece-options',
+          click_to_render_ms: renderedAt - profileStarted,
+          state_update_to_render_ms: renderedAt - stateUpdateStarted!,
+        })}`)
+      })
+    }
     return options
   } catch {
     if (selectedPieceId.value === pieceId) {

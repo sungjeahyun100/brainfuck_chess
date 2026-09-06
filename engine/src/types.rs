@@ -708,9 +708,17 @@ impl PromotionCondition {
 
 // ─── Chessembly Program Cache ───────────────────────────────────────────────
 
+#[derive(Debug, Clone)]
+struct CachedChessemblyProgram {
+    // Kept beside the compiled program so a game-local definition replacement
+    // invalidates only the accessed layer, without scanning the whole catalog.
+    source: String,
+    program: Arc<Program>,
+}
+
 #[derive(Debug, Default)]
 pub struct ChessemblyProgramCache {
-    pub programs: RwLock<HashMap<String, Arc<Program>>>,
+    programs: RwLock<HashMap<String, CachedChessemblyProgram>>,
 }
 
 impl Clone for ChessemblyProgramCache {
@@ -735,36 +743,31 @@ impl ChessemblyProgramCache {
             for layer in &definition.move_layers {
                 programs.insert(
                     Self::layer_key(type_id, &layer.id),
-                    Arc::new(parse(&layer.chessembly_code)),
+                    CachedChessemblyProgram {
+                        source: layer.chessembly_code.clone(),
+                        program: Arc::new(parse(&layer.chessembly_code)),
+                    },
                 );
             }
         }
         *self.write_programs() = programs;
     }
 
-    pub fn is_complete_for(&self, definitions: &HashMap<PieceTypeId, PieceDefinition>) -> bool {
-        let programs = self.read_programs();
-        let expected_len: usize = definitions
-            .values()
-            .map(|definition| definition.move_layers.len())
-            .sum();
-        programs.len() == expected_len
-            && definitions.iter().all(|(type_id, definition)| {
-                definition
-                    .move_layers
-                    .iter()
-                    .all(|layer| programs.contains_key(&Self::layer_key(type_id, &layer.id)))
-            })
+    pub fn get(&self, type_id: &PieceTypeId, source: &str) -> Option<Arc<Program>> {
+        self.get_layer(type_id, "default", source)
     }
 
-    pub fn get(&self, type_id: &PieceTypeId) -> Option<Arc<Program>> {
-        self.get_layer(type_id, "default")
-    }
-
-    pub fn get_layer(&self, type_id: &PieceTypeId, layer_id: &str) -> Option<Arc<Program>> {
+    pub fn get_layer(
+        &self,
+        type_id: &PieceTypeId,
+        layer_id: &str,
+        source: &str,
+    ) -> Option<Arc<Program>> {
+        crate::profiling::record_cache_check(1);
         self.read_programs()
             .get(&Self::layer_key(type_id, layer_id))
-            .cloned()
+            .filter(|cached| cached.source == source)
+            .map(|cached| cached.program.clone())
     }
 
     pub fn get_or_parse(
@@ -772,7 +775,7 @@ impl ChessemblyProgramCache {
         type_id: &PieceTypeId,
         definition: &PieceDefinition,
     ) -> Arc<Program> {
-        if let Some(program) = self.get(type_id) {
+        if let Some(program) = self.get(type_id, &definition.chessembly_code) {
             return program;
         }
 
@@ -780,7 +783,19 @@ impl ChessemblyProgramCache {
         let mut programs = self.write_programs();
         programs
             .entry(Self::layer_key(type_id, "default"))
-            .or_insert_with(|| program.clone())
+            .and_modify(|cached| {
+                if cached.source != definition.chessembly_code {
+                    *cached = CachedChessemblyProgram {
+                        source: definition.chessembly_code.clone(),
+                        program: program.clone(),
+                    };
+                }
+            })
+            .or_insert_with(|| CachedChessemblyProgram {
+                source: definition.chessembly_code.clone(),
+                program: program.clone(),
+            })
+            .program
             .clone()
     }
 
@@ -796,13 +811,13 @@ impl ChessemblyProgramCache {
         format!("{type_id}::{layer_id}")
     }
 
-    fn read_programs(&self) -> RwLockReadGuard<'_, HashMap<String, Arc<Program>>> {
+    fn read_programs(&self) -> RwLockReadGuard<'_, HashMap<String, CachedChessemblyProgram>> {
         self.programs
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn write_programs(&self) -> RwLockWriteGuard<'_, HashMap<String, Arc<Program>>> {
+    fn write_programs(&self) -> RwLockWriteGuard<'_, HashMap<String, CachedChessemblyProgram>> {
         self.programs
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -923,7 +938,7 @@ pub struct AbilityDeployment {
     pub to: Square,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GlobalStateUpdate {
     pub key: String,
     pub value: i32,
@@ -932,21 +947,21 @@ pub struct GlobalStateUpdate {
 /// Backward-compatible Rust name for Chessembly's global `set-state` output.
 pub type StateUpdate = GlobalStateUpdate;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PieceStateUpdate {
     pub piece_id: PieceId,
     pub key: String,
     pub value: PieceStateValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CooldownUpdate {
     pub piece_id: PieceId,
     pub move_option_id: String,
     pub remaining: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct ActionEffects {
     #[serde(default)]
     pub global_state_updates: Vec<GlobalStateUpdate>,
@@ -958,7 +973,7 @@ pub struct ActionEffects {
     pub piece_type_transition: Option<PieceTypeTransition>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PieceTypeTransition {
     pub piece_id: PieceId,
     pub target_type_id: PieceTypeId,
@@ -1081,21 +1096,24 @@ impl GameState {
     }
 
     pub fn ensure_chessembly_cache(&self) {
-        if !self
-            .chessembly_program_cache
-            .is_complete_for(&self.piece_definitions)
-        {
+        // Deserialized states start empty and are rebuilt eagerly. Partially
+        // populated caches are safe because each lookup validates its source
+        // and compiles a missing or changed layer lazily.
+        if self.chessembly_program_cache.is_empty() {
             self.rebuild_chessembly_cache();
         }
     }
 
     pub fn chessembly_program(&self, type_id: &PieceTypeId) -> Option<Arc<Program>> {
-        if let Some(program) = self.chessembly_program_cache.get(type_id) {
+        let definition = self.piece_definitions.get(type_id)?;
+        if let Some(program) = self
+            .chessembly_program_cache
+            .get(type_id, &definition.chessembly_code)
+        {
             crate::profiling::record_cache_hit(1);
             return Some(program);
         }
 
-        let definition = self.piece_definitions.get(type_id)?;
         Some(
             self.chessembly_program_cache
                 .get_or_parse(type_id, definition),
@@ -1107,7 +1125,10 @@ impl GameState {
         type_id: &PieceTypeId,
         layer: &MoveLayerDefinition,
     ) -> Arc<Program> {
-        if let Some(program) = self.chessembly_program_cache.get_layer(type_id, &layer.id) {
+        if let Some(program) =
+            self.chessembly_program_cache
+                .get_layer(type_id, &layer.id, &layer.chessembly_code)
+        {
             crate::profiling::record_cache_hit(1);
             return program;
         }
@@ -1117,7 +1138,19 @@ impl GameState {
         let mut programs = self.chessembly_program_cache.write_programs();
         programs
             .entry(key)
-            .or_insert_with(|| program.clone())
+            .and_modify(|cached| {
+                if cached.source != layer.chessembly_code {
+                    *cached = CachedChessemblyProgram {
+                        source: layer.chessembly_code.clone(),
+                        program: program.clone(),
+                    };
+                }
+            })
+            .or_insert_with(|| CachedChessemblyProgram {
+                source: layer.chessembly_code.clone(),
+                program: program.clone(),
+            })
+            .program
             .clone()
     }
 

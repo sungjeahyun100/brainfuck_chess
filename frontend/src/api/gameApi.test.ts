@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { api } from './gameApi.ts'
+import { api, mergeGameSync } from './gameApi.ts'
+import type { GameSyncResponse } from './gameApi.ts'
+import type { GameState } from '../types/game.ts'
 import type { PieceLabOptionsRequest } from './gameApi.ts'
 import type { TurnAction } from '../types/game.ts'
 
@@ -13,6 +15,61 @@ const lab: PieceLabOptionsRequest = {
   selected_piece_id: 'lab-rook',
   global_state: {},
 }
+
+const syncCurrent = {
+  id: 'game', board: { size: 8, squares: {} }, pieces: {}, players: {},
+  piece_definitions: { rook: { id: 'rook' } }, custom_piece_manifest: [],
+  player_info: {}, current_player: 'white', turn_number: 1, phase: 'playing',
+  history: [{ turn_number: 1, player_id: 'white', action: { type: 'move' } }],
+  record_notation: [{ type: 'move' }], clock: {}, catalog_revision: 4, state_revision: 8,
+} as unknown as GameState
+
+function syncResponse(overrides: Partial<GameSyncResponse> = {}): GameSyncResponse {
+  return {
+    catalog_revision: 4,
+    state_revision: 9,
+    dynamic: {
+      id: 'game', board: { size: 8, squares: {} }, pieces: {}, players: {},
+      current_player: 'black', turn_number: 2, phase: 'playing', clock: {} as GameState['clock'],
+    },
+    latest_ply: 2,
+    new_history: [{ turn_number: 2, player_id: 'black', action: { type: 'move' } } as never],
+    new_record_notation: [{ type: 'move' } as never],
+    resync_required: false,
+    ...overrides,
+  }
+}
+
+test('game sync reuses the catalog and appends only new history', () => {
+  const merged = mergeGameSync(syncCurrent, syncResponse())
+  assert.equal(merged.piece_definitions, syncCurrent.piece_definitions)
+  assert.equal(merged.history.length, 2)
+  assert.equal(merged.record_notation?.length, 2)
+  assert.equal(merged.current_player, 'black')
+})
+
+test('game sync ignores an out-of-order or duplicate response revision', () => {
+  assert.equal(
+    mergeGameSync(syncCurrent, syncResponse({ state_revision: 8 })),
+    syncCurrent,
+  )
+})
+
+test('game sync can recover from a revision mismatch with a full catalog and history', () => {
+  const catalog = {
+    piece_definitions: { custom: { id: 'custom' } },
+    custom_piece_manifest: [],
+    player_info: {},
+  } as unknown as NonNullable<GameSyncResponse['catalog']>
+  const merged = mergeGameSync(syncCurrent, syncResponse({
+    catalog_revision: 5,
+    catalog,
+    resync_required: true,
+  }))
+  assert.equal(merged.catalog_revision, 5)
+  assert.equal(merged.piece_definitions, catalog.piece_definitions)
+  assert.equal(merged.history.length, 1)
+})
 
 test('piece lab action adds the move discriminator omitted by legal-action responses', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = []

@@ -99,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import type { BotDifficulty, GameState } from './types/game'
 import type {
   AppView,
@@ -341,9 +341,26 @@ function startGamePolling(gameId: string) {
   stopGamePolling()
   gamePollTimer.value = window.setInterval(async () => {
     try {
-      gameState.value = currentRoom.value && localPlayer.value
-        ? await api.heartbeatRoom(currentRoom.value.id, localPlayer.value)
+      const syncedState = currentRoom.value && localPlayer.value
+        ? await api.heartbeatRoom(currentRoom.value.id, localPlayer.value, gameState.value)
         : await api.getGame(gameId)
+      const updateStarted = import.meta.env.DEV ? performance.now() : null
+      if (gameState.value) Object.assign(gameState.value, syncedState)
+      else gameState.value = syncedState
+      if (updateStarted !== null) {
+        await nextTick()
+        requestAnimationFrame(() => {
+          const renderedAt = performance.now()
+          performance.measure('heartbeat:state_update_to_render_ms', {
+            start: updateStarted,
+            end: renderedAt,
+          })
+          console.debug(`[profiling] ${JSON.stringify({
+            path: 'heartbeat',
+            state_update_to_render_ms: renderedAt - updateStarted,
+          })}`)
+        })
+      }
       if (gameState.value.phase === 'ended') {
         stopGamePolling()
         sessionStorage.removeItem(ACTIVE_MATCH_KEY)

@@ -88,8 +88,69 @@ interface ResignGameRequest {
 
 export interface PieceOptionsResponse {
   moves: MoveAction[]
-  attacks: Square[]
   ability_actions: import('../types/game').AbilityAction[]
+}
+
+interface GameSyncCatalog {
+  piece_definitions: GameState['piece_definitions']
+  custom_piece_manifest: GameState['custom_piece_manifest']
+  player_info: GameState['player_info']
+  challenge?: GameState['challenge']
+}
+
+interface GameDynamicView {
+  id: string
+  board: GameState['board']
+  pieces: GameState['pieces']
+  players: GameState['players']
+  current_player: GameState['current_player']
+  turn_number: number
+  phase: GameState['phase']
+  en_passant_target?: GameState['en_passant_target']
+  en_passant_available_to?: GameState['en_passant_available_to']
+  global_state?: GameState['global_state']
+  result?: GameState['result']
+  clock: GameState['clock']
+  presence?: GameState['presence']
+}
+
+export interface GameSyncResponse {
+  catalog_revision: number
+  state_revision: number
+  catalog?: GameSyncCatalog
+  dynamic: GameDynamicView
+  latest_ply: number
+  new_history: GameState['history']
+  new_record_notation: NonNullable<GameState['record_notation']>
+  resync_required: boolean
+}
+
+export function mergeGameSync(current: GameState | null, sync: GameSyncResponse): GameState {
+  if (current?.state_revision !== undefined && sync.state_revision <= current.state_revision) {
+    return current
+  }
+  const definitions = sync.catalog?.piece_definitions ?? current?.piece_definitions
+  const manifest = sync.catalog?.custom_piece_manifest ?? current?.custom_piece_manifest
+  const playerInfo = sync.catalog?.player_info ?? current?.player_info
+  if (!definitions || !manifest || !playerInfo) {
+    throw new Error('게임 카탈로그 재동기화가 필요합니다.')
+  }
+  const replaceHistory = !current || sync.resync_required
+  return {
+    ...sync.dynamic,
+    catalog_revision: sync.catalog_revision,
+    state_revision: sync.state_revision,
+    piece_definitions: definitions,
+    custom_piece_manifest: manifest,
+    player_info: playerInfo,
+    challenge: sync.catalog?.challenge ?? current?.challenge,
+    history: replaceHistory
+      ? sync.new_history
+      : [...current.history, ...sync.new_history],
+    record_notation: replaceHistory
+      ? sync.new_record_notation
+      : [...(current.record_notation ?? []), ...sync.new_record_notation],
+  }
 }
 
 export interface PieceLabPieceRequest {
@@ -145,7 +206,12 @@ export interface PieceLabOptionsResponse {
   piece_runtime: Record<string, import('../types/game').Piece>
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
+let requestProfileSerial = 0
+
+async function request<T>(url: string, options?: RequestInit, profileName?: string): Promise<T> {
+  const shouldProfile = import.meta.env?.DEV === true && profileName && typeof performance !== 'undefined'
+  const profileId = shouldProfile ? `${profileName}-${++requestProfileSerial}` : null
+  if (profileId) performance.mark(`${profileId}:start`)
   const fetchRequest = () => fetch(url, {
     credentials: 'same-origin',
     headers: {
@@ -154,6 +220,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
   })
   let res = await fetchRequest()
+  if (profileId) performance.mark(`${profileId}:response`)
   if (res.status === 401) {
     const session = await fetch('/api/auth/session', {
       method: 'POST',
@@ -166,7 +233,21 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     throw new Error(err.error ?? res.statusText)
   }
   if (res.status === 204) return undefined as T
-  return res.json()
+  const parsed = await res.json() as T
+  if (profileId) {
+    performance.mark(`${profileId}:parsed`)
+    const requestMeasure = performance.measure(`${profileName}:client_request_to_response_ms`, `${profileId}:start`, `${profileId}:response`)
+    const parseMeasure = performance.measure(`${profileName}:client_json_parse_ms`, `${profileId}:response`, `${profileId}:parsed`)
+    console.debug(`[profiling] ${JSON.stringify({
+      path: profileName,
+      client_request_to_response_ms: requestMeasure.duration,
+      client_json_parse_ms: parseMeasure.duration,
+    })}`)
+    performance.clearMarks(`${profileId}:start`)
+    performance.clearMarks(`${profileId}:response`)
+    performance.clearMarks(`${profileId}:parsed`)
+  }
+  return parsed
 }
 
 export function withTurnActionType(action: import('../types/game').TurnAction): import('../types/game').TurnAction {
@@ -316,7 +397,7 @@ export const api = {
 
   getPieceOptions(id: string, pieceId: string, moveOptionId?: string | null): Promise<PieceOptionsResponse> {
     const query = moveOptionId ? `?move_option_id=${encodeURIComponent(moveOptionId)}` : ''
-    return request(`${BASE}/${id}/pieces/${pieceId}/options${query}`)
+    return request(`${BASE}/${id}/pieces/${pieceId}/options${query}`, undefined, 'piece-options')
   },
 
   getPieceLabOptions(payload: PieceLabOptionsRequest): Promise<PieceLabOptionsResponse> {
@@ -357,11 +438,17 @@ export const api = {
     })
   },
 
-  heartbeatRoom(id: string, playerId: PlayerId): Promise<GameState> {
-    return request(`${ROOM_BASE}/${encodeURIComponent(id)}/heartbeat`, {
+  async heartbeatRoom(id: string, playerId: PlayerId, current: GameState | null = null): Promise<GameState> {
+    const sync = await request<GameSyncResponse>(`${ROOM_BASE}/${encodeURIComponent(id)}/heartbeat`, {
       method: 'POST',
-      body: JSON.stringify({ client_id: getClientId(), player_id: playerId }),
-    })
+      body: JSON.stringify({
+        client_id: getClientId(),
+        player_id: playerId,
+        catalog_revision: current?.catalog_revision,
+        latest_ply: current?.history.length ?? 0,
+      }),
+    }, 'heartbeat')
+    return mergeGameSync(current, sync)
   },
 
   getRoom(id: string): Promise<MultiplayerRoom> {

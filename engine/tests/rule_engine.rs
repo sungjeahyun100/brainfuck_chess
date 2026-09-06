@@ -1729,6 +1729,47 @@ fn test_chessembly_cache_clone_and_deserialize_rebuild() {
 }
 
 #[test]
+fn chessembly_cache_lazily_replaces_a_stale_layer_without_catalog_scan() {
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "custom", "white", "rook", 3, 3);
+    let piece_id = PieceId::from("custom");
+
+    let original = generate_piece_legal_move_actions(&state, &piece_id);
+    assert!(original.iter().any(|action| action.to == Square::new(3, 4)));
+
+    let definition = state.piece_definitions.get_mut("rook").unwrap();
+    definition.move_layers[0].chessembly_code = "move(1, 0);".into();
+    definition.chessembly_code = "move(1, 0);".into();
+
+    let changed = generate_piece_legal_move_actions(&state, &piece_id);
+    assert_eq!(changed.len(), 1);
+    assert_eq!(changed[0].to, Square::new(4, 3));
+
+    let repeated = generate_piece_legal_move_actions(&state, &piece_id);
+    assert_eq!(repeated, changed);
+}
+
+#[test]
+fn piece_move_deduplication_preserves_deterministic_canonical_order() {
+    let mut state = make_game_state(8);
+    let mut definition = rook_definition();
+    definition.id = "duplicate-layers".into();
+    definition.name = "Duplicate Layers".into();
+    definition.chessembly_code = "move(1, 0); move(1, 0);".into();
+    definition.move_layers[0].chessembly_code = definition.chessembly_code.clone();
+    state
+        .piece_definitions
+        .insert(definition.id.clone(), definition);
+    state.rebuild_chessembly_cache();
+    add_piece(&mut state, "duplicate", "white", "duplicate-layers", 3, 3);
+
+    let first = generate_piece_legal_move_actions(&state, &PieceId::from("duplicate"));
+    let second = generate_piece_legal_move_actions(&state, &PieceId::from("duplicate"));
+    assert_eq!(first, second);
+    assert_eq!(first.len(), 1);
+}
+
+#[test]
 fn test_piece_legal_move_actions_match_filtered_full_generator() {
     let mut state = make_game_state(8);
     add_piece(&mut state, "wk", "white", "king", 4, 0);

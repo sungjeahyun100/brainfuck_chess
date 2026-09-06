@@ -347,6 +347,9 @@ export interface ChallengeGameMetadata {
 }
 
 export interface GameState {
+  /** Network snapshot revisions; absent in legacy replay/game-record payloads. */
+  catalog_revision?: number
+  state_revision?: number
   id: string
   board: Board
   pieces: Record<PieceId, Piece>

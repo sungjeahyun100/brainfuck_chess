@@ -3,6 +3,9 @@ name = "brainfuck-chess-server"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+profiling = ["brainfuck-chess-engine/profiling"]
+
 [dependencies]
 brainfuck-chess-engine = { path = "../engine" }
 axum = "0.7"

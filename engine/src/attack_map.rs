@@ -14,8 +14,6 @@ pub fn generate_attack_map(
     existing_attack_maps: &HashMap<PlayerId, HashSet<SquareId>>,
 ) -> AttackMap {
     crate::profiling::record_attack_map(1);
-    game_state.ensure_chessembly_cache();
-
     let mut attacked_squares: HashSet<SquareId> = HashSet::new();
     let mut source_map: HashMap<SquareId, Vec<PieceId>> = HashMap::new();
 
