@@ -251,7 +251,6 @@ fn eval_expr(
                         // Activate as both movement and attack; return false to stop chain
                         activate_movement(target, state, result);
                         activate_attack(target, state, result);
-                        state.anchor = target;
                         (ExprResult::False, 1)
                     } else {
                         (ExprResult::False, 1)

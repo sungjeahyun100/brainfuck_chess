@@ -66,6 +66,12 @@ const builtInPieceCatalog: Omit<PieceCatalogItem, 'deploymentZone'>[] = [
   { id: 'tank', name: '탱크', score: 0, category: 'variant', canPocket: true },
   { id: 'bomber', name: '폭격기', score: 0, category: 'variant', canPocket: true },
   { id: 'machine-gunner', name: '기관총 사수', score: 0, category: 'variant', canPocket: true },
+  { id: 'shell', name: '포탄', score: 0, category: 'variant', canPocket: true },
+  { id: 'sacrificial-shrine', name: '희생의 성소', score: 0, category: 'variant', canPocket: true },
+  { id: 'sacrificial-lamb', name: '희생양', score: 0, category: 'variant', canPocket: true },
+  { id: 'fanatic', name: '광신도', score: 0, category: 'variant', canPocket: true },
+  { id: 'wall', name: '성벽', score: 0, category: 'variant', canPocket: true },
+  { id: 'repairman', name: '수리병', score: 0, category: 'variant', canPocket: true },
   { id: 'surface-to-air-missile', name: '지대공 미사일', score: 0, category: 'variant', canPocket: true, aliases: ['SAM', '격추'] },
   { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
 ]

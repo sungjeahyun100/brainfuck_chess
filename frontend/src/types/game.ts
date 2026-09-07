@@ -201,6 +201,7 @@ export interface AbilityAction {
   piece_id: PieceId
   ability_id: string
   target_piece_id?: PieceId
+  target_piece_ids?: PieceId[]
   pocket_piece_id?: PieceId
   to?: Square
   deployments: AbilityDeployment[]
@@ -216,6 +217,7 @@ export interface SubmitAbilityAction {
   piece_id: PieceId
   ability_id: string
   target_piece_id?: PieceId
+  target_piece_ids?: PieceId[]
   pocket_piece_id?: PieceId
   to?: Square
   deployments?: AbilityDeployment[]

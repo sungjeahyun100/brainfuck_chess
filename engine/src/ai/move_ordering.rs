@@ -25,8 +25,8 @@ fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32, i32) {
             }
         }
         AiAction::Drop(action) => {
-            if action.captured_piece_id.is_some() {
-                let impact = tactical_impact(state, &AiAction::Drop(action.clone()));
+            let impact = tactical_impact(state, &AiAction::Drop(action.clone()));
+            if impact.removed_enemy_pieces > 0 {
                 return (
                     if impact.captures_king { 7 } else { 6 },
                     impact.removed_enemy_value,
@@ -134,18 +134,22 @@ fn quiescence_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
             }
         }
         AiAction::Drop(action) => {
-            let captured = action
-                .captured_piece_id
-                .as_ref()
-                .and_then(|id| state.pieces.get(id))
-                .and_then(|piece| state.piece_definitions.get(&piece.type_id));
-            if captured.is_some_and(|definition| definition.is_king) {
+            let impact = tactical_impact(state, &AiAction::Drop(action.clone()));
+            if impact.captures_king {
                 (7, u32::MAX)
             } else {
-                (3, captured.map_or(0, |definition| definition.score))
+                (3, impact.removed_enemy_value)
             }
         }
-        AiAction::Ability(action) => (2, captured_value(action.target_piece_id.as_ref())),
+        AiAction::Ability(action) => (
+            2,
+            action
+                .target_piece_ids
+                .iter()
+                .map(|id| captured_value(Some(id)))
+                .sum::<u32>()
+                .max(captured_value(action.target_piece_id.as_ref())),
+        ),
     }
 }
 
@@ -171,6 +175,7 @@ fn canonical_action_cmp(left: &AiAction, right: &AiAction) -> Ordering {
             .cmp(&right.piece_id)
             .then_with(|| left.ability_id.cmp(&right.ability_id))
             .then_with(|| left.target_piece_id.cmp(&right.target_piece_id))
+            .then_with(|| left.target_piece_ids.cmp(&right.target_piece_ids))
             .then_with(|| left.pocket_piece_id.cmp(&right.pocket_piece_id))
             .then_with(|| optional_square_cmp(left.to, right.to))
             .then_with(|| {

@@ -436,6 +436,7 @@ fn airborne_commits_multiple_unique_deployments_in_one_turn() {
         piece_id: "actor".into(),
         ability_id: "airdrop".into(),
         target_piece_id: None,
+        target_piece_ids: Vec::new(),
         pocket_piece_id: None,
         to: None,
         deployments: vec![
@@ -1047,6 +1048,8 @@ fn deployment_zone_classifies_every_builtin_and_both_player_orientations() {
         "dozer-black",
         "surface-to-air-missile-white",
         "surface-to-air-missile-black",
+        "fanatic",
+        "wall",
     ];
 
     for definition in definitions.values() {
@@ -2053,6 +2056,51 @@ fn bouncing_bishop_reflection_is_part_of_normal_movement() {
     assert!(!wall_moves
         .iter()
         .any(|action| action.to == Square::new(5, 5)));
+}
+
+#[test]
+fn bouncing_bishop_does_not_reflect_after_hitting_an_ordinary_piece_or_wall() {
+    let mut state = make_game_state(8);
+    state.current_player = "black".into();
+    add_piece(&mut state, "wk", "white", "king", 4, 0);
+    add_piece(&mut state, "bk", "black", "king", 4, 7);
+    add_piece(&mut state, "bb", "black", "bouncing-bishop", 3, 5);
+    add_piece(&mut state, "ordinary", "white", "bishop", 0, 2);
+    add_piece(&mut state, "wall", "white", "wall", 7, 1);
+
+    let moves = generate_piece_legal_move_actions(&state, &"bb".into());
+
+    assert!(
+        moves.iter().any(|action| {
+            action.to == Square::new(0, 2)
+                && action.captured_piece_id.as_ref().map(PieceId::as_str) == Some("ordinary")
+        }),
+        "ordinary edge piece should remain capturable: {moves:?}"
+    );
+    for blocked_reflection in [Square::new(1, 1), Square::new(2, 0), Square::new(6, 0)] {
+        assert!(
+            !moves.iter().any(|action| action.to == blocked_reflection),
+            "unexpected reflection through {}",
+            blocked_reflection.to_id()
+        );
+    }
+
+    let attacks = generate_attack_map(&state, &"black".into(), &HashMap::new());
+    assert!(attacks
+        .attacked_squares
+        .contains(&Square::new(0, 2).to_id()));
+    assert!(!attacks
+        .attacked_squares
+        .contains(&Square::new(1, 1).to_id()));
+    assert!(!attacks
+        .attacked_squares
+        .contains(&Square::new(2, 0).to_id()));
+    assert!(!attacks
+        .attacked_squares
+        .contains(&Square::new(7, 1).to_id()));
+    assert!(!attacks
+        .attacked_squares
+        .contains(&Square::new(6, 0).to_id()));
 }
 
 #[test]

@@ -9,12 +9,12 @@ use crate::interaction::{
 };
 use crate::pieces::default_pieces::{
     BOMBER_BOMB_ABILITY_ID, BOMBER_LANDING_DISTANCE, BOMBER_LAND_ABILITY_ID,
-    BOMBER_TAKEOFF_ABILITY_ID, BOMBER_TAKEOFF_DISTANCE, INTERCEPT_ABILITY_ID,
-    MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID, TANK_FIRE_ABILITY_ID,
-    TANK_FIRE_RANGE,
+    BOMBER_TAKEOFF_ABILITY_ID, BOMBER_TAKEOFF_DISTANCE, DETONATE_ABILITY_ID, INTERCEPT_ABILITY_ID,
+    MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID, REPAIR_WALLS_ABILITY_ID,
+    SACRIFICE_ABILITY_ID, TANK_FIRE_ABILITY_ID, TANK_FIRE_RANGE,
 };
 use crate::rules::{get_base_zone_squares, player_forward_direction};
-use crate::terrain::{can_affect_square, can_capture_piece};
+use crate::terrain::{can_affect_square, can_capture_piece, can_destroy_piece_with_ability};
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -816,6 +816,7 @@ pub fn generate_piece_legal_ability_actions(
                         piece_id: piece_id.clone(),
                         ability_id: ability_id.into(),
                         target_piece_id: None,
+                        target_piece_ids: Vec::new(),
                         pocket_piece_id: None,
                         to: Some(target),
                         deployments: Vec::new(),
@@ -829,10 +830,49 @@ pub fn generate_piece_legal_ability_actions(
                 piece_id: piece_id.clone(),
                 ability_id: ability_id.into(),
                 target_piece_id: None,
+                target_piece_ids: Vec::new(),
                 pocket_piece_id: None,
                 to: Some(origin),
                 deployments: Vec::new(),
             });
+        }
+        ("shell", DETONATE_ABILITY_ID) if actor.layer == PieceLayer::Ground => {
+            actions.push(simple_ability_action(
+                actor,
+                piece_id,
+                ability_id,
+                Some(origin),
+            ));
+        }
+        ("sacrificial-shrine", SACRIFICE_ABILITY_ID) if actor.layer == PieceLayer::Ground => {
+            if sacrifice_budget(game_state, actor) > 0 {
+                for target in sacrifice_targets(game_state, actor) {
+                    actions.push(AbilityAction {
+                        player_id: actor.owner.clone(),
+                        piece_id: piece_id.clone(),
+                        ability_id: ability_id.into(),
+                        target_piece_id: Some(target.id.clone()),
+                        target_piece_ids: Vec::new(),
+                        pocket_piece_id: None,
+                        to: Some(origin),
+                        deployments: Vec::new(),
+                    });
+                }
+            }
+        }
+        ("repairman", REPAIR_WALLS_ABILITY_ID) if actor.layer == PieceLayer::Ground => {
+            if repairman_front_squares(game_state, actor)
+                .iter()
+                .any(|square| {
+                    game_state
+                        .board
+                        .get_piece_at(square)
+                        .and_then(|id| game_state.pieces.get(id))
+                        .is_some_and(|piece| piece.owner == actor.owner && piece.type_id == "wall")
+                })
+            {
+                actions.push(simple_ability_action(actor, piece_id, ability_id, None));
+            }
         }
         ("tank", TANK_FIRE_ABILITY_ID) if actor.layer == PieceLayer::Ground => {
             for (dx, dy) in QUEEN_DIRECTIONS {
@@ -878,6 +918,7 @@ pub fn generate_piece_legal_ability_actions(
                             piece_id: piece_id.clone(),
                             ability_id: ability_id.into(),
                             target_piece_id: Some(target_id.clone()),
+                            target_piece_ids: Vec::new(),
                             pocket_piece_id: None,
                             to: Some(target),
                             deployments: Vec::new(),
@@ -937,6 +978,7 @@ pub fn generate_piece_legal_ability_actions(
                             piece_id: piece_id.clone(),
                             ability_id: ability_id.into(),
                             target_piece_id: Some(target.id.clone()),
+                            target_piece_ids: Vec::new(),
                             pocket_piece_id: Some(pocket_id.clone()),
                             to: target.current_square,
                             deployments: Vec::new(),
@@ -972,6 +1014,7 @@ pub fn generate_piece_legal_ability_actions(
                                 piece_id: piece_id.clone(),
                                 ability_id: ability_id.into(),
                                 target_piece_id: None,
+                                target_piece_ids: Vec::new(),
                                 pocket_piece_id: Some(pocket_id.clone()),
                                 to: Some(to),
                                 deployments: Vec::new(),
@@ -993,6 +1036,7 @@ pub fn generate_piece_legal_ability_actions(
                         piece_id: piece_id.clone(),
                         ability_id: ability_id.into(),
                         target_piece_id: Some(target.id.clone()),
+                        target_piece_ids: Vec::new(),
                         pocket_piece_id: None,
                         to: target.current_square,
                         deployments: Vec::new(),
@@ -1080,6 +1124,7 @@ fn simple_ability_action(
         piece_id: piece_id.clone(),
         ability_id: ability_id.into(),
         target_piece_id: None,
+        target_piece_ids: Vec::new(),
         pocket_piece_id: None,
         to,
         deployments: Vec::new(),
@@ -1095,6 +1140,94 @@ pub(crate) fn pending_landing_piece_id(game_state: &GameState) -> Option<PieceId
             && piece.state.get("airborne") == Some(&PieceStateValue::Boolean(true)))
         .then(|| piece.id.clone())
     })
+}
+
+pub(crate) fn sacrificial_piece_ids(game_state: &GameState, actor: &Piece) -> Vec<PieceId> {
+    let Some(origin) = actor.current_square else {
+        return Vec::new();
+    };
+    let mut sacrifices = Vec::new();
+    for (dx, dy) in QUEEN_DIRECTIONS {
+        let square = Square::new(origin.file + dx, origin.rank + dy);
+        for layer in [PieceLayer::Ground, PieceLayer::Air] {
+            let Some((id, piece)) = game_state
+                .board
+                .get_piece_at_layer(&square, layer)
+                .and_then(|id| game_state.pieces.get(id).map(|piece| (id, piece)))
+            else {
+                continue;
+            };
+            let can_sacrifice = piece.owner == actor.owner
+                && game_state
+                    .piece_definitions
+                    .get(&piece.type_id)
+                    .is_some_and(|definition| !definition.is_king);
+            if can_sacrifice {
+                sacrifices.push(id.clone());
+            }
+        }
+    }
+    sacrifices
+}
+
+pub(crate) fn sacrifice_budget(game_state: &GameState, actor: &Piece) -> u32 {
+    sacrificial_piece_ids(game_state, actor)
+        .iter()
+        .filter_map(|id| game_state.pieces.get(id))
+        .filter_map(|piece| game_state.piece_definitions.get(&piece.type_id))
+        .map(|definition| definition.score)
+        .sum::<u32>()
+        .min(8)
+}
+
+fn shrine_can_target_king(game_state: &GameState, actor: &Piece) -> bool {
+    let Some(origin) = actor.current_square else {
+        return false;
+    };
+    QUEEN_DIRECTIONS.into_iter().all(|(dx, dy)| {
+        game_state
+            .board
+            .get_piece_at(&Square::new(origin.file + dx, origin.rank + dy))
+            .and_then(|id| game_state.pieces.get(id))
+            .is_some_and(|piece| {
+                piece.owner == actor.owner
+                    && piece.layer == PieceLayer::Ground
+                    && piece.type_id == "sacrificial-lamb"
+            })
+    })
+}
+
+fn sacrifice_targets<'a>(game_state: &'a GameState, actor: &Piece) -> Vec<&'a Piece> {
+    let can_target_king = shrine_can_target_king(game_state, actor);
+    let budget = sacrifice_budget(game_state, actor);
+    game_state
+        .pieces
+        .values()
+        .filter(|target| {
+            target.owner != actor.owner
+                && target.is_on_board()
+                && target.layer == PieceLayer::Ground
+                && can_destroy_piece_with_ability(game_state, actor, target)
+                && game_state
+                    .piece_definitions
+                    .get(&target.type_id)
+                    .is_some_and(|definition| {
+                        (definition.is_king && can_target_king)
+                            || (!definition.is_king && definition.score <= budget)
+                    })
+        })
+        .collect()
+}
+
+pub(crate) fn repairman_front_squares(game_state: &GameState, actor: &Piece) -> Vec<Square> {
+    let Some(origin) = actor.current_square else {
+        return Vec::new();
+    };
+    let forward = player_forward_direction(&actor.owner);
+    (-1..=1)
+        .map(|dx| Square::new(origin.file + dx, origin.rank + forward))
+        .filter(|square| game_state.board.is_in_bounds(square))
+        .collect()
 }
 
 /// Mortar removes pieces on the selected point and its four orthogonally
@@ -1118,7 +1251,7 @@ pub(crate) fn mortar_barrage_targets(
                         .get(piece_id)
                         .map(|piece| (piece_id, piece))
                 })
-                .filter(|(_, victim)| can_capture_piece(game_state, actor, victim))
+                .filter(|(_, victim)| can_destroy_piece_with_ability(game_state, actor, victim))
                 .map(|(piece_id, _)| piece_id.clone())
         })
         .collect()
@@ -1141,7 +1274,7 @@ pub(crate) fn machine_gun_barrage_targets(game_state: &GameState, actor: &Piece)
                 if game_state
                     .pieces
                     .get(piece_id)
-                    .is_some_and(|victim| can_capture_piece(game_state, actor, victim))
+                    .is_some_and(|victim| can_destroy_piece_with_ability(game_state, actor, victim))
                 {
                     targets.push(piece_id.clone());
                 }
@@ -1155,6 +1288,48 @@ pub(crate) fn machine_gun_barrage_targets(game_state: &GameState, actor: &Piece)
 /// bounded multi-deployment action, so each unique deployment must be one of
 /// the canonical single-piece candidates generated from the same state.
 pub fn is_legal_ability_action(game_state: &GameState, action: &AbilityAction) -> bool {
+    if action.ability_id == SACRIFICE_ABILITY_ID {
+        if action.player_id != game_state.current_player
+            || action.pocket_piece_id.is_some()
+            || action.to.is_some()
+            || !action.deployments.is_empty()
+        {
+            return false;
+        }
+        let selected = if action.target_piece_ids.is_empty() {
+            action.target_piece_id.iter().cloned().collect::<Vec<_>>()
+        } else if action.target_piece_id.is_none() {
+            action.target_piece_ids.clone()
+        } else {
+            return false;
+        };
+        if selected.is_empty() {
+            return false;
+        }
+        let singles = generate_piece_legal_ability_actions(
+            game_state,
+            &action.piece_id,
+            SACRIFICE_ABILITY_ID,
+        );
+        let eligible = singles
+            .iter()
+            .filter_map(|candidate| candidate.target_piece_id.clone())
+            .collect::<HashSet<_>>();
+        let unique = selected.iter().cloned().collect::<HashSet<_>>();
+        if unique.len() != selected.len() || !selected.iter().all(|id| eligible.contains(id)) {
+            return false;
+        }
+        let Some(actor) = game_state.pieces.get(&action.piece_id) else {
+            return false;
+        };
+        let selected_score = selected
+            .iter()
+            .filter_map(|id| game_state.pieces.get(id))
+            .filter_map(|piece| game_state.piece_definitions.get(&piece.type_id))
+            .map(|definition| definition.score)
+            .sum::<u32>();
+        return selected_score <= sacrifice_budget(game_state, actor);
+    }
     if action.ability_id != "airdrop" {
         return action.deployments.is_empty()
             && generate_piece_legal_ability_actions(
@@ -1168,6 +1343,7 @@ pub fn is_legal_ability_action(game_state: &GameState, action: &AbilityAction) -
     if action.player_id != game_state.current_player
         || action.deployments.is_empty()
         || action.target_piece_id.is_some()
+        || !action.target_piece_ids.is_empty()
         || action.pocket_piece_id.is_some()
         || action.to.is_some()
     {
@@ -1188,6 +1364,78 @@ pub fn is_legal_ability_action(game_state: &GameState, action: &AbilityAction) -
 
 /// Generate every standalone ability action available to the current player.
 pub fn generate_legal_ability_actions(game_state: &GameState) -> Vec<AbilityAction> {
+    fn canonical_sacrifice_action(
+        game_state: &GameState,
+        actor_id: &PieceId,
+        singles: Vec<AbilityAction>,
+    ) -> Vec<AbilityAction> {
+        let Some(actor) = game_state.pieces.get(actor_id) else {
+            return Vec::new();
+        };
+        let budget = sacrifice_budget(game_state, actor) as usize;
+        let mut candidates = singles
+            .into_iter()
+            .filter_map(|action| action.target_piece_id)
+            .collect::<Vec<_>>();
+        candidates.sort();
+        if let Some(king_id) = candidates.iter().find(|id| {
+            game_state
+                .pieces
+                .get(*id)
+                .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+                .is_some_and(|definition| definition.is_king)
+        }) {
+            return vec![AbilityAction {
+                player_id: actor.owner.clone(),
+                piece_id: actor_id.clone(),
+                ability_id: SACRIFICE_ABILITY_ID.into(),
+                target_piece_id: None,
+                target_piece_ids: vec![king_id.clone()],
+                pocket_piece_id: None,
+                to: None,
+                deployments: Vec::new(),
+            }];
+        }
+
+        let mut best = vec![None::<Vec<PieceId>>; budget + 1];
+        best[0] = Some(Vec::new());
+        for candidate in candidates {
+            let score = game_state
+                .pieces
+                .get(&candidate)
+                .and_then(|piece| game_state.piece_definitions.get(&piece.type_id))
+                .map_or(0, |definition| definition.score) as usize;
+            if score == 0 || score > budget {
+                continue;
+            }
+            for total in (score..=budget).rev() {
+                if best[total].is_none() {
+                    if let Some(previous) = best[total - score].clone() {
+                        let mut selection = previous;
+                        selection.push(candidate.clone());
+                        best[total] = Some(selection);
+                    }
+                }
+            }
+        }
+        let Some(target_piece_ids) = best.into_iter().rev().flatten().next() else {
+            return Vec::new();
+        };
+        if target_piece_ids.is_empty() {
+            return Vec::new();
+        }
+        vec![AbilityAction {
+            player_id: actor.owner.clone(),
+            piece_id: actor_id.clone(),
+            ability_id: SACRIFICE_ABILITY_ID.into(),
+            target_piece_id: None,
+            target_piece_ids,
+            pocket_piece_id: None,
+            to: None,
+            deployments: Vec::new(),
+        }]
+    }
+
     fn canonical_airdrop_actions(
         game_state: &GameState,
         player_id: &PlayerId,
@@ -1291,6 +1539,7 @@ pub fn generate_legal_ability_actions(game_state: &GameState) -> Vec<AbilityActi
                         piece_id: context.actor_id.clone(),
                         ability_id: "airdrop".into(),
                         target_piece_id: None,
+                        target_piece_ids: Vec::new(),
                         pocket_piece_id: None,
                         to: None,
                         deployments: deployments.clone(),
@@ -1368,6 +1617,8 @@ pub fn generate_legal_ability_actions(game_state: &GameState) -> Vec<AbilityActi
                         &piece_id,
                         actions,
                     )
+                } else if option_id == SACRIFICE_ABILITY_ID {
+                    canonical_sacrifice_action(game_state, &piece_id, actions)
                 } else {
                     actions
                 }

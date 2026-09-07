@@ -83,6 +83,7 @@ test('targetless standalone abilities are recognized as immediate actions', () =
 
   assert.equal(isImmediateAbilityAction(action), true)
   assert.equal(isImmediateAbilityAction({ ...action, to: { file: 3, rank: 3 } }), false)
+  assert.equal(isImmediateAbilityAction({ ...action, target_piece_ids: ['enemy'] }), false)
 })
 
 test('targetless bomb uses the bomber square as its explicit UI target', () => {

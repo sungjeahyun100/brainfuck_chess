@@ -924,6 +924,9 @@ pub struct AbilityAction {
     pub ability_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_piece_id: Option<PieceId>,
+    /// Explicit multi-target selection for abilities such as Sacrifice.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_piece_ids: Vec<PieceId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pocket_piece_id: Option<PieceId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

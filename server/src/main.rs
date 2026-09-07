@@ -235,6 +235,8 @@ struct SubmitAbilityRequest {
     #[serde(default)]
     target_piece_id: Option<PieceId>,
     #[serde(default)]
+    target_piece_ids: Vec<PieceId>,
+    #[serde(default)]
     pocket_piece_id: Option<PieceId>,
     #[serde(default)]
     to: Option<Square>,
@@ -464,7 +466,15 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
         | "tank"
         | "bomber"
         | "machine-gunner"
-        | "machine_gunner" => Some(raw_piece_type.replace('_', "-")),
+        | "machine_gunner"
+        | "shell"
+        | "sacrificial-shrine"
+        | "sacrificial_shrine"
+        | "sacrificial-lamb"
+        | "sacrificial_lamb"
+        | "fanatic"
+        | "wall"
+        | "repairman" => Some(raw_piece_type.replace('_', "-")),
         "surface-to-air-missile"
         | "surface-to-air-missile-white"
         | "surface-to-air-missile-black" => Some(if player_id == "white" {
@@ -3150,6 +3160,7 @@ async fn submit_action(
                 piece_id: request.piece_id,
                 ability_id: request.ability_id,
                 target_piece_id: request.target_piece_id,
+                target_piece_ids: request.target_piece_ids,
                 pocket_piece_id: request.pocket_piece_id,
                 to: request.to,
                 deployments: request.deployments,
@@ -4832,6 +4843,28 @@ mod tests {
         assert_eq!(scores.get("dozer"), scores.get("dozer-white"));
         assert_eq!(scores.get("mortar"), Some(&8));
         assert_eq!(scores.get("machine-gunner"), Some(&8));
+        for (piece_type, score) in [
+            ("shell", 3),
+            ("sacrificial-shrine", 8),
+            ("sacrificial-lamb", 1),
+            ("fanatic", 2),
+            ("wall", 1),
+            ("repairman", 4),
+        ] {
+            assert_eq!(scores.get(piece_type), Some(&score));
+            assert_eq!(
+                resolve_piece_type("white", piece_type).as_deref(),
+                Some(piece_type)
+            );
+        }
+        assert_eq!(
+            resolve_piece_type("black", "sacrificial_shrine").as_deref(),
+            Some("sacrificial-shrine")
+        );
+        assert_eq!(
+            resolve_piece_type("black", "sacrificial_lamb").as_deref(),
+            Some("sacrificial-lamb")
+        );
         assert_eq!(scores.get("surface-to-air-missile"), Some(&2));
         assert_eq!(
             resolve_piece_type("white", "surface-to-air-missile").as_deref(),
@@ -5314,6 +5347,63 @@ mod tests {
                 .get_piece_at_layer(&Square::new(6, 1), PieceLayer::Air),
             Some(&PieceId::from("lab_bomber"))
         );
+    }
+
+    #[tokio::test]
+    async fn lab_apply_action_resolves_fanatic_death_after_capture() {
+        let req = LabPieceOptionsRequest {
+            board_size: 8,
+            selected_piece_id: "lab_rook".into(),
+            move_option_id: None,
+            global_state: HashMap::new(),
+            pocket_pieces: vec![],
+            custom_pieces: vec![],
+            pieces: vec![
+                LabPieceSpec {
+                    id: "lab_rook".into(),
+                    piece_type: "rook".into(),
+                    owner: "white".into(),
+                    square: Square::new(0, 0),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                },
+                LabPieceSpec {
+                    id: "lab_fanatic".into(),
+                    piece_type: "fanatic".into(),
+                    owner: "black".into(),
+                    square: Square::new(2, 0),
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                    current_ammo: None,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                },
+            ],
+        };
+        let state = build_lab_game_state(&req, &[]).unwrap();
+        let capture = generate_piece_legal_move_actions(&state, &PieceId::from("lab_rook"))
+            .into_iter()
+            .find(|action| action.to == Square::new(2, 0))
+            .unwrap();
+
+        let response = apply_lab_action(
+            State(AppState::in_memory()),
+            HeaderMap::new(),
+            Json(LabApplyActionRequest {
+                lab: req,
+                action: TurnAction::Move(capture),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert!(response.pieces["lab_fanatic"].captured);
+        assert!(response.pieces["lab_rook"].captured);
+        assert!(response.board.get_piece_at(&Square::new(2, 0)).is_none());
     }
 
     #[tokio::test]

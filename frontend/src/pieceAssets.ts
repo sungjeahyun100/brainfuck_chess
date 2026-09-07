@@ -14,6 +14,18 @@ import cannonRookBlack from './assets/pieces/cannon-rook-black.svg'
 import cannonRookWhite from './assets/pieces/cannon-rook-white.svg'
 import machineGunnerBlack from './assets/pieces/machine-gunner-black.svg'
 import machineGunnerWhite from './assets/pieces/machine-gunner-white.svg'
+import shellBlack from './assets/pieces/shell-black.svg'
+import shellWhite from './assets/pieces/shell-white.svg'
+import sacrificialShrineBlack from './assets/pieces/sacrificial-shrine-black.svg'
+import sacrificialShrineWhite from './assets/pieces/sacrificial-shrine-white.svg'
+import sacrificialLambBlack from './assets/pieces/sacrificial-lamb-black.svg'
+import sacrificialLambWhite from './assets/pieces/sacrificial-lamb-white.svg'
+import fanaticBlack from './assets/pieces/fanatic-black.svg'
+import fanaticWhite from './assets/pieces/fanatic-white.svg'
+import wallBlack from './assets/pieces/wall-black.svg'
+import wallWhite from './assets/pieces/wall-white.svg'
+import repairmanBlack from './assets/pieces/repairman-black.svg'
+import repairmanWhite from './assets/pieces/repairman-white.svg'
 import mortarBlack from './assets/pieces/mortar-black.svg'
 import mortarWhite from './assets/pieces/mortar-white.svg'
 import tankBlack from './assets/pieces/tank-black.svg'
@@ -93,6 +105,12 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   'surface-to-air-missile-white': { white: surfaceToAirMissileWhite, black: surfaceToAirMissileBlack },
   'surface-to-air-missile-black': { white: surfaceToAirMissileWhite, black: surfaceToAirMissileBlack },
   'machine-gunner': { white: machineGunnerWhite, black: machineGunnerBlack },
+  shell: { white: shellWhite, black: shellBlack },
+  'sacrificial-shrine': { white: sacrificialShrineWhite, black: sacrificialShrineBlack },
+  'sacrificial-lamb': { white: sacrificialLambWhite, black: sacrificialLambBlack },
+  fanatic: { white: fanaticWhite, black: fanaticBlack },
+  wall: { white: wallWhite, black: wallBlack },
+  repairman: { white: repairmanWhite, black: repairmanBlack },
   'pawn-white': { white: pawnWhite, black: pawnBlack },
   'pawn-black': { white: pawnWhite, black: pawnBlack },
   'tempest-pawn': { white: tempestPawnWhite, black: tempestPawnBlack },

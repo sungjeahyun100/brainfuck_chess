@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::actions::apply_canonical_action;
 use crate::ai::types::AiAction;
-use crate::types::{GameState, PieceId, PieceLayer, PieceStateValue, Square, TurnAction};
+use crate::types::{GameState, PieceId, PieceLayer, PieceStateValue, PlayerId, Square, TurnAction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NodeKind {
@@ -178,6 +178,7 @@ enum CanonicalActionKey {
         piece_id: PieceId,
         ability_id: String,
         target_piece_id: Option<PieceId>,
+        target_piece_ids: Vec<PieceId>,
         pocket_piece: Option<PocketReferenceKey>,
         to: Option<Square>,
         deployments: Vec<(PocketReferenceKey, Square)>,
@@ -222,6 +223,7 @@ pub(crate) fn canonicalize_actions(state: &GameState, actions: Vec<AiAction>) ->
                     piece_id: ability.piece_id.clone(),
                     ability_id: ability.ability_id.clone(),
                     target_piece_id: ability.target_piece_id.clone(),
+                    target_piece_ids: ability.target_piece_ids.clone(),
                     pocket_piece: ability
                         .pocket_piece_id
                         .as_ref()
@@ -253,6 +255,38 @@ impl TacticalImpact {
 }
 
 pub(crate) fn tactical_impact(state: &GameState, action: &AiAction) -> TacticalImpact {
+    fn transition_impact(
+        state: &GameState,
+        next: &GameState,
+        acting_player: &PlayerId,
+    ) -> TacticalImpact {
+        let mut impact = TacticalImpact {
+            captures_king: next
+                .result
+                .as_ref()
+                .and_then(|result| result.winner.as_ref())
+                == Some(acting_player),
+            ..TacticalImpact::default()
+        };
+        for (piece_id, before) in &state.pieces {
+            if before.owner == *acting_player || !before.is_on_board() {
+                continue;
+            }
+            let removed = next
+                .pieces
+                .get(piece_id)
+                .is_none_or(|after| !after.is_on_board());
+            if removed {
+                impact.removed_enemy_pieces += 1;
+                impact.removed_enemy_value += state
+                    .piece_definitions
+                    .get(&before.type_id)
+                    .map_or(0, |definition| definition.score);
+            }
+        }
+        impact
+    }
+
     match action {
         AiAction::Move(action) => {
             let captured = action
@@ -268,6 +302,14 @@ pub(crate) fn tactical_impact(state: &GameState, action: &AiAction) -> TacticalI
             }
         }
         AiAction::Drop(action) => {
+            if state
+                .pieces
+                .get(&action.piece_id)
+                .is_some_and(|piece| piece.type_id == "shell")
+            {
+                let next = apply_canonical_action(state.clone(), TurnAction::Drop(action.clone()));
+                return transition_impact(state, &next, &action.player_id);
+            }
             let captured = action
                 .captured_piece_id
                 .as_ref()
@@ -282,31 +324,7 @@ pub(crate) fn tactical_impact(state: &GameState, action: &AiAction) -> TacticalI
         }
         AiAction::Ability(ability) => {
             let next = apply_canonical_action(state.clone(), TurnAction::Ability(ability.clone()));
-            let mut impact = TacticalImpact {
-                captures_king: next
-                    .result
-                    .as_ref()
-                    .and_then(|result| result.winner.as_ref())
-                    == Some(&ability.player_id),
-                ..TacticalImpact::default()
-            };
-            for (piece_id, before) in &state.pieces {
-                if before.owner == ability.player_id || !before.is_on_board() {
-                    continue;
-                }
-                let removed = next
-                    .pieces
-                    .get(piece_id)
-                    .is_none_or(|after| !after.is_on_board());
-                if removed {
-                    impact.removed_enemy_pieces += 1;
-                    impact.removed_enemy_value += state
-                        .piece_definitions
-                        .get(&before.type_id)
-                        .map_or(0, |definition| definition.score);
-                }
-            }
-            impact
+            transition_impact(state, &next, &ability.player_id)
         }
     }
 }
@@ -721,6 +739,7 @@ mod tests {
                 piece_id: piece_id.into(),
                 ability_id: "quiet".into(),
                 target_piece_id: None,
+                target_piece_ids: Vec::new(),
                 pocket_piece_id: pocket_piece_id.map(Into::into),
                 to: None,
                 deployments: Vec::new(),

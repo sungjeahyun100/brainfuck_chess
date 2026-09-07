@@ -1,11 +1,11 @@
 use crate::legal_moves::{
     bomber_landing_targets, machine_gun_barrage_targets, mortar_barrage_targets,
-    pending_landing_piece_id,
+    pending_landing_piece_id, repairman_front_squares, sacrificial_piece_ids,
 };
 use crate::pieces::default_pieces::{
-    BOMBER_BOMB_ABILITY_ID, BOMBER_LAND_ABILITY_ID, BOMBER_TAKEOFF_ABILITY_ID,
+    BOMBER_BOMB_ABILITY_ID, BOMBER_LAND_ABILITY_ID, BOMBER_TAKEOFF_ABILITY_ID, DETONATE_ABILITY_ID,
     INTERCEPT_ABILITY_ID, MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID,
-    TANK_FIRE_ABILITY_ID,
+    REPAIR_WALLS_ABILITY_ID, SACRIFICE_ABILITY_ID, TANK_FIRE_ABILITY_ID,
 };
 use crate::rules::get_base_zone_squares;
 use crate::types::*;
@@ -78,17 +78,9 @@ pub fn has_living_king(game_state: &GameState, player_id: &PlayerId) -> bool {
 /// Apply a MoveAction to the game state.
 /// If the captured piece is a King, the game ends immediately.
 pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameState {
-    // Detect what is on the destination square before moving
-    let target_piece_id = action.captured_piece_id.clone();
-    let target_is_king = target_piece_id.as_ref().and_then(|id| {
-        game_state
-            .pieces
-            .get(id)
-            .and_then(|p| game_state.piece_definitions.get(&p.type_id))
-            .map(is_royal_piece)
-    });
     // Move the piece
-    game_state = move_piece_on_board(game_state, &action);
+    let (next_state, removal) = move_piece_on_board(game_state, &action);
+    game_state = next_state;
     consume_option_ammo(&mut game_state, &action.piece_id, &action.move_option_id);
 
     // Promote when the moving piece's definition allows this target type.
@@ -203,14 +195,7 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
         game_state.en_passant_available_to = None;
     }
 
-    // Check if a King was captured → end the game immediately
-    if target_is_king == Some(true) {
-        game_state.phase = GamePhase::Ended;
-        game_state.result = Some(GameResult {
-            winner: Some(action.player_id.clone()),
-            reason: GameEndReason::KingCapture,
-        });
-    }
+    apply_removal_result(&mut game_state, &removal, &action.player_id);
 
     game_state
 }
@@ -354,17 +339,21 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
                 apply_ground_blast(&mut state, origin, &action.player_id);
             }
         }
+        DETONATE_ABILITY_ID => {
+            if let Some(origin) = state
+                .pieces
+                .get(&action.piece_id)
+                .and_then(|piece| piece.current_square)
+            {
+                apply_ground_blast(&mut state, origin, &action.player_id);
+            }
+        }
         INTERCEPT_ABILITY_ID => {
             let Some(target_id) = action.target_piece_id else {
                 return state;
             };
-            if remove_captured_piece(&mut state, &target_id, &action.player_id) {
-                state.phase = GamePhase::Ended;
-                state.result = Some(GameResult {
-                    winner: Some(action.player_id.clone()),
-                    reason: GameEndReason::KingCapture,
-                });
-            }
+            let removal = remove_captured_piece(&mut state, &target_id, &action.player_id);
+            apply_removal_result(&mut state, &removal, &action.player_id);
         }
         BOMBER_LAND_ABILITY_ID => {
             let Some(to) = action.to else {
@@ -409,35 +398,15 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
                         .map(|actor| mortar_barrage_targets(&state, actor, target))
                 })
                 .unwrap_or_default();
-            let mut removed_enemy_king = false;
-            let mut removed_friendly_king = false;
+            let mut removal = RemovalOutcome::default();
             for target_id in targets {
-                let target_owner = state
-                    .pieces
-                    .get(&target_id)
-                    .map(|piece| piece.owner.clone());
-                let was_king = remove_captured_piece(&mut state, &target_id, &action.player_id);
-                if was_king {
-                    if target_owner.as_ref() == Some(&action.player_id) {
-                        removed_friendly_king = true;
-                    } else {
-                        removed_enemy_king = true;
-                    }
-                }
+                removal.merge(remove_captured_piece(
+                    &mut state,
+                    &target_id,
+                    &action.player_id,
+                ));
             }
-            if removed_enemy_king || removed_friendly_king {
-                state.phase = GamePhase::Ended;
-                state.result = Some(GameResult {
-                    winner: if removed_enemy_king {
-                        Some(action.player_id.clone())
-                    } else if action.player_id == "white" {
-                        Some("black".into())
-                    } else {
-                        Some("white".into())
-                    },
-                    reason: GameEndReason::KingCapture,
-                });
-            }
+            apply_removal_result(&mut state, &removal, &action.player_id);
         }
         MACHINE_GUN_BARRAGE_ABILITY_ID => {
             let targets = state
@@ -445,34 +414,78 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
                 .get(&action.piece_id)
                 .map(|actor| machine_gun_barrage_targets(&state, actor))
                 .unwrap_or_default();
-            let mut removed_enemy_king = false;
-            let mut removed_friendly_king = false;
+            let mut removal = RemovalOutcome::default();
             for target_id in targets {
-                let target_owner = state
-                    .pieces
-                    .get(&target_id)
-                    .map(|piece| piece.owner.clone());
-                let was_king = remove_captured_piece(&mut state, &target_id, &action.player_id);
-                if was_king {
-                    if target_owner.as_ref() == Some(&action.player_id) {
-                        removed_friendly_king = true;
-                    } else {
-                        removed_enemy_king = true;
-                    }
-                }
+                removal.merge(remove_captured_piece(
+                    &mut state,
+                    &target_id,
+                    &action.player_id,
+                ));
             }
-            if removed_enemy_king || removed_friendly_king {
-                state.phase = GamePhase::Ended;
-                state.result = Some(GameResult {
-                    winner: if removed_enemy_king {
-                        Some(action.player_id.clone())
-                    } else if action.player_id == "white" {
-                        Some("black".into())
-                    } else {
-                        Some("white".into())
-                    },
-                    reason: GameEndReason::KingCapture,
-                });
+            apply_removal_result(&mut state, &removal, &action.player_id);
+        }
+        SACRIFICE_ABILITY_ID => {
+            let Some(actor) = state.pieces.get(&action.piece_id).cloned() else {
+                return state;
+            };
+            let sacrifices = sacrificial_piece_ids(&state, &actor);
+            let targets = if action.target_piece_ids.is_empty() {
+                action
+                    .target_piece_id
+                    .clone()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            } else {
+                action.target_piece_ids.clone()
+            };
+            let mut removal = RemovalOutcome::default();
+            for piece_id in sacrifices.into_iter().chain(targets) {
+                removal.merge(remove_captured_piece(
+                    &mut state,
+                    &piece_id,
+                    &action.player_id,
+                ));
+            }
+            apply_removal_result(&mut state, &removal, &action.player_id);
+        }
+        REPAIR_WALLS_ABILITY_ID => {
+            let Some(actor) = state.pieces.get(&action.piece_id).cloned() else {
+                return state;
+            };
+            let Some(definition) = state.piece_definitions.get("wall").cloned() else {
+                return state;
+            };
+            for square in repairman_front_squares(&state, &actor) {
+                if !state.board.is_empty(&square) {
+                    continue;
+                }
+                let base = format!(
+                    "{}-wall-{}-{}-{}",
+                    action.piece_id, state.turn_number, square.file, square.rank
+                );
+                let mut id: PieceId = base.clone().into();
+                let mut suffix = 2;
+                while state.pieces.contains_key(&id) {
+                    id = format!("{base}-{suffix}").into();
+                    suffix += 1;
+                }
+                let mut wall = Piece {
+                    id: id.clone(),
+                    owner: action.player_id.clone(),
+                    type_id: "wall".into(),
+                    current_square: Some(square),
+                    in_pocket: false,
+                    captured: false,
+                    has_moved: false,
+                    current_ammo: 0,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                    state: Default::default(),
+                    move_option_cooldowns: Default::default(),
+                };
+                wall.initialize_from_definition(&definition);
+                state.board.squares.insert(square.to_id(), Some(id.clone()));
+                state.pieces.insert(id, wall);
             }
         }
         "relieve" => {
@@ -550,6 +563,15 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
 }
 
 fn apply_ground_blast(game_state: &mut GameState, center: Square, acting_player: &PlayerId) {
+    let removal = remove_ground_blast_pieces(game_state, center, acting_player);
+    apply_removal_result(game_state, &removal, acting_player);
+}
+
+fn remove_ground_blast_pieces(
+    game_state: &mut GameState,
+    center: Square,
+    acting_player: &PlayerId,
+) -> RemovalOutcome {
     let targets = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
         .into_iter()
         .filter_map(|(dx, dy)| {
@@ -557,52 +579,91 @@ fn apply_ground_blast(game_state: &mut GameState, center: Square, acting_player:
             game_state.board.get_piece_at(&square).cloned()
         })
         .collect::<Vec<_>>();
-    let mut removed_enemy_king = false;
-    let mut removed_friendly_king = false;
+    let mut removal = RemovalOutcome::default();
     for target_id in targets {
-        let target_owner = game_state
-            .pieces
-            .get(&target_id)
-            .map(|piece| piece.owner.clone());
-        if remove_captured_piece(game_state, &target_id, acting_player) {
-            if target_owner.as_ref() == Some(acting_player) {
-                removed_friendly_king = true;
-            } else {
-                removed_enemy_king = true;
-            }
-        }
+        removal.merge(remove_captured_piece(game_state, &target_id, acting_player));
     }
-    if removed_enemy_king || removed_friendly_king {
-        game_state.phase = GamePhase::Ended;
-        game_state.result = Some(GameResult {
-            winner: if removed_enemy_king {
-                Some(acting_player.clone())
-            } else if acting_player == "white" {
-                Some("black".into())
-            } else {
-                Some("white".into())
-            },
-            reason: GameEndReason::KingCapture,
-        });
+    removal
+}
+
+#[derive(Default)]
+struct RemovalOutcome {
+    king_owners: std::collections::HashSet<PlayerId>,
+    fanatic_death_squares: std::collections::HashSet<Square>,
+}
+
+impl RemovalOutcome {
+    fn merge(&mut self, other: Self) {
+        self.king_owners.extend(other.king_owners);
+        self.fanatic_death_squares
+            .extend(other.fanatic_death_squares);
     }
 }
 
+fn remove_fanatic_capturer(
+    game_state: &mut GameState,
+    outcome: &mut RemovalOutcome,
+    capturer_id: &PieceId,
+    acting_player: &PlayerId,
+) {
+    let capturer_reached_death_square = game_state
+        .pieces
+        .get(capturer_id)
+        .and_then(|piece| piece.current_square)
+        .is_some_and(|square| outcome.fanatic_death_squares.contains(&square));
+    if capturer_reached_death_square {
+        outcome.merge(remove_captured_piece(
+            game_state,
+            capturer_id,
+            acting_player,
+        ));
+    }
+}
+
+fn apply_removal_result(
+    game_state: &mut GameState,
+    outcome: &RemovalOutcome,
+    acting_player: &PlayerId,
+) {
+    if outcome.king_owners.is_empty() {
+        return;
+    }
+    let opponent: PlayerId = if acting_player == "white" {
+        "black".into()
+    } else {
+        "white".into()
+    };
+    game_state.phase = GamePhase::Ended;
+    game_state.result = Some(GameResult {
+        winner: if outcome.king_owners.contains(&opponent) {
+            Some(acting_player.clone())
+        } else {
+            Some(opponent)
+        },
+        reason: GameEndReason::KingCapture,
+    });
+}
+
 /// Normalized piece-removal path shared by capture-like actions. It updates the
-/// board, concrete piece state, and capture record, and reports royal removal.
+/// board, concrete piece state, capture record, and Fanatic death cascade.
 fn remove_captured_piece(
     game_state: &mut GameState,
     piece_id: &PieceId,
     record_for_player: &PlayerId,
-) -> bool {
+) -> RemovalOutcome {
     let Some(piece) = game_state.pieces.get(piece_id) else {
-        return false;
+        return RemovalOutcome::default();
     };
+    if piece.captured || !piece.is_on_board() {
+        return RemovalOutcome::default();
+    }
     let square = piece.current_square;
-    let layer = piece.layer;
+    let is_fanatic = piece.type_id == "fanatic";
     let is_king = game_state
         .piece_definitions
         .get(&piece.type_id)
         .is_some_and(is_royal_piece);
+    let layer = piece.layer;
     if let Some(square) = square {
         game_state.board.set_piece_at_layer(square, layer, None);
     }
@@ -616,7 +677,22 @@ fn remove_captured_piece(
             player.captured_pieces.push(piece_id.clone());
         }
     }
-    is_king
+    let mut outcome = RemovalOutcome::default();
+    if is_fanatic {
+        if let Some(square) = square {
+            outcome.fanatic_death_squares.insert(square);
+        }
+    }
+    if is_king {
+        if let Some(owner) = game_state
+            .pieces
+            .get(piece_id)
+            .map(|piece| piece.owner.clone())
+        {
+            outcome.king_owners.insert(owner);
+        }
+    }
+    outcome
 }
 
 fn resolve_unlandable_bombers(game_state: &mut GameState, owner: &PlayerId) {
@@ -730,10 +806,11 @@ fn replenish_depleted_ammo_at_home(game_state: &mut GameState, piece_id: &PieceI
 
 /// Apply a DropAction: move a pocket piece onto the board.
 pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameState {
-    let captured_is_king = action
+    let mut removal = action
         .captured_piece_id
         .as_ref()
-        .is_some_and(|id| remove_captured_piece(&mut game_state, id, &action.player_id));
+        .map(|id| remove_captured_piece(&mut game_state, id, &action.player_id))
+        .unwrap_or_default();
     // Remove from pocket list
     if let Some(player) = game_state.players.get_mut(&action.player_id) {
         player
@@ -754,6 +831,25 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
         .squares
         .insert(action.to.to_id(), Some(action.piece_id.clone()));
 
+    remove_fanatic_capturer(
+        &mut game_state,
+        &mut removal,
+        &action.piece_id,
+        &action.player_id,
+    );
+
+    if game_state
+        .pieces
+        .get(&action.piece_id)
+        .is_some_and(|piece| piece.type_id == "shell")
+    {
+        removal.merge(remove_ground_blast_pieces(
+            &mut game_state,
+            action.to,
+            &action.player_id,
+        ));
+    }
+
     // If the player who could claim en passant used this turn for a drop,
     // the en passant right expires.
     if game_state.en_passant_available_to.as_ref() == Some(&game_state.current_player) {
@@ -761,20 +857,18 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
         game_state.en_passant_available_to = None;
     }
 
-    if captured_is_king {
-        game_state.phase = GamePhase::Ended;
-        game_state.result = Some(GameResult {
-            winner: Some(action.player_id),
-            reason: GameEndReason::KingCapture,
-        });
-    }
+    apply_removal_result(&mut game_state, &removal, &action.player_id);
 
     game_state
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
-fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameState {
+fn move_piece_on_board(
+    mut game_state: GameState,
+    action: &MoveAction,
+) -> (GameState, RemovalOutcome) {
+    let mut removal = RemovalOutcome::default();
     let moved_piece = game_state
         .pieces
         .get(&action.piece_id)
@@ -814,7 +908,11 @@ fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameSt
             .find(|p| p.id != action.player_id)
             .map(|player| player.id.clone())
             .unwrap_or_else(|| action.player_id.clone());
-        remove_captured_piece(&mut game_state, &captured_id, &record_for_player);
+        removal.merge(remove_captured_piece(
+            &mut game_state,
+            &captured_id,
+            &record_for_player,
+        ));
     }
 
     if is_castling {
@@ -865,7 +963,14 @@ fn move_piece_on_board(mut game_state: GameState, action: &MoveAction) -> GameSt
         piece.current_square = Some(action.to);
     }
 
-    game_state
+    remove_fanatic_capturer(
+        &mut game_state,
+        &mut removal,
+        &action.piece_id,
+        &action.player_id,
+    );
+
+    (game_state, removal)
 }
 
 fn replenish_ammo_on_home_entry(

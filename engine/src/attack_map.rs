@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::chessembly::run_chessembly_layer_for_piece;
 use crate::interaction::{destination_is_blocked_by_interaction, resolve_piece_interactions};
-use crate::terrain::can_affect_square;
+use crate::terrain::{can_affect_square, can_capture_piece};
 use crate::types::*;
 
 /// Compute the full attack map for a player: the union of attackSquares from
@@ -60,6 +60,7 @@ pub fn generate_attack_map(
                 option_attacks.extend(chessembly_result.attack_squares.into_iter().filter(|sq| {
                     !destination_is_blocked_by_interaction(game_state, piece, *sq, &option.id)
                         && can_affect_square(game_state, piece, *sq)
+                        && ordinary_attack_can_target_square(game_state, piece, *sq)
                 }));
             }
 
@@ -67,7 +68,10 @@ pub fn generate_attack_map(
                 resolve_piece_interactions(game_state, piece, &option.id)
                     .attack_squares
                     .into_iter()
-                    .filter(|square| can_affect_square(game_state, piece, *square)),
+                    .filter(|square| {
+                        can_affect_square(game_state, piece, *square)
+                            && ordinary_attack_can_target_square(game_state, piece, *square)
+                    }),
             );
 
             for sq in option_attacks {
@@ -89,6 +93,18 @@ pub fn generate_attack_map(
         attacked_squares,
         source_map,
     }
+}
+
+fn ordinary_attack_can_target_square(
+    game_state: &GameState,
+    attacker: &Piece,
+    square: Square,
+) -> bool {
+    game_state
+        .board
+        .get_piece_at_layer(&square, attacker.layer)
+        .and_then(|piece_id| game_state.pieces.get(piece_id))
+        .is_none_or(|victim| can_capture_piece(game_state, attacker, victim))
 }
 
 #[cfg(test)]
@@ -247,5 +263,24 @@ mod tests {
             crate::placement::get_piece_placement_squares(&state, &"white".into(), reserve);
         assert!(placement.contains(&reflected));
         assert!(!placement.contains(&wall));
+    }
+
+    #[test]
+    fn wall_blocks_a_sliding_attack_without_becoming_an_attack_square() {
+        let mut state = make_game_state(8);
+        add_piece(&mut state, "bishop", "black", "bishop", 3, 5);
+        add_piece(&mut state, "wall", "white", "wall", 6, 2);
+
+        let attack_map = generate_attack_map(&state, &"black".into(), &HashMap::new());
+
+        assert!(attack_map
+            .attacked_squares
+            .contains(&Square::new(5, 3).to_id()));
+        assert!(!attack_map
+            .attacked_squares
+            .contains(&Square::new(6, 2).to_id()));
+        assert!(!attack_map
+            .attacked_squares
+            .contains(&Square::new(7, 1).to_id()));
     }
 }

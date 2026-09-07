@@ -120,6 +120,30 @@
       </div>
     </div>
 
+    <div v-if="sacrificeOpen" class="sacrifice-panel-overlay">
+      <div class="airdrop-box sacrifice-panel-box">
+        <h3>희생 대상 선택</h3>
+        <p>성소 주변의 아군 기물(킹 제외)은 모두 희생됩니다. 제거할 적 지상 기물을 점수 한도 안에서 선택하세요.</p>
+        <div class="airdrop-pocket">
+          <button
+            v-for="pieceId in sacrificeCandidateIds"
+            :key="pieceId"
+            :class="{ selected: sacrificeSelectedIds.includes(pieceId) }"
+            :disabled="!sacrificeSelectedIds.includes(pieceId) && sacrificeSelectedScore + pieceScore(pieceId) > sacrificeBudget"
+            @click="toggleSacrificeTarget(pieceId)"
+          >
+            <span><strong>{{ sacrificeSquareLabel(pieceId) }}</strong>{{ props.state.piece_definitions[props.state.pieces[pieceId].type_id]?.name ?? props.state.pieces[pieceId].type_id }}</span>
+            <small>{{ props.state.piece_definitions[props.state.pieces[pieceId].type_id]?.is_king ? '킹' : `${pieceScore(pieceId)}점` }}</small>
+          </button>
+        </div>
+        <small>선택 {{ sacrificeSelectedIds.length }}개 · {{ sacrificeSelectedScore }}점 / 한도 {{ sacrificeBudget }}점</small>
+        <div class="airdrop-actions">
+          <button @click="cancelSacrifice">취소</button>
+          <button class="confirm" :disabled="sacrificeSelectedIds.length === 0" @click="confirmSacrifice">희생 실행</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Game over overlay -->
     <div v-if="viewState.phase === 'ended'" class="game-over-overlay">
       <div class="game-over-box">
@@ -197,6 +221,7 @@
           :selected-piece-id="visibleSelectedPieceId"
           :movable-squares="visibleMovableSquares"
           :attack-squares="visibleAttackSquares"
+          :attention-squares="sacrificeSelectedSquares"
           :threat-squares="visibleOpponentAttackSquares"
           :drop-squares="visibleDropSquares"
           :last-move="lastMove"
@@ -451,6 +476,9 @@ const airdropOpen = ref(false)
 const airdropSelectedPieceId = ref<string | null>(null)
 const airdropDraft = ref<AbilityDeployment[]>([])
 const airdropOptions = ref<LegalPieceOptions | null>(null)
+const sacrificeOpen = ref(false)
+const sacrificeSelectedIds = ref<string[]>([])
+const sacrificeOptions = ref<LegalPieceOptions | null>(null)
 let promotionResolve: ((choice: string | null) => void) | null = null
 const botPreviewSelectedPieceId = ref<string | null>(null)
 const botPreviewMovableSquares = ref<Square[]>([])
@@ -643,6 +671,41 @@ const airdropSquares = computed(() => {
   }).sort((left, right) => right.rank - left.rank || left.file - right.file)
 })
 const airdropUsedPieceIds = computed(() => new Set(airdropDraft.value.map(item => item.pocket_piece_id)))
+const sacrificeCandidateIds = computed(() => Array.from(new Set(
+  (sacrificeOptions.value?.abilityActions ?? []).flatMap(action => action.target_piece_id ? [action.target_piece_id] : []),
+)))
+const sacrificeBudget = computed(() => {
+  const shrine = selectedPieceId.value ? props.state.pieces[selectedPieceId.value] : undefined
+  if (!shrine?.current_square) return 0
+  let total = 0
+  for (let dx = -1; dx <= 1; dx += 1) {
+    for (let dy = -1; dy <= 1; dy += 1) {
+      if (dx === 0 && dy === 0) continue
+      const key = squareId({ file: shrine.current_square.file + dx, rank: shrine.current_square.rank + dy })
+      for (const id of [props.state.board.squares[key], props.state.board.air_squares?.[key]]) {
+        const piece = id ? props.state.pieces[id] : undefined
+        const definition = piece ? props.state.piece_definitions[piece.type_id] : undefined
+        if (piece?.owner === shrine.owner && !definition?.is_king) {
+          total += definition?.score ?? 0
+        }
+      }
+    }
+  }
+  return Math.min(8, total)
+})
+const sacrificeSelectedScore = computed(() => sacrificeSelectedIds.value.reduce(
+  (total, id) => total + pieceScore(id),
+  0,
+))
+const sacrificeSelectedSquares = computed(() => sacrificeSelectedIds.value.flatMap(pieceId => {
+  const square = props.state.pieces[pieceId]?.current_square
+  return square ? [square] : []
+}))
+
+function sacrificeSquareLabel(pieceId: string): string {
+  const square = props.state.pieces[pieceId]?.current_square
+  return square ? `${String.fromCharCode(97 + square.file)}${square.rank + 1}` : '-'
+}
 
 function abilityUnavailableReason(ability: MoveOptionDefinition): string {
   if (!selectedPiece.value) return '선택한 기물이 없습니다.'
@@ -1113,9 +1176,15 @@ const PIECE_SYMBOLS: Record<string, string> = {
   amazon: 'A', guhang: 'G', 'prime-minister': '총', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-bishop': 'B', 'tempest-knight': 'N', 'bouncing-bishop': 'B', 'bouncing-rook': 'R', 'bouncing-queen': 'Q', nightrider: 'N', windmill: 'W',
   'pawn-white': '♙', 'pawn-black': '♟', 'tempest-pawn-white': '♙', 'tempest-pawn-black': '♟', 'bouncing-pawn-white': '♙', 'bouncing-pawn-black': '♟', 'dozer-white': 'D', 'dozer-black': 'D',
   tank: '🛡', bomber: '✈', 'surface-to-air-missile-white': '▲', 'surface-to-air-missile-black': '▲',
+  shell: '●', 'sacrificial-shrine': '祭', 'sacrificial-lamb': '羊', fanatic: '†', wall: '▥', repairman: '⚒',
 }
 function pieceSymbol(typeId: string): string {
   return PIECE_SYMBOLS[typeId] ?? '?'
+}
+
+function pieceScore(pieceId: string): number {
+  const piece = props.state.pieces[pieceId]
+  return piece ? props.state.piece_definitions[piece.type_id]?.score ?? 0 : 0
 }
 
 function pieceImage(pieceId: string): string | undefined {
@@ -1565,6 +1634,12 @@ async function submitAbility(pieceId: string, to: Square) {
   const abilityId = activeAbilityId.value
   if (!abilityId) return
   const options = await loadPieceOptions(pieceId, abilityId)
+  if (abilityId === 'sacrifice') {
+    sacrificeOptions.value = options
+    sacrificeSelectedIds.value = []
+    sacrificeOpen.value = options.abilityActions.length > 0
+    return
+  }
   const actorSquare = props.state.pieces[pieceId]?.current_square
   const candidates = options.abilityActions.filter(action => abilityActionTargetsSquare(action, actorSquare, to))
   if (candidates.length === 0) { clearSelection(); return }
@@ -1589,6 +1664,44 @@ async function submitAbility(pieceId: string, to: Square) {
     emit('stateUpdate', newState)
   } catch (e: unknown) { error.value = e instanceof Error ? e.message : String(e) }
   finally { clearSelection() }
+}
+
+function toggleSacrificeTarget(pieceId: string) {
+  if (sacrificeSelectedIds.value.includes(pieceId)) {
+    sacrificeSelectedIds.value = sacrificeSelectedIds.value.filter(id => id !== pieceId)
+    return
+  }
+  if (sacrificeSelectedScore.value + pieceScore(pieceId) <= sacrificeBudget.value) {
+    sacrificeSelectedIds.value = [...sacrificeSelectedIds.value, pieceId]
+  }
+}
+
+function cancelSacrifice() {
+  sacrificeOpen.value = false
+  sacrificeSelectedIds.value = []
+  sacrificeOptions.value = null
+  clearSelection()
+}
+
+async function confirmSacrifice() {
+  const pieceId = selectedPieceId.value
+  if (!pieceId || sacrificeSelectedIds.value.length === 0) return
+  try {
+    const newState = await api.submitAction(props.state.id, {
+      type: 'ability',
+      piece_id: pieceId,
+      ability_id: 'sacrifice',
+      target_piece_ids: sacrificeSelectedIds.value,
+    })
+    emit('stateUpdate', newState)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    sacrificeOpen.value = false
+    sacrificeSelectedIds.value = []
+    sacrificeOptions.value = null
+    clearSelection()
+  }
 }
 
 async function submitDrop(pieceId: string, to: Square) {
@@ -1703,7 +1816,7 @@ function onBoardPieceClick(pieceId: string) {
     return
   }
   if (piece.owner !== props.state.current_player) return
-  if (abilityMode.value && activeAbilityId.value === 'bomb' && selectedPieceId.value === pieceId && piece.current_square) {
+  if (abilityMode.value && selectedPieceId.value === pieceId && piece.current_square) {
     void submitAbility(pieceId, piece.current_square)
     return
   }
@@ -2092,6 +2205,13 @@ async function onResign() {
   position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center;
   background: rgba(8, 20, 32, 0.68); padding: 20px;
 }
+.sacrifice-panel-overlay {
+  position: fixed; inset: 0; z-index: 70; display: flex; align-items: flex-start; justify-content: flex-end;
+  padding: 88px 24px 24px; pointer-events: none;
+}
+.sacrifice-panel-box { width: min(390px, 100%); max-height: calc(100vh - 112px); overflow: auto; pointer-events: auto; box-shadow: 0 20px 60px rgba(8, 20, 32, .35); }
+.sacrifice-panel-box .airdrop-pocket button > span { display: flex; align-items: center; gap: 10px; }
+.sacrifice-panel-box .airdrop-pocket button > span strong { color: #b45309; font-variant-numeric: tabular-nums; }
 .airdrop-box { width: min(680px, 100%); padding: 24px; border-radius: 14px; background: white; color: #1f2933; }
 .airdrop-box h3 { margin: 0 0 6px; }
 .airdrop-box > p { margin: 0 0 18px; color: #52606d; }
@@ -2109,6 +2229,8 @@ async function onResign() {
 .airdrop-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 @media (max-width: 900px) {
+  .sacrifice-panel-overlay { align-items: flex-end; justify-content: center; padding: 12px; }
+  .sacrifice-panel-box { max-height: 44vh; }
   .airdrop-layout { grid-template-columns: 1fr; }
   .game-screen { padding: 12px; }
   .header,

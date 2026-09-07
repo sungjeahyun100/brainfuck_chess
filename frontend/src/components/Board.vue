@@ -174,6 +174,7 @@ const props = defineProps<{
   selectedPieceId: string | null
   movableSquares: Square[]
   attackSquares: Square[]
+  attentionSquares?: Square[]
   threatSquares?: Square[]
   dropSquares: Square[]
   lastMove?: { from: Square; to: Square } | null
@@ -236,6 +237,7 @@ const allSquares = computed((): SquareInfo[] => {
 
 const movableSquareIds = computed(() => new Set(props.movableSquares.map(squareIdFromSquare)))
 const attackSquareIds = computed(() => new Set(props.attackSquares.map(squareIdFromSquare)))
+const attentionSquareIds = computed(() => new Set((props.attentionSquares ?? []).map(squareIdFromSquare)))
 const threatSquareIds = computed(() => new Set((props.threatSquares ?? []).map(squareIdFromSquare)))
 const dropSquareIds = computed(() => new Set(props.dropSquares.map(squareIdFromSquare)))
 const lastMoveSquareIds = computed(() => {
@@ -316,6 +318,9 @@ function squareClasses(sq: SquareInfo) {
   }
   if (threatSquareIds.value.has(sq.id)) {
     classes.push('opponent-threat')
+  }
+  if (attentionSquareIds.value.has(sq.id)) {
+    classes.push('attention')
   }
   if ((sq.piece && sq.piece.id === props.selectedPieceId)
     || (sq.airPiece && sq.airPiece.id === props.selectedPieceId)) {
@@ -670,6 +675,12 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'bomber': '✈',
   'surface-to-air-missile-white': '▲',
   'surface-to-air-missile-black': '▲',
+  'shell': '●',
+  'sacrificial-shrine': '祭',
+  'sacrificial-lamb': '羊',
+  'fanatic': '†',
+  'wall': '▥',
+  'repairman': '⚒',
 }
 
 function pieceSymbol(typeId: string): string {
@@ -782,8 +793,29 @@ function pieceAlt(piece: Piece): string {
   box-shadow: 0 0 0 2px rgba(19, 184, 166, 0.22);
 }
 
+.square.attention::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  z-index: 7;
+  border: 4px solid #ffcf4a;
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px rgba(208, 39, 55, .75), 0 0 24px 8px rgba(255, 207, 74, .9);
+  pointer-events: none;
+  animation: board-attention-pulse .7s ease-in-out infinite alternate;
+}
+
+@keyframes board-attention-pulse {
+  from { opacity: .45; transform: scale(.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 .square.drag-over::before {
   border-color: rgba(74, 143, 255, 0.82);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .square.attention::after { animation: none; }
 }
 
 .legal-move-dot {
