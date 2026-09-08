@@ -189,7 +189,7 @@ test('import reuses current validation for squares, placement zones, score, and 
     ['out of board', {
       ...validPayload(),
       starting: [{ pieceId: 'king', file: 8, rank: 0 }],
-    }, /기본 진영/],
+    }, /보드 범위/],
     ['wrong deployment zone', {
       ...validPayload(),
       starting: [{ pieceId: 'king', file: 4, rank: 0 }, { pieceId: 'pawn', file: 0, rank: 0 }],

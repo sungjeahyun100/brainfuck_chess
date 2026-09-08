@@ -17,6 +17,7 @@ mod auth;
 mod challenge;
 mod custom_piece;
 mod database;
+mod deck;
 mod game_record;
 mod profiling;
 mod request_guard;

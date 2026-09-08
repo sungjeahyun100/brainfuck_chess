@@ -100,6 +100,16 @@ impl AuthState {
         self.verify_token(token)
     }
 
+    /// Browser comparison value, never an authentication credential or database key.
+    /// Domain separation keeps this independent of session signatures. No stored ID is added.
+    pub(crate) fn account_context(&self, user_id: &str) -> String {
+        let mut mac = Hmac::<Sha256>::new_from_slice(&self.signing_key)
+            .expect("HMAC accepts keys of any length");
+        mac.update(b"deck-account-context:v1:");
+        mac.update(user_id.as_bytes());
+        URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+    }
+
     fn issue_token(&self, user_id: &str) -> Result<String, String> {
         let issued_at = unix_time()?;
         let payload = serde_json::to_vec(&SessionClaims {
@@ -191,7 +201,7 @@ impl AuthState {
         .expect("static cookie is valid")
     }
 
-    fn validate_origin(&self, headers: &HeaderMap) -> Result<(), String> {
+    pub(crate) fn validate_origin(&self, headers: &HeaderMap) -> Result<(), String> {
         let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
             return if self.secure_cookie {
                 Err("요청 origin을 확인할 수 없습니다.".into())
@@ -471,7 +481,7 @@ pub(crate) async fn session(State(app): State<AppState>, headers: HeaderMap) -> 
         );
     }
     let mut response = Json(SessionResponse {
-        user_id: user_id.clone(),
+        user_id: app.auth.account_context(&user_id),
     })
     .into_response();
     match app.auth.set_cookie(&user_id) {
@@ -488,9 +498,31 @@ pub(crate) async fn session(State(app): State<AppState>, headers: HeaderMap) -> 
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserUserProfile {
+    id: String,
+    public_id: Option<String>,
+    display_name: Option<String>,
+    avatar_url: Option<String>,
+    profile_visibility: ProfileVisibility,
+}
+
+impl BrowserUserProfile {
+    fn new(auth: &AuthState, user: UserProfile) -> Self {
+        Self {
+            id: auth.account_context(&user.id),
+            public_id: user.public_id,
+            display_name: user.display_name,
+            avatar_url: user.avatar_url,
+            profile_visibility: user.profile_visibility,
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct MeResponse {
     authenticated: bool,
-    user: Option<UserProfile>,
+    user: Option<BrowserUserProfile>,
 }
 
 pub(crate) async fn me(State(app): State<AppState>, headers: HeaderMap) -> Response {
@@ -504,7 +536,7 @@ pub(crate) async fn me(State(app): State<AppState>, headers: HeaderMap) -> Respo
     match app.accounts.authenticated_user(&user_id).await {
         Ok(user) => Json(MeResponse {
             authenticated: user.is_some(),
-            user,
+            user: user.map(|user| BrowserUserProfile::new(&app.auth, user)),
         })
         .into_response(),
         Err(_) => auth_error(
@@ -528,7 +560,7 @@ pub(crate) struct UpdateProfileRequest {
 
 #[derive(Serialize)]
 struct UpdateProfileResponse {
-    user: UserProfile,
+    user: BrowserUserProfile,
 }
 
 pub(crate) async fn update_profile(
@@ -612,7 +644,10 @@ pub(crate) async fn update_profile(
         )
         .await
     {
-        Ok(user) => Json(UpdateProfileResponse { user }).into_response(),
+        Ok(user) => Json(UpdateProfileResponse {
+            user: BrowserUserProfile::new(&app.auth, user),
+        })
+        .into_response(),
         Err(AccountUpdateError::NotFound) => auth_error(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
@@ -643,7 +678,7 @@ pub(crate) struct GoogleLoginRequest {
 #[serde(rename_all = "camelCase")]
 struct GoogleLoginResponse {
     authenticated: bool,
-    user: UserProfile,
+    user: BrowserUserProfile,
     imported_guest_data: bool,
 }
 
@@ -692,7 +727,7 @@ pub(crate) async fn google_login(
         }) => {
             let mut response = Json(GoogleLoginResponse {
                 authenticated: true,
-                user: user.clone(),
+                user: BrowserUserProfile::new(&app.auth, user.clone()),
                 imported_guest_data,
             })
             .into_response();

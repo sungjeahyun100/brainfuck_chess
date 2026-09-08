@@ -15,6 +15,8 @@ order:
    records without granting test roles access to production data.
 4. `20260904000000_analysis_retention.sql` adds safe legacy retention defaults,
    analysis trees/nodes, cascade deletion, and the cleanup permission.
+5. `20260908000000_account_decks.sql` creates account-owned JSONB decks,
+   revision checks, import identity keys, and environment-specific CRUD grants.
 
 The scripts never create or read `test.game_records`. Existing rows whose
 current public ID cannot be matched remain nullable and private to third parties.

@@ -43,6 +43,8 @@ export interface LobbyDeck {
 }
 
 export interface SavedDeck extends LobbyDeck {
+  /** Present only on account decks; required for optimistic concurrency. */
+  version?: number
   id: string
   name: string
   mapId: BoardMapId

@@ -53,12 +53,14 @@ PROD_MIGRATIONS=(
   "$SCRIPT_DIR/server/db/prod/20260826001000_game_record_ownership.sql"
   "$SCRIPT_DIR/server/db/prod/20260827000000_challenge_clears.sql"
   "$SCRIPT_DIR/server/db/prod/20260904000000_analysis_retention.sql"
+  "$SCRIPT_DIR/server/db/prod/20260908000000_account_decks.sql"
 )
 TEST_MIGRATIONS=(
   "$SCRIPT_DIR/server/db/test/20260826000500_create_game_records.sql"
   "$SCRIPT_DIR/server/db/test/20260826001000_game_record_ownership.sql"
   "$SCRIPT_DIR/server/db/test/20260827000000_challenge_clears.sql"
   "$SCRIPT_DIR/server/db/test/20260904000000_analysis_retention.sql"
+  "$SCRIPT_DIR/server/db/test/20260908000000_account_decks.sql"
 )
 
 if [[ "$TARGET" == "prod" ]]; then

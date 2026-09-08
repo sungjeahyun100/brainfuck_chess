@@ -16,6 +16,29 @@ pub(crate) fn api(state: AppState) -> Router {
         .route("/auth/profile", patch(crate::auth::update_profile))
         .route("/auth/google", post(crate::auth::google_login))
         .route("/auth/logout", post(crate::auth::logout))
+        .merge(
+            Router::new()
+                .route("/decks", get(crate::deck::list).post(crate::deck::create))
+                .route("/decks/import", post(crate::deck::import))
+                .route(
+                    "/decks/:id",
+                    get(crate::deck::get)
+                        .put(crate::deck::update)
+                        .delete(crate::deck::delete),
+                )
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::deck::MAX_DECK_BYTES,
+                ))
+                .layer(axum::middleware::map_response(
+                    |mut response: axum::response::Response| async move {
+                        response.headers_mut().insert(
+                            axum::http::header::CACHE_CONTROL,
+                            axum::http::HeaderValue::from_static("no-store"),
+                        );
+                        response
+                    },
+                )),
+        )
         .route("/piece-scores", get(get_piece_scores))
         .route("/piece-catalog", get(get_piece_catalog))
         .route("/games", post(create_game))

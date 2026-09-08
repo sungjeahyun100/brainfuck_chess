@@ -1,5 +1,7 @@
 <template>
   <main class="lobby">
+    <p v-if="decksLoading" role="status">덱을 불러오는 중…</p>
+    <p v-if="decksError" class="error" role="alert">{{ decksError }} <button class="btn-secondary" @click="savedDecks.loadDecks">다시 불러오기</button></p>
     <div class="page-bar">
       <button class="btn-secondary" @click="$emit('back')">로비로</button>
       <div>
@@ -11,7 +13,7 @@
       </button>
     </div>
 
-    <section v-if="decks.length === 0" class="card empty-state">
+    <section v-if="!decksLoading && !decksError && decks.length === 0" class="card empty-state">
       <h2>먼저 덱을 만들어 주세요.</h2>
       <p>저장된 덱이 없으면 게임을 시작할 수 없습니다.</p>
       <button class="btn-start" @click="$emit('deck-building')">덱 빌딩으로 이동</button>
@@ -113,7 +115,7 @@ const emit = defineEmits<{
 }>()
 
 const savedDecks = useSavedDecks()
-const decks = ref<SavedDeck[]>([])
+const { decks, loading: decksLoading, error: decksError } = savedDecks
 const primaryDeckId = ref('')
 const secondaryDeckId = ref('')
 const humanSide = ref<LobbyPlayer>('white')
@@ -134,14 +136,15 @@ const errorMessage = computed(() => {
   return null
 })
 const canStart = computed(() => Boolean(
-  primaryDeck.value
+  !decksLoading.value
+  && !decksError.value
+  && primaryDeck.value
   && secondaryDeck.value
   && sameMap.value
   && (props.mode !== 'single' || (isValidGameNickname(localNickname.value) && isValidGameNickname(guestNickname.value)))
 ))
 
 function refresh() {
-  decks.value = savedDecks.loadDecks()
   primaryDeckId.value = validDecks.value[0]?.id ?? ''
   secondaryDeckId.value = validDecks.value.find(deck => deck.id !== primaryDeckId.value)?.id ?? validDecks.value[0]?.id ?? ''
 }
@@ -175,7 +178,7 @@ function start() {
   }))
 }
 
-watch(() => props.mode, refresh)
+watch([() => props.mode, decks], refresh)
 onMounted(async () => {
   refresh()
   try {

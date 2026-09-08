@@ -84,6 +84,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, type Auth } from
 import { AuthApiError, authApi, type AuthUser, type ProfileVisibility } from '../api/authApi'
 import { accountSettingsDraft, persistAccountSettings } from '../accountSettings'
 import { CUSTOM_PIECES_CHANGED_EVENT } from '../api/customPieceApi'
+import { setDeckStorageIdentity } from '../composables/useSavedDecks'
 import { firebaseConfig } from '../config'
 
 const user = ref<AuthUser | null>(null)
@@ -115,6 +116,17 @@ async function refresh() {
   await authApi.ensureGuestSession()
   const state = await authApi.me()
   user.value = state.user
+  setDeckStorageIdentity(state.authenticated && state.user ? state.user.id : null)
+}
+
+async function changeDeckAccount<T>(action: () => Promise<T>): Promise<T> {
+  setDeckStorageIdentity(undefined)
+  try { return await action() }
+  catch (cause) {
+    try { await refresh() }
+    catch { setDeckStorageIdentity(undefined, '로그인 상태를 확인하지 못했습니다. 새로고침해 주세요.') }
+    throw cause
+  }
 }
 
 async function login() {
@@ -126,8 +138,9 @@ async function login() {
     const credential = await signInWithPopup(auth, new GoogleAuthProvider())
     const idToken = await credential.user.getIdToken(true)
     try {
-      const result = await authApi.googleLogin(idToken)
+      const result = await changeDeckAccount(() => authApi.googleLogin(idToken))
       user.value = result.user
+      setDeckStorageIdentity(result.authenticated && result.user ? result.user.id : null)
       await signOut(auth).catch(() => undefined)
       window.dispatchEvent(new Event(CUSTOM_PIECES_CHANGED_EVENT))
     } catch (cause) {
@@ -145,12 +158,14 @@ async function login() {
 }
 
 async function finishLogin(importGuestData: boolean) {
-  if (!pendingToken.value) return
+  const idToken = pendingToken.value
+  if (!idToken) return
   busy.value = true
   error.value = null
   try {
-    const result = await authApi.googleLogin(pendingToken.value, importGuestData)
+    const result = await changeDeckAccount(() => authApi.googleLogin(idToken, importGuestData))
     user.value = result.user
+    setDeckStorageIdentity(result.authenticated && result.user ? result.user.id : null)
     pendingToken.value = null
     await signOut(firebaseAuth()).catch(() => undefined)
     window.dispatchEvent(new Event(CUSTOM_PIECES_CHANGED_EVENT))
@@ -165,7 +180,8 @@ async function logout() {
   busy.value = true
   error.value = null
   try {
-    await authApi.logout()
+    await changeDeckAccount(() => authApi.logout())
+    setDeckStorageIdentity(null)
     if (firebaseConfig) await signOut(firebaseAuth()).catch(() => undefined)
     user.value = null
     await authApi.ensureGuestSession()
@@ -219,6 +235,7 @@ onMounted(async () => {
     await refresh()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '계정 상태를 확인하지 못했습니다.'
+    setDeckStorageIdentity(undefined, error.value)
   } finally {
     loading.value = false
   }

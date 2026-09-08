@@ -1,5 +1,7 @@
 <template>
   <main class="lobby">
+    <p v-if="decksLoading" role="status">덱을 불러오는 중…</p>
+    <p v-if="decksError" class="error" role="alert">{{ decksError }} <button class="btn-secondary" @click="savedDecks.loadDecks">다시 불러오기</button></p>
     <div class="page-bar">
       <button class="btn-secondary" @click="$emit('back')">로비로</button>
       <div>
@@ -9,7 +11,7 @@
       <button class="btn-secondary" :disabled="!currentRoom" @click="refreshRoom">새로고침</button>
     </div>
 
-    <section v-if="decks.length === 0" class="card empty-state">
+    <section v-if="!decksLoading && !decksError && decks.length === 0" class="card empty-state">
       <h2>먼저 덱을 만들어 주세요.</h2>
       <p>멀티플레이는 방에 들어가기 전에 저장된 덱 하나를 선택해야 합니다.</p>
       <button class="btn-start" @click="$emit('deck-building')">덱 빌딩으로 이동</button>
@@ -78,9 +80,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { GameState } from '../types/game'
-import type { LobbyPlayer, SavedDeck } from '../types/deck'
+import type { LobbyPlayer } from '../types/deck'
 import { api, type MultiplayerRoom } from '../api/gameApi'
 import { useSavedDecks } from '../composables/useSavedDecks'
 import { savedDeckToPlayerDeckRequest } from '../composables/useDeckSerialization'
@@ -96,7 +98,7 @@ const emit = defineEmits<{
 }>()
 
 const savedDecks = useSavedDecks()
-const decks = ref<SavedDeck[]>([])
+const { decks, loading: decksLoading, error: decksError } = savedDecks
 const selectedDeckId = ref('')
 const hostSideMode = ref<LobbyPlayer | 'random'>('random')
 const roomCodeInput = ref('')
@@ -118,8 +120,9 @@ function randomSide(): LobbyPlayer {
   return Math.random() < 0.5 ? 'white' : 'black'
 }
 
+watch(decks, refreshDecks)
+
 function refreshDecks() {
-  decks.value = savedDecks.loadDecks()
   selectedDeckId.value = validDecks.value[0]?.id ?? ''
 }
 
@@ -147,7 +150,7 @@ function startPolling(roomId: string) {
 }
 
 async function createRoom() {
-  if (!selectedDeck.value) return
+  if (decksLoading.value || decksError.value || !selectedDeck.value) return
   error.value = null
   status.value = null
   try {
@@ -221,7 +224,7 @@ async function readyRoom() {
 }
 
 async function joinRoom() {
-  if (!selectedDeck.value) return
+  if (decksLoading.value || decksError.value || !selectedDeck.value) return
   error.value = null
   status.value = null
   try {

@@ -1,5 +1,7 @@
 <template>
   <main class="lobby">
+    <p v-if="decksLoading" role="status">덱을 불러오는 중…</p>
+    <p v-if="decksError" class="error" role="alert">{{ decksError }} <button class="btn-secondary" @click="savedDecks.loadDecks">다시 불러오기</button></p>
     <div class="page-bar">
       <button class="btn-secondary" @click="selectedChallenge ? selectedChallenge = null : $emit('back')">
         {{ selectedChallenge ? '목록으로' : '로비로' }}
@@ -35,7 +37,7 @@
         <strong>상대: {{ difficultyLabel(selectedChallenge.bot_difficulty) }} 봇</strong>
       </section>
 
-      <section v-if="decks.length === 0" class="card empty-state">
+      <section v-if="!decksLoading && !decksError && decks.length === 0" class="card empty-state">
         <h2>먼저 덱을 만들어 주세요.</h2>
         <p>저장된 덱이 없으면 Challenge를 시작할 수 없습니다.</p>
         <button class="btn-start" @click="$emit('deck-building')">덱 빌딩으로 이동</button>
@@ -67,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { api, type ChallengeSummary } from '../api/gameApi'
 import type { BotDifficulty, GameState } from '../types/game'
 import type { SavedDeck } from '../types/deck'
@@ -82,13 +84,15 @@ const emit = defineEmits<{
 }>()
 const savedDecks = useSavedDecks()
 const challenges = ref<ChallengeSummary[]>([])
-const decks = ref<SavedDeck[]>([])
+const { decks, loading: decksLoading, error: decksError } = savedDecks
 const selectedChallenge = ref<ChallengeSummary | null>(null)
 const selectedDeckId = ref('')
 const loading = ref(true)
 const starting = ref(false)
 const error = ref<string | null>(null)
 const startError = ref<string | null>(null)
+
+watch(decks, () => { selectedDeckId.value = decks.value.find(deck => availability(deck).valid)?.id ?? '' })
 
 function difficultyLabel(value: BotDifficulty) {
   return ({ easy: 'Easy', normal: 'Normal', hard: 'Hard' } as const)[value]
@@ -114,7 +118,7 @@ function selectChallenge(challenge: ChallengeSummary) {
 async function start() {
   const challenge = selectedChallenge.value
   const deck = decks.value.find(item => item.id === selectedDeckId.value)
-  if (!challenge || !deck || !availability(deck).valid) return
+  if (decksLoading.value || decksError.value || !challenge || !deck || !availability(deck).valid) return
   starting.value = true
   startError.value = null
   try {
@@ -128,7 +132,6 @@ async function start() {
 }
 
 onMounted(async () => {
-  decks.value = savedDecks.loadDecks()
   try { challenges.value = await api.listChallenges() }
   catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) }
   finally { loading.value = false }

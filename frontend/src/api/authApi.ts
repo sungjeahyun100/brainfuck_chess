@@ -1,6 +1,7 @@
 export type ProfileVisibility = 'public' | 'private'
 
 export interface AuthUser {
+  /** Opaque account comparison value; never the internal user primary key. */
   id: string
   publicId: string | null
   displayName: string | null

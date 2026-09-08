@@ -45,6 +45,14 @@ pub(crate) async fn verify_database_contract(
         ));
     }
 
+    let deck_contract = sqlx::query_scalar::<_, bool>(
+        "SELECT to_regclass($1) IS NOT NULL AND has_table_privilege(current_user, to_regclass($1), 'SELECT') AND has_table_privilege(current_user, to_regclass($1), 'INSERT') AND has_table_privilege(current_user, to_regclass($1), 'UPDATE') AND has_table_privilege(current_user, to_regclass($1), 'DELETE') AND (SELECT count(*)=10 FROM information_schema.columns WHERE table_schema=$2 AND table_name='decks' AND column_name IN ('id','owner_id','name','deck_data','format_version','created_at_ms','updated_at_ms','version','request_key','create_hash'))"
+    ).bind(data_schema.table("decks")).bind(data_schema.name()).fetch_one(pool).await
+        .map_err(|error| format!("failed to inspect deck storage contract: {error}"))?;
+    if !deck_contract {
+        return Err("deck storage schema or CRUD privileges are not provisioned; run the approved admin migration".into());
+    }
+
     for required_schema in ["shared", data_schema.name()] {
         let can_use_required =
             sqlx::query_scalar::<_, bool>("SELECT has_schema_privilege(current_user, $1, 'USAGE')")
@@ -107,7 +115,8 @@ impl DataSchema {
     pub(crate) fn table(self, table: &str) -> String {
         debug_assert!(matches!(
             table,
-            "custom_piece_versions"
+            "decks"
+                | "custom_piece_versions"
                 | "custom_piece_images"
                 | "game_records"
                 | "game_analysis_trees"
@@ -149,6 +158,20 @@ mod tests {
         verify_database_contract(&test, "test", DataSchema::Test)
             .await
             .unwrap();
+
+        sqlx::query("REVOKE UPDATE ON test.decks FROM test_app")
+            .execute(&admin)
+            .await
+            .unwrap();
+        let missing_deck_permission =
+            verify_database_contract(&test, "test", DataSchema::Test).await;
+        sqlx::query("GRANT UPDATE ON test.decks TO test_app")
+            .execute(&admin)
+            .await
+            .expect("temporary deck permission change must be restored");
+        assert!(missing_deck_permission
+            .unwrap_err()
+            .contains("deck storage schema or CRUD privileges"));
 
         sqlx::query("GRANT USAGE ON SCHEMA prod TO deck_chess_test")
             .execute(&admin)

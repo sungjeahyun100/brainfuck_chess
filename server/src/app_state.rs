@@ -15,6 +15,7 @@ use sqlx::postgres::PgPoolOptions;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
+    pub(crate) decks: crate::deck::DeckStore,
     pub(crate) games: GameStore,
     pub(crate) rooms: RoomStore,
     pub(crate) custom_pieces: CustomPieceStore,
@@ -31,6 +32,7 @@ impl AppState {
         let custom_pieces: CustomPieceStore =
             std::sync::Arc::new(InMemoryCustomPieceRepository::default());
         Self {
+            decks: std::sync::Arc::new(crate::deck::tests::MemoryDeckRepository::default()),
             games: Default::default(),
             rooms: Default::default(),
             accounts: std::sync::Arc::new(InMemoryAccountRepository::new(custom_pieces.clone())),
@@ -45,6 +47,8 @@ impl AppState {
     pub(crate) async fn from_env(app_env: &str) -> Result<Self, String> {
         let auth = AuthState::from_env(app_env)?;
         let data_schema = DataSchema::for_app_env(app_env)?;
+        let mut decks: crate::deck::DeckStore =
+            std::sync::Arc::new(crate::deck::PostgresDeckRepository::new(None, data_schema));
         let (custom_pieces, accounts, game_records, analyses, challenge_progress): (
             CustomPieceStore,
             AccountStore,
@@ -60,6 +64,10 @@ impl AppState {
                     .await
                     .map_err(|error| format!("failed to connect to PostgreSQL: {error}"))?;
                 verify_database_contract(&pool, app_env, data_schema).await?;
+                decks = std::sync::Arc::new(crate::deck::PostgresDeckRepository::new(
+                    Some(pool.clone()),
+                    data_schema,
+                ));
                 (
                     std::sync::Arc::new(PostgresCustomPieceRepository::from_pool(
                         pool.clone(),
@@ -102,6 +110,7 @@ impl AppState {
             Err(_) => return Err(format!("DATABASE_URL is required for APP_ENV={app_env}")),
         };
         Ok(Self {
+            decks,
             games: Default::default(),
             rooms: Default::default(),
             custom_pieces,

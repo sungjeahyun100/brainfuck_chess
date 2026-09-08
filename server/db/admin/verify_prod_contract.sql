@@ -3,6 +3,7 @@
 -- USAGE on application schemas.
 DO $contract$
 DECLARE
+    decks_table oid;
     challenge_table oid;
     game_records_table oid;
     analysis_trees_table oid;
@@ -18,6 +19,7 @@ BEGIN
             ('prod', 'game_records'),
             ('prod', 'game_analysis_trees'),
             ('prod', 'game_analysis_nodes'),
+            ('prod', 'decks'),
             ('prod', 'challenge_clears')
         ) required(schema_name, table_name)
         WHERE NOT EXISTS (
@@ -38,6 +40,16 @@ BEGIN
             ('prod', 'game_records', 'black_user_id'),
             ('prod', 'game_records', 'retention_mode'),
             ('prod', 'game_records', 'expires_at_ms'),
+            ('prod', 'decks', 'id'),
+            ('prod', 'decks', 'owner_id'),
+            ('prod', 'decks', 'name'),
+            ('prod', 'decks', 'deck_data'),
+            ('prod', 'decks', 'format_version'),
+            ('prod', 'decks', 'created_at_ms'),
+            ('prod', 'decks', 'updated_at_ms'),
+            ('prod', 'decks', 'version'),
+            ('prod', 'decks', 'request_key'),
+            ('prod', 'decks', 'create_hash'),
             ('prod', 'challenge_clears', 'user_id'),
             ('prod', 'challenge_clears', 'challenge_id'),
             ('prod', 'challenge_clears', 'first_cleared_at_ms')
@@ -54,6 +66,18 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'production runtime contract is missing required columns';
     END IF;
+
+    SELECT relation.oid INTO STRICT decks_table FROM pg_class relation
+        JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
+        WHERE namespace.nspname='prod' AND relation.relname='decks';
+    IF EXISTS (SELECT 1 FROM (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE')) p(privilege)
+        WHERE NOT has_table_privilege('prod_app', decks_table, p.privilege)
+           OR has_table_privilege('test_app', decks_table, p.privilege))
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=decks_table AND contype='p' AND pg_get_constraintdef(oid)='PRIMARY KEY (id)')
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=decks_table AND contype='u' AND pg_get_constraintdef(oid)='UNIQUE (owner_id, request_key)')
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid=c.confrelid JOIN pg_namespace n ON n.oid=r.relnamespace
+           WHERE c.conrelid=decks_table AND c.contype='f' AND c.confdeltype='c' AND n.nspname='shared' AND r.relname='users')
+    THEN RAISE EXCEPTION 'prod deck persistence contract is invalid'; END IF;
 
     SELECT relation.oid INTO STRICT challenge_table
     FROM pg_class relation

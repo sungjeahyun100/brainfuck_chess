@@ -1,5 +1,12 @@
 <template>
   <main class="lobby">
+    <template v-if="!deckLoaded">
+      <button class="btn-secondary" @click="$emit('back')">목록으로</button>
+      <p v-if="loadError" class="error" role="alert">{{ loadError }}</p>
+      <p v-else role="status">덱을 불러오는 중…</p>
+      <button v-if="loadError" class="btn-secondary" @click="loadDeck">다시 불러오기</button>
+    </template>
+    <template v-else>
     <div class="page-bar">
       <button class="btn-secondary" @click="$emit('back')">목록으로</button>
       <div>
@@ -7,10 +14,10 @@
         <h1>{{ deck.name || '이름 없는 덱' }}</h1>
       </div>
       <div class="deck-editor-actions">
-        <button class="btn-secondary" :disabled="!canSaveDeck" @click="copyDeckCode">덱 코드 복사</button>
+        <button class="btn-secondary" :disabled="!deckSummary.valid" @click="copyDeckCode">덱 코드 복사</button>
         <button class="btn-secondary" @click="openImportDialog">덱 코드 불러오기</button>
         <button class="btn-secondary danger" @click="resetDeck">전체 초기화</button>
-        <button class="btn-start" :disabled="!canSaveDeck" @click="save">덱 저장</button>
+        <button class="btn-start" :disabled="!canSaveDeck || saving" @click="save">{{ saving ? '저장 중…' : '덱 저장' }}</button>
       </div>
     </div>
 
@@ -56,7 +63,7 @@
       <div class="deck-score-copy">
         <span class="limit-label">덱 점수</span>
         <strong>{{ deckSummary.totalScore }} / {{ deckSummary.scoreLimit }}점</strong>
-        <span>{{ deckSummary.valid ? '게임 사용 가능' : '저장 가능 · 게임 사용 불가' }}</span>
+        <span>{{ deckSummary.valid ? '게임 사용 가능' : (canSaveDeck ? '저장 가능 · 게임 사용 불가' : '저장 불가') }}</span>
       </div>
       <div class="deck-score-meter" :class="{ over: deckSummary.totalScore > deckSummary.scoreLimit }">
         <span :style="{ width: scoreFillWidth }"></span>
@@ -340,15 +347,15 @@
         </template>
       </section>
     </div>
+    </template>
   </main>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onMounted } from 'vue'
 import { pieceAsset } from '../pieceAssets'
 import { customPieceApi } from '../api/customPieceApi'
-import type { DeckPieceType, SavedDeck } from '../types/deck'
+import type { DeckPieceType, PieceCatalogItem, SavedDeck } from '../types/deck'
 import {
   baseZoneRanks,
   canUseInPocket,
@@ -356,6 +363,7 @@ import {
   deckPresets,
   emptyPocket,
   frontmostBaseRank,
+  findPieceCatalogItem,
   isUniqueStartingPiece,
   pieceCatalog,
   pieceLabel,
@@ -365,9 +373,10 @@ import {
   scoreLimit,
   totalPocketCount,
   validateSavedDeck,
+  validateDeckForStorage,
   replaceCustomPieceCatalog,
 } from '../composables/useDeckValidation'
-import { createNewSavedDeck, useSavedDecks } from '../composables/useSavedDecks'
+import { createNewSavedDeck, deckStorageIdentity, useSavedDecks } from '../composables/useSavedDecks'
 import { encodeDeckCode } from '../composables/useDeckCodeCodec'
 import { importDeckCode, type DeckCodeImportResult } from '../composables/useDeckCode'
 import { boardMaps, findBoardMap } from '../boardMaps'
@@ -390,7 +399,11 @@ const placementTool = ref<DeckPieceType>('king')
 const draggedPiece = ref<DeckPieceType | null>(null)
 const saveError = ref<string | null>(null)
 const placementError = ref<string | null>(null)
-const deck = ref<SavedDeck>(loadDeck())
+const deck = ref<SavedDeck>(createNewSavedDeck())
+const deckLoaded = ref(false)
+const loadError = ref<string | null>(null)
+const saving = savedDecks.busy
+let loadRevision = 0
 const catalogLoadError = ref<string | null>(null)
 const catalogRevision = ref(0)
 const latestCustomPieces = ref<Awaited<ReturnType<typeof customPieceApi.list>>['items']>([])
@@ -401,32 +414,46 @@ const importCode = ref('')
 const importError = ref<string | null>(null)
 const importCandidate = ref<Extract<DeckCodeImportResult, { ok: true }> | null>(null)
 
-onMounted(async () => {
+async function loadDeck() {
+  const revision = ++loadRevision
+  deckLoaded.value = false
+  loadError.value = null
+  catalogLoadError.value = null
+  saveError.value = null
+  if (deckStorageIdentity.value === undefined) {
+    loadError.value = savedDecks.error.value
+    return
+  }
   try {
+    const existing = props.deckId ? await savedDecks.getDeck(props.deckId) : createNewSavedDeck()
+    if (!existing) throw new Error('덱을 찾을 수 없습니다.')
+    if (revision !== loadRevision) return
+    deck.value = cloneSavedDeck(existing)
+    deckLoaded.value = true
     const { items } = await customPieceApi.list()
-    latestCustomPieces.value = items
     const pinned = await Promise.all(
-      (deck.value.customPieces ?? [])
+      (existing.customPieces ?? [])
         .filter(reference => !items.some(item => item.id === reference.id && item.version === reference.version))
         .map(reference => customPieceApi.getVersion(reference.id, reference.version).catch(() => null)),
     )
+    if (revision !== loadRevision) return
+    latestCustomPieces.value = items
     replaceCustomPieceCatalog([...items, ...pinned.filter(item => item !== null)])
     catalogRevision.value += 1
-  } catch (error) {
-    catalogLoadError.value = error instanceof Error ? error.message : String(error)
+  } catch (cause) {
+    if (revision === loadRevision) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      if (deckLoaded.value) catalogLoadError.value = message
+      else loadError.value = message
+    }
   }
-})
-
-function loadDeck(): SavedDeck {
-  if (props.deckId) {
-    const existing = savedDecks.getDeck(props.deckId)
-    if (existing) return cloneSavedDeck(existing)
-  }
-  return createNewSavedDeck()
 }
+watch([deckStorageIdentity, () => props.deckId], loadDeck, { immediate: true, flush: 'sync' })
+watch(savedDecks.error, message => { if (deckStorageIdentity.value === undefined) loadError.value = message })
 
 function cloneSavedDeck(source: SavedDeck): SavedDeck {
   return {
+    ...(source.version === undefined ? {} : { version: source.version }),
     id: source.id,
     name: source.name,
     mapId: source.mapId,
@@ -452,15 +479,15 @@ function changeMap() {
   resetToClassic()
 }
 
-watch(() => props.deckId, () => {
-  deck.value = loadDeck()
-})
-
 const deckSummary = computed(() => {
   catalogRevision.value
   return validateSavedDeck(deck.value)
 })
-const canSaveDeck = computed(() => deckSummary.value.valid)
+const storageSummary = computed(() => {
+  catalogRevision.value
+  return validateDeckForStorage(deck.value)
+})
+const canSaveDeck = computed(() => storageSummary.value.valid)
 const activePresets = computed(() => deckPresets.filter(preset => presetLayoutForBoard(preset, deck.value.boardSize)))
 const selectedToolLabel = computed(() => placementTool.value === eraseTool ? '지우개' : pieceLabel(placementTool.value))
 const scoreFillWidth = computed(() => `${Math.min(100, Math.round((deckSummary.value.totalScore / deckSummary.value.scoreLimit) * 100))}%`)
@@ -779,10 +806,11 @@ function emitTestPiece(pieceType: DeckPieceType) {
   })
 }
 
-function save() {
+async function save() {
+  if (!deckLoaded.value || saving.value) return
   saveError.value = null
-  if (!deckSummary.value.valid) {
-    saveError.value = deckSummary.value.errors.join(' ')
+  if (!storageSummary.value.valid) {
+    saveError.value = storageSummary.value.errors.join(' ')
     return
   }
   try {
@@ -790,15 +818,16 @@ function save() {
       ...deck.value.starting.map(piece => piece.pieceType),
       ...Object.entries(deck.value.pocket).filter(([, count]) => count > 0).map(([pieceType]) => pieceType),
     ])
-    deck.value.customPieces = pieceCatalog
-      .filter(piece => piece.custom && usedTypes.has(piece.id))
+    deck.value.customPieces = [...usedTypes]
+      .map(findPieceCatalogItem)
+      .filter((piece): piece is PieceCatalogItem => Boolean(piece?.custom))
       .map(piece => ({
         id: piece.custom!.id,
         version: piece.custom!.version,
         contentHash: piece.custom!.contentHash,
         exposedPieceKey: piece.custom!.exposedPieceKey,
       }))
-    savedDecks.saveDeck(cloneSavedDeck(deck.value))
+    await savedDecks.saveDeck(cloneSavedDeck(deck.value))
     emit('saved')
   } catch (e: unknown) {
     saveError.value = e instanceof Error ? e.message : String(e)

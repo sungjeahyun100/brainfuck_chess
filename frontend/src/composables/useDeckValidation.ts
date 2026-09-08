@@ -388,14 +388,14 @@ export function canPieceBePlacedAtStart(
     && placementRestriction(pieceType, rank, boardSize, side) === null
 }
 
-export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '덱'): DeckSummary {
-  const totalScore = calculateDeckScore(deck)
-  const limit = scoreLimit(boardSize)
+function validateDeckStructure(deck: LobbyDeck, boardSize: number, name: string): string[] {
   const errors: string[] = []
   const normalizedName = name.trim()
 
   if (!normalizedName) {
     errors.push('덱 이름은 비어 있을 수 없습니다.')
+  } else if ([...normalizedName].length > 100 || /[\p{Cc}]/u.test(normalizedName)) {
+    errors.push('덱 이름은 제어 문자를 제외한 1~100자여야 합니다.')
   }
 
   if (!(boardSizes as readonly number[]).includes(boardSize)) {
@@ -408,10 +408,48 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
       errors.push('시작 기물 좌표는 정수여야 합니다.')
       continue
     }
+    if (piece.square.file < 0 || piece.square.file >= boardSize || piece.square.rank < 0 || piece.square.rank >= boardSize) {
+      errors.push('시작 기물 좌표가 보드 범위를 벗어났습니다.')
+    }
     const squareKey = `${piece.square.file}:${piece.square.rank}`
     if (occupiedSquares.has(squareKey)) errors.push('같은 칸에 여러 시작 기물을 배치할 수 없습니다.')
     occupiedSquares.add(squareKey)
   }
+
+  if (deck.starting.length > 144 || Object.keys(deck.pocket).length > 256 || totalPocketCount(deck) > 4096) {
+    errors.push('덱 크기가 허용 범위를 벗어났습니다.')
+  }
+  for (const [pieceType, count] of Object.entries(deck.pocket)) {
+    if (!Number.isInteger(count) || count < 0 || count > 1024) {
+      errors.push(`${pieceLabel(pieceType)}의 포켓 수량이 올바르지 않습니다.`)
+    }
+  }
+  const usedTypes = new Set([
+    ...deck.starting.map(piece => piece.pieceType),
+    ...Object.entries(deck.pocket).filter(([, count]) => count > 0).map(([id]) => id),
+  ])
+  for (const id of usedTypes) {
+    if (!findPieceCatalogItem(id)) errors.push(`사용할 수 없는 기물 버전입니다: ${id}`)
+  }
+  return errors
+}
+
+function mapErrors(deck: SavedDeck): string[] {
+  const normalizedMapId = normalizeBoardMapId(deck.mapId, deck.boardSize)
+  const map = normalizedMapId ? findBoardMap(normalizedMapId) : null
+  return !map || map.boardSize !== deck.boardSize ? ['덱의 전용 맵 정보가 올바르지 않습니다.'] : []
+}
+
+/** Safe editable content; King, score, deployment and active-version rules belong to game start. */
+export function validateDeckForStorage(deck: SavedDeck): { valid: boolean; errors: string[] } {
+  const errors = [...validateDeckStructure(deck, deck.boardSize, deck.name), ...mapErrors(deck)]
+  return { valid: errors.length === 0, errors }
+}
+
+export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '덱'): DeckSummary {
+  const totalScore = calculateDeckScore(deck)
+  const limit = scoreLimit(boardSize)
+  const errors = validateDeckStructure(deck, boardSize, name)
 
   const kingCount = deck.starting.filter(piece => piece.pieceType === 'king').length
   if (kingCount !== 1) {
@@ -423,9 +461,6 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
   }
 
   for (const [pieceType, count] of Object.entries(deck.pocket)) {
-    if (!Number.isInteger(count) || count < 0) {
-      errors.push(`${pieceLabel(pieceType)}의 포켓 수량이 올바르지 않습니다.`)
-    }
     if (count > 0 && !canUseInPocket(pieceType)) {
       errors.push(`${pieceLabel(pieceType)}은 포켓에 넣을 수 없습니다.`)
     }
@@ -464,9 +499,7 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
   ]
   for (const pieceType of new Set(usedTypes)) {
     const catalogPiece = findPieceCatalogItem(pieceType)
-    if (!catalogPiece) {
-      errors.push(`사용할 수 없는 기물 버전입니다: ${pieceType}`)
-    } else if (catalogPiece.custom && !catalogPiece.custom.active) {
+    if (catalogPiece?.custom && !catalogPiece.custom.active) {
       errors.push(`${catalogPiece.name} v${catalogPiece.custom.version}은 비활성화되어 새 게임에 사용할 수 없습니다.`)
     }
   }
@@ -480,17 +513,9 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
 }
 
 export function validateSavedDeck(deck: SavedDeck): DeckSummary {
-  const normalizedMapId = normalizeBoardMapId(deck.mapId, deck.boardSize)
-  const map = normalizedMapId ? findBoardMap(normalizedMapId) : null
   const summary = validateLobbyDeck(deck, deck.boardSize, deck.name)
-  if (!map || map.boardSize !== deck.boardSize) {
-    return {
-      ...summary,
-      valid: false,
-      errors: [...summary.errors, '덱의 전용 맵 정보가 올바르지 않습니다.'],
-    }
-  }
-  return summary
+  const errors = [...summary.errors, ...mapErrors(deck)]
+  return { ...summary, valid: errors.length === 0, errors }
 }
 
 export function validateDeckForGame(deck: SavedDeck, boardSize: number): DeckSummary {

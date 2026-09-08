@@ -205,8 +205,8 @@ function closePieceLab() {
   view.value = pieceLabReturnView.value === 'piece-lab' ? 'home' : pieceLabReturnView.value
 }
 
-function getValidDeck(deckId: string) {
-  const deck = savedDecks.getDeck(deckId)
+async function getValidDeck(deckId: string) {
+  const deck = await savedDecks.getDeck(deckId)
   if (!deck) {
     throw new Error('선택한 덱을 찾을 수 없습니다.')
   }
@@ -228,8 +228,8 @@ async function startSingleGame(selection: SingleDeckSelection) {
   playMode.value = 'single'
   botDebugMode.value = false
   try {
-    const localDeck = getValidDeck(selection.localDeckId)
-    const opponentDeck = getValidDeck(selection.opponentDeckId)
+    const localDeck = await getValidDeck(selection.localDeckId)
+    const opponentDeck = await getValidDeck(selection.opponentDeckId)
     ensureSameMap(localDeck.mapId, opponentDeck.mapId)
     const resolvedSide = resolveLocalSide(selection.localSide)
     const { white: whiteDeck, black: blackDeck } = mapSinglePlayerDecks(resolvedSide, localDeck, opponentDeck)
@@ -265,8 +265,8 @@ async function startConfiguredBotGame(selection: BotDeckSelection, debug: boolea
   botDebugMode.value = debug
   botDifficulty.value = selection.difficulty
   try {
-    const humanDeck = getValidDeck(selection.humanDeckId)
-    const selectedBotDeck = getValidDeck(selection.botDeckId)
+    const humanDeck = await getValidDeck(selection.humanDeckId)
+    const selectedBotDeck = await getValidDeck(selection.botDeckId)
     ensureSameMap(humanDeck.mapId, selectedBotDeck.mapId)
 
     const whiteDeck = selection.humanSide === 'white' ? humanDeck : selectedBotDeck

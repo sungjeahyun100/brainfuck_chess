@@ -11,6 +11,8 @@ order:
 2. `20260826001000_game_record_ownership.sql`
 3. `20260827000000_challenge_clears.sql`
 4. `20260904000000_analysis_retention.sql`
+5. `20260908000000_account_decks.sql` creates account-owned JSONB decks,
+   revision checks, import identity keys, and environment-specific CRUD grants.
 
 The first grants `test_app` SELECT/INSERT/UPDATE on `test.game_records`; the
 second backfills legacy test rows, and the analysis/retention migration adds the

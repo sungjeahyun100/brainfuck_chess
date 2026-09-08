@@ -1159,7 +1159,7 @@ async function onSquareClick(file: number, rank: number) {
     remainingFlightTurns: 0,
   }
   pieces.value = [...pieces.value, piece]
-  selectedPieceId.value = piece.id
+  clearSelection()
 }
 
 async function onAirPieceClick(piece: PieceLabPiece, file: number, rank: number) {
@@ -1467,7 +1467,7 @@ async function onSquareDrop(event: DragEvent, file: number, rank: number) {
         remainingFlightTurns: 0,
       },
     ]
-    selectedPieceId.value = pieces.value[pieces.value.length - 1]?.id ?? null
+    clearSelection()
   }
 }
 

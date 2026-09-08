@@ -1,5 +1,7 @@
 <template>
   <main class="lobby bot-debugger">
+    <p v-if="decksLoading" role="status">덱을 불러오는 중…</p>
+    <p v-if="decksError" class="error" role="alert">{{ decksError }} <button class="btn-secondary" @click="savedDecks.loadDecks">다시 불러오기</button></p>
     <div class="page-bar">
       <button class="btn-secondary" @click="$emit('back')">로비로</button>
       <div>
@@ -16,7 +18,7 @@
       <p v-else>Normal과 Hard는 Easy의 무작위 후보 선택을 사용하지 않습니다. 탐색 시간 제한에 따른 차이까지 비교할 수 있도록 실제 측정값을 함께 기록합니다.</p>
     </section>
 
-    <section v-if="decks.length === 0" class="card empty-state">
+    <section v-if="!decksLoading && !decksError && decks.length === 0" class="card empty-state">
       <h2>테스트할 저장 덱이 없습니다.</h2>
       <p>내 덱과 봇 덱을 먼저 만들어 주세요.</p>
       <button class="btn-start" @click="$emit('deck-building')">덱 빌딩으로 이동</button>
@@ -81,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { BotDifficulty, TimeControlId } from '../types/game'
 import type { BotDeckSelection, LobbyPlayer, SavedDeck } from '../types/deck'
 import { useSavedDecks } from '../composables/useSavedDecks'
@@ -98,7 +100,7 @@ const emit = defineEmits<{
 }>()
 
 const savedDecks = useSavedDecks()
-const decks = ref<SavedDeck[]>([])
+const { decks, loading: decksLoading, error: decksError } = savedDecks
 const humanDeckId = ref('')
 const botDeckId = ref('')
 const humanSide = ref<LobbyPlayer>('white')
@@ -113,7 +115,7 @@ const sameMap = computed(() => Boolean(humanDeck.value && botDeck.value && human
 const errorMessage = computed(() => humanDeck.value && botDeck.value && !sameMap.value
   ? '같은 맵 전용 덱을 선택해야 동일한 규칙 상태를 만들 수 있습니다.'
   : null)
-const canStart = computed(() => Boolean(humanDeck.value && botDeck.value && sameMap.value))
+const canStart = computed(() => Boolean(!decksLoading.value && !decksError.value && humanDeck.value && botDeck.value && sameMap.value))
 
 function selection(): BotDeckSelection {
   return {
@@ -164,8 +166,7 @@ function pocketInfo(deck: SavedDeck): string {
     .join(', ') || '없음'
 }
 
-onMounted(() => {
-  decks.value = savedDecks.loadDecks()
+watch(decks, () => {
   const initial = props.initialSelection
   const validIds = new Set(validDecks.value.map(deck => deck.id))
   humanDeckId.value = initial && validIds.has(initial.humanDeckId)

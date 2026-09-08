@@ -166,13 +166,13 @@ export function decodeDeckCode(input: string): DeckCodeDecodeResult {
     const map = typeof parsed.mapId === 'string' ? findBoardMap(parsed.mapId) : null
     let customPieces: CustomDeckPieceRef[] | undefined
     if (match[1] === '3') {
-      if (parsed.v !== 3 || typeof parsed.name !== 'string' || parsed.name.length > 100 || !Array.isArray(parsed.customPieces) || parsed.customPieces.length > 256) return { ok: false, error: 'invalid_schema' }
+      if (parsed.v !== 3 || typeof parsed.name !== 'string' || Array.from(parsed.name).length > 100 || !Array.isArray(parsed.customPieces) || parsed.customPieces.length > 256) return { ok: false, error: 'invalid_schema' }
       customPieces = []
       const identities = new Set<string>()
       for (const item of parsed.customPieces) {
         if (!isRecord(item) || !hasExactlyKeys(item, ['id', 'version', 'contentHash', 'exposedPieceKey'])
           || !isSafePieceId(item.id) || !Number.isInteger(item.version) || (item.version as number) <= 0
-          || typeof item.contentHash !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/u.test(item.contentHash)
+          || typeof item.contentHash !== 'string' || !/^[A-Za-z0-9_:-]{1,256}$/u.test(item.contentHash)
           || !isSafePieceId(item.exposedPieceKey)) return { ok: false, error: 'invalid_schema' }
         const key = `${item.id}:${item.version}:${item.exposedPieceKey}`
         if (identities.has(key)) return { ok: false, error: 'invalid_schema' }
