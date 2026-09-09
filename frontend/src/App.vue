@@ -127,6 +127,7 @@ import type { GameRecord } from './types/gameRecord'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
 import { useSavedDecks } from './composables/useSavedDecks'
 import { serializeNeutralDeck } from './composables/useDeckSerialization'
+import { parseDeckRuleset, type DeckRuleset } from './deckRulesets'
 import { validateSavedDeck } from './composables/useDeckValidation'
 import { mapSinglePlayerDecks, resolveLocalSide } from './singlePlayerSetup'
 import type { PlayMode } from './gameControlPolicy'
@@ -220,7 +221,10 @@ async function getValidDeck(deckId: string) {
   return deck
 }
 
-function ensureSameMap(firstMapId: string, secondMapId: string) {
+function ensureCompatibleDecks(firstMapId: string, secondMapId: string, firstRuleset?: DeckRuleset, secondRuleset?: DeckRuleset) {
+  if (parseDeckRuleset(firstRuleset) !== parseDeckRuleset(secondRuleset)) {
+    throw new Error('선택한 두 덱의 룰이 다릅니다. 같은 룰의 덱을 선택하세요.')
+  }
   if (firstMapId !== secondMapId) {
     throw new Error('선택한 두 덱의 맵이 다릅니다. 같은 맵 전용 덱을 선택하세요.')
   }
@@ -233,7 +237,7 @@ async function startSingleGame(selection: SingleDeckSelection) {
   try {
     const localDeck = await getValidDeck(selection.localDeckId)
     const opponentDeck = await getValidDeck(selection.opponentDeckId)
-    ensureSameMap(localDeck.mapId, opponentDeck.mapId)
+    ensureCompatibleDecks(localDeck.mapId, opponentDeck.mapId, localDeck.ruleset, opponentDeck.ruleset)
     const resolvedSide = resolveLocalSide(selection.localSide)
     const { white: whiteDeck, black: blackDeck } = mapSinglePlayerDecks(resolvedSide, localDeck, opponentDeck)
 
@@ -270,7 +274,7 @@ async function startConfiguredBotGame(selection: BotDeckSelection, debug: boolea
   try {
     const humanDeck = await getValidDeck(selection.humanDeckId)
     const selectedBotDeck = await getValidDeck(selection.botDeckId)
-    ensureSameMap(humanDeck.mapId, selectedBotDeck.mapId)
+    ensureCompatibleDecks(humanDeck.mapId, selectedBotDeck.mapId, humanDeck.ruleset, selectedBotDeck.ruleset)
 
     const whiteDeck = selection.humanSide === 'white' ? humanDeck : selectedBotDeck
     const blackDeck = selection.humanSide === 'black' ? humanDeck : selectedBotDeck
@@ -705,7 +709,7 @@ select {
 
 .editor-topbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px);
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px) minmax(120px, 160px);
   gap: 16px;
   align-items: end;
   padding: 18px;

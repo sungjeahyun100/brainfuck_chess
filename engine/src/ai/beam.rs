@@ -501,6 +501,7 @@ mod tests {
             })
             .collect();
         GameState {
+            ruleset: Default::default(),
             id: "beam-test".into(),
             board: create_board(12),
             pieces: HashMap::new(),

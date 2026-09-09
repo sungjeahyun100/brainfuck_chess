@@ -9,6 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use brainfuck_chess_engine::types::DeckRuleset;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
@@ -25,6 +26,9 @@ const MAX_DECKS: i64 = 200;
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DeckData {
+    // Preserve legacy JSON/fingerprints; Standard is stored explicitly in JSONB.
+    #[serde(default, skip_serializing_if = "DeckRuleset::is_legacy")]
+    ruleset: DeckRuleset,
     map_id: String,
     board_size: i32,
     starting: Vec<Placement>,
@@ -481,6 +485,7 @@ impl DeckInput {
             ));
         }
         Ok(PlayerDeckSpec {
+            ruleset: data.ruleset,
             name: Some(self.name.clone()),
             starting,
             pocket,

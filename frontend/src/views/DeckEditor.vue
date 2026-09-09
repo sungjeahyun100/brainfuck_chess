@@ -14,7 +14,7 @@
         <h1>{{ deck.name || '이름 없는 덱' }}</h1>
       </div>
       <div class="deck-editor-actions">
-        <button class="btn-secondary" :disabled="!deckSummary.valid" @click="copyDeckCode">덱 코드 복사</button>
+        <button class="btn-secondary" :disabled="!deckSummary.valid || deck.ruleset === 'standard'" :title="deck.ruleset === 'standard' ? STANDARD_DECK_CODE_UNSUPPORTED : undefined" @click="copyDeckCode">덱 코드 복사</button>
         <button class="btn-secondary" @click="openImportDialog">덱 코드 불러오기</button>
         <button class="btn-secondary danger" @click="resetDeck">전체 초기화</button>
         <button class="btn-start" :disabled="!canSaveDeck || saving" @click="save">{{ saving ? '저장 중…' : '덱 저장' }}</button>
@@ -34,7 +34,16 @@
           </option>
         </select>
       </label>
+      <label>
+        <span class="limit-label">룰</span>
+        <select v-model="deck.ruleset" class="text-input">
+          <option v-for="ruleset in deckRulesets" :key="ruleset.id" :value="ruleset.id">{{ ruleset.label }}</option>
+        </select>
+      </label>
     </section>
+    <p v-if="deck.ruleset === 'standard'" class="deck-code-notice">
+      Standard는 중앙 Back과 주변 Front를 기본 진영으로 사용합니다. Front의 모든 칸을 채워야 합니다. 룰 변경 시 기존 배치는 유지되며, 기본 배치는 아래 프리셋으로 적용할 수 있습니다. {{ STANDARD_DECK_CODE_UNSUPPORTED }}
+    </p>
     <p v-if="saveError" class="error">{{ saveError }}</p>
     <p v-if="saveNotice" class="deck-code-notice" role="status">{{ saveNotice }}</p>
     <p v-if="deckCodeNotice" class="deck-code-notice" :class="{ error: deckCodeNoticeIsError }" role="status">
@@ -238,12 +247,14 @@
                 :key="`${square.file}_${square.rank}`"
                 class="placement-square"
                 :class="squareClass(square.file, square.rank)"
-                :title="squareRestriction(square.rank) ?? undefined"
+                :title="squareRestriction(square.file, square.rank) ?? undefined"
+                :disabled="deck.ruleset === 'standard' && !squareZone(square.file, square.rank) && !(placementTool === eraseTool && pieceAt(square.file, square.rank))"
                 @click="onPlacementSquareClick(square.file, square.rank)"
                 @dragover.prevent="onPlacementDragOver"
                 @drop.prevent="onPlacementDrop($event, square.file, square.rank)"
               >
                 <span class="square-label">{{ fileLabel(square.file) }}{{ square.rank + 1 }}</span>
+                <span v-if="deck.ruleset === 'standard'" class="setup-zone-label">{{ squareZone(square.file, square.rank) === 'front' ? 'F' : squareZone(square.file, square.rank) === 'back' ? 'B' : '—' }}</span>
                 <span v-if="pieceAt(square.file, square.rank)" class="square-piece">
                   <img
                     v-if="displayPieceAsset(pieceAt(square.file, square.rank)!)"
@@ -357,11 +368,13 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { deckRulesets, parseDeckRuleset } from '../deckRulesets'
 import { pieceAsset } from '../pieceAssets'
 import { customPieceApi } from '../api/customPieceApi'
 import type { DeckPieceType, PieceCatalogItem, SavedDeck } from '../types/deck'
 import {
   baseZoneRanks,
+  deploymentZoneAtSquare,
   canUseInPocket,
   createPresetDeck,
   deckPresets,
@@ -381,7 +394,7 @@ import {
   replaceCustomPieceCatalog,
 } from '../composables/useDeckValidation'
 import { createNewSavedDeck, deckStorageIdentity, useSavedDecks } from '../composables/useSavedDecks'
-import { encodeDeckCode } from '../composables/useDeckCodeCodec'
+import { encodeDeckCode, STANDARD_DECK_CODE_UNSUPPORTED } from '../composables/useDeckCodeCodec'
 import { importDeckCode, type DeckCodeImportResult } from '../composables/useDeckCode'
 import { boardMaps, findBoardMap } from '../boardMaps'
 
@@ -461,6 +474,7 @@ watch(savedDecks.error, message => { if (deckStorageIdentity.value === undefined
 function cloneSavedDeck(source: SavedDeck): SavedDeck {
   return {
     ...(source.version === undefined ? {} : { version: source.version }),
+    ruleset: parseDeckRuleset(source.ruleset),
     id: source.id,
     name: source.name,
     mapId: source.mapId,
@@ -495,7 +509,9 @@ const storageSummary = computed(() => {
   return validateDeckForStorage(deck.value)
 })
 const canSaveDeck = computed(() => storageSummary.value.valid)
-const activePresets = computed(() => deckPresets.filter(preset => presetLayoutForBoard(preset, deck.value.boardSize)))
+const activePresets = computed(() => deck.value.ruleset === 'standard'
+  ? [{ id: 'classic', name: 'Standard 기본 배치', description: '중앙 King 1기와 Front 전 칸의 Pawn, 빈 포켓으로 시작합니다.' }]
+  : deckPresets.filter(preset => presetLayoutForBoard(preset, deck.value.boardSize)))
 const selectedToolLabel = computed(() => placementTool.value === eraseTool ? '지우개' : pieceLabel(placementTool.value))
 const scoreFillWidth = computed(() => `${Math.min(100, Math.round((deckSummary.value.totalScore / deckSummary.value.scoreLimit) * 100))}%`)
 const frontlineScore = computed(() => {
@@ -530,9 +546,9 @@ function catalogSectionsFor(pieces: typeof pieceCatalog) {
     .map(id => ({
       id,
       label: id === 'front' ? '앞줄 배치 기물' : '그 외 배치 기물',
-      description: id === 'front'
-        ? '상대와 가까운 시작 줄 전용'
-        : '나머지 시작 배치 줄 전용',
+      description: deck.value.ruleset === 'standard'
+        ? (id === 'front' ? '중앙 Back을 둘러싼 Front 구역 전용' : '중앙 Back 구역 전용')
+        : (id === 'front' ? '상대와 가까운 시작 줄 전용' : '나머지 시작 배치 줄 전용'),
       pieces: pieces.filter(piece => piece.deploymentZone === id),
     }))
     .filter(section => section.pieces.length > 0)
@@ -549,8 +565,16 @@ const filteredCustomCatalog = computed(() => {
 const arsenalCatalogSections = computed(() => catalogSectionsFor(filteredArsenalCatalog.value))
 const customCatalogSections = computed(() => catalogSectionsFor(filteredCustomCatalog.value))
 const placementZoneSections = computed(() => {
-  const frontRank = frontmostBaseRank(deck.value.boardSize)
-  const ranks = baseZoneRanks(deck.value.boardSize).reverse()
+  if (deck.value.ruleset === 'standard') {
+    return [{
+      id: 'base', label: 'Standard Base / Home',
+      description: 'F: Front 전용 · B: Back 전용 · 회색: 진영 밖',
+      squares: baseZoneRanks(deck.value.boardSize, 'white', deck.value.ruleset).reverse()
+        .flatMap(rank => Array.from({ length: deck.value.boardSize }, (_, file) => ({ file, rank }))),
+    }]
+  }
+  const frontRank = frontmostBaseRank(deck.value.boardSize, 'white', deck.value.ruleset)
+  const ranks = baseZoneRanks(deck.value.boardSize, 'white', deck.value.ruleset).reverse()
   return (['front', 'back'] as const).map(id => {
     const zoneRanks = ranks.filter(rank => id === 'front' ? rank === frontRank : rank !== frontRank)
     return {
@@ -633,13 +657,13 @@ function displayPieceSymbol(pieceType: DeckPieceType): string {
 }
 
 function resetToClassic() {
-  const base = createPresetDeck(deck.value.boardSize)
+  const base = createPresetDeck(deck.value.boardSize, 'classic', deck.value.ruleset)
   deck.value.starting = base.starting
   deck.value.pocket = base.pocket
 }
 
 function applyPreset(presetId: string) {
-  const base = createPresetDeck(deck.value.boardSize, presetId)
+  const base = createPresetDeck(deck.value.boardSize, presetId, deck.value.ruleset)
   deck.value.starting = base.starting
   deck.value.pocket = base.pocket
 }
@@ -654,6 +678,11 @@ function resetDeck() {
 }
 
 async function copyDeckCode() {
+  if (deck.value.ruleset === 'standard') {
+    deckCodeNoticeIsError.value = true
+    deckCodeNotice.value = STANDARD_DECK_CODE_UNSUPPORTED
+    return
+  }
   deckCodeNotice.value = null
   if (!deckSummary.value.valid) {
     deckCodeNoticeIsError.value = true
@@ -722,23 +751,28 @@ function pocketFillWidth(pieceType: DeckPieceType): string {
   return `${Math.round((count / maxPocketCount.value) * 100)}%`
 }
 
+function squareZone(file: number, rank: number) {
+  return deploymentZoneAtSquare({ file, rank }, deck.value.boardSize, 'white', deck.value.ruleset)
+}
+
 function squareClass(file: number, rank: number): string[] {
   const activePiece = draggedPiece.value ?? (placementTool.value === eraseTool ? null : placementTool.value)
   return [
     (file + rank) % 2 === 1 ? 'light' : 'dark',
+    deck.value.ruleset === 'standard' ? `standard-zone-${squareZone(file, rank) ?? 'outside'}` : '',
     pieceAt(file, rank) ? 'occupied' : 'empty',
     draggedPiece.value ? 'drop-ready' : '',
-    activePiece && placementRestriction(activePiece, rank, deck.value.boardSize) ? 'restricted' : '',
+    activePiece && placementRestriction(activePiece, { file, rank }, deck.value.boardSize, 'white', deck.value.ruleset) ? 'restricted' : '',
   ].filter(Boolean)
 }
 
-function squareRestriction(rank: number): string | null {
+function squareRestriction(file: number, rank: number): string | null {
   const activePiece = draggedPiece.value ?? (placementTool.value === eraseTool ? null : placementTool.value)
-  return activePiece ? placementRestriction(activePiece, rank, deck.value.boardSize) : null
+  return activePiece ? placementRestriction(activePiece, { file, rank }, deck.value.boardSize, 'white', deck.value.ruleset) : null
 }
 
 function placePieceAt(pieceType: DeckPieceType, file: number, rank: number) {
-  const restriction = placementRestriction(pieceType, rank, deck.value.boardSize)
+  const restriction = placementRestriction(pieceType, { file, rank }, deck.value.boardSize, 'white', deck.value.ruleset)
   if (restriction) {
     placementError.value = restriction
     return
@@ -858,3 +892,9 @@ async function save() {
   }
 }
 </script>
+
+<style scoped>
+.placement-square.standard-zone-outside { background: #363b45; color: #a3a9b3; }
+.placement-square.standard-zone-back:not(.restricted) { box-shadow: inset 0 0 0 3px #547bb5; }
+.setup-zone-label { position: absolute; top: 3px; right: 5px; font-size: 11px; font-weight: 700; }
+</style>

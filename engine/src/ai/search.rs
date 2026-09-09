@@ -968,6 +968,7 @@ mod tests {
             })
             .collect();
         let mut state = GameState {
+            ruleset: Default::default(),
             id: "abort-propagation".into(),
             board: create_board(8),
             pieces: HashMap::new(),

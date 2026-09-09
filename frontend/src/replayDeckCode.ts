@@ -1,3 +1,4 @@
+import { parseDeckRuleset } from './deckRulesets.ts'
 import type { CustomDeckPieceRef, LobbyDeck } from './types/deck'
 import type { BoardMapId, PlayerId } from './types/game'
 import type { GameRecord } from './types/gameRecord'
@@ -37,6 +38,12 @@ function customPieceRef(
 }
 
 export function frozenDeckCodeSource(record: GameRecord, side: PlayerId): FrozenDeckCodeSource | null {
+  // Standard Deck Code is unsupported until G7, including export from Replay.
+  try {
+    if (parseDeckRuleset(record.initial_state?.ruleset) !== 'legacy') return null
+  } catch {
+    return null
+  }
   const deck = record.decks?.[side]
   if (!deck || !Number.isInteger(deck.board_size) || typeof deck.deck_name !== 'string'
     || !Array.isArray(deck.deployments) || !Array.isArray(deck.pocket)) return null

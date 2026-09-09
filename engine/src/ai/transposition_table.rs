@@ -7,6 +7,7 @@ use crate::types::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PositionKey {
+    ruleset: crate::types::DeckRuleset,
     board_size: i32,
     board: Vec<(i32, i32, Option<PieceId>)>,
     air_board: Vec<(i32, i32, Option<PieceId>)>,
@@ -148,6 +149,7 @@ impl PositionKey {
         global_state.sort_by(|left, right| left.0.cmp(&right.0));
 
         Self {
+            ruleset: state.ruleset,
             board_size: state.board.size,
             board,
             air_board,
@@ -268,6 +270,7 @@ mod tests {
             );
         }
         let mut state = GameState {
+            ruleset: Default::default(),
             id: "position-key-test".into(),
             board: create_board(8),
             pieces: HashMap::new(),
@@ -541,5 +544,15 @@ mod tests {
             }
         ));
         assert_eq!(table.len(), 1);
+    }
+    #[test]
+    fn ruleset_is_part_of_position_identity() {
+        let legacy = state();
+        let mut standard = legacy.clone();
+        standard.ruleset = crate::types::DeckRuleset::Standard;
+        assert_ne!(
+            PositionKey::from_state(&legacy),
+            PositionKey::from_state(&standard)
+        );
     }
 }

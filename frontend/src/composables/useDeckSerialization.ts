@@ -1,3 +1,4 @@
+import { parseDeckRuleset } from '../deckRulesets.ts'
 import type { Square } from '../types/game'
 import type { LobbyDeck, LobbyPlayer, SavedDeck } from '../types/deck'
 import type { DeckPieceRequest, PlayerDeckRequest } from '../api/gameApi'
@@ -23,6 +24,7 @@ function mirrorSquare(square: Square, boardSize: number): Square {
 
 function serializeDeck(deck: LobbyDeck): PlayerDeckRequest {
   return {
+    ruleset: parseDeckRuleset(deck.ruleset),
     starting: deck.starting.map(piece => ({
       ...serializePiece(deck, piece.pieceType),
       square: piece.square,
@@ -42,6 +44,7 @@ export function serializeNeutralDeck(deck: SavedDeck, side: LobbyPlayer): Player
   }
 
   return {
+    ruleset: parseDeckRuleset(deck.ruleset),
     name: deck.name,
     starting: deck.starting.map(piece => ({
       ...serializePiece(deck, piece.pieceType),

@@ -155,6 +155,7 @@ mod tests {
         );
 
         GameState {
+            ruleset: Default::default(),
             id: "test".into(),
             board,
             pieces: HashMap::new(),

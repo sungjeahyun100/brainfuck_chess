@@ -1603,6 +1603,7 @@ fn build_test_state(board_spec: TestBoard, package: &CustomPiecePackage) -> ApiR
         .map(|definition| (definition.id.clone(), definition))
         .collect::<HashMap<_, _>>();
     let mut state = GameState {
+        ruleset: Default::default(),
         id: "custom-piece-test".into(),
         board: board.clone(),
         pieces: HashMap::new(),
@@ -1860,6 +1861,7 @@ mod tests {
             exposed_piece_key: created.exposed_piece_key.clone(),
         };
         let white = crate::PlayerDeckSpec {
+            ruleset: Default::default(),
             name: None,
             starting: vec![
                 crate::StartingPieceSpec {
@@ -1879,6 +1881,7 @@ mod tests {
             pocket: vec![custom_ref],
         };
         let black = crate::PlayerDeckSpec {
+            ruleset: Default::default(),
             name: None,
             starting: vec![crate::StartingPieceSpec {
                 piece: crate::DeckPieceRef::BuiltIn {
@@ -1942,6 +1945,7 @@ mod tests {
         assert_eq!(state.players["white"].deck.total_score, 22);
 
         let mut room = crate::MultiplayerRoom {
+            ruleset: Default::default(),
             id: "ROOM01".into(),
             board_size: 8,
             map_id: "standard-8x8".into(),
@@ -1954,6 +1958,7 @@ mod tests {
             guest_owner_id: Some("alice".into()),
             host_deck: Some(white),
             guest_deck: Some(crate::PlayerDeckSpec {
+                ruleset: Default::default(),
                 name: None,
                 starting: vec![crate::StartingPieceSpec {
                     piece: crate::DeckPieceRef::BuiltIn {

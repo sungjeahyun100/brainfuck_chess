@@ -16,6 +16,7 @@ fn empty_state() -> GameState {
         .collect::<HashMap<_, _>>();
     let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&definitions);
     GameState {
+        ruleset: Default::default(),
         id: "custom-visual-test".into(),
         board: create_board(8),
         pieces: HashMap::new(),

@@ -140,6 +140,7 @@ mod tests {
             .map(|definition| (definition.id.clone(), definition))
             .collect();
         GameState {
+            ruleset: Default::default(),
             id: "material-test".into(),
             board: create_board(8),
             pieces: HashMap::new(),

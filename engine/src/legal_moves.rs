@@ -13,7 +13,7 @@ use crate::pieces::default_pieces::{
     MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID, REPAIR_WALLS_ABILITY_ID,
     SACRIFICE_ABILITY_ID, TANK_FIRE_ABILITY_ID, TANK_FIRE_RANGE,
 };
-use crate::rules::{get_base_zone_squares, player_forward_direction};
+use crate::rules::{get_base_zone_squares_with_ruleset, player_forward_direction};
 use crate::terrain::{can_affect_square, can_capture_piece, can_destroy_piece_with_ability};
 use crate::types::*;
 
@@ -807,7 +807,11 @@ pub fn generate_piece_legal_ability_actions(
             } else {
                 "white".into()
             };
-            let opponent_base_zone = get_base_zone_squares(&opponent_id, game_state.board.size);
+            let opponent_base_zone = get_base_zone_squares_with_ruleset(
+                &opponent_id,
+                game_state.board.size,
+                game_state.ruleset,
+            );
             for rank in 0..game_state.board.size {
                 let target = Square::new(origin.file, rank);
                 if !opponent_base_zone.contains(&target) {
@@ -1083,7 +1087,9 @@ pub(crate) fn bomber_landing_targets(game_state: &GameState, actor: &Piece) -> V
     } else {
         "white".into()
     };
-    if get_base_zone_squares(&opponent, game_state.board.size).contains(&origin) {
+    if get_base_zone_squares_with_ruleset(&opponent, game_state.board.size, game_state.ruleset)
+        .contains(&origin)
+    {
         return Vec::new();
     }
     QUEEN_DIRECTIONS

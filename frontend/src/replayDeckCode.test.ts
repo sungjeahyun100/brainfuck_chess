@@ -90,3 +90,12 @@ test('directional built-in engine ids become canonical neutral Deck Code ids', (
     if (decoded.ok) assert.equal(decoded.value.starting[0].pieceId, canonicalId)
   }
 })
+
+
+test('Standard replay decks cannot silently export as Legacy DC3', () => {
+  const record = replayRecord()
+  record.initial_state.ruleset = 'standard'
+  assert.equal(frozenDeckCodeSource(record, 'white'), null)
+  record.initial_state.ruleset = 'future' as never
+  assert.equal(frozenDeckCodeSource(record, 'white'), null)
+})

@@ -1110,6 +1110,7 @@ mod tests {
         black_user_id: String,
     ) -> GameRecord {
         let state = GameState {
+            ruleset: Default::default(),
             id: game_id,
             board: Board {
                 size: 8,

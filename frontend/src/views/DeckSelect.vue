@@ -65,7 +65,7 @@
           <select v-model="primaryDeckId" class="text-input">
             <option value="">선택 안 함</option>
             <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
-              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }}
+              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }} · {{ deck.ruleset === 'standard' ? 'Standard' : 'Legacy' }}
             </option>
           </select>
           <p v-if="primaryDeck">{{ deckInfo(primaryDeck) }}</p>
@@ -76,7 +76,7 @@
           <select v-model="secondaryDeckId" class="text-input">
             <option value="">선택 안 함</option>
             <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
-              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }}
+              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }} · {{ deck.ruleset === 'standard' ? 'Standard' : 'Legacy' }}
             </option>
           </select>
           <p v-if="secondaryDeck">{{ deckInfo(secondaryDeck) }}</p>
@@ -92,6 +92,7 @@
 </template>
 
 <script setup lang="ts">
+import { parseDeckRuleset } from '../deckRulesets'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { BotDifficulty } from '../types/game'
 import type { BotDeckSelection, DeckSelectMode, LobbyPlayer, SavedDeck, SingleDeckSelection } from '../types/deck'
@@ -130,8 +131,10 @@ const invalidDecks = computed(() => decks.value.filter(deck => !validateSavedDec
 const primaryDeck = computed(() => decks.value.find(deck => deck.id === primaryDeckId.value) ?? null)
 const secondaryDeck = computed(() => decks.value.find(deck => deck.id === secondaryDeckId.value) ?? null)
 const sameMap = computed(() => Boolean(primaryDeck.value && secondaryDeck.value && primaryDeck.value.mapId === secondaryDeck.value.mapId))
+const sameRuleset = computed(() => Boolean(primaryDeck.value && secondaryDeck.value && parseDeckRuleset(primaryDeck.value.ruleset) === parseDeckRuleset(secondaryDeck.value.ruleset)))
 const errorMessage = computed(() => {
   if (!primaryDeck.value || !secondaryDeck.value) return null
+  if (!sameRuleset.value) return '선택한 두 덱의 룰이 다릅니다. 같은 룰의 덱을 선택하세요.'
   if (!sameMap.value) return '선택한 두 덱의 맵이 다릅니다. 같은 맵 전용 덱을 선택하세요.'
   return null
 })
@@ -141,6 +144,7 @@ const canStart = computed(() => Boolean(
   && primaryDeck.value
   && secondaryDeck.value
   && sameMap.value
+  && sameRuleset.value
   && (props.mode !== 'single' || (isValidGameNickname(localNickname.value) && isValidGameNickname(guestNickname.value)))
 ))
 

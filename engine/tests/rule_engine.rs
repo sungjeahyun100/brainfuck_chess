@@ -59,6 +59,7 @@ fn make_game_state(board_size: i32) -> GameState {
     );
 
     GameState {
+        ruleset: Default::default(),
         id: "test".into(),
         board,
         pieces: HashMap::new(),
@@ -2239,4 +2240,390 @@ fn piece_definition_validation_rejects_unknown_references() {
         .validate()
         .unwrap_err()
         .contains("unknown state key"));
+}
+
+#[test]
+fn legacy_wrappers_preserve_geometry_validation_and_pocket_drop() {
+    for size in 8..=12 {
+        let mut state = make_game_state(size);
+        for side in ["white", "black"] {
+            let owner = side.to_string();
+            assert_eq!(
+                get_base_zone_squares(&owner, size),
+                get_base_zone_squares_with_ruleset(&owner, size, DeckRuleset::Legacy)
+            );
+            assert_eq!(
+                get_frontmost_base_rank(&owner, size),
+                get_frontmost_base_rank_with_ruleset(&owner, size, DeckRuleset::Legacy)
+            );
+            let depth = if size >= 10 { 3 } else { 2 };
+            let expected = (0..size)
+                .flat_map(|rank| {
+                    (0..size).filter_map(move |file| {
+                        (if side == "white" {
+                            rank < depth
+                        } else {
+                            rank >= size - depth
+                        })
+                        .then_some(Square::new(file, rank))
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(get_base_zone_squares(&owner, size), expected);
+            for definition in state.piece_definitions.values() {
+                for rank in 0..size {
+                    for file in 0..size {
+                        let square = Square::new(file, rank);
+                        let local_rank = if side == "white" {
+                            rank
+                        } else {
+                            size - 1 - rank
+                        };
+                        let allowed = local_rank < depth
+                            && (local_rank == depth - 1)
+                                == (definition.deployment_zone == DeploymentZone::Front);
+                        assert_eq!(
+                            can_piece_be_placed_at_start(definition, &owner, square, size),
+                            allowed
+                        );
+                        assert_eq!(
+                            can_piece_be_placed_at_start_with_ruleset(
+                                definition,
+                                &owner,
+                                square,
+                                size,
+                                DeckRuleset::Legacy
+                            ),
+                            allowed
+                        );
+                    }
+                }
+            }
+            add_piece(
+                &mut state,
+                &format!("{side}-king"),
+                side,
+                "king",
+                size / 2,
+                if side == "white" { 0 } else { size - 1 },
+            );
+            add_front_pawn_line(&mut state, side, size);
+            let deck = &state.players[side].deck;
+            assert!(validate_deck(deck, size, &state.pieces, &state.piece_definitions).valid);
+            assert!(
+                validate_deck_with_ruleset(
+                    deck,
+                    size,
+                    &state.pieces,
+                    &state.piece_definitions,
+                    DeckRuleset::Legacy
+                )
+                .valid
+            );
+        }
+        for side in ["white", "black"] {
+            for file in 0..size {
+                let mut missing = state.clone();
+                missing
+                    .players
+                    .get_mut(side)
+                    .unwrap()
+                    .deck
+                    .starting_pieces
+                    .retain(|id| id.as_str() != format!("{side}-front-{file}"));
+                let result = validate_deck(
+                    &missing.players[side].deck,
+                    size,
+                    &missing.pieces,
+                    &missing.piece_definitions,
+                );
+                assert!(!result.valid);
+                assert!(result.errors.iter().any(|e| e.contains("모든 칸")));
+            }
+        }
+        add_pocket_piece(&mut state, "reserve", "white", "knight");
+        let actions = generate_piece_legal_drop_actions(&state, &"reserve".into());
+        assert!(!actions.is_empty());
+        let after = submit_action(state, TurnAction::Drop(actions[0].clone())).unwrap();
+        assert!(!after.pieces["reserve"].in_pocket);
+        assert_eq!(after.ruleset, DeckRuleset::Legacy);
+    }
+}
+
+// Explicit expectations are deliberately independent of the production formula.
+fn standard_expected_zones(size: i32) -> (Vec<Square>, Vec<Square>) {
+    let (back, front): (&[(i32, i32)], &[(i32, i32)]) = match size {
+        8 => (
+            &[(3, 0), (4, 0)],
+            &[(2, 0), (5, 0), (2, 1), (3, 1), (4, 1), (5, 1)],
+        ),
+        9 => (
+            &[(3, 0), (4, 0), (5, 0)],
+            &[(2, 0), (6, 0), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1)],
+        ),
+        10 => (
+            &[(4, 0), (5, 0)],
+            &[(3, 0), (6, 0), (3, 1), (4, 1), (5, 1), (6, 1)],
+        ),
+        11 => (
+            &[(4, 0), (5, 0), (6, 0)],
+            &[(3, 0), (7, 0), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1)],
+        ),
+        12 => (
+            &[(5, 0), (6, 0)],
+            &[(4, 0), (7, 0), (4, 1), (5, 1), (6, 1), (7, 1)],
+        ),
+        _ => panic!("unsupported fixture"),
+    };
+    (
+        back.iter().map(|&(f, r)| Square::new(f, r)).collect(),
+        front.iter().map(|&(f, r)| Square::new(f, r)).collect(),
+    )
+}
+
+fn square_set(squares: Vec<Square>) -> std::collections::HashSet<Square> {
+    squares.into_iter().collect()
+}
+
+#[test]
+fn standard_exact_geometry_and_initial_deployment_for_every_size_and_side() {
+    for size in 8..=12 {
+        let (white_back, white_front) = standard_expected_zones(size);
+        for side in ["white", "black"] {
+            let owner = side.to_string();
+            let mirror = |s: &Square| {
+                Square::new(
+                    s.file,
+                    if side == "white" {
+                        s.rank
+                    } else {
+                        size - 1 - s.rank
+                    },
+                )
+            };
+            let back = square_set(white_back.iter().map(mirror).collect());
+            let front = square_set(white_front.iter().map(mirror).collect());
+            let base = back
+                .union(&front)
+                .copied()
+                .collect::<std::collections::HashSet<_>>();
+            assert_eq!(
+                square_set(get_back_zone_squares_with_ruleset(
+                    &owner,
+                    size,
+                    DeckRuleset::Standard
+                )),
+                back
+            );
+            assert_eq!(
+                square_set(get_front_zone_squares_with_ruleset(
+                    &owner,
+                    size,
+                    DeckRuleset::Standard
+                )),
+                front
+            );
+            let actual = get_base_zone_squares_with_ruleset(&owner, size, DeckRuleset::Standard);
+            assert_eq!(actual.len(), base.len());
+            assert_eq!(square_set(actual), base);
+            assert!(back.is_disjoint(&front));
+            let definitions = all_default_definitions();
+            for rank in -1..=size {
+                for file in -1..=size {
+                    let square = Square::new(file, rank);
+                    for definition in &definitions {
+                        let expected = if definition.deployment_zone == DeploymentZone::Back {
+                            back.contains(&square)
+                        } else {
+                            front.contains(&square)
+                        };
+                        assert_eq!(
+                            can_piece_be_placed_at_start_with_ruleset(
+                                definition,
+                                &owner,
+                                square,
+                                size,
+                                DeckRuleset::Standard
+                            ),
+                            expected,
+                            "{size} {side} {} {square:?}",
+                            definition.id
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn standard_front_fill_requires_every_front_square_and_leaves_back_optional() {
+    for size in 8..=12 {
+        for side in ["white", "black"] {
+            let mut state = make_game_state(size);
+            state.ruleset = DeckRuleset::Standard;
+            let (back, front) = standard_expected_zones(size);
+            let mirror = |s: Square| {
+                Square::new(
+                    s.file,
+                    if side == "white" {
+                        s.rank
+                    } else {
+                        size - 1 - s.rank
+                    },
+                )
+            };
+            let king = mirror(back[0]);
+            add_piece(&mut state, "king", side, "king", king.file, king.rank);
+            for (index, square) in front.iter().copied().map(mirror).enumerate() {
+                add_piece(
+                    &mut state,
+                    &format!("pawn-{index}"),
+                    side,
+                    if side == "white" {
+                        "pawn-white"
+                    } else {
+                        "pawn-black"
+                    },
+                    square.file,
+                    square.rank,
+                );
+            }
+            let validate = |state: &GameState| {
+                validate_deck_with_ruleset(
+                    &state.players[side].deck,
+                    size,
+                    &state.pieces,
+                    &state.piece_definitions,
+                    state.ruleset,
+                )
+            };
+            assert!(validate(&state).valid);
+            // G2 must still allow these Back pieces; Extra-only belongs to G4.
+            for kind in ["guhang", "bomber"] {
+                let mut extra_back = state.clone();
+                let square = mirror(back[1]);
+                add_piece(
+                    &mut extra_back,
+                    "back-piece",
+                    side,
+                    kind,
+                    square.file,
+                    square.rank,
+                );
+                assert!(validate(&extra_back).valid);
+            }
+            for index in 0..front.len() {
+                let mut missing = state.clone();
+                missing
+                    .players
+                    .get_mut(side)
+                    .unwrap()
+                    .deck
+                    .starting_pieces
+                    .retain(|id| id.as_str() != format!("pawn-{index}"));
+                assert!(validate(&missing)
+                    .errors
+                    .iter()
+                    .any(|error| error.contains("앞줄")));
+                let mut wrong_kind = state.clone();
+                wrong_kind
+                    .pieces
+                    .get_mut(format!("pawn-{index}").as_str())
+                    .unwrap()
+                    .type_id = "knight".into();
+                let result = validate(&wrong_kind);
+                assert!(!result.valid);
+                assert!(result.errors.iter().any(|error| error.contains("모든 칸")));
+            }
+        }
+    }
+}
+
+#[test]
+fn runtime_drop_uses_full_home_union_attack_map_for_both_rulesets_and_maps() {
+    for size in 8..=12 {
+        for side in ["white", "black"] {
+            for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+                let mut plain_targets = None;
+                let variants = if size == 12 {
+                    vec![BoardVariant::Plain, BoardVariant::CentralHighGround]
+                } else {
+                    vec![BoardVariant::Plain]
+                };
+                for variant in variants {
+                    let mut state = make_game_state(size);
+                    state.board = create_board_with_variant(size, variant).unwrap();
+                    state.ruleset = ruleset;
+                    state.current_player = side.into();
+                    add_pocket_piece(&mut state, "reserve", side, "knight");
+                    let expected = if ruleset == DeckRuleset::Legacy {
+                        get_base_zone_squares(&side.into(), size)
+                    } else {
+                        let (back, front) = standard_expected_zones(size);
+                        back.into_iter()
+                            .chain(front)
+                            .map(|s| {
+                                Square::new(
+                                    s.file,
+                                    if side == "white" {
+                                        s.rank
+                                    } else {
+                                        size - 1 - s.rank
+                                    },
+                                )
+                            })
+                            .collect()
+                    };
+                    let actions = generate_piece_legal_drop_actions(&state, &"reserve".into());
+                    let targets = square_set(actions.iter().map(|a| a.to).collect());
+                    assert_eq!(targets, square_set(expected));
+                    if let Some(ref plain) = plain_targets {
+                        assert_eq!(&targets, plain);
+                    } else {
+                        plain_targets = Some(targets);
+                    }
+                    for action in actions {
+                        let after =
+                            submit_action(state.clone(), TurnAction::Drop(action.clone())).unwrap();
+                        assert_eq!(after.ruleset, ruleset);
+                        assert_eq!(after.pieces["reserve"].current_square, Some(action.to));
+                    }
+                    if ruleset == DeckRuleset::Standard {
+                        let outside = Square::new(0, if side == "white" { 0 } else { size - 1 });
+                        assert!(submit_action(
+                            state.clone(),
+                            TurnAction::Drop(DropAction {
+                                player_id: side.into(),
+                                piece_id: "reserve".into(),
+                                to: outside,
+                                captured_piece_id: None
+                            })
+                        )
+                        .is_err());
+                    }
+                    let rank = if side == "white" { 3 } else { size - 4 };
+                    add_piece(&mut state, "attacker", side, "knight", 0, rank);
+                    let attacked_outside =
+                        Square::new(1, if side == "white" { 1 } else { size - 2 });
+                    let actions = generate_piece_legal_drop_actions(&state, &"reserve".into());
+                    let attack = generate_attack_map(&state, &side.into(), &HashMap::new());
+                    let expected = get_base_zone_squares_with_ruleset(&side.into(), size, ruleset)
+                        .into_iter()
+                        .chain(attack.attacked_squares.iter().map(|s| s.to_square()))
+                        .filter(|s| state.board.is_empty(s))
+                        .collect();
+                    assert_eq!(
+                        square_set(actions.iter().map(|a| a.to).collect()),
+                        square_set(expected)
+                    );
+                    let action = actions
+                        .into_iter()
+                        .find(|a| a.to == attacked_outside)
+                        .unwrap();
+                    assert!(submit_action(state, TurnAction::Drop(action)).is_ok());
+                }
+            }
+        }
+    }
 }

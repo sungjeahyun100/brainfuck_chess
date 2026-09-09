@@ -1,3 +1,4 @@
+import { parseDeckRuleset } from '../deckRulesets.ts'
 import type { SavedDeck } from '../types/deck.ts'
 
 export class DeckApiError extends Error {
@@ -15,6 +16,7 @@ export function deckInput(deck: SavedDeck) {
   return {
     name: deck.name,
     deckData: {
+      ruleset: parseDeckRuleset(deck.ruleset),
       mapId: deck.mapId,
       boardSize: deck.boardSize,
       starting: deck.starting,
@@ -22,6 +24,10 @@ export function deckInput(deck: SavedDeck) {
       customPieces: deck.customPieces ?? [],
     },
   }
+}
+
+function normalizeSavedDeck(deck: SavedDeck): SavedDeck {
+  return { ...deck, ruleset: parseDeckRuleset(deck.ruleset) }
 }
 
 export function accountDeckApi(account: string) {
@@ -41,11 +47,11 @@ export function accountDeckApi(account: string) {
     return response.json() as Promise<T>
   }
   return {
-    list: () => request<{ items: SavedDeck[] }>().then(result => result.items),
-    get: (id: string) => request<SavedDeck>(`/${encodeURIComponent(id)}`),
-    create: (deck: SavedDeck) => request<SavedDeck>('', 'POST', { requestId: deck.id, ...deckInput(deck) }),
-    import: (deck: SavedDeck) => request<SavedDeck>('/import', 'POST', deckInput(deck)),
-    update: (deck: SavedDeck) => request<SavedDeck>(`/${encodeURIComponent(deck.id)}`, 'PUT', { expectedVersion: deck.version, ...deckInput(deck) }),
+    list: () => request<{ items: SavedDeck[] }>().then(result => result.items.map(normalizeSavedDeck)),
+    get: (id: string) => request<SavedDeck>(`/${encodeURIComponent(id)}`).then(normalizeSavedDeck),
+    create: (deck: SavedDeck) => request<SavedDeck>('', 'POST', { requestId: deck.id, ...deckInput(deck) }).then(normalizeSavedDeck),
+    import: (deck: SavedDeck) => request<SavedDeck>('/import', 'POST', deckInput(deck)).then(normalizeSavedDeck),
+    update: (deck: SavedDeck) => request<SavedDeck>(`/${encodeURIComponent(deck.id)}`, 'PUT', { expectedVersion: deck.version, ...deckInput(deck) }).then(normalizeSavedDeck),
     delete: (deck: SavedDeck) => request<void>(`/${encodeURIComponent(deck.id)}`, 'DELETE', { expectedVersion: deck.version }),
   }
 }

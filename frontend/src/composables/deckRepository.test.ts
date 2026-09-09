@@ -1,3 +1,5 @@
+import { parseDeckRuleset } from '../deckRulesets.ts'
+import { savedDeckToPlayerDeckRequest, serializeNeutralDeck } from './useDeckSerialization.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { effectScope } from 'vue'
@@ -308,4 +310,86 @@ test('late GET from A cannot replace B after logout and login', async t => {
   assert.deepEqual(state.decks.value, [b])
   assert.equal(state.error.value, null)
   assert.equal(state.loading.value, false)
+})
+
+
+test('ruleset normalizes only missing local values and preserves both formats across refresh', async () => {
+  const browser = storage()
+  const { ruleset: _ruleset, ...old } = createNewSavedDeck()
+  browser.setItem(key, JSON.stringify([old]))
+  const repo = new LocalDeckRepository()
+  assert.equal((await repo.getDeck(old.id))!.ruleset, 'legacy')
+  for (const ruleset of ['legacy', 'standard'] as const) {
+    const source = { ...createNewSavedDeck(), ruleset }
+    const saved = await repo.saveDeck(source)
+    assert.equal(saved.ruleset, ruleset)
+    assert.equal((await new LocalDeckRepository().getDeck(saved.id))!.ruleset, ruleset)
+    assert.equal(JSON.parse(browser.getItem(key)!).find((entry: any) => entry.id === saved.id).ruleset, ruleset)
+  }
+  for (const unknown of ['future', null, 1, false]) {
+    const invalid = { ...old, ruleset: unknown }
+    const raw = JSON.stringify([invalid])
+    browser.setItem(key, raw)
+    await assert.rejects(repo.listDecks(), /지원하지 않는 덱 룰/)
+    assert.equal(browser.getItem(key), raw)
+    assert.throws(() => parseDeckRuleset(unknown), /지원하지 않는 덱 룰/)
+    assert.equal(validateDeckForStorage(invalid as SavedDeck).valid, false)
+    assert.equal(validateSavedDeck(invalid as SavedDeck).valid, false)
+  }
+})
+
+test('account ruleset roundtrips through allowlist and rejects unknown outbound and inbound values', async t => {
+  storage(); const backend = fixture(); t.mock.method(globalThis, 'fetch', backend.fetcher)
+  const repo = new AccountDeckRepository('alice')
+  for (const ruleset of ['legacy', 'standard'] as const) {
+    const created = await repo.saveDeck({ ...createNewSavedDeck(), ruleset })
+    assert.equal(created.ruleset, ruleset)
+    assert.equal(backend.requests.at(-1)!.body.deckData.ruleset, ruleset)
+    assert.equal((await new AccountDeckRepository('alice').getDeck(created.id)).ruleset, ruleset)
+  }
+  const old = { ...createNewSavedDeck(), id: 'old', version: 1 }
+  delete (old as Partial<SavedDeck>).ruleset
+  backend.decks.get('alice')!.set(old.id, old)
+  assert.equal((await repo.getDeck(old.id)).ruleset, 'legacy')
+  const invalid = { ...old, ruleset: 'future' } as unknown as SavedDeck
+  const count = backend.requests.length
+  assert.throws(() => repo.saveDeck(invalid), /지원하지 않는 덱 룰/)
+  assert.equal(backend.requests.length, count)
+  backend.decks.get('alice')!.set(old.id, invalid)
+  await assert.rejects(repo.getDeck(old.id), /지원하지 않는 덱 룰/)
+})
+
+test('ruleset survives neutral/black serialization without changing coordinates or map', () => {
+  storage()
+  for (const ruleset of ['legacy', 'standard'] as const) {
+    const deck = { ...createNewSavedDeck('standard-10x10'), ruleset }
+    const before = JSON.parse(JSON.stringify(deck))
+    assert.equal(savedDeckToPlayerDeckRequest(deck).ruleset, ruleset)
+    const white = serializeNeutralDeck(deck, 'white')
+    const black = serializeNeutralDeck(deck, 'black')
+    assert.equal(white.ruleset, ruleset)
+    assert.equal(black.ruleset, ruleset)
+    assert.deepEqual(black.starting.map(piece => piece.square), white.starting.map(piece => ({ file: piece.square.file, rank: 9 - piece.square.rank })))
+    assert.deepEqual(deck, before)
+  }
+})
+
+test('unknown local ruleset is reported during guest load and account import discovery without overwriting storage', async t => {
+  const browser = storage(); const backend = fixture(); t.mock.method(globalThis, 'fetch', backend.fetcher)
+  const saved = createNewSavedDeck()
+  const original = JSON.stringify([{ ...saved, ruleset: 'future' }])
+  browser.setItem(key, original)
+  setDeckStorageIdentity(null)
+  const scope = effectScope(); const state = scope.run(useSavedDecks)!
+  t.after(() => scope.stop())
+  await settle()
+  assert.match(state.error.value!, /지원하지 않는/)
+  assert.equal(state.loading.value, false)
+  setDeckStorageIdentity('alice')
+  await settle()
+  assert.match(state.error.value!, /지원하지 않는/)
+  assert.equal(state.localCount.value, 0)
+  await assert.rejects(state.importLocalDecks(), /지원하지 않는/)
+  assert.equal(backend.requests.filter(request => request.method === 'POST').length, 0)
+  assert.equal(browser.getItem(key), original)
 })

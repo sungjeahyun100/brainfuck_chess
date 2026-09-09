@@ -39,6 +39,7 @@ fn empty_state(name: &str, board_size: i32) -> GameState {
         })
         .collect();
     GameState {
+        ruleset: Default::default(),
         id: format!("piece-options-benchmark-{name}"),
         board: create_board(board_size),
         pieces: HashMap::new(),

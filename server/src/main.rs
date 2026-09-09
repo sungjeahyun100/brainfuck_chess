@@ -44,7 +44,8 @@ use brainfuck_chess_engine::{
     pieces::default_pieces::all_default_definitions,
     rules::{
         board_map_definition, calculate_deck_score, calculate_score_limit, create_board,
-        create_board_with_variant, get_base_zone_squares, standard_board_map_id, validate_deck,
+        create_board_with_variant, get_base_zone_squares_with_ruleset, standard_board_map_id,
+        validate_deck_with_ruleset,
     },
     types::*,
 };
@@ -53,6 +54,8 @@ use brainfuck_chess_engine::{
 
 #[derive(Deserialize)]
 struct CreateGameRequest {
+    #[serde(default)]
+    ruleset: DeckRuleset,
     board_size: i32,
     #[serde(default)]
     map_id: Option<String>,
@@ -80,6 +83,8 @@ struct CreateChallengeGameRequest {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct MultiplayerRoom {
+    #[serde(default)]
+    ruleset: DeckRuleset,
     id: String,
     board_size: i32,
     map_id: String,
@@ -106,6 +111,8 @@ struct MultiplayerRoom {
 
 #[derive(Deserialize)]
 struct CreateRoomRequest {
+    #[serde(default)]
+    ruleset: DeckRuleset,
     board_size: i32,
     #[serde(default)]
     map_id: Option<String>,
@@ -116,6 +123,13 @@ struct CreateRoomRequest {
     deck: PlayerDeckSpec,
     #[serde(default)]
     time_control: TimeControlId,
+}
+
+fn ensure_ruleset(expected: DeckRuleset, actual: DeckRuleset) -> Result<(), String> {
+    if expected != actual {
+        return Err("덱과 게임의 룰이 다릅니다. 같은 룰의 덱을 선택하세요.".into());
+    }
+    Ok(())
 }
 
 fn resolve_board_map(
@@ -182,6 +196,8 @@ struct HeartbeatRequest {
 
 #[derive(Clone, Deserialize, Serialize)]
 struct PlayerDeckSpec {
+    #[serde(default)]
+    ruleset: DeckRuleset,
     #[serde(default)]
     name: Option<String>,
     starting: Vec<StartingPieceSpec>,
@@ -558,10 +574,11 @@ fn build_player_deck(
     packages: &HashMap<(String, u32), CustomPiecePackage>,
     enforce_user_validation: bool,
 ) -> Result<Deck, String> {
-    let base_zone: HashSet<SquareId> = get_base_zone_squares(&player_id.to_string(), board_size)
-        .into_iter()
-        .map(|sq| sq.to_id())
-        .collect();
+    let base_zone: HashSet<SquareId> =
+        get_base_zone_squares_with_ruleset(&player_id.to_string(), board_size, spec.ruleset)
+            .into_iter()
+            .map(|sq| sq.to_id())
+            .collect();
 
     let mut counters = HashMap::new();
     let mut starting_pieces = Vec::new();
@@ -652,7 +669,8 @@ fn build_player_deck(
     deck.total_score = calculate_deck_score(&deck, pieces, definitions);
 
     if enforce_user_validation {
-        let validation = validate_deck(&deck, board_size, pieces, definitions);
+        let validation =
+            validate_deck_with_ruleset(&deck, board_size, pieces, definitions, spec.ruleset);
         if !validation.valid {
             return Err(validation.errors.join(" "));
         }
@@ -691,6 +709,7 @@ fn build_game_state_with_variant(
     validate_white_as_user_deck: bool,
     validate_black_as_user_deck: bool,
 ) -> Result<GameState, String> {
+    ensure_ruleset(white_spec.ruleset, black_spec.ruleset)?;
     if board_size < 8 {
         return Err("보드 크기는 최소 8이어야 합니다.".into());
     }
@@ -704,6 +723,7 @@ fn build_game_state_with_variant(
     let pieces = HashMap::new();
 
     let mut state = GameState {
+        ruleset: white_spec.ruleset,
         id,
         board,
         pieces,
@@ -784,6 +804,7 @@ fn build_lab_game_state(
         .collect();
     let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&defs);
     let mut catalog_state = GameState {
+        ruleset: Default::default(),
         id: "piece-lab-catalog".into(),
         board,
         pieces: HashMap::new(),
@@ -991,6 +1012,7 @@ fn build_lab_game_state(
     );
 
     Ok(GameState {
+        ruleset: Default::default(),
         id: "piece-lab".into(),
         board,
         pieces,
@@ -1027,6 +1049,7 @@ fn materialize_neutral_deck(
     }
 
     PlayerDeckSpec {
+        ruleset: spec.ruleset,
         name: spec.name.clone(),
         starting: spec
             .starting
@@ -1142,6 +1165,8 @@ async fn start_room_game(
         .guest_deck
         .as_ref()
         .ok_or_else(|| "참가자 덱이 선택되지 않았습니다.".to_string())?;
+    ensure_ruleset(room.ruleset, host_spec.ruleset)?;
+    ensure_ruleset(room.ruleset, guest_spec.ruleset)?;
     let game_id = Uuid::new_v4().to_string();
     let host_deck = materialize_neutral_deck(host_spec, &room.host_side, room.board_size);
     let guest_deck = materialize_neutral_deck(guest_spec, &room.guest_side, room.board_size);
@@ -1544,6 +1569,8 @@ async fn create_challenge_game(
     headers: HeaderMap,
     Json(req): Json<CreateChallengeGameRequest>,
 ) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_ruleset(DeckRuleset::Legacy, req.player_deck.ruleset)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let definition = challenge::find(&challenge_id).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -1670,6 +1697,10 @@ async fn create_game(
     headers: HeaderMap,
     Json(req): Json<CreateGameRequest>,
 ) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_ruleset(req.ruleset, req.white_deck.ruleset)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    ensure_ruleset(req.ruleset, req.black_deck.ruleset)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     let packages = resolve_custom_packages(
         &app,
@@ -1746,6 +1777,8 @@ async fn create_room(
     headers: HeaderMap,
     Json(req): Json<CreateRoomRequest>,
 ) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_ruleset(req.ruleset, req.deck.ruleset)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     if req.board_size < 8 {
         return Err((
@@ -1771,6 +1804,7 @@ async fn create_room(
 
     let id = generate_room_id(&app.rooms);
     let room = MultiplayerRoom {
+        ruleset: req.ruleset,
         id: id.clone(),
         board_size: req.board_size,
         map_id,
@@ -1826,6 +1860,9 @@ async fn join_room(
             }),
         )
     })?;
+
+    ensure_ruleset(room.ruleset, req.deck.ruleset)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
 
     if req.client_id == room.host_client_id {
         return Err((
@@ -1887,6 +1924,9 @@ async fn select_room_deck(
             }),
         )
     })?;
+
+    ensure_ruleset(room.ruleset, req.deck.ruleset)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
 
     if room.game_id.is_some() {
         return Err((
@@ -3684,6 +3724,7 @@ async fn resolve_lab_packages(
     let owner = custom_piece::authenticated_owner(app, headers)
         .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
     let deck = PlayerDeckSpec {
+        ruleset: Default::default(),
         name: None,
         starting: custom_pieces
             .iter()
@@ -4278,6 +4319,7 @@ mod tests {
             square: Square::new(file, front_rank),
         }));
         PlayerDeckSpec {
+            ruleset: Default::default(),
             name: Some("Player Deck".into()),
             starting,
             pocket: vec![],
@@ -4441,6 +4483,7 @@ mod tests {
     fn test_app_with_game() -> (AppState, String) {
         let game_id = "test-game".to_string();
         let white_deck = PlayerDeckSpec {
+            ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
                 "white",
@@ -4458,6 +4501,7 @@ mod tests {
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
+            ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
                 "black",
@@ -4906,6 +4950,7 @@ mod tests {
     #[test]
     fn game_creation_rejects_deployment_zone_mismatches_for_both_players() {
         let valid_white = PlayerDeckSpec {
+            ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
                 "white",
@@ -4917,6 +4962,7 @@ mod tests {
             pocket: vec![],
         };
         let valid_black = PlayerDeckSpec {
+            ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
                 "black",
@@ -5794,6 +5840,7 @@ mod tests {
     async fn submit_move_action_applies_canonical_piece_state_effect() {
         let game_id = "windmill-game".to_string();
         let white_deck = PlayerDeckSpec {
+            ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
                 "white",
@@ -5811,6 +5858,7 @@ mod tests {
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
+            ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
                 "black",
@@ -5903,5 +5951,367 @@ mod tests {
 
         assert_eq!(error.0, StatusCode::BAD_REQUEST);
         assert!(error.1.error.contains("difficulty"));
+    }
+    async fn ruleset_http(
+        app: &AppState,
+        path: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        use axum::{
+            body::{to_bytes, Body},
+            http::Request,
+        };
+        use tower::Service;
+        let response = routes::api(app.clone())
+            .call(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), 3_000_000).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or_default())
+    }
+
+    fn valid_player_deck_with_ruleset(size: i32, ruleset: DeckRuleset) -> PlayerDeckSpec {
+        let mut spec = valid_player_deck(size);
+        spec.ruleset = ruleset;
+        if ruleset == DeckRuleset::Standard {
+            spec.starting.truncate(1);
+            spec.starting.extend(
+                brainfuck_chess_engine::rules::get_front_zone_squares_with_ruleset(
+                    &"white".into(),
+                    size,
+                    ruleset,
+                )
+                .into_iter()
+                .map(|square| StartingPieceSpec {
+                    piece: built_in("pawn"),
+                    square,
+                }),
+            );
+        }
+        spec
+    }
+
+    fn ruleset_game_request(size: i32, ruleset: DeckRuleset, map: &str) -> serde_json::Value {
+        let white = valid_player_deck_with_ruleset(size, ruleset);
+        let black = materialize_neutral_deck(&white, "black", size);
+        serde_json::json!({ "board_size": size, "map_id": map, "ruleset": ruleset,
+            "white_deck": white, "black_deck": black, "time_control": "unlimited" })
+    }
+
+    #[tokio::test]
+    async fn ruleset_game_creation_is_independent_of_map_and_preserved_in_views() {
+        let app = AppState::in_memory();
+        for (size, map) in [
+            (8, "standard-8x8"),
+            (9, "standard-9x9"),
+            (10, "standard-10x10"),
+            (11, "standard-11x11"),
+            (12, "standard-12x12"),
+            (12, "central-high-ground-12x12"),
+        ] {
+            for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+                let (status, response) =
+                    ruleset_http(&app, "/games", ruleset_game_request(size, ruleset, map)).await;
+                assert_eq!(status, StatusCode::OK, "{response}");
+                assert_eq!(
+                    response["state"]["ruleset"],
+                    serde_json::to_value(ruleset).unwrap()
+                );
+                let id = response["id"].as_str().unwrap();
+                let game = app.games.get(id).unwrap();
+                assert_eq!(game.state.ruleset, ruleset);
+                assert_eq!(game.record.initial_state.ruleset, ruleset);
+                assert_eq!(game.record.state_at_ply(0).unwrap().ruleset, ruleset);
+                assert_eq!(game.state.board.size, size);
+                assert_eq!(game.record.decks["white"].map_id, map);
+                assert!(matches!(
+                    game.record.game_mode,
+                    game_record::GameMode::Standard
+                ));
+                assert_eq!(game.record.ruleset_version, "deck-chess-1");
+                assert!(game.state.history.is_empty());
+                let expected_front =
+                    brainfuck_chess_engine::rules::get_front_zone_squares_with_ruleset(
+                        &"white".into(),
+                        size,
+                        ruleset,
+                    );
+                assert_eq!(
+                    game.state.players["white"].deck.starting_pieces.len(),
+                    expected_front.len() + 1
+                );
+                assert_eq!(
+                    game.state.players["black"].deck.starting_pieces.len(),
+                    expected_front.len() + 1
+                );
+                assert_eq!(
+                    game.state.board.terrain,
+                    create_board_with_variant(
+                        size,
+                        if map.starts_with("central-high-ground") {
+                            BoardVariant::CentralHighGround
+                        } else {
+                            BoardVariant::Plain
+                        }
+                    )
+                    .unwrap()
+                    .terrain
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn standard_game_creation_rejects_old_geometry_wrong_zone_and_missing_front() {
+        let app = AppState::in_memory();
+        for side in ["white_deck", "black_deck"] {
+            for mode in ["outside", "wrong-zone", "missing-front"] {
+                let mut request = ruleset_game_request(8, DeckRuleset::Standard, "standard-8x8");
+                let starting = request[side]["starting"].as_array_mut().unwrap();
+                match mode {
+                    "outside" => starting[0]["square"]["file"] = 0.into(),
+                    "wrong-zone" => starting[1]["piece_type"] = "knight".into(),
+                    _ => {
+                        starting.remove(1);
+                    }
+                }
+                let (status, response) = ruleset_http(&app, "/games", request).await;
+                assert_eq!(status, StatusCode::BAD_REQUEST, "{side} {mode}: {response}");
+                assert!(app.games.is_empty());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn ruleset_old_requests_default_only_missing_values_and_reject_mismatches() {
+        let app = AppState::in_memory();
+        let mut old = ruleset_game_request(8, DeckRuleset::Legacy, "standard-8x8");
+        old.as_object_mut().unwrap().remove("ruleset");
+        for side in ["white_deck", "black_deck"] {
+            old[side].as_object_mut().unwrap().remove("ruleset");
+        }
+        let (status, response) = ruleset_http(&app, "/games", old.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(response["state"]["ruleset"], "legacy");
+        let count = app.games.len();
+        for field in ["request", "white_deck", "black_deck"] {
+            for value in [
+                serde_json::json!("future"),
+                serde_json::Value::Null,
+                serde_json::json!(1),
+            ] {
+                let mut bad = old.clone();
+                if field == "request" {
+                    bad["ruleset"] = value;
+                } else {
+                    bad[field]["ruleset"] = value;
+                }
+                assert!(matches!(
+                    ruleset_http(&app, "/games", bad).await.0,
+                    StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+                ));
+            }
+        }
+        for (request, white, black) in [
+            ("legacy", "legacy", "standard"),
+            ("legacy", "standard", "standard"),
+            ("standard", "legacy", "legacy"),
+            ("standard", "standard", "legacy"),
+        ] {
+            let mut bad = old.clone();
+            bad["ruleset"] = request.into();
+            bad["white_deck"]["ruleset"] = white.into();
+            bad["black_deck"]["ruleset"] = black.into();
+            assert_eq!(
+                ruleset_http(&app, "/games", bad).await.0,
+                StatusCode::BAD_REQUEST
+            );
+        }
+        assert_eq!(app.games.len(), count);
+    }
+
+    #[tokio::test]
+    async fn ruleset_room_create_reselect_ready_join_and_heartbeat_are_authoritative() {
+        for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+            let app = AppState::in_memory();
+            let spec = valid_player_deck_with_ruleset(8, ruleset);
+            let mut other = spec.clone();
+            other.ruleset = if ruleset == DeckRuleset::Legacy {
+                DeckRuleset::Standard
+            } else {
+                DeckRuleset::Legacy
+            };
+            let payload = serde_json::json!({"board_size":8,"map_id":"standard-8x8", "ruleset":ruleset,
+                "host_side":"black","client_id":"host","deck":spec,"time_control":"unlimited"});
+            let mut bad = payload.clone();
+            bad["deck"] = serde_json::to_value(&other).unwrap();
+            assert_eq!(
+                ruleset_http(&app, "/rooms", bad).await.0,
+                StatusCode::BAD_REQUEST
+            );
+            assert!(app.rooms.is_empty());
+            let (status, room) = ruleset_http(&app, "/rooms", payload).await;
+            assert_eq!(status, StatusCode::OK, "{room}");
+            assert_eq!(room["ruleset"], serde_json::to_value(ruleset).unwrap());
+            let id = room["id"].as_str().unwrap();
+            for (route, client) in [
+                ("join", "guest"),
+                ("select-deck", "guest"),
+                ("select-deck", "host"),
+            ] {
+                assert_eq!(
+                    ruleset_http(
+                        &app,
+                        &format!("/rooms/{id}/{route}"),
+                        serde_json::json!({"client_id":client,"deck":other})
+                    )
+                    .await
+                    .0,
+                    StatusCode::BAD_REQUEST
+                );
+                assert!(app.rooms.get(id).unwrap().guest_deck.is_none());
+                assert!(app.rooms.get(id).unwrap().guest_client_id.is_none());
+            }
+            for client in ["host", "guest"] {
+                let (status, selected) = ruleset_http(
+                    &app,
+                    &format!("/rooms/{id}/select-deck"),
+                    serde_json::json!({"client_id":client,"deck":spec}),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK, "{selected}");
+                assert_eq!(selected["ruleset"], serde_json::to_value(ruleset).unwrap());
+            }
+            assert_eq!(
+                ruleset_http(
+                    &app,
+                    &format!("/rooms/{id}/ready"),
+                    serde_json::json!({"client_id":"host"})
+                )
+                .await
+                .0,
+                StatusCode::OK
+            );
+            // Final factory validation is independent of the endpoint's earlier check.
+            app.rooms.get_mut(id).unwrap().guest_deck = Some(other);
+            assert_eq!(
+                ruleset_http(
+                    &app,
+                    &format!("/rooms/{id}/ready"),
+                    serde_json::json!({"client_id":"guest"})
+                )
+                .await
+                .0,
+                StatusCode::BAD_REQUEST
+            );
+            assert!(app.games.is_empty());
+            app.rooms.get_mut(id).unwrap().guest_deck = Some(spec.clone());
+            let (status, ready) = ruleset_http(
+                &app,
+                &format!("/rooms/{id}/ready"),
+                serde_json::json!({"client_id":"guest"}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{ready}");
+            let game_id = ready["game_id"].as_str().unwrap();
+            assert_eq!(app.games.get(game_id).unwrap().state.ruleset, ruleset);
+            let mut revision = serde_json::Value::Null;
+            for _ in 0..2 {
+                let (status, sync) = ruleset_http(&app, &format!("/rooms/{id}/heartbeat"), serde_json::json!({"client_id":"host","player_id":"black","latest_ply":0,"catalog_revision":revision})).await;
+                assert_eq!(status, StatusCode::OK, "{sync}");
+                assert_eq!(
+                    sync["dynamic"]["ruleset"],
+                    serde_json::to_value(ruleset).unwrap()
+                );
+                revision = sync["catalog_revision"].clone();
+            }
+            // The immediate join/start path also retains the room format.
+            let (_, second) = ruleset_http(&app, "/rooms", serde_json::json!({"board_size":8,"ruleset":ruleset,"host_side":"white","client_id":"host2","deck":spec,"time_control":"unlimited"})).await;
+            let second_id = second["id"].as_str().unwrap();
+            let (status, joined) = ruleset_http(
+                &app,
+                &format!("/rooms/{second_id}/join"),
+                serde_json::json!({"client_id":"guest2","deck":spec}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{joined}");
+            assert_eq!(
+                joined["state"]["ruleset"],
+                serde_json::to_value(ruleset).unwrap()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn ruleset_existing_challenges_are_legacy_only() {
+        let app = AppState::in_memory();
+        let mut spec = valid_player_deck(12);
+        spec.ruleset = DeckRuleset::Standard;
+        let (status, _) = ruleset_http(
+            &app,
+            "/challenges/raining_men/games",
+            serde_json::json!({"player_deck":spec}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(app.games.is_empty());
+        spec.ruleset = DeckRuleset::Legacy;
+        let (status, game) = ruleset_http(
+            &app,
+            "/challenges/raining_men/games",
+            serde_json::json!({"player_deck":spec}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{game}");
+        assert_eq!(game["state"]["ruleset"], "legacy");
+        assert!(app
+            .games
+            .get(game["id"].as_str().unwrap())
+            .unwrap()
+            .state
+            .pieces
+            .values()
+            .any(|piece| piece.owner == "black"
+                && piece.type_id == "guhang"
+                && piece.is_on_board()));
+    }
+    #[tokio::test]
+    async fn ruleset_old_room_requests_default_and_unknown_values_do_not_create_rooms() {
+        let app = AppState::in_memory();
+        let mut deck = serde_json::to_value(valid_player_deck(8)).unwrap();
+        deck.as_object_mut().unwrap().remove("ruleset");
+        let old = serde_json::json!({"board_size":8,"host_side":"white","client_id":"old-host","deck":deck});
+        let (status, room) = ruleset_http(&app, "/rooms", old.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{room}");
+        assert_eq!(room["ruleset"], "legacy");
+        assert_eq!(room["host_deck"]["ruleset"], "legacy");
+        for field in ["request", "deck"] {
+            for value in [
+                serde_json::json!("future"),
+                serde_json::Value::Null,
+                serde_json::json!(false),
+            ] {
+                let mut bad = old.clone();
+                if field == "request" {
+                    bad["ruleset"] = value;
+                } else {
+                    bad["deck"]["ruleset"] = value;
+                }
+                assert!(matches!(
+                    ruleset_http(&app, "/rooms", bad).await.0,
+                    StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+                ));
+            }
+        }
+        assert_eq!(app.rooms.len(), 1);
+        assert!(app.games.is_empty());
     }
 }

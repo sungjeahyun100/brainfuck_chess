@@ -203,3 +203,43 @@ test('retention update only sends the requested permanent state', async () => {
   await api.updateGameRetention('game', true)
   assert.deepEqual(body, { permanent: true })
 })
+
+
+test('ruleset sync preserves both formats across catalog omission and rejects unknown values', () => {
+  for (const ruleset of ['legacy', 'standard'] as const) {
+    const sync = syncResponse()
+    sync.dynamic.ruleset = ruleset
+    const first = mergeGameSync(null, { ...sync, catalog: { piece_definitions: {}, custom_piece_manifest: [], player_info: {} } as never })
+    assert.equal(first.ruleset, ruleset)
+    assert.equal(mergeGameSync(first, { ...sync, state_revision: first.state_revision! + 1 }).ruleset, ruleset)
+  }
+  assert.equal(mergeGameSync(syncCurrent, syncResponse()).ruleset, 'legacy')
+  const bad = syncResponse()
+  bad.dynamic.ruleset = 'future' as never
+  assert.throws(() => mergeGameSync(syncCurrent, bad), /지원하지 않는 덱 룰/)
+})
+
+test('game and room payloads carry deck and top-level ruleset independently of map size', async t => {
+  const calls: any[] = []
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => { calls.push(JSON.parse(String(init.body))); return Response.json({}) })
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => 'client' } })
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'sessionStorage', previous); else delete (globalThis as any).sessionStorage })
+  for (const ruleset of ['legacy', 'standard'] as const) {
+    const deck = { ruleset, starting: [], pocket: [] }
+    await api.createGame(10, deck, deck, 'standard-10x10', 'unlimited')
+    const game = calls.at(-1)
+    assert.equal(game.ruleset, ruleset)
+    assert.equal(game.white_deck.ruleset, ruleset)
+    assert.equal(game.black_deck.ruleset, ruleset)
+    assert.equal(game.map_id, 'standard-10x10')
+    assert.equal(game.board_size, 10)
+    await api.createRoom(10, 'white', deck, 'standard-10x10', 'unlimited')
+    assert.equal(calls.at(-1).ruleset, ruleset)
+    assert.equal(calls.at(-1).deck.ruleset, ruleset)
+    await api.selectRoomDeck('room', deck)
+    assert.equal(calls.at(-1).deck.ruleset, ruleset)
+    await api.joinRoom('room', deck)
+    assert.equal(calls.at(-1).deck.ruleset, ruleset)
+  }
+})

@@ -1,3 +1,4 @@
+import type { DeckRuleset } from '../deckRulesets'
 import type { BoardMapId, BotDifficulty, Square, TimeControlId } from './game'
 import type { CustomPieceImage } from './customPiece'
 
@@ -37,12 +38,15 @@ export interface LobbyPlacement {
 }
 
 export interface LobbyDeck {
+  /** Absent on legacy inputs and presets. */
+  ruleset?: DeckRuleset
   starting: LobbyPlacement[]
   pocket: Record<DeckPieceType, number>
   customPieces?: CustomDeckPieceRef[]
 }
 
 export interface SavedDeck extends LobbyDeck {
+  ruleset: DeckRuleset
   /** Present only on account decks; required for optimistic concurrency. */
   version?: number
   id: string

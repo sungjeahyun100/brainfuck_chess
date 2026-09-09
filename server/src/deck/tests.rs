@@ -111,6 +111,7 @@ fn input() -> DeckInput {
     DeckInput {
         name: "테스트 덱".into(),
         deck_data: DeckData {
+            ruleset: Default::default(),
             map_id: "standard-8x8".into(),
             board_size: 8,
             starting,
@@ -722,6 +723,7 @@ fn size_fixture(custom_count: usize, placements: usize) -> DeckInput {
     DeckInput {
         name: "😀".repeat(100),
         deck_data: DeckData {
+            ruleset: Default::default(),
             map_id: "standard-12x12".into(),
             board_size: 12,
             starting: (0..placements)
@@ -863,4 +865,78 @@ async fn maximum_cardinality_deck_with_real_owned_versions_saves_through_api() {
         request(&app, "alice", "PUT", &path, update).await.0,
         StatusCode::OK
     );
+}
+
+#[test]
+fn ruleset_preserves_old_account_json_and_import_fingerprint() {
+    let old_json: serde_json::Value = serde_json::from_str(r#"{"name":"Old deck","deckData":{"mapId":"standard-8x8","boardSize":8,"starting":[],"pocket":{},"customPieces":[]}}"#).unwrap();
+    let old: DeckInput = serde_json::from_value(old_json.clone()).unwrap();
+    assert_eq!(old.deck_data.ruleset, DeckRuleset::Legacy);
+    assert_eq!(serde_json::to_value(&old).unwrap(), old_json);
+    assert_eq!(
+        fingerprint(&old),
+        "0df9dceb7f145306a9dea2f4da33d5311a7e0e2144168dd3107082065845b635"
+    );
+    let mut explicit = old.clone();
+    explicit.deck_data.ruleset = DeckRuleset::Legacy;
+    assert_eq!(fingerprint(&explicit), fingerprint(&old));
+    explicit.deck_data.ruleset = DeckRuleset::Standard;
+    assert_ne!(fingerprint(&explicit), fingerprint(&old));
+    assert_eq!(explicit.spec().unwrap().ruleset, DeckRuleset::Standard);
+}
+
+#[tokio::test]
+async fn ruleset_account_api_roundtrip_update_import_and_unknown_rejection() {
+    let app = AppState::in_memory();
+    account(&app, "alice").await;
+    for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+        let mut payload = create_input();
+        payload["deckData"]["ruleset"] = serde_json::to_value(ruleset).unwrap();
+        let (status, created) = request(&app, "alice", "POST", "/decks", payload).await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        let created: SavedDeck = serde_json::from_value(created).unwrap();
+        assert_eq!(created.data.ruleset, ruleset);
+        let path = format!("/decks/{}", created.id);
+        let (status, loaded) = request(&app, "alice", "GET", &path, serde_json::Value::Null).await;
+        assert_eq!(status, StatusCode::OK);
+        let loaded: SavedDeck = serde_json::from_value(loaded).unwrap();
+        assert_eq!(loaded.data.ruleset, ruleset);
+        let mut update = serde_json::to_value(DeckInput {
+            name: "Renamed".into(),
+            deck_data: loaded.data,
+        })
+        .unwrap();
+        update["expectedVersion"] = serde_json::json!(created.version);
+        let (status, updated) = request(&app, "alice", "PUT", &path, update).await;
+        assert_eq!(status, StatusCode::OK, "{updated}");
+        assert_eq!(
+            serde_json::from_value::<SavedDeck>(updated)
+                .unwrap()
+                .data
+                .ruleset,
+            ruleset
+        );
+    }
+    // Distinct formats must not collide under content-based import idempotency.
+    let mut payload = serde_json::to_value(input()).unwrap();
+    let (_, legacy) = request(&app, "alice", "POST", "/decks/import", payload.clone()).await;
+    payload["deckData"]["ruleset"] = serde_json::json!("standard");
+    let (_, standard) = request(&app, "alice", "POST", "/decks/import", payload.clone()).await;
+    let (_, repeated) = request(&app, "alice", "POST", "/decks/import", payload).await;
+    assert!(legacy["id"].is_string() && standard["id"].is_string());
+    assert_ne!(legacy["id"], standard["id"]);
+    assert_eq!(standard["id"], repeated["id"]);
+    for unknown in [
+        serde_json::json!("future"),
+        serde_json::Value::Null,
+        serde_json::json!(false),
+    ] {
+        let mut payload = create_input();
+        payload["deckData"]["ruleset"] = unknown;
+        let (status, _) = request(&app, "alice", "POST", "/decks", payload).await;
+        assert!(matches!(
+            status,
+            StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+        ));
+    }
 }

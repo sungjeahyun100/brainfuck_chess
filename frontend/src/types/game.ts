@@ -1,3 +1,4 @@
+import type { DeckRuleset } from '../deckRulesets'
 // Types mirroring the Rust engine's JSON serialization.
 
 export type PlayerId = 'white' | 'black'
@@ -349,6 +350,8 @@ export interface ChallengeGameMetadata {
 }
 
 export interface GameState {
+  /** Omitted Legacy on historical serialized states to preserve analysis hashes. */
+  ruleset?: DeckRuleset
   /** Network snapshot revisions; absent in legacy replay/game-record payloads. */
   catalog_revision?: number
   state_revision?: number

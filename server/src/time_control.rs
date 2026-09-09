@@ -249,7 +249,7 @@ pub(crate) struct StoredGame {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct GameView {
-    #[serde(flatten)]
+    #[serde(flatten, serialize_with = "serialize_game_view_state")]
     pub(crate) state: GameState,
     pub(crate) clock: ClockSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -260,6 +260,17 @@ pub(crate) struct GameView {
     pub(crate) challenge: Option<ChallengeGameMetadata>,
     pub(crate) catalog_revision: u64,
     pub(crate) state_revision: u64,
+}
+
+// Wire views explicitly expose Legacy too. The persisted GameState serializer
+// remains unchanged for Legacy, preserving existing canonical analysis hashes.
+fn serialize_game_view_state<S: serde::Serializer>(
+    state: &GameState,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut value = serde_json::to_value(state).map_err(serde::ser::Error::custom)?;
+    value["ruleset"] = serde_json::to_value(state.ruleset).map_err(serde::ser::Error::custom)?;
+    value.serialize(serializer)
 }
 
 #[derive(Debug, Serialize)]
@@ -273,6 +284,7 @@ pub(crate) struct GameStaticData {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct GameDynamicView {
+    pub(crate) ruleset: brainfuck_chess_engine::types::DeckRuleset,
     pub(crate) id: String,
     pub(crate) board: Board,
     pub(crate) pieces: HashMap<PieceId, Piece>,
@@ -467,6 +479,7 @@ impl StoredGame {
             state_revision: self.state_revision,
             catalog,
             dynamic: GameDynamicView {
+                ruleset: self.state.ruleset,
                 id: self.state.id.clone(),
                 board: self.state.board.clone(),
                 pieces: self.state.pieces.clone(),
@@ -602,6 +615,7 @@ mod tests {
 
     fn empty_game() -> GameState {
         GameState {
+            ruleset: Default::default(),
             id: "clock-test".into(),
             board: Board {
                 size: 8,

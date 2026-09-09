@@ -15,6 +15,7 @@ fn make_state() -> GameState {
         .map(|definition| (definition.id.clone(), definition))
         .collect::<HashMap<_, _>>();
     GameState {
+        ruleset: Default::default(),
         id: "v2-supplement".into(),
         board: create_board(8),
         pieces: HashMap::new(),

@@ -7,7 +7,7 @@ use crate::pieces::default_pieces::{
     INTERCEPT_ABILITY_ID, MACHINE_GUN_BARRAGE_ABILITY_ID, MORTAR_BARRAGE_ABILITY_ID,
     REPAIR_WALLS_ABILITY_ID, SACRIFICE_ABILITY_ID, TANK_FIRE_ABILITY_ID,
 };
-use crate::rules::get_base_zone_squares;
+use crate::rules::get_base_zone_squares_with_ruleset;
 use crate::types::*;
 
 fn is_pawn_type(type_id: &str) -> bool {
@@ -370,7 +370,11 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
             state
                 .board
                 .set_piece_at_layer(to, PieceLayer::Ground, Some(action.piece_id.clone()));
-            let home = get_base_zone_squares(&action.player_id, state.board.size);
+            let home = get_base_zone_squares_with_ruleset(
+                &action.player_id,
+                state.board.size,
+                state.ruleset,
+            );
             let max_ammo = state
                 .pieces
                 .get(&action.piece_id)
@@ -794,7 +798,12 @@ fn replenish_depleted_ammo_at_home(game_state: &mut GameState, piece_id: &PieceI
         piece.current_ammo == 0
             && piece.layer == PieceLayer::Ground
             && piece.current_square.is_some_and(|square| {
-                get_base_zone_squares(&piece.owner, game_state.board.size).contains(&square)
+                get_base_zone_squares_with_ruleset(
+                    &piece.owner,
+                    game_state.board.size,
+                    game_state.ruleset,
+                )
+                .contains(&square)
             })
     });
     if should_replenish {
@@ -993,7 +1002,8 @@ fn replenish_ammo_on_home_entry(
     if max_ammo == 0 {
         return;
     }
-    let home = get_base_zone_squares(&owner, game_state.board.size);
+    let home =
+        get_base_zone_squares_with_ruleset(&owner, game_state.board.size, game_state.ruleset);
     if !home.contains(&from) && home.contains(&to) {
         if let Some(piece) = game_state.pieces.get_mut(piece_id) {
             piece.current_ammo = max_ammo;

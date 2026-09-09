@@ -42,6 +42,7 @@ fn empty_state(name: &str) -> GameState {
         .collect();
 
     GameState {
+        ruleset: Default::default(),
         id: format!("ai-benchmark-{name}"),
         board: create_board(8),
         pieces: HashMap::new(),

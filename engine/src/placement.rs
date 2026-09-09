@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::attack_map::generate_attack_map;
-use crate::rules::get_base_zone_squares;
+use crate::rules::get_base_zone_squares_with_ruleset;
 use crate::types::*;
 #[cfg(feature = "profiling")]
 use std::time::Instant;
@@ -15,7 +15,8 @@ fn get_placement_candidates(game_state: &GameState, player_id: &PlayerId) -> Vec
     let started = Instant::now();
     let attack_map = generate_attack_map(game_state, player_id, &HashMap::new());
 
-    let base_zone = get_base_zone_squares(player_id, game_state.board.size);
+    let base_zone =
+        get_base_zone_squares_with_ruleset(player_id, game_state.board.size, game_state.ruleset);
 
     let mut candidates: HashSet<SquareId> = HashSet::new();
 

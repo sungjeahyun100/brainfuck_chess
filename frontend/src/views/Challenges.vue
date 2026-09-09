@@ -69,6 +69,7 @@
 </template>
 
 <script setup lang="ts">
+import { parseDeckRuleset } from '../deckRulesets'
 import { onMounted, ref, watch } from 'vue'
 import { api, type ChallengeSummary } from '../api/gameApi'
 import type { BotDifficulty, GameState } from '../types/game'
@@ -103,6 +104,7 @@ function availability(deck: SavedDeck): { valid: boolean; reason: string } {
   if (!challenge) return { valid: false, reason: '' }
   const summary = validateSavedDeck(deck)
   if (!summary.valid) return { valid: false, reason: summary.errors[0] ?? '유효하지 않은 덱입니다.' }
+  if (parseDeckRuleset(deck.ruleset) !== 'legacy') return { valid: false, reason: '기존 Challenge는 Legacy 덱만 사용할 수 있습니다.' }
   if (deck.mapId !== challenge.map_id) {
     return { valid: false, reason: `이 Challenge는 ${challenge.board_size}×${challenge.board_size} 일반전 덱이 필요합니다.` }
   }

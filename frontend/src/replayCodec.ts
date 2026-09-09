@@ -1,4 +1,5 @@
 import type { GameRecord } from './types/gameRecord'
+import { isDeckRuleset } from './deckRulesets.ts'
 
 export const REPLAY_CODE_PREFIX = 'DC-G2-'
 export const MAX_REPLAY_CODE_LENGTH = 4_000_000
@@ -56,6 +57,7 @@ async function gunzipBounded(bytes: Uint8Array): Promise<Uint8Array | null> {
 
 function validState(value: unknown): boolean {
   if (!isRecord(value) || !isRecord(value.board) || !Number.isInteger(value.board.size)) return false
+  if (value.ruleset !== undefined && !isDeckRuleset(value.ruleset)) return false
   const size = value.board.size as number
   if (size < 8 || size > 12 || !isRecord(value.pieces) || Object.keys(value.pieces).length > MAX_REPLAY_PIECES) return false
   return isRecord(value.piece_definitions) && isRecord(value.players) && Array.isArray(value.history)

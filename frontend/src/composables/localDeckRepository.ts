@@ -1,3 +1,4 @@
+import { parseDeckRuleset } from '../deckRulesets.ts'
 import type { SavedDeck } from '../types/deck'
 import type { BoardMapId } from '../types/game'
 import { findBoardMap, normalizeBoardMapId } from '../boardMaps.ts'
@@ -8,23 +9,28 @@ const STORAGE_KEY = 'brainfuck_chess_saved_decks_v1'
 function readStorage(): SavedDeck[] {
   if (typeof localStorage === 'undefined') return []
 
+  let parsed: unknown
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(isSavedDeck).flatMap(deck => {
-      const mapId = normalizeBoardMapId(deck.mapId, deck.boardSize)
-      if (!mapId) return []
-      return [{
-        ...deck,
-        mapId,
-        customPieces: Array.isArray(deck.customPieces) ? deck.customPieces : [],
-      }]
-    })
+    parsed = JSON.parse(raw)
   } catch {
     return []
   }
+  if (!Array.isArray(parsed)) return []
+  // Keep ruleset errors outside the legacy JSON fallback: never silently discard
+  // an unknown format and later overwrite the user's original storage.
+  return parsed.filter(isSavedDeck).flatMap(deck => {
+    const ruleset = parseDeckRuleset(deck.ruleset)
+    const mapId = normalizeBoardMapId(deck.mapId, deck.boardSize)
+    if (!mapId) return []
+    return [{
+      ...deck,
+      ruleset,
+      mapId,
+      customPieces: Array.isArray(deck.customPieces) ? deck.customPieces : [],
+    }]
+  })
 }
 
 function writeStorage(decks: SavedDeck[]) {
@@ -66,6 +72,7 @@ export function createNewSavedDeck(mapId: BoardMapId = 'standard-8x8'): SavedDec
   const existing = readStorage()
 
   return {
+    ruleset: 'legacy',
     id: nextId(),
     name: createDeckName(existing),
     mapId: map.id,
@@ -90,6 +97,7 @@ export function useLocalSavedDecks() {
     if (!mapId) throw new Error('덱의 맵 정보가 올바르지 않습니다.')
     const normalized: SavedDeck = {
       ...deck,
+      ruleset: parseDeckRuleset(deck.ruleset),
       mapId,
       name: deck.name.trim(),
       updatedAt: now,

@@ -90,3 +90,17 @@ test('Replay Code rejects malformed action, square, deck and oversized delta arr
   await rejected(value => { (value.actions as Array<Record<string, unknown>>)[0].state_delta = Array.from({ length: 513 }, () => ({ op: 'set', path: ['turn_number'], value: 2 })) })
   await rejected(value => { (value.actions as Array<Record<string, unknown>>)[0].state_delta = [{ op: 'set', path: ['pieces', '__proto__', 'polluted'], value: true }] })
 })
+
+test('G1 Replay retains explicit rulesets, leaves legacy JSON unchanged and rejects unknown values', async () => {
+  for (const ruleset of [undefined, 'legacy', 'standard'] as const) {
+    const original = structuredClone(record)
+    if (ruleset !== undefined) original.initial_state.ruleset = ruleset
+    const decoded = await decodeReplayCode(await encodeReplayCode(original))
+    assert.equal(decoded.ok, true)
+    if (decoded.ok) assert.deepEqual(decoded.value, original)
+  }
+  for (const ruleset of ['future', null, 1]) {
+    const malformed = { ...record, initial_state: { ...record.initial_state, ruleset } }
+    assert.deepEqual(await decodeReplayCode(await encodeReplayCode(malformed as unknown as GameRecord)), { ok: false, error: 'invalid_schema' })
+  }
+})

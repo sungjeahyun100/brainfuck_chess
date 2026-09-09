@@ -1,3 +1,4 @@
+import { parseDeckRuleset, type DeckRuleset } from '../deckRulesets.ts'
 import type {
   BotDifficulty,
   BoardVariant,
@@ -46,6 +47,7 @@ export interface DeckPlacementRequest {
 }
 
 export interface PlayerDeckRequest {
+  ruleset?: DeckRuleset
   name?: string
   starting: DeckPlacementRequest[]
   pocket: DeckPieceRequest[]
@@ -63,6 +65,7 @@ export interface ChallengeSummary {
 }
 
 export interface MultiplayerRoom {
+  ruleset?: DeckRuleset
   id: string
   board_size: number
   map_id: BoardMapId
@@ -99,6 +102,7 @@ interface GameSyncCatalog {
 }
 
 interface GameDynamicView {
+  ruleset?: DeckRuleset
   id: string
   board: GameState['board']
   pieces: GameState['pieces']
@@ -138,6 +142,7 @@ export function mergeGameSync(current: GameState | null, sync: GameSyncResponse)
   const replaceHistory = !current || sync.resync_required
   return {
     ...sync.dynamic,
+    ruleset: parseDeckRuleset(sync.dynamic.ruleset),
     catalog_revision: sync.catalog_revision,
     state_revision: sync.state_revision,
     piece_definitions: definitions,
@@ -299,6 +304,7 @@ export const api = {
     return request(`${BASE}`, {
       method: 'POST',
       body: JSON.stringify({
+        ruleset: parseDeckRuleset(whiteDeck.ruleset),
         board_size: boardSize,
         map_id: mapId,
         white_deck: whiteDeck,
@@ -433,6 +439,7 @@ export const api = {
     return request(`${ROOM_BASE}`, {
       method: 'POST',
       body: JSON.stringify({
+        ruleset: parseDeckRuleset(deck.ruleset),
         board_size: boardSize,
         map_id: mapId,
         host_side: hostSide,

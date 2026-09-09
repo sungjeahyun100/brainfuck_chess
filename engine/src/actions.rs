@@ -84,6 +84,7 @@ mod tests {
             })
             .collect();
         let mut state = GameState {
+            ruleset: Default::default(),
             id: "canonical-apply-parity".into(),
             board: create_board(8),
             pieces: HashMap::new(),

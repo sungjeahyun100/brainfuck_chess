@@ -1,6 +1,9 @@
+import { parseDeckRuleset } from '../deckRulesets.ts'
 import type { CustomDeckPieceRef, LobbyDeck } from '../types/deck'
 import type { BoardMapId } from '../types/game'
 import { findBoardMap, standardMapId } from '../boardMaps.ts'
+
+export const STANDARD_DECK_CODE_UNSUPPORTED = 'Standard 덱 코드 내보내기는 아직 지원하지 않습니다.'
 
 export const DECK_CODE_PREFIX = 'DC3.'
 export const MAX_DECK_CODE_LENGTH = 65_536
@@ -113,6 +116,9 @@ function decodeBase64Url(payload: string): string | null {
 }
 
 export function encodeDeckCode(deck: LobbyDeck & { boardSize: number; mapId: BoardMapId; name?: string }): string {
+  if (parseDeckRuleset(deck.ruleset) !== 'legacy') {
+    throw new Error(STANDARD_DECK_CODE_UNSUPPORTED)
+  }
   const value = {
     v: 3,
     name: 'name' in deck && typeof deck.name === 'string' ? deck.name : '',

@@ -566,6 +566,7 @@ mod tests {
 
     fn state() -> GameState {
         GameState {
+            ruleset: Default::default(),
             id: "game".into(),
             board: Board {
                 size: 8,
@@ -753,5 +754,41 @@ mod tests {
         right.global_state.insert("beta".into(), 2);
         right.global_state.insert("alpha".into(), 1);
         assert_eq!(state_hash(&left).unwrap(), state_hash(&right).unwrap());
+    }
+    #[test]
+    fn ruleset_preserves_pre_g1_state_json_and_canonical_hash() {
+        let old_json: serde_json::Value = serde_json::from_str(r#"{"id":"game","board":{"size":8,"squares":{}},"pieces":{},"piece_definitions":{},"players":{},"current_player":"white","turn_number":1,"phase":"playing","en_passant_target":null,"en_passant_available_to":null,"global_state":{},"history":[],"result":null}"#).unwrap();
+        let restored: GameState = serde_json::from_value(old_json.clone()).unwrap();
+        assert_eq!(
+            restored.ruleset,
+            brainfuck_chess_engine::types::DeckRuleset::Legacy
+        );
+        assert_eq!(serde_json::to_value(&restored).unwrap(), old_json);
+        assert_eq!(
+            state_hash(&restored).unwrap(),
+            "sha256-canonical:35bef86d93aadeb18fdd1c7a9a5525ec936f3ea70085de74b3e8311fdd1fe525"
+        );
+        let mut explicit = old_json.clone();
+        explicit["ruleset"] = serde_json::json!("legacy");
+        let explicit: GameState = serde_json::from_value(explicit).unwrap();
+        assert_eq!(
+            state_hash(&explicit).unwrap(),
+            state_hash(&restored).unwrap()
+        );
+        let mut standard = restored.clone();
+        standard.ruleset = brainfuck_chess_engine::types::DeckRuleset::Standard;
+        assert_ne!(
+            state_hash(&standard).unwrap(),
+            state_hash(&restored).unwrap()
+        );
+        for unknown in [
+            serde_json::json!("future"),
+            serde_json::Value::Null,
+            serde_json::json!(2),
+        ] {
+            let mut invalid = old_json.clone();
+            invalid["ruleset"] = unknown;
+            assert!(serde_json::from_value::<GameState>(invalid).is_err());
+        }
     }
 }

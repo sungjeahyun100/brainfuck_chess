@@ -34,6 +34,7 @@ fn state() -> GameState {
         })
         .collect();
     GameState {
+        ruleset: Default::default(),
         id: "ammo-air-test".into(),
         board: create_board(8),
         pieces: HashMap::new(),
@@ -578,4 +579,171 @@ fn serialized_state_preserves_ammo_layer_flight_and_cooldown() {
             .get_piece_at_layer(&Square::new(4, 4), PieceLayer::Air),
         Some(&"b".into())
     );
+}
+
+#[test]
+fn ruleset_mortar_barrage_excludes_exact_opponent_base() {
+    for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+        for side in ["white", "black"] {
+            for (file, standard_blocked) in [(0, false), (2, true), (3, true)] {
+                let mut game = state();
+                game.ruleset = ruleset;
+                game.current_player = side.into();
+                add_piece(&mut game, "m", side, "mortar", Square::new(file, 3));
+                let targets =
+                    generate_piece_legal_ability_actions(&game, &"m".into(), "mortar-barrage");
+                let target_rank = if side == "white" { 7 } else { 0 };
+                assert_eq!(
+                    targets
+                        .iter()
+                        .any(|a| a.to == Some(Square::new(file, target_rank))),
+                    ruleset == DeckRuleset::Standard && !standard_blocked
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn ruleset_ammo_replenishment_on_entry_and_depletion_uses_full_home() {
+    for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+        for side in ["white", "black"] {
+            let mirror =
+                |file, rank| Square::new(file, if side == "white" { rank } else { 7 - rank });
+            // Back, side Front, forward Front, and old Legacy-only home.
+            for (file, rank, standard_home) in
+                [(3, 0, true), (2, 0, true), (3, 1, true), (0, 1, false)]
+            {
+                let mut game = state();
+                game.ruleset = ruleset;
+                game.current_player = side.into();
+                add_piece(&mut game, "m", side, "mortar", mirror(file, rank));
+                let shot =
+                    generate_piece_legal_ability_actions(&game, &"m".into(), "mortar-barrage")
+                        .into_iter()
+                        .find(|a| a.to == Some(mirror(file, 4)))
+                        .unwrap();
+                let after = submit_action(game, TurnAction::Ability(shot)).unwrap();
+                assert_eq!(
+                    after.pieces["m"].current_ammo,
+                    u32::from(ruleset == DeckRuleset::Legacy || standard_home)
+                );
+            }
+            // Cross the rank boundary into either the new base or Legacy-only home.
+            for file in [0, 3] {
+                let mut game = state();
+                game.ruleset = ruleset;
+                game.current_player = side.into();
+                add_piece(&mut game, "m", side, "mortar", mirror(file, 2));
+                game.pieces.get_mut("m").unwrap().current_ammo = 0;
+                let action = generate_piece_legal_move_actions(&game, &"m".into())
+                    .into_iter()
+                    .find(|a| a.to == mirror(file, 1))
+                    .unwrap();
+                let after = submit_action(game, TurnAction::Move(action)).unwrap();
+                assert_eq!(
+                    after.pieces["m"].current_ammo,
+                    u32::from(ruleset == DeckRuleset::Legacy || file == 3)
+                );
+            }
+            // Same-rank entry: (1,0) -> side Front (2,0). Legacy is already at home.
+            let mut game = state();
+            game.ruleset = ruleset;
+            game.current_player = side.into();
+            add_piece(&mut game, "m", side, "mortar", mirror(1, 0));
+            game.pieces.get_mut("m").unwrap().current_ammo = 0;
+            let action = generate_piece_legal_move_actions(&game, &"m".into())
+                .into_iter()
+                .find(|a| a.to == mirror(2, 0))
+                .unwrap();
+            let after = submit_action(game, TurnAction::Move(action)).unwrap();
+            assert_eq!(
+                after.pieces["m"].current_ammo,
+                u32::from(ruleset == DeckRuleset::Standard)
+            );
+        }
+    }
+}
+
+#[test]
+fn ruleset_bomber_forced_return_refills_only_in_actual_home_and_preserves_turn_flow() {
+    for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+        for side in ["white", "black"] {
+            let mirror =
+                |file, rank| Square::new(file, if side == "white" { rank } else { 7 - rank });
+            for (file, rank, standard_home) in
+                [(3, 0, true), (2, 0, true), (3, 1, true), (0, 1, false)]
+            {
+                let mut game = state();
+                game.ruleset = ruleset;
+                game.current_player = side.into();
+                add_piece(&mut game, "b", side, "bomber", mirror(file, rank));
+                add_piece(&mut game, "king", side, "king", mirror(7, 0));
+                make_airborne(&mut game, "b", mirror(file, rank + 4), 1);
+                game.pieces.get_mut("b").unwrap().current_ammo = 0;
+                let action = generate_piece_legal_move_actions(&game, &"king".into())
+                    .into_iter()
+                    .next()
+                    .unwrap();
+                game = submit_action(game, TurnAction::Move(action)).unwrap();
+                assert_eq!(game.current_player, side);
+                assert_eq!(game.pieces["b"].remaining_flight_turns, 0);
+                assert!(generate_piece_legal_move_actions(&game, &"king".into()).is_empty());
+                let landing =
+                    generate_piece_legal_ability_actions(&game, &"b".into(), "forced-landing")
+                        .into_iter()
+                        .find(|a| a.to == Some(mirror(file, rank)))
+                        .unwrap();
+                game = submit_action(game, TurnAction::Ability(landing)).unwrap();
+                assert_eq!(game.pieces["b"].layer, PieceLayer::Ground);
+                assert_eq!(
+                    game.pieces["b"].current_ammo,
+                    if ruleset == DeckRuleset::Legacy || standard_home {
+                        3
+                    } else {
+                        0
+                    }
+                );
+                assert_eq!(
+                    game.current_player,
+                    if side == "white" { "black" } else { "white" }
+                );
+                assert_eq!(game.history.len(), 2);
+                assert!(game.history.iter().all(|a| a.player_id == side));
+            }
+        }
+    }
+}
+
+#[test]
+fn ruleset_bomber_enemy_home_landing_block_and_crash_use_new_geometry() {
+    for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+        for side in ["white", "black"] {
+            for (file, rank, standard_enemy_home) in
+                [(0, 7, false), (2, 7, true), (3, 7, true), (3, 6, true)]
+            {
+                let mut game = state();
+                game.ruleset = ruleset;
+                game.current_player = side.into();
+                let origin = Square::new(file, if side == "white" { rank } else { 7 - rank });
+                add_piece(&mut game, "b", side, "bomber", Square::new(7, 3));
+                make_airborne(&mut game, "b", origin, 0);
+                let landings =
+                    generate_piece_legal_ability_actions(&game, &"b".into(), "forced-landing");
+                let blocked = ruleset == DeckRuleset::Legacy || standard_enemy_home;
+                assert_eq!(landings.is_empty(), blocked);
+                game.pieces.get_mut("b").unwrap().remaining_flight_turns = 1;
+                add_piece(&mut game, "king", side, "king", Square::new(7, 2));
+                let action = generate_piece_legal_move_actions(&game, &"king".into())
+                    .into_iter()
+                    .next()
+                    .unwrap();
+                let after = submit_action(game, TurnAction::Move(action)).unwrap();
+                assert_eq!(after.pieces["b"].captured, blocked);
+                if !blocked {
+                    assert_eq!(after.current_player, side);
+                }
+            }
+        }
+    }
 }

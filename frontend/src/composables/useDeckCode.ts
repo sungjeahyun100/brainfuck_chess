@@ -48,6 +48,8 @@ export function importDeckCode(code: string, currentDeck: SavedDeck): DeckCodeIm
 
   const candidate: SavedDeck = {
     ...currentDeck,
+    // DC1/DC2/DC3 are always Legacy, even when imported into a Standard draft.
+    ruleset: 'legacy',
     name: decoded.value.name?.trim() || currentDeck.name,
     mapId: decoded.value.mapId,
     boardSize: decoded.value.boardSize,

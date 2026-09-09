@@ -137,8 +137,12 @@ export function useSavedDecks() {
     const revision = identityRevision
     await loadDecks()
     if (revision === identityRevision && isAccount.value) {
-      const local = await new LocalDeckRepository().listDecks()
-      if (revision === identityRevision) localCount.value = local.length
+      try {
+        const local = await new LocalDeckRepository().listDecks()
+        if (revision === identityRevision) localCount.value = local.length
+      } catch (cause) {
+        if (revision === identityRevision) report(cause)
+      }
     }
   }, { immediate: true, flush: 'sync' })
   return { decks, loading, busy, error, isAccount, localCount, importResult, loadDecks, getDeck, saveDeck, deleteDeck, duplicateDeck, renameDeck, importLocalDecks }

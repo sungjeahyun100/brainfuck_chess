@@ -22,6 +22,21 @@ pub enum BoardVariant {
     CentralHighGround,
 }
 
+/// Game rules, independent of map IDs, terrain and record GameMode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeckRuleset {
+    #[default]
+    Legacy,
+    Standard,
+}
+
+impl DeckRuleset {
+    pub fn is_legacy(&self) -> bool {
+        *self == Self::Legacy
+    }
+}
+
 /// Stable external piece id with allocation-free clones inside the engine.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -1065,6 +1080,9 @@ pub enum GamePhase {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
+    // Omit Legacy so old serialized states and canonical analysis hashes remain identical.
+    #[serde(default, skip_serializing_if = "DeckRuleset::is_legacy")]
+    pub ruleset: DeckRuleset,
     pub id: String,
     pub board: Board,
     /// All piece instances, keyed by PieceId

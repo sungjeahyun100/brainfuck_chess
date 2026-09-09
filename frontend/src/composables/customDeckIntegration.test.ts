@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { savedDeckToPlayerDeckRequest } from './useDeckSerialization.ts'
+import { savedDeckToPlayerDeckRequest, serializeNeutralDeck } from './useDeckSerialization.ts'
 import {
   baseZoneDepth,
+  baseZoneSquares,
+  frontZoneSquares,
+  backZoneSquares,
+  deploymentZoneAtSquare,
   applyPieceMetadata,
   canPieceBePlacedAtStart,
   frontmostBaseRank,
@@ -266,4 +270,62 @@ test('deployment zones replace score-based front-rank placement', () => {
   const invalidBack = deck('knight')
   invalidBack.starting[1].square.rank = 1
   assert.match(validateSavedDeck(invalidBack).errors.join(' '), /배치할 수 없습니다/)
+})
+
+const standardExpected: Record<number, { back: number[][]; front: number[][] }> = {
+  8: { back: [[3,0],[4,0]], front: [[2,0],[5,0],[2,1],[3,1],[4,1],[5,1]] },
+  9: { back: [[3,0],[4,0],[5,0]], front: [[2,0],[6,0],[2,1],[3,1],[4,1],[5,1],[6,1]] },
+  10: { back: [[4,0],[5,0]], front: [[3,0],[6,0],[3,1],[4,1],[5,1],[6,1]] },
+  11: { back: [[4,0],[5,0],[6,0]], front: [[3,0],[7,0],[3,1],[4,1],[5,1],[6,1],[7,1]] },
+  12: { back: [[5,0],[6,0]], front: [[4,0],[7,0],[4,1],[5,1],[6,1],[7,1]] },
+}
+
+test('Standard exact Front/Back/Base sets and initial placement match every size and side', () => {
+  for (const size of [8, 9, 10, 11, 12]) {
+    const expected = standardExpected[size]
+    for (const side of ['white', 'black'] as const) {
+      const mirror = ([file, rank]: number[]) => ({ file, rank: side === 'white' ? rank : size - 1 - rank })
+      const back = expected.back.map(mirror)
+      const front = expected.front.map(mirror)
+      assert.deepEqual(new Set(backZoneSquares(size, side, 'standard')), new Set(back))
+      assert.deepEqual(new Set(frontZoneSquares(size, side, 'standard')), new Set(front))
+      assert.deepEqual(new Set(baseZoneSquares(size, side, 'standard')), new Set([...back, ...front]))
+      for (let rank = -1; rank <= size; rank++) {
+        for (let file = -1; file <= size; file++) {
+          const square = { file, rank }
+          const includes = (squares: {file: number; rank: number}[]) => squares.some(s => s.file === file && s.rank === rank)
+          assert.equal(deploymentZoneAtSquare(square, size, side, 'standard'), includes(back) ? 'back' : includes(front) ? 'front' : null)
+          for (const kind of ['king', 'knight', 'guhang', 'bomber']) {
+            assert.equal(canPieceBePlacedAtStart(kind, square, size, side, 'standard'), includes(back))
+          }
+          assert.equal(canPieceBePlacedAtStart('pawn', square, size, side, 'standard'), includes(front))
+        }
+      }
+      assert.equal(canPieceBePlacedAtStart('pawn', side === 'white' ? 1 : size - 2, size, side, 'standard'), false)
+    }
+  }
+})
+
+test('Standard preset is playable with every Front square and optional Back vacancies; drafts remain storable', () => {
+  for (const size of [8, 9, 10, 11, 12]) {
+    const standard: SavedDeck = {
+      ...deck('knight'), ...createPresetDeck(size, 'classic', 'standard'),
+      boardSize: size, mapId: `standard-${size}x${size}`, customPieces: [], ruleset: 'standard',
+    }
+    assert.equal(validateSavedDeck(standard).valid, true)
+    assert.equal(standard.starting.filter(p => p.pieceType === 'king').length, 1)
+    assert.equal(standard.starting.length, standardExpected[size].front.length + 1)
+    assert.equal(Object.values(standard.pocket).reduce((a,b) => a+b, 0), 0)
+    for (const square of frontZoneSquares(size, 'white', 'standard')) {
+      const missing = { ...standard, starting: standard.starting.filter(p => p.square.file !== square.file || p.square.rank !== square.rank) }
+      assert.equal(validateSavedDeck(missing).valid, false)
+      assert.ok(validateSavedDeck(missing).errors.some(e => e.includes('모든 칸')))
+      const wrong = { ...standard, starting: standard.starting.map(p => p.square.file === square.file && p.square.rank === square.rank ? { ...p, pieceType: 'knight' } : p) }
+      assert.ok(validateSavedDeck(wrong).errors.some(e => e.includes('모든 칸')))
+    }
+    const request = serializeNeutralDeck(standard, 'black')
+    assert.equal(request.ruleset, 'standard')
+    assert.deepEqual(request.starting.map(p => p.square), standard.starting.map(p => ({ file: p.square.file, rank: size - 1 - p.square.rank })))
+    if (size === 12) assert.equal(validateSavedDeck({ ...standard, mapId: 'central-high-ground-12x12' }).valid, true)
+  }
 })

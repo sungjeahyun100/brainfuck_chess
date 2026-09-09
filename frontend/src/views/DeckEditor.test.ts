@@ -1,3 +1,4 @@
+import * as rulesets from '../deckRulesets.ts'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
@@ -24,6 +25,7 @@ async function editor(t: any, persist: (deck: SavedDeck) => Promise<SavedDeck>) 
   t.after(() => scope.stop())
   const modules: Record<string, unknown> = {
     vue,
+    '../deckRulesets': rulesets,
     '../pieceAssets': { pieceAsset: () => undefined },
     '../api/customPieceApi': { customPieceApi: { list: async () => ({ items: [] }) } },
     '../composables/useDeckValidation': validation,
@@ -164,4 +166,88 @@ test('saving does not overwrite edits made while the request is pending', async 
   await pending
   assert.equal(state.deck.value.name, '저장 중 추가 편집')
   assert.equal(state.deck.value.version, 2)
+})
+
+
+test('ruleset editor selection is independent of size/map and is preserved by clone and save', async t => {
+  const persisted: SavedDeck[] = []
+  const { state } = await editor(t, async deck => { persisted.push(deck); return { ...deck, version: 2 } })
+  for (const ruleset of ['legacy', 'standard'] as const) {
+    const before = JSON.parse(JSON.stringify(state.deck.value))
+    state.deck.value.ruleset = ruleset
+    await vue.nextTick()
+    assert.deepEqual(JSON.parse(JSON.stringify(state.deck.value)), { ...before, ruleset })
+    assert.equal(state.cloneSavedDeck(state.deck.value).ruleset, ruleset)
+    for (const mapId of ['central-high-ground-12x12', 'standard-12x12', 'standard-8x8', 'standard-10x10']) {
+      state.deck.value.mapId = mapId
+      state.changeMap()
+      assert.equal(state.deck.value.ruleset, ruleset)
+      assert.equal(state.deck.value.boardSize, boardMaps.findBoardMap(mapId)!.boardSize)
+    }
+    await state.save()
+    assert.equal(state.saveError.value, null)
+    assert.equal(persisted.at(-1)!.ruleset, ruleset)
+  }
+  const { ruleset: _ruleset, ...old } = state.deck.value
+  assert.equal(state.cloneSavedDeck(old).ruleset, 'legacy')
+  assert.throws(() => state.cloneSavedDeck({ ...old, ruleset: 'future' }), /지원하지 않는 덱 룰/)
+  state.deck.value.ruleset = 'standard'
+  await state.copyDeckCode()
+  assert.match(state.deckCodeNotice.value, /Standard.*지원하지/)
+  // Verify the real Vue template binds a separate labelled selector.
+  assert.match(descriptor.template!.content, /<select v-model="deck.ruleset"/)
+  assert.match(descriptor.template!.content, /<select v-model="deck.mapId"/)
+})
+
+
+test('Standard editor displays actual coordinates, restricts clicks/drags, and resets by size', async t => {
+  const { state } = await editor(t, async deck => deck)
+  validation.applyPieceMetadata(Object.fromEntries(validation.pieceCatalog.filter(p => !p.custom).map(p => [p.id, {
+    score: p.id === 'pawn' ? 1 : 0, deployment_zone: p.id === 'pawn' ? 'front' : 'back',
+  }])))
+  state.deck.value.ruleset = 'standard'
+  for (const size of [8, 9, 10, 11, 12]) {
+    state.deck.value.mapId = `standard-${size}x${size}`
+    state.changeMap()
+    state.applyPreset('classic')
+    assert.equal(state.deckSummary.value.valid, true)
+    assert.deepEqual(state.deck.value.starting, validation.createPresetDeck(size, 'classic', 'standard').starting)
+    const cells = state.placementZoneSections.value.flatMap((z: any) => z.squares)
+    assert.equal(cells.length, 2 * size)
+    assert.deepEqual(cells.slice(0, size), Array.from({ length: size }, (_, file) => ({file, rank: 1})))
+    const front = validation.frontZoneSquares(size, 'white', 'standard')
+    const back = validation.backZoneSquares(size, 'white', 'standard')
+    state.placementTool.value = 'knight'
+    for (const square of cells) {
+      assert.equal(state.squareClass(square.file, square.rank).includes('restricted'), state.squareZone(square.file, square.rank) !== 'back')
+    }
+    const before = JSON.stringify(state.deck.value.starting)
+    state.onPlacementSquareClick(front[0].file, front[0].rank)
+    state.onPlacementSquareClick(0, 0)
+    assert.equal(JSON.stringify(state.deck.value.starting), before)
+    assert.match(state.placementError.value, /진영 밖/)
+    state.onPieceDragStart({}, 'pawn')
+    state.onPlacementDrop({}, back[0].file, back[0].rank)
+    assert.equal(JSON.stringify(state.deck.value.starting), before)
+    state.placementTool.value = 'guhang'
+    const vacancy = back.find(s => state.pieceAt(s.file, s.rank) === null)!
+    state.onPlacementSquareClick(vacancy.file, vacancy.rank)
+    assert.equal(state.pieceAt(vacancy.file, vacancy.rank), 'guhang')
+    state.onPieceDragStart({}, 'bomber')
+    state.onPlacementDrop({}, vacancy.file, vacancy.rank)
+    assert.equal(state.pieceAt(vacancy.file, vacancy.rank), 'bomber')
+    state.placementTool.value = state.eraseTool
+    state.onPlacementSquareClick(front[0].file, front[0].rank)
+    assert.equal(state.deckSummary.value.valid, false)
+    assert.equal(state.canSaveDeck.value, true)
+    state.placementTool.value = 'pawn'
+    state.onPlacementSquareClick(front[0].file, front[0].rank)
+    assert.equal(state.deckSummary.value.valid, true)
+  }
+  const beforeMap = JSON.stringify(state.deck.value.starting)
+  state.deck.value.mapId = 'central-high-ground-12x12'
+  state.changeMap()
+  assert.equal(JSON.stringify(state.deck.value.starting), beforeMap)
+  assert.match(descriptor.template!.content, /squareRestriction\(square.file, square.rank\)/)
+  assert.match(descriptor.template!.content, /:disabled="deck.ruleset === 'standard' && !squareZone/)
 })

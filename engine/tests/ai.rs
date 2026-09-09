@@ -36,6 +36,7 @@ fn make_state() -> GameState {
         .collect();
 
     GameState {
+        ruleset: Default::default(),
         id: "ai-test".into(),
         board: create_board(8),
         pieces: HashMap::new(),

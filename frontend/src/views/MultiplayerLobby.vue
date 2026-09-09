@@ -26,7 +26,7 @@
               <select v-model="selectedDeckId" class="text-input" :disabled="Boolean(currentRoom?.game_id)">
                 <option value="">선택 안 함</option>
                 <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
-                  {{ deck.name }} · {{ boardMapLabel(deck.mapId) }}
+                  {{ deck.name }} · {{ boardMapLabel(deck.mapId) }} · {{ deck.ruleset === 'standard' ? 'Standard' : 'Legacy' }}
                 </option>
               </select>
             </label>
@@ -62,7 +62,7 @@
             <strong>{{ currentRoom ? currentRoom.id : '없음' }}</strong>
             <p v-if="selectedDeck">선택 덱: {{ selectedDeck.name }} · {{ boardMapLabel(selectedDeck.mapId) }}</p>
             <p v-if="currentRoom">
-              방 맵: {{ boardMapLabel(currentRoom.map_id) }} · 방장 {{ playerLabel(currentRoom.host_side) }}
+              방 맵: {{ boardMapLabel(currentRoom.map_id) }} · {{ currentRoom.ruleset === 'standard' ? 'Standard' : 'Legacy' }} · 방장 {{ playerLabel(currentRoom.host_side) }}
             </p>
             <p v-if="currentRoom">타임 컨트롤: {{ timeControlLabel(currentRoom.time_control) }}</p>
             <p v-if="currentRoom">
@@ -80,6 +80,7 @@
 </template>
 
 <script setup lang="ts">
+import { parseDeckRuleset } from '../deckRulesets'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { GameState } from '../types/game'
 import type { LobbyPlayer } from '../types/deck'
@@ -192,6 +193,10 @@ async function applySelectedDeckToRoom() {
   if (!selectedDeck.value || !currentRoom.value) return
   error.value = null
   try {
+    if (parseDeckRuleset(selectedDeck.value.ruleset) !== parseDeckRuleset(currentRoom.value.ruleset)) {
+      error.value = '방의 룰과 선택한 덱의 룰이 다릅니다.'
+      return
+    }
     if (selectedDeck.value.mapId !== currentRoom.value.map_id) {
       error.value = '방의 맵과 선택한 덱의 전용 맵이 다릅니다.'
       return
@@ -229,6 +234,10 @@ async function joinRoom() {
   status.value = null
   try {
     const room = await api.getRoom(roomCodeInput.value.toUpperCase())
+    if (parseDeckRuleset(selectedDeck.value.ruleset) !== parseDeckRuleset(room.ruleset)) {
+      error.value = '방의 룰과 선택한 덱의 룰이 다릅니다.'
+      return
+    }
     if (room.map_id !== selectedDeck.value.mapId) {
       error.value = '방의 맵과 선택한 덱의 전용 맵이 다릅니다.'
       return

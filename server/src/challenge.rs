@@ -272,6 +272,7 @@ pub(crate) fn opponent_deck(definition: &ChallengeDefinition, side: &str) -> Pla
         })
         .collect();
     PlayerDeckSpec {
+        ruleset: Default::default(),
         name: Some(definition.name.into()),
         starting,
         pocket,

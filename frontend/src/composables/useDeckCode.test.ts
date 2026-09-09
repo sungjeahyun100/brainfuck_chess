@@ -214,3 +214,29 @@ test('import reuses current validation for squares, placement zones, score, and 
     if (!result.ok) assert.match(result.message, expected, name)
   }
 })
+
+
+test('DC1/DC2/DC3 retain Legacy meaning even when imported into a Standard draft', () => {
+  const current = { ...savedDeck(), ruleset: 'standard' as const }
+  const before = JSON.parse(JSON.stringify(current))
+  const v1 = validPayload()
+  const codes = [
+    codeFor(v1),
+    `DC2.${base64Url(JSON.stringify({ ...v1, v: 2, mapId: 'standard-8x8' }))}`,
+    encodeDeckCode({ ...savedDeck(), ruleset: 'legacy' }),
+  ]
+  for (const code of codes) {
+    const result = importDeckCode(code, current)
+    assert.equal(result.ok, true)
+    if (result.ok) assert.equal(result.deck.ruleset, 'legacy')
+  }
+  assert.deepEqual(current, before)
+  assert.equal(encodeDeckCode(savedDeck()), encodeDeckCode({ ...savedDeck(), ruleset: 'legacy' }))
+  assert.throws(() => encodeDeckCode(current), /Standard.*지원하지/)
+  assert.throws(() => encodeDeckCode({ ...current, ruleset: 'future' } as never), /지원하지 않는 덱 룰/)
+  for (const v of [1, 2, 3]) {
+    const payload = v === 1 ? v1 : v === 2 ? { ...v1, v, mapId: 'standard-8x8' } : { ...v1, v, mapId: 'standard-8x8', name: 'Deck', customPieces: [] }
+    const result = decodeDeckCode(`DC${v}.${base64Url(JSON.stringify({ ...payload, ruleset: 'legacy' }))}`)
+    assert.deepEqual(result, { ok: false, error: 'invalid_schema' })
+  }
+})
