@@ -36,6 +36,7 @@
       </label>
     </section>
     <p v-if="saveError" class="error">{{ saveError }}</p>
+    <p v-if="saveNotice" class="deck-code-notice" role="status">{{ saveNotice }}</p>
     <p v-if="deckCodeNotice" class="deck-code-notice" :class="{ error: deckCodeNoticeIsError }" role="status">
       {{ deckCodeNotice }}
     </p>
@@ -398,8 +399,10 @@ const customPieceSearch = ref('')
 const placementTool = ref<DeckPieceType>('king')
 const draggedPiece = ref<DeckPieceType | null>(null)
 const saveError = ref<string | null>(null)
+const saveNotice = ref<string | null>(null)
 const placementError = ref<string | null>(null)
 const deck = ref<SavedDeck>(createNewSavedDeck())
+watch(deck, () => { saveNotice.value = null }, { deep: true, flush: 'sync' })
 const deckLoaded = ref(false)
 const loadError = ref<string | null>(null)
 const saving = savedDecks.busy
@@ -420,6 +423,7 @@ async function loadDeck() {
   loadError.value = null
   catalogLoadError.value = null
   saveError.value = null
+  saveNotice.value = null
   if (deckStorageIdentity.value === undefined) {
     loadError.value = savedDecks.error.value
     return
@@ -474,7 +478,7 @@ function cloneSavedDeck(source: SavedDeck): SavedDeck {
 
 function changeMap() {
   const map = findBoardMap(deck.value.mapId)
-  if (!map) return
+  if (!map || map.boardSize === deck.value.boardSize) return
   deck.value.boardSize = map.boardSize
   resetToClassic()
 }
@@ -809,6 +813,7 @@ function emitTestPiece(pieceType: DeckPieceType) {
 async function save() {
   if (!deckLoaded.value || saving.value) return
   saveError.value = null
+  saveNotice.value = null
   if (!storageSummary.value.valid) {
     saveError.value = storageSummary.value.errors.join(' ')
     return
@@ -827,7 +832,14 @@ async function save() {
         contentHash: piece.custom!.contentHash,
         exposedPieceKey: piece.custom!.exposedPieceKey,
       }))
-    await savedDecks.saveDeck(cloneSavedDeck(deck.value))
+    const revision = loadRevision
+    const saved = await savedDecks.saveDeck(cloneSavedDeck(deck.value))
+    if (revision !== loadRevision) return
+    // Keep edits made during the request, but use the acknowledged version for the next save.
+    if (saved.version === undefined) delete deck.value.version
+    else deck.value.version = saved.version
+    deck.value.updatedAt = saved.updatedAt
+    saveNotice.value = '덱을 저장했습니다.'
     emit('saved')
   } catch (e: unknown) {
     saveError.value = e instanceof Error ? e.message : String(e)

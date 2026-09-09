@@ -37,7 +37,6 @@
       v-else-if="view === 'deck-editor'"
       :deck-id="editingDeckId"
       @back="navigate('deck-library')"
-      @saved="navigate('deck-library')"
       @test-piece="openPieceLabFromDeckEditor"
     />
     <PieceLab
