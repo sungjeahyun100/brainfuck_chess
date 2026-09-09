@@ -18,6 +18,7 @@
       <button class="home-action" @click="$emit('navigate', 'custom-piece-workshop')">커스텀 기물 제작소</button>
       <button class="home-action" @click="$emit('navigate', 'replay-import')">기보 / 리플레이</button>
       <button class="home-action" @click="$emit('navigate', 'game-history')">게임 기록</button>
+      <button class="home-action" @click="$emit('show-updates')">업데이트 로그</button>
     </section>
   </main>
 </template>
@@ -28,5 +29,6 @@ import type { AppView } from '../types/deck'
 
 defineEmits<{
   navigate: [view: AppView]
+  'show-updates': []
 }>()
 </script>

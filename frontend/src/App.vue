@@ -27,6 +27,7 @@
     <LobbyHome
       v-else-if="view === 'home'"
       @navigate="navigate"
+      @show-updates="updateLogDialog?.open()"
     />
     <DeckLibrary
       v-else-if="view === 'deck-library'"
@@ -94,6 +95,7 @@
     />
 
     <p v-if="lobbyError && !gameState" class="global-error error">{{ lobbyError }}</p>
+    <UpdateLog ref="updateLogDialog" />
   </div>
 </template>
 
@@ -108,6 +110,7 @@ import type {
 } from './types/deck'
 import { api, type MultiplayerRoom } from './api/gameApi'
 import GameScreen from './components/GameScreen.vue'
+import UpdateLog from './components/UpdateLog.vue'
 import LobbyHome from './views/LobbyHome.vue'
 import DeckLibrary from './views/DeckLibrary.vue'
 import DeckEditor from './views/DeckEditor.vue'
@@ -129,6 +132,7 @@ import { mapSinglePlayerDecks, resolveLocalSide } from './singlePlayerSetup'
 import type { PlayMode } from './gameControlPolicy'
 
 const savedDecks = useSavedDecks()
+const updateLogDialog = ref<InstanceType<typeof UpdateLog> | null>(null)
 const view = ref<AppView>('home')
 const editingDeckId = ref<string | null>(null)
 const pieceLabReturnView = ref<AppView>('home')
