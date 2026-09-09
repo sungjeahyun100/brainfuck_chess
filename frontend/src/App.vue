@@ -1154,6 +1154,7 @@ select {
 }
 
 .pocket-drop-zone {
+  width: 100%;
   min-height: 64px;
   display: flex;
   align-items: center;
@@ -1164,6 +1165,11 @@ select {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.03);
   text-align: center;
+  cursor: pointer;
+}
+
+.pocket-drop-zone[aria-disabled="true"] {
+  cursor: not-allowed;
 }
 
 .pocket-drop-zone.ready {

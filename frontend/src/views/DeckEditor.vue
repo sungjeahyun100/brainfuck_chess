@@ -269,14 +269,17 @@
             <span class="section-score-pill">{{ pocketScore }}점 · {{ scorePercent(pocketScore) }}%</span>
           </div>
         </div>
-        <div
+        <button
+          type="button"
           class="pocket-drop-zone"
-          :class="{ ready: draggedPiece && canUseInPocket(draggedPiece) }"
+          :class="{ ready: pocketTargetPiece && canUseInPocket(pocketTargetPiece) }"
+          :aria-disabled="!pocketTargetPiece || !canUseInPocket(pocketTargetPiece)"
+          @click="onPocketClick"
           @dragover.prevent="onPocketDragOver"
           @drop.prevent="onPocketDrop($event)"
         >
           <span>{{ pocketDropMessage }}</span>
-        </div>
+        </button>
         <div v-if="activePocketCatalog.length > 0" class="pocket-summary">
           <div v-for="piece in activePocketCatalog" :key="piece.id" class="pocket-chip">
             <span class="symbol pocket-piece-symbol">
@@ -508,10 +511,14 @@ const activePocketCatalog = computed(() => {
   return pieceCatalog.filter(piece => piece.canPocket && (deck.value.pocket[piece.id] ?? 0) > 0)
 })
 const maxPocketCount = computed(() => Math.max(1, ...activePocketCatalog.value.map(piece => deck.value.pocket[piece.id] ?? 0)))
+const pocketTargetPiece = computed(() => draggedPiece.value ?? (placementTool.value === eraseTool ? null : placementTool.value))
 const pocketDropMessage = computed(() => {
-  if (!draggedPiece.value) return '여기에 드롭해서 포켓에 추가'
-  if (!canUseInPocket(draggedPiece.value)) return `${pieceLabel(draggedPiece.value)}은 포켓에 넣을 수 없습니다.`
-  return `${pieceLabel(draggedPiece.value)} 포켓에 추가`
+  const pieceType = pocketTargetPiece.value
+  if (!pieceType) return '기물을 선택한 뒤 여기를 누르거나, 드래그해서 포켓에 추가'
+  if (!canUseInPocket(pieceType)) return `${pieceLabel(pieceType)}은 포켓에 넣을 수 없습니다.`
+  return draggedPiece.value
+    ? `${pieceLabel(pieceType)} 포켓에 추가`
+    : `여기를 눌러 ${pieceLabel(pieceType)} 포켓에 추가`
 })
 function matchesPieceSearch(piece: (typeof pieceCatalog)[number], search: string): boolean {
   const query = search.toLowerCase()
@@ -783,6 +790,11 @@ function onPlacementDrop(event: DragEvent, file: number, rank: number) {
   if (!pieceType) return
   placementTool.value = pieceType
   placePieceAt(pieceType, file, rank)
+}
+
+function onPocketClick() {
+  if (placementTool.value === eraseTool) return
+  changePocketCount(placementTool.value, 1)
 }
 
 function onPocketDragOver(event: DragEvent) {

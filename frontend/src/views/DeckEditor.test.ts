@@ -76,6 +76,50 @@ test('changing board size still applies the classic preset for that size', async
   assert.deepEqual(state.deck.value.pocket, preset.pocket)
 })
 
+test('selecting a piece and clicking the pocket adds one per click without changing the frontline', async t => {
+  const { state } = await editor(t, async deck => deck)
+  state.deck.value.pocket = {}
+  const starting = JSON.parse(JSON.stringify(state.deck.value.starting))
+  state.placementTool.value = 'knight'
+  assert.match(state.pocketDropMessage.value, /여기를 눌러/)
+  state.onPocketClick()
+  state.onPocketClick()
+  state.placementTool.value = 'rook'
+  state.onPocketClick()
+  assert.deepEqual(state.deck.value.pocket, { knight: 2, rook: 1 })
+  assert.deepEqual(state.deck.value.starting, starting)
+  assert.equal(state.placementTool.value, 'rook')
+})
+
+test('clicking the pocket with King or the eraser selected preserves its contents', async t => {
+  const { state } = await editor(t, async deck => deck)
+  state.deck.value.pocket = { knight: 2 }
+  state.placementTool.value = 'king'
+  assert.match(state.pocketDropMessage.value, /포켓에 넣을 수 없습니다/)
+  state.onPocketClick()
+  state.placementTool.value = state.eraseTool
+  assert.equal(state.pocketTargetPiece.value, null)
+  assert.match(state.pocketDropMessage.value, /기물을 선택한 뒤/)
+  state.onPocketClick()
+  assert.deepEqual(state.deck.value.pocket, { knight: 2 })
+})
+
+test('pocket drops still use the dragged piece and reject King regardless of the selected tool', async t => {
+  const { state } = await editor(t, async deck => deck)
+  state.deck.value.pocket = {}
+  state.placementTool.value = state.eraseTool
+  state.onPieceDragStart({}, 'rook')
+  assert.equal(state.pocketTargetPiece.value, 'rook')
+  state.onPocketDrop({})
+  assert.deepEqual(state.deck.value.pocket, { rook: 1 })
+  assert.equal(state.draggedPiece.value, null)
+  state.placementTool.value = 'knight'
+  state.onPieceDragStart({}, 'king')
+  state.onPocketDrop({})
+  assert.deepEqual(state.deck.value.pocket, { rook: 1 })
+  assert.equal(state.draggedPiece.value, null)
+})
+
 test('successful saves keep the editor loaded, show feedback, and advance the version for repeated saves', async t => {
   const versions: (number | undefined)[] = []
   const { state, events } = await editor(t, async deck => {
