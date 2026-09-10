@@ -149,7 +149,7 @@ test('G5 actual summon panel keeps overpayment, target confirmation, cancellatio
   state.pieces.extra = { ...state.pieces.w1, id: 'extra', type_id: 'knight' }
   state.players.white.deck.extra_deck_pieces = ['extra']
   const selectedRequests: string[][] = [], submitted: TurnAction[] = []
-  const props = vue.reactive({ state, enabled: true, loadOptions: async (id: string, ids: string[]) => {
+  const props = vue.reactive({ state, viewer: 'white', enabled: true, loadOptions: async (id: string, ids: string[]) => {
     selectedRequests.push([...ids])
     return { sacrifice_piece_ids: ['w1','w2','w3'], policy: { sacrifice_zones: ['hand','board'] }, cost: 25, actions: ids.length === 3 ? [{ player_id: 'white', extra_piece_id: id, sacrifice_piece_ids: [...ids], target_square: { file: 4, rank: 0 } }] : [] }
   }, submit: async (action: TurnAction) => { submitted.push(action) } })

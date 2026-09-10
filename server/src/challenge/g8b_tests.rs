@@ -271,9 +271,9 @@ async fn standard_production_creation_bot_summon_draw_privacy_and_exact_replay()
         {
             assert!(!wire.contains(hidden.as_str()));
         }
-        for p in stored.state.players.values() {
+        for (side, p) in &stored.state.players {
             for extra in &p.deck.extra_deck_pieces {
-                assert!(wire.contains(extra.as_str()));
+                assert_eq!(wire.contains(extra.as_str()), side == "white");
             }
         }
         assert_eq!(stored.record.decks["black"].extra.len(), 3);

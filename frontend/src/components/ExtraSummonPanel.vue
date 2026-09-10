@@ -2,7 +2,7 @@
   <section v-if="state.ruleset === 'standard'" class="extra-panel" aria-label="Extra Deck 특수 소환">
     <div v-for="side in sides" :key="side" class="extra-side">
       <strong>{{ side === 'white' ? '백' : '흑' }} Extra Deck · {{ extraPieces(side).length }}기</strong>
-      <small>{{ canSelectSide(side) ? '기물을 선택하여 특수 소환' : '공개 정보 · 보기 전용' }}</small>
+      <small>{{ canSelectSide(side) ? '기물을 선택하여 특수 소환' : '현재 턴에는 소환할 수 없습니다.' }}</small>
       <div class="extra-list">
         <button v-for="piece in extraPieces(side)" :key="piece.id" :disabled="!canSelectSide(side) || busy" :aria-pressed="extraId === piece.id" :class="{ selected: extraId === piece.id }" @click="selectExtra(piece.id)">
           <img v-if="asset(piece.id)" :src="asset(piece.id)" :alt="label(piece.id)" />
@@ -48,19 +48,21 @@ import { renderedPieceAsset } from '../pieceAssets'
 import { gameplayKey, gameActionError } from '../standardGameUi'
 const props = defineProps<{
   state: GameState
+  viewer: PlayerId | null
+  revealAll?: boolean
   enabled: boolean
   disabledReason?: string
   loadOptions: (id: string, selected: string[]) => Promise<SummonOptions>
   submit: (action: ExtraSummonAction) => Promise<void>
 }>()
 const emit = defineEmits<{ targets: [squares: Square[]]; active: [active: boolean]; selection: [value: { candidates: string[]; selected: string[]; stage: 'sacrifice' | 'target' }] }>()
-const sides: PlayerId[] = ['white', 'black']
+const sides = computed<PlayerId[]>(() => props.revealAll ? ['white', 'black'] : props.viewer ? [props.viewer] : [])
 const extraId = ref<string | null>(null), selected = ref<string[]>([]), options = ref<SummonOptions | null>(null)
 const target = ref<SummonOptions['actions'][number] | null>(null), busy = ref(false), error = ref('')
 const stage = ref<'sacrifice' | 'target'>('sacrifice')
 let generation = 0
-function extraPieces(side: PlayerId) { return (props.state.players[side]?.deck.extra_deck_pieces ?? []).flatMap(id => props.state.pieces[id] ? [props.state.pieces[id]] : []) }
-function canSelectSide(side: PlayerId) { return props.enabled && side === props.state.current_player }
+function extraPieces(side: PlayerId) { return !props.revealAll && side !== props.viewer ? [] : (props.state.players[side]?.deck.extra_deck_pieces ?? []).flatMap(id => props.state.pieces[id] ? [props.state.pieces[id]] : []) }
+function canSelectSide(side: PlayerId) { return props.enabled && side === props.viewer && side === props.state.current_player }
 function label(id: string) { const p = props.state.pieces[id]; const d = props.state.piece_definitions[p?.type_id ?? '']; return `${d?.name ?? '기물'} [${d?.score ?? 0}]` }
 function asset(id: string) { const p = props.state.pieces[id]; return p ? renderedPieceAsset(p, props.state.piece_definitions[p.type_id]) : undefined }
 const score = computed(() => selected.value.reduce((sum, id) => sum + (props.state.piece_definitions[props.state.pieces[id]?.type_id ?? '']?.score ?? 0), 0))
@@ -70,6 +72,7 @@ watch([options, selected, stage, busy], () => {
 })
 function cancel() { generation++; extraId.value = null; selected.value = []; options.value = null; target.value = null; busy.value = false; error.value = ''; stage.value = 'sacrifice'; emit('targets', []); emit('active', false) }
 watch(() => gameplayKey(props.state), cancel)
+watch(() => props.viewer, cancel)
 watch(() => props.enabled, enabled => { if (!enabled && !busy.value) cancel() })
 async function refresh() {
   if (!extraId.value) return

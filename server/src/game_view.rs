@@ -77,8 +77,8 @@ pub(crate) fn project_state(state: &GameState, audience: Audience<'_>) -> GameSt
     if state.ruleset == DeckRuleset::Legacy {
         return view;
     }
-    // Standard Extra is public from game start; only Pocket/Hand belong to this
-    // hidden set. Committed Hand sacrifices leave Hand and become public removed pieces.
+    // Unplayed Extra pieces are private too. Summoned pieces and committed
+    // sacrifices leave their reserves and become public board/removed pieces.
     let hidden: HashSet<_> = state
         .players
         .iter()
@@ -89,6 +89,7 @@ pub(crate) fn project_state(state: &GameState, audience: Audience<'_>) -> GameSt
                 .hand_pieces
                 .iter()
                 .chain(&player.deck.pocket_pieces)
+                .chain(&player.deck.extra_deck_pieces)
         })
         .cloned()
         .collect();
@@ -97,6 +98,7 @@ pub(crate) fn project_state(state: &GameState, audience: Audience<'_>) -> GameSt
         if !audience.controls(owner) {
             player.deck.hand_pieces.clear();
             player.deck.pocket_pieces.clear();
+            player.deck.extra_deck_pieces.clear();
         }
         player
             .deck

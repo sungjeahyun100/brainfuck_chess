@@ -95,7 +95,7 @@ test('G6 reserve DOM shows own names/scores, hides opponent identities and toler
 test('G6 summon only toggles authoritative candidates; no King/opponent/Pocket; target and late cancel safe',async t=>{
   const scope=vue.effectScope();t.after(()=>scope.stop());const state=fixture();state.piece_definitions.knight.score=9
   const submitted:unknown[]=[];let queries=0
-  const props=vue.reactive({state,enabled:true,loadOptions:async(id:string,selected:string[]):Promise<SummonOptions>=>{queries++;return {cost:25,policy:{sacrifice_zones:['hand','board']},sacrifice_piece_ids:['w1','w2','wq'],actions:selected.length===3?[{player_id:'white',extra_piece_id:id,sacrifice_piece_ids:[...selected],target_square:{file:4,rank:0}}]:[]}},submit:async(a:unknown)=>{submitted.push(a)}})
+  const props=vue.reactive({state,viewer:'white',enabled:true,loadOptions:async(id:string,selected:string[]):Promise<SummonOptions>=>{queries++;return {cost:25,policy:{sacrifice_zones:['hand','board']},sacrifice_piece_ids:['w1','w2','wq'],actions:selected.length===3?[{player_id:'white',extra_piece_id:id,sacrifice_piece_ids:[...selected],target_square:{file:4,rank:0}}]:[]}},submit:async(a:unknown)=>{submitted.push(a)}})
   const ui=scope.run(()=>compile('ExtraSummonPanel',modules).setup(props,{expose(){},emit(){}}))
   await ui.selectExtra('be');assert.equal(queries,0)
   await ui.selectExtra('we');for(const id of ['wk','bk','wpocket','be'])await ui.toggle(id);assert.deepEqual(ui.selected.value,[]);assert.equal(queries,1)
@@ -116,7 +116,7 @@ test('G6 errors never echo arbitrary internal text',()=>{assert.doesNotMatch(hel
 
 test('G6 server refusal preserves valid summon choices; reordered clocks preserve target; gameplay changes cancel', async t => {
   const scope=vue.effectScope();t.after(()=>scope.stop());const state=fixture()
-  const props=vue.reactive({state,enabled:true,loadOptions:async(id:string,ids:string[])=>({cost:9,policy:{sacrifice_zones:['board']},sacrifice_piece_ids:['wq'],actions:ids.length?[{player_id:'white',extra_piece_id:id,sacrifice_piece_ids:ids,target_square:{file:4,rank:0}}]:[]}),submit:async()=>{throw new Error('private internal details')}})
+  const props=vue.reactive({state,viewer:'white',enabled:true,loadOptions:async(id:string,ids:string[])=>({cost:9,policy:{sacrifice_zones:['board']},sacrifice_piece_ids:['wq'],actions:ids.length?[{player_id:'white',extra_piece_id:id,sacrifice_piece_ids:ids,target_square:{file:4,rank:0}}]:[]}),submit:async()=>{throw new Error('private internal details')}})
   const ui=scope.run(()=>compile('ExtraSummonPanel',modules).setup(props,{expose(){},emit(){}}))
   await ui.selectExtra('we');await ui.toggle('w1');assert.deepEqual(ui.selected.value,[],'Board-only server candidates exclude Hand')
   await ui.toggle('wq');ui.chooseTarget({file:4,rank:0});const target=ui.target.value
@@ -134,9 +134,33 @@ test('G6 late ability request cannot open an overlay or submit after summon star
   assert.equal(ui.airdropOpen.value,false);assert.equal(ui.selectedPieceId.value,null);assert.equal(submits,0)
 })
 
-test('G6 public Extra DOM has both names and scores, while opponent buttons are disabled',async()=>{
-  const state=fixture();const html=await renderToString(vue.createSSRApp(compile('ExtraSummonPanel',modules,true),{state,enabled:true,loadOptions:async()=>({}),submit:async()=>{}}))
-  assert.match(html,/구행 \[25\]/);assert.match(html,/폭격기 \[13\]/);assert.match(html,/보기 전용/);assert.match(html,/disabled/);assert.doesNotMatch(html,/data-piece|wpocket|bpocket/)
+test('Extra DOM hides opponent deck identities, scores and counts for either viewer',async()=>{
+  const state=fixture()
+  const component=compile('ExtraSummonPanel',modules,true)
+  for(const current_player of ['white','black']) {
+    state.current_player=current_player
+    for(const viewer of ['white','black',null]) {
+      const html=await renderToString(vue.createSSRApp(component,{state,viewer,enabled:true,loadOptions:async()=>({}),submit:async()=>{}}))
+      if(viewer==='white') { assert.match(html,/구행 \[25\]/); assert.doesNotMatch(html,/폭격기|흑 Extra Deck/) }
+      if(viewer==='black') { assert.match(html,/폭격기 \[13\]/); assert.doesNotMatch(html,/구행|백 Extra Deck/) }
+      if(viewer===null) assert.doesNotMatch(html,/구행|폭격기|Extra Deck ·/)
+    }
+  }
+})
+
+test('Shared local hands can be visible while opponent Pocket stays private',async()=>{
+  const state=fixture();state.pieces.bpocket.type_id='bomber'
+  const html=await renderToString(vue.createSSRApp(compile('StandardReservePanel',modules,true),{state,side:'black',reveal:true,revealPocket:false}))
+  assert.match(html,/나이트/);assert.match(html,/Pocket: 비공개/);assert.doesNotMatch(html,/폭격기|13점/)
+})
+
+test('Deck viewer follows local turns but stays on human side during bot turns',async t=>{
+  const {ui,props}=setup(t)
+  assert.equal(ui.deckViewer.value,'white')
+  props.state={...props.state,current_player:'black'};await vue.nextTick()
+  assert.equal(ui.deckViewer.value,'black');assert.equal(ui.canRevealReserve('white'),true)
+  Object.assign(props,{playMode:'bot',localPlayer:'white'});await vue.nextTick()
+  assert.equal(ui.deckViewer.value,'white');assert.equal(ui.canRevealReserve('black'),false)
 })
 
 test('G6 Standard bot fallback renders only the authoritative final state and no hidden ID label',async t=>{

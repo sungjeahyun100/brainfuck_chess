@@ -1,5 +1,5 @@
 <template>
-  <div class="game-screen" :class="{ standard: isStandard }" @keydown.esc="cancelInteraction">
+  <div class="game-screen" :class="{ standard: isStandard, 'with-bot': Boolean(botPlayer) }" @keydown.esc="cancelInteraction">
     <!-- Header -->
     <div class="header">
       <h2>
@@ -165,45 +165,8 @@
     </div>
 
     <div class="main-layout" :class="{ locked: botThinking || botReplaying || isBotTurn }">
-      <!-- Left: Pocket (White) -->
-      <div v-if="!isStandard" class="pocket">
-        <h4>⬜ White Pocket</h4>
-        <div class="pocket-pieces">
-          <div
-            v-for="group in whitePocketGroups"
-            :key="group.typeId"
-            class="pocket-piece-row"
-            :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
-            draggable="true"
-            @click="onPocketClick(group.representativeId)"
-            @dragstart="onPocketDragStart($event, group.representativeId)"
-            @dragend="onPocketDragEnd"
-          >
-            <img
-              v-if="pieceImage(group.representativeId)"
-              class="pocket-piece-image"
-              :src="pieceImage(group.representativeId)"
-              :alt="pieceAlt(group.representativeId)"
-              draggable="false"
-            />
-            <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
-            <span class="pocket-piece-meta">
-              <strong>{{ group.name }}</strong>
-              <span class="pocket-count-bar">
-                <span :style="{ width: pocketGroupFillWidth(group.count, maxWhitePocketCount) }"></span>
-              </span>
-            </span>
-            <span class="pocket-piece-count">{{ group.count }}</span>
-          </div>
-        </div>
-        <div class="score-info" v-if="whiteDeck">
-          <span>{{ whiteDeck.total_score }} / {{ whiteDeck.score_limit }} pts</span>
-        </div>
-      </div>
-
       <!-- Center: Board -->
       <div class="board-column">
-        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveOtherSide" :reveal="canRevealReserve(reserveOtherSide)" :enabled="false" />
         <div class="game-clock" :class="clockClasses(topPlayer)">
           <span><b>{{ playerInfo(topPlayer).nickname }}</b><small><template v-if="playerInfo(topPlayer).public_id">@{{ playerInfo(topPlayer).public_id }} · </template>{{ topPlayer.toUpperCase() }}</small></span>
           <strong>{{ formattedClock(topPlayer) }}</strong>
@@ -242,10 +205,6 @@
           <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
         </div>
 
-        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveActiveSide" :reveal="canRevealReserve(reserveActiveSide)"
-          :enabled="canUseSummonControls && state.phase === 'playing'" :selected-id="selectedPocketPieceId"
-          :summoning="summonActive" :candidates="summonSelection.candidates" :selected-sacrifices="summonSelection.selected"
-          :disabled-reason="controlTurnLabel" @select="onHandClick" />
         <div v-if="isStandard" class="interaction-status" role="status">
           <span>{{ interactionLabel }}</span><button v-if="interactionMode !== 'None'" type="button" @click="cancelInteraction">선택 취소</button>
         </div>
@@ -291,47 +250,90 @@
         </div>
       </div>
 
-      <!-- Right: Pocket (Black) -->
-      <div v-if="!isStandard" class="pocket">
-        <h4>⬛ Black Pocket</h4>
-        <div class="pocket-pieces">
-          <div
-            v-for="group in blackPocketGroups"
-            :key="group.typeId"
-            class="pocket-piece-row"
-            :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
-            draggable="true"
-            @click="onPocketClick(group.representativeId)"
-            @dragstart="onPocketDragStart($event, group.representativeId)"
-            @dragend="onPocketDragEnd"
-          >
-            <img
-              v-if="pieceImage(group.representativeId)"
-              class="pocket-piece-image"
-              :src="pieceImage(group.representativeId)"
-              :alt="pieceAlt(group.representativeId)"
-              draggable="false"
-            />
-            <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
-            <span class="pocket-piece-meta">
-              <strong>{{ group.name }}</strong>
-              <span class="pocket-count-bar">
-                <span :style="{ width: pocketGroupFillWidth(group.count, maxBlackPocketCount) }"></span>
+      <aside class="hand-column" aria-label="양측 패">
+        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveOtherSide" :reveal="canRevealReserve(reserveOtherSide)" :reveal-pocket="false" :enabled="false" />
+        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveActiveSide" :reveal="canRevealReserve(reserveActiveSide)" :reveal-pocket="canRevealDeck(reserveActiveSide)"
+          :enabled="canUseSummonControls && state.phase === 'playing'" :selected-id="selectedPocketPieceId"
+          :summoning="summonActive" :candidates="summonSelection.candidates" :selected-sacrifices="summonSelection.selected"
+          :disabled-reason="controlTurnLabel" @select="onHandClick" />
+        <!-- Legacy reserves -->
+        <div v-if="!isStandard" class="pocket">
+          <h4>⬜ White Pocket</h4>
+          <div class="pocket-pieces">
+            <div
+              v-for="group in whitePocketGroups"
+              :key="group.typeId"
+              class="pocket-piece-row"
+              :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
+              draggable="true"
+              @click="onPocketClick(group.representativeId)"
+              @dragstart="onPocketDragStart($event, group.representativeId)"
+              @dragend="onPocketDragEnd"
+            >
+              <img
+                v-if="pieceImage(group.representativeId)"
+                class="pocket-piece-image"
+                :src="pieceImage(group.representativeId)"
+                :alt="pieceAlt(group.representativeId)"
+                draggable="false"
+              />
+              <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
+              <span class="pocket-piece-meta">
+                <strong>{{ group.name }}</strong>
+                <span class="pocket-count-bar">
+                  <span :style="{ width: pocketGroupFillWidth(group.count, maxWhitePocketCount) }"></span>
+                </span>
               </span>
-            </span>
-            <span class="pocket-piece-count">{{ group.count }}</span>
+              <span class="pocket-piece-count">{{ group.count }}</span>
+            </div>
+          </div>
+          <div class="score-info" v-if="whiteDeck && canRevealDeck('white')">
+            <span>{{ whiteDeck.total_score }} / {{ whiteDeck.score_limit }} pts</span>
           </div>
         </div>
-        <div class="score-info" v-if="blackDeck">
-          <span>{{ blackDeck.total_score }} / {{ blackDeck.score_limit }} pts</span>
+
+        <div v-if="!isStandard" class="pocket">
+          <h4>⬛ Black Pocket</h4>
+          <div class="pocket-pieces">
+            <div
+              v-for="group in blackPocketGroups"
+              :key="group.typeId"
+              class="pocket-piece-row"
+              :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
+              draggable="true"
+              @click="onPocketClick(group.representativeId)"
+              @dragstart="onPocketDragStart($event, group.representativeId)"
+              @dragend="onPocketDragEnd"
+            >
+              <img
+                v-if="pieceImage(group.representativeId)"
+                class="pocket-piece-image"
+                :src="pieceImage(group.representativeId)"
+                :alt="pieceAlt(group.representativeId)"
+                draggable="false"
+              />
+              <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
+              <span class="pocket-piece-meta">
+                <strong>{{ group.name }}</strong>
+                <span class="pocket-count-bar">
+                  <span :style="{ width: pocketGroupFillWidth(group.count, maxBlackPocketCount) }"></span>
+                </span>
+              </span>
+              <span class="pocket-piece-count">{{ group.count }}</span>
+            </div>
+          </div>
+          <div class="score-info" v-if="blackDeck && canRevealDeck('black')">
+            <span>{{ blackDeck.total_score }} / {{ blackDeck.score_limit }} pts</span>
+          </div>
         </div>
-      </div>
+
+      </aside>
 
       <aside class="game-sidebar">
-        <ExtraSummonPanel ref="summonPanel" :state="viewState" :enabled="canUseSummonControls && state.phase === 'playing'"
+        <ExtraSummonPanel ref="summonPanel" :state="viewState" :viewer="deckViewer" :enabled="canUseSummonControls && state.phase === 'playing'"
           :disabled-reason="controlTurnLabel" :load-options="loadSummonOptions" :submit="submitSummon"
           @targets="summonSquares = $event" @selection="summonSelection = $event" @active="onSummonActive" />
-        <p v-if="isStandard" class="draw-info">턴 시작 드로우는 자동으로 Hand에 반영됩니다. {{ playMode === 'single' ? '로컬 2인은 양측 reserve를 확인할 수 있습니다.' : '상대는 Hand 장수만 공개됩니다.' }}</p>
+        <p v-if="isStandard" class="draw-info">턴 시작 드로우는 자동으로 Hand에 반영됩니다. {{ playMode === 'single' ? '로컬 2인은 양측 패가 보이며, 덱은 현재 차례만 확인할 수 있습니다.' : '상대는 Hand 장수만 공개됩니다.' }}</p>
         <h3>기보</h3>
         <div class="live-notation">
           <div v-for="entry in liveNotation" :key="entry.ply"><span>{{ entry.ply }}. {{ entry.text }}</span>
@@ -542,6 +544,8 @@ const dropOptionsRequests = new Map<string, Promise<DropAction[]>>()
 const viewState = computed(() => botReplayState.value ?? props.state)
 const isStandard = computed(() => props.state.ruleset === 'standard')
 const reserveActiveSide = computed<PlayerId>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? 'white')
+const deckViewer = computed<PlayerId | null>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? null)
+function canRevealDeck(side: PlayerId) { return side === deckViewer.value }
 const reserveOtherSide = computed<PlayerId>(() => otherPlayer(reserveActiveSide.value))
 function canRevealReserve(side: PlayerId) { return props.playMode === 'single' || side === props.localPlayer }
 const positionKey = computed(() => gameplayKey(props.state))
@@ -569,10 +573,10 @@ const opponentAbandonmentRemainingMs = computed(() => Math.max(
   (opponentPresence.value?.forfeit_at_ms ?? estimatedServerNowMs.value) - estimatedServerNowMs.value,
 ))
 const whitePocket = computed(() =>
-  viewState.value.players['white']?.deck.pocket_pieces ?? []
+  canRevealReserve('white') ? viewState.value.players['white']?.deck.pocket_pieces ?? [] : []
 )
 const blackPocket = computed(() =>
-  viewState.value.players['black']?.deck.pocket_pieces ?? []
+  canRevealReserve('black') ? viewState.value.players['black']?.deck.pocket_pieces ?? [] : []
 )
 const whitePocketGroups = computed(() => groupPocketPieces(whitePocket.value))
 const blackPocketGroups = computed(() => groupPocketPieces(blackPocket.value))
@@ -2382,15 +2386,43 @@ async function onResign() {
   }
 }
 
-.standard .main-layout { display:grid; grid-template-columns:minmax(0, 680px) minmax(280px, 360px); justify-content:center; }
-.standard .board-column { width:100%; }
-.standard .board-tools, .standard .selected-piece-panel, .standard .game-clock, .standard :deep(.board) { width:100%; box-sizing:border-box; }
-.standard :deep(.board-wrapper) { width:100%; }
-.standard .game-sidebar { width:auto; min-width:0; max-height:none; }
+
+/* Reserve room for the title, clocks and controls before sizing either ruleset's board. */
+.game-screen { --board-size: min(calc(100dvh - var(--game-chrome, 350px)), calc(100vw - 574px)); gap: 8px; padding: 10px; }
+.game-screen.with-bot { --game-chrome: 420px; }
+.main-layout, .standard .main-layout { display: grid; grid-template-columns: var(--board-size) 230px 280px; gap: 12px; align-items: start; justify-content: center; }
+.board-column, .standard .board-column { width: 100%; gap: 6px; }
+.game-clock, .board-tools, .selected-piece-panel, .game-screen :deep(.board-wrapper), .game-screen :deep(.board) { width: 100%; box-sizing: border-box; }
+.game-clock { padding: 6px 10px; line-height: 1.2; }
+.game-clock > span { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.game-clock > strong { grid-column: 2; grid-row: 1 / span 2; }
+.game-clock > small { grid-column: 1; }
+.game-clock strong { font-size: 1.35rem; }
+.hand-column { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-height: calc(100dvh - 180px); overflow: auto; }
+.hand-column .pocket { width: 100%; min-width: 0; flex: none; }
+.game-sidebar, .standard .game-sidebar { width: auto; min-width: 0; max-height: calc(100dvh - 180px); overflow: auto; gap: 8px; padding: 10px; }
+.bot-status { padding: 7px 12px; }
 .interaction-status { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; font-size:13px; color:#dce6f3; }
-.interaction-status button { flex-shrink:0; padding:8px; cursor:pointer; }
+.interaction-status button { flex-shrink:0; padding:6px; cursor:pointer; }
 .draw-info { font-size:12px; color:#b6c2d2; }
-.standard .live-notation { max-height:300px; overflow:auto; overflow-wrap:anywhere; }
-@media (max-width: 1000px) { .standard .main-layout { grid-template-columns:minmax(0, 680px); } }
-@media (max-width: 480px) { .game-screen.standard { padding:6px; } .standard .header, .standard .turn-info { flex-wrap:wrap; gap:6px; } }
+.live-notation { max-height: 160px; overflow:auto; overflow-wrap:anywhere; }
+@media (max-width: 800px) {
+  .game-screen { --board-size: min(calc(100dvh - var(--game-chrome, 350px)), calc(100vw - 280px)); }
+  .main-layout, .standard .main-layout { grid-template-columns: var(--board-size) 230px; }
+  .board-column { grid-row: 1 / span 2; }
+  .hand-column { max-height: calc((100dvh - 180px) * .55); }
+  .game-sidebar, .standard .game-sidebar { grid-column: 2; max-height: calc((100dvh - 180px) * .45 - 12px); }
+}
+@media (max-width: 600px) {
+  .game-screen { --board-size: min(calc(100dvh - var(--game-chrome, 350px)), calc(100vw - 166px)); padding: 6px; }
+  .main-layout, .standard .main-layout { grid-template-columns: var(--board-size) minmax(0, 1fr); gap: 6px; }
+  .header, .turn-info { flex-wrap: wrap; gap: 6px; }
+  .hand-column { max-height: calc((100dvh - 280px) * .55); }
+  .game-sidebar, .standard .game-sidebar { max-height: calc((100dvh - 280px) * .45 - 6px); }
+  .header h2 { font-size: 18px; }
+  .title-en { display: none; }
+  .game-clock { gap: 2px 4px; padding: 5px; }
+  .game-clock strong { font-size: 1rem; }
+  .board-tools { flex-wrap: wrap; }
+}
 </style>

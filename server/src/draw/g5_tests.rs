@@ -285,7 +285,7 @@ async fn analysis_preview_no_rng_commit_once_exact_reload_and_tamper_rejection()
 }
 
 #[test]
-fn public_extra_projection_and_hand_sacrifice_reveal_only_used_pieces() {
+fn private_extra_projection_and_hand_sacrifice_reveal_only_used_pieces() {
     let mut game = game();
     let state = &mut game.state;
     let extra = state.players["white"].deck.extra_deck_pieces[0].clone();
@@ -297,7 +297,7 @@ fn public_extra_projection_and_hand_sacrifice_reveal_only_used_pieces() {
     let before = game_view::project_state(state, game_view::Audience::Player("black"));
     for side in ["white", "black"] {
         for id in &state.players[side].deck.extra_deck_pieces {
-            assert!(before.pieces.contains_key(id));
+            assert_eq!(before.pieces.contains_key(id), side == "black");
         }
     }
     assert!(!before.pieces.contains_key(&hands[0]));
@@ -310,6 +310,7 @@ fn public_extra_projection_and_hand_sacrifice_reveal_only_used_pieces() {
         assert!(view.pieces[id].captured);
     }
     assert!(!view.pieces.contains_key(&hands[3]));
+    assert!(view.pieces[&extra].current_square.is_some());
     assert!(view.players["white"].deck.extra_deck_pieces.is_empty());
 }
 

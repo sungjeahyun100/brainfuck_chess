@@ -105,6 +105,7 @@ fn assert_private(value: &Value, state: &GameState, own: Option<&str>) {
             .hand_pieces
             .iter()
             .chain(&player.deck.pocket_pieces)
+            .chain(&player.deck.extra_deck_pieces)
         {
             assert!(!wire.contains(id.as_str()), "hidden ID {id} in wire {wire}");
         }
@@ -515,7 +516,7 @@ fn opponent_pocket_to_hand_transfer_exposes_only_count_not_membership_by_subtrac
 }
 
 #[tokio::test]
-async fn g5_room_both_players_summon_and_rejoin_heartbeat_preserve_public_extra() {
+async fn g5_room_both_players_summon_and_rejoin_heartbeat_preserve_private_extra() {
     let app = AppState::in_memory();
     let mut deck = spec();
     deck.pocket = (0..3)
@@ -544,7 +545,7 @@ async fn g5_room_both_players_summon_and_rejoin_heartbeat_preserve_public_extra(
         let extra = &before.players[side].deck.extra_deck_pieces[0];
         let sacrifices = &before.players[side].deck.hand_pieces;
         let (_, public) = http(&app, "GET", &format!("/games/{id}"), None, Value::Null).await;
-        assert!(public["pieces"].get(extra.as_str()).is_some());
+        assert!(public["pieces"].get(extra.as_str()).is_none());
         assert_private(&public, &before, None);
         let (status, options) = http(
             &app,

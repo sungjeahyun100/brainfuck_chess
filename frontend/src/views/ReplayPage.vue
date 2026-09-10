@@ -34,10 +34,10 @@
         </section>
       </section>
       <aside class="replay-sidebar">
-        <ExtraSummonPanel ref="summonPanel" :state="state" :enabled="canManage && !committing" :load-options="loadSummonOptions" :submit="playAnalysisAction" @selection="summonSelection = $event" @targets="summonSquares = $event" @active="summonActive = $event; clearSelection()" />
+        <ExtraSummonPanel ref="summonPanel" :state="state" :viewer="state.current_player" reveal-all :enabled="canManage && !committing" :load-options="loadSummonOptions" :submit="playAnalysisAction" @selection="summonSelection = $event" @targets="summonSquares = $event" @active="summonActive = $event; clearSelection()" />
         <p v-if="currentSummonDetail">{{ currentSummonDetail }}</p>
         <section v-if="isStandard && record.ended_at_ms != null" aria-label="완료 대국 손패와 드로우">
-          <StandardReservePanel v-for="side in replaySides" :key="side" :state="state" :side="side" :reveal="true"
+          <StandardReservePanel v-for="side in replaySides" :key="side" :state="state" :side="side" :reveal="true" reveal-pocket
             :enabled="canManage && !committing && side === state.current_player" :selected-id="selectedPieceId"
             :summoning="summonActive" :candidates="summonSelection.candidates" :selected-sacrifices="summonSelection.selected"
             @select="id => summonActive ? summonPanel?.toggle(id) : selectPiece(id)" />

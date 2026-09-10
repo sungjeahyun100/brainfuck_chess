@@ -7068,9 +7068,8 @@ mod tests {
             assert_eq!(
                 game["state"]["players"][side]["deck"]["extra_deck_pieces"]
                     .as_array()
-                    .unwrap()
-                    .len(),
-                3
+                    .map_or(0, Vec::len),
+                if side == "white" { 3 } else { 0 }
             );
         }
         let (status, sync) = ruleset_http(
@@ -7084,9 +7083,8 @@ mod tests {
             assert_eq!(
                 sync["dynamic"]["players"][side]["deck"]["extra_deck_pieces"]
                     .as_array()
-                    .unwrap()
-                    .len(),
-                3
+                    .map_or(0, Vec::len),
+                if side == "black" { 3 } else { 0 }
             );
         }
         spec.ruleset = DeckRuleset::Legacy;
