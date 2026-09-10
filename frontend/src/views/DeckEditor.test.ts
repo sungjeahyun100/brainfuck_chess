@@ -347,3 +347,22 @@ test('G7 custom Extra copy collects unsaved references and keeps pinned hashes w
   assert.deepEqual(JSON.parse(JSON.stringify(state.deck.value)), before)
   assert.deepEqual(JSON.parse(JSON.stringify(validation.pieceCatalog)), catalogBefore)
 })
+
+
+test('Standard score caps gain twenty points on every board and reject one point over', () => {
+  validation.applyPieceMetadata(Object.fromEntries(validation.pieceCatalog.filter(p => !p.custom).map(p => [p.id, {
+    score: p.id === 'pawn' ? 1 : 0, deployment_zone: p.id === 'pawn' ? 'front' : 'back',
+  }])))
+  for (const [size, legacy] of [[8, 39], [9, 56], [10, 75], [11, 96], [12, 119]]) {
+    assert.equal(validation.scoreLimit(size), legacy)
+    assert.equal(validation.scoreLimit(size, 'legacy'), legacy)
+    assert.equal(validation.scoreLimit(size, 'standard'), legacy + 20)
+    const deck = { ...validation.createPresetDeck(size, 'classic', 'standard'), ruleset: 'standard' as const }
+    deck.pocket.pawn += legacy + 20 - validation.calculateDeckScore(deck)
+    assert.equal(validation.validateLobbyDeck(deck, size).scoreLimit, legacy + 20)
+    assert.equal(validation.validateLobbyDeck(deck, size).valid, true)
+    deck.pocket.pawn += 1
+    assert.equal(validation.validateLobbyDeck(deck, size).valid, false)
+  }
+  assert.match(descriptor.template!.content, /scoreLimit\(map.boardSize, deck.ruleset\)/)
+})
