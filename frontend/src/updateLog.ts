@@ -8,6 +8,15 @@ export interface UpdateLogEntry {
 // Add releases at the beginning and give each release a new, stable ID.
 export const updateLog: readonly UpdateLogEntry[] = [
   {
+    id: '2026-09-10.2',
+    date: '2026-09-10',
+    title: 'Standard 덱 점수 상한 증가',
+    changes: [
+      'Standard Main Deck의 점수 상한을 모든 보드에서 20점씩 올렸습니다: 8×8은 39→59점, 9×9는 56→76점, 10×10은 75→95점, 11×11은 96→116점, 12×12는 119→139점입니다.',
+      '덱 편집 화면의 상한 표시와 게임 시작 시 덱 검증에 새 상한을 적용했습니다. Legacy 덱 점수 상한과 Extra Deck 규칙은 그대로 유지됩니다.',
+    ],
+  },
+  {
     id: '2026-09-10.1',
     date: '2026-09-10',
     title: 'Standard 룰 추가와 대국 화면 개선',
