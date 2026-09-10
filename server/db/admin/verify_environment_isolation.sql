@@ -20,6 +20,12 @@ VALUES
 ON CONFLICT (id) DO UPDATE SET ended_at_ms = EXCLUDED.ended_at_ms;
 SELECT record FROM test.game_records WHERE id = '__test_game_record_probe__';
 
+INSERT INTO test.challenge_clears (user_id, challenge_id, first_cleared_at_ms)
+VALUES ('__deck_chess_permission_probe__', '__test_challenge_probe__', 0)
+ON CONFLICT (user_id, challenge_id) DO NOTHING;
+SELECT challenge_id FROM test.challenge_clears
+WHERE user_id = '__deck_chess_permission_probe__';
+
 DO $test_cannot_write_prod$
 BEGIN
     BEGIN
@@ -31,6 +37,12 @@ BEGIN
     BEGIN
         PERFORM count(*) FROM prod.game_records;
         RAISE EXCEPTION 'test_app unexpectedly read prod game records';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+    BEGIN
+        PERFORM count(*) FROM prod.challenge_clears;
+        RAISE EXCEPTION 'test_app unexpectedly read prod challenge clears';
     EXCEPTION WHEN insufficient_privilege THEN
         NULL;
     END;
@@ -68,6 +80,12 @@ VALUES
 ON CONFLICT (id) DO UPDATE SET ended_at_ms = EXCLUDED.ended_at_ms;
 SELECT record FROM prod.game_records WHERE id = '__prod_game_record_probe__';
 
+INSERT INTO prod.challenge_clears (user_id, challenge_id, first_cleared_at_ms)
+VALUES ('__deck_chess_permission_probe__', '__prod_challenge_probe__', 0)
+ON CONFLICT (user_id, challenge_id) DO NOTHING;
+SELECT challenge_id FROM prod.challenge_clears
+WHERE user_id = '__deck_chess_permission_probe__';
+
 DO $prod_cannot_write_test$
 BEGIN
     BEGIN
@@ -79,6 +97,12 @@ BEGIN
     BEGIN
         PERFORM count(*) FROM test.game_records;
         RAISE EXCEPTION 'prod_app unexpectedly read test game records';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+    BEGIN
+        PERFORM count(*) FROM test.challenge_clears;
+        RAISE EXCEPTION 'prod_app unexpectedly read test challenge clears';
     EXCEPTION WHEN insufficient_privilege THEN
         NULL;
     END;

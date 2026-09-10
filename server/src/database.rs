@@ -17,9 +17,19 @@ pub(crate) async fn verify_database_contract(
          AND to_regclass('{}.custom_piece_versions') IS NOT NULL \
          AND to_regclass('{}.custom_piece_images') IS NOT NULL \
          AND to_regclass('{}.game_records') IS NOT NULL \
+         AND to_regclass('{}.game_analysis_trees') IS NOT NULL \
+         AND to_regclass('{}.game_analysis_nodes') IS NOT NULL \
+         AND to_regclass('{}.challenge_clears') IS NOT NULL \
          AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='shared' AND table_name='users' AND column_name='profile_visibility') \
          AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='white_user_id') \
-         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='black_user_id')",
+         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='black_user_id') \
+         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='retention_mode') \
+         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='{}' AND table_name='game_records' AND column_name='expires_at_ms')",
+        data_schema.name(),
+        data_schema.name(),
+        data_schema.name(),
+        data_schema.name(),
+        data_schema.name(),
         data_schema.name(),
         data_schema.name(),
         data_schema.name(),
@@ -33,6 +43,24 @@ pub(crate) async fn verify_database_contract(
         return Err(format!(
             "database schema is not provisioned for APP_ENV={app_env}; run the approved admin migration"
         ));
+    }
+
+    let analysis_draw_contract = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='game_analysis_nodes' AND column_name='draws' AND data_type='jsonb' AND is_nullable='NO')"
+    ).bind(data_schema.name()).fetch_one(pool).await
+        .map_err(|_| "failed to inspect analysis Draw storage contract".to_owned())?;
+    if !analysis_draw_contract {
+        return Err(
+            "analysis Draw storage is not provisioned; run the approved admin migration".into(),
+        );
+    }
+
+    let deck_contract = sqlx::query_scalar::<_, bool>(
+        "SELECT to_regclass($1) IS NOT NULL AND has_table_privilege(current_user, to_regclass($1), 'SELECT') AND has_table_privilege(current_user, to_regclass($1), 'INSERT') AND has_table_privilege(current_user, to_regclass($1), 'UPDATE') AND has_table_privilege(current_user, to_regclass($1), 'DELETE') AND (SELECT count(*)=10 FROM information_schema.columns WHERE table_schema=$2 AND table_name='decks' AND column_name IN ('id','owner_id','name','deck_data','format_version','created_at_ms','updated_at_ms','version','request_key','create_hash'))"
+    ).bind(data_schema.table("decks")).bind(data_schema.name()).fetch_one(pool).await
+        .map_err(|error| format!("failed to inspect deck storage contract: {error}"))?;
+    if !deck_contract {
+        return Err("deck storage schema or CRUD privileges are not provisioned; run the approved admin migration".into());
     }
 
     for required_schema in ["shared", data_schema.name()] {
@@ -97,7 +125,13 @@ impl DataSchema {
     pub(crate) fn table(self, table: &str) -> String {
         debug_assert!(matches!(
             table,
-            "custom_piece_versions" | "custom_piece_images" | "game_records"
+            "decks"
+                | "custom_piece_versions"
+                | "custom_piece_images"
+                | "game_records"
+                | "game_analysis_trees"
+                | "game_analysis_nodes"
+                | "challenge_clears"
         ));
         format!("{}.{}", self.name(), table)
     }
@@ -134,6 +168,20 @@ mod tests {
         verify_database_contract(&test, "test", DataSchema::Test)
             .await
             .unwrap();
+
+        sqlx::query("REVOKE UPDATE ON test.decks FROM test_app")
+            .execute(&admin)
+            .await
+            .unwrap();
+        let missing_deck_permission =
+            verify_database_contract(&test, "test", DataSchema::Test).await;
+        sqlx::query("GRANT UPDATE ON test.decks TO test_app")
+            .execute(&admin)
+            .await
+            .expect("temporary deck permission change must be restored");
+        assert!(missing_deck_permission
+            .unwrap_err()
+            .contains("deck storage schema or CRUD privileges"));
 
         sqlx::query("GRANT USAGE ON SCHEMA prod TO deck_chess_test")
             .execute(&admin)

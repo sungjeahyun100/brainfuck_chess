@@ -3,6 +3,7 @@
     <div
       ref="boardElement"
       class="board"
+      :class="{ 'annotation-mode': annotationMode }"
       :style="{ '--size': board.size }"
       @contextmenu.prevent
       @pointerdown="onBoardPointerDown"
@@ -14,6 +15,9 @@
         :class="squareClasses(sq)"
         :data-file="sq.file"
         :data-rank="sq.rank"
+        role="button" tabindex="0"
+        :aria-label="`${fileLabel(sq.file)}${sq.rank + 1}${sacrificeMarker(sq) ? ' · ' + sacrificeMarker(sq) : ''}`"
+        @keydown.enter.prevent="onSquareClick(sq)" @keydown.space.prevent="onSquareClick(sq)"
         @click="onSquareClick(sq)"
         @pointerdown="onSquarePointerDown($event, sq)"
         @dragover.prevent
@@ -32,6 +36,7 @@
         <span v-if="showCoordinates && isRankLabelSquare(sq)" class="board-coordinate rank-coordinate">
           {{ sq.rank + 1 }}
         </span>
+        <span v-if="sacrificeMarker(sq)" class="sacrifice-marker">{{ sacrificeMarker(sq) }}</span>
         <span v-if="legalMarker(sq)" class="legal-move-dot" :class="legalMarker(sq)" />
         <span v-if="sq.piece" class="piece" :class="`owner-${sq.piece.owner}`">
           <img
@@ -173,12 +178,16 @@ const props = defineProps<{
   selectedPieceId: string | null
   movableSquares: Square[]
   attackSquares: Square[]
+  attentionSquares?: Square[]
+  sacrificeCandidateIds?: string[]
+  selectedSacrificeIds?: string[]
   threatSquares?: Square[]
   dropSquares: Square[]
   lastMove?: { from: Square; to: Square } | null
   orientation?: PlayerId
   abilityMode?: boolean
   showCoordinates?: boolean
+  annotationMode?: boolean
 }>()
 
 function pieceImage(piece: Piece): string | undefined {
@@ -234,6 +243,7 @@ const allSquares = computed((): SquareInfo[] => {
 
 const movableSquareIds = computed(() => new Set(props.movableSquares.map(squareIdFromSquare)))
 const attackSquareIds = computed(() => new Set(props.attackSquares.map(squareIdFromSquare)))
+const attentionSquareIds = computed(() => new Set((props.attentionSquares ?? []).map(squareIdFromSquare)))
 const threatSquareIds = computed(() => new Set((props.threatSquares ?? []).map(squareIdFromSquare)))
 const dropSquareIds = computed(() => new Set(props.dropSquares.map(squareIdFromSquare)))
 const lastMoveSquareIds = computed(() => {
@@ -306,14 +316,24 @@ function terrainLabel(typeId: string) {
   return typeId === 'high-ground' ? '고지' : typeId
 }
 
+function sacrificeMarker(sq: SquareInfo): string {
+  const ids = [sq.piece?.id, sq.airPiece?.id].filter((id): id is string => Boolean(id))
+  if (ids.some(id => props.selectedSacrificeIds?.includes(id))) return '✓ 제물'
+  if (ids.some(id => props.sacrificeCandidateIds?.includes(id))) return '제물 후보'
+  return ''
+}
 function squareClasses(sq: SquareInfo) {
   const classes: string[] = [sq.isLight ? 'light' : 'dark']
+  if (sacrificeMarker(sq)) classes.push(sacrificeMarker(sq).startsWith('✓') ? 'sacrifice-selected' : 'sacrifice-candidate')
 
   if (lastMoveSquareIds.value.has(sq.id)) {
     classes.push('last-move')
   }
   if (threatSquareIds.value.has(sq.id)) {
     classes.push('opponent-threat')
+  }
+  if (attentionSquareIds.value.has(sq.id)) {
+    classes.push('attention')
   }
   if ((sq.piece && sq.piece.id === props.selectedPieceId)
     || (sq.airPiece && sq.airPiece.id === props.selectedPieceId)) {
@@ -349,6 +369,7 @@ function onSquareClick(sq: SquareInfo) {
 }
 
 function onSquarePointerDown(event: PointerEvent, sq: SquareInfo) {
+  if (props.annotationMode) return
   if (event.button !== 0 || !sq.piece) return
 
   pointerDrag.value = {
@@ -364,6 +385,11 @@ function onSquarePointerDown(event: PointerEvent, sq: SquareInfo) {
 }
 
 function onBoardPointerDown(event: PointerEvent) {
+  if (props.annotationMode && event.button === 0) {
+    startAnnotationDrag(event)
+    return
+  }
+
   if (event.button === 0) {
     const squareId = squareIdFromClientPoint(event.clientX, event.clientY)
     if (squareId && !props.board.squares[squareId]) {
@@ -374,6 +400,10 @@ function onBoardPointerDown(event: PointerEvent) {
 
   if (event.button !== 2) return
 
+  startAnnotationDrag(event)
+}
+
+function startAnnotationDrag(event: PointerEvent) {
   const from = squareIdFromClientPoint(event.clientX, event.clientY)
   if (!from) return
 
@@ -446,6 +476,8 @@ function onWindowRightPointerUp(event: PointerEvent) {
 
   if (!to) return
 
+  if (event.button === 0) suppressNextClick = true
+
   if (to === drag.from) {
     toggleHighlight(to)
     return
@@ -490,6 +522,8 @@ function clearAnnotations() {
   arrows.value = []
   highlightedSquares.value = []
 }
+
+defineExpose({ clearAnnotations })
 
 function preventRightDragContextMenu(event: MouseEvent) {
   if (!rightDrag.value) return
@@ -627,6 +661,7 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'king': '♔',
   'queen': '♕',
   'amazon': 'A',
+  'prime-minister': '총',
   'cannon-rook': 'C',
   'tempest-queen': 'Q',
   'tempest-rook': 'T',
@@ -653,6 +688,12 @@ const PIECE_SYMBOLS: Record<string, string> = {
   'bomber': '✈',
   'surface-to-air-missile-white': '▲',
   'surface-to-air-missile-black': '▲',
+  'shell': '●',
+  'sacrificial-shrine': '祭',
+  'sacrificial-lamb': '羊',
+  'fanatic': '†',
+  'wall': '▥',
+  'repairman': '⚒',
 }
 
 function pieceSymbol(typeId: string): string {
@@ -765,8 +806,29 @@ function pieceAlt(piece: Piece): string {
   box-shadow: 0 0 0 2px rgba(19, 184, 166, 0.22);
 }
 
+.square.attention::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  z-index: 7;
+  border: 4px solid #ffcf4a;
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px rgba(208, 39, 55, .75), 0 0 24px 8px rgba(255, 207, 74, .9);
+  pointer-events: none;
+  animation: board-attention-pulse .7s ease-in-out infinite alternate;
+}
+
+@keyframes board-attention-pulse {
+  from { opacity: .45; transform: scale(.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 .square.drag-over::before {
   border-color: rgba(74, 143, 255, 0.82);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .square.attention::after { animation: none; }
 }
 
 .legal-move-dot {
@@ -814,6 +876,11 @@ function pieceAlt(piece: Piece): string {
   height: 100%;
   pointer-events: none;
   z-index: 4;
+}
+
+.board.annotation-mode {
+  cursor: crosshair;
+  touch-action: none;
 }
 
 .board-arrow {
@@ -931,4 +998,8 @@ function pieceAlt(piece: Piece): string {
 
 .piece.owner-white { color: #fff; text-shadow: 0 0 2px #333; }
 .piece.owner-black { color: #111; text-shadow: 0 0 2px #ccc; }
+.square.sacrifice-candidate { outline:2px dashed #2563eb; outline-offset:-3px; }
+.square.sacrifice-selected { outline:3px solid #f4cf72; outline-offset:-4px; }
+.sacrifice-marker { position:absolute; bottom:0; z-index:8; font-size:clamp(8px, 1.1vw, 11px); background:#15213a; color:#fff; padding:1px 3px; pointer-events:none; }
+.square:focus-visible { outline:3px solid #38bdf8; outline-offset:-3px; z-index:9; }
 </style>

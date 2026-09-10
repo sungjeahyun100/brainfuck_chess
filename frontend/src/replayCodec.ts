@@ -1,4 +1,6 @@
+import { recordRulesVersionError, type RecordRulesVersionError } from './gameRulesVersions.ts'
 import type { GameRecord } from './types/gameRecord'
+import { isDeckRuleset } from './deckRulesets.ts'
 
 export const REPLAY_CODE_PREFIX = 'DC-G2-'
 export const MAX_REPLAY_CODE_LENGTH = 4_000_000
@@ -7,7 +9,7 @@ export const MAX_REPLAY_ACTIONS = 4_096
 export const MAX_REPLAY_PIECES = 2_048
 export const MAX_REPLAY_DELTA_OPERATIONS = 512
 
-export type ReplayDecodeError = 'empty' | 'too_large' | 'invalid_format' | 'unsupported_version' | 'invalid_payload' | 'invalid_schema'
+export type ReplayDecodeError = RecordRulesVersionError | 'empty' | 'too_large' | 'invalid_format' | 'unsupported_version' | 'invalid_payload' | 'invalid_schema'
 export type ReplayDecodeResult = { ok: true; value: GameRecord } | { ok: false; error: ReplayDecodeError }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -56,6 +58,7 @@ async function gunzipBounded(bytes: Uint8Array): Promise<Uint8Array | null> {
 
 function validState(value: unknown): boolean {
   if (!isRecord(value) || !isRecord(value.board) || !Number.isInteger(value.board.size)) return false
+  if (value.ruleset !== undefined && !isDeckRuleset(value.ruleset)) return false
   const size = value.board.size as number
   if (size < 8 || size > 12 || !isRecord(value.pieces) || Object.keys(value.pieces).length > MAX_REPLAY_PIECES) return false
   return isRecord(value.piece_definitions) && isRecord(value.players) && Array.isArray(value.history)
@@ -74,6 +77,8 @@ function validSquare(value: unknown, size: number): boolean {
 }
 
 function validText(value: unknown, max = 128): boolean { return typeof value === 'string' && value.length > 0 && value.length <= max }
+
+function validPieceId(value: unknown): boolean { return validText(value, 256) && typeof value === 'string' && value.trim().length > 0 && !/[\u0000-\u001f\u007f]/u.test(value) }
 
 function validCustomPieceManifest(value: unknown): boolean {
   if (value === undefined) return true
@@ -105,17 +110,36 @@ function validDelta(value: unknown): boolean {
 
 function validNotation(value: unknown, size: number): boolean {
   if (!isRecord(value) || !Number.isInteger(value.turn_number) || (value.turn_number as number) < 1 || !Number.isInteger(value.move_number) || value.move_number !== Math.floor(((value.turn_number as number) + 1) / 2) || !['white', 'black'].includes(String(value.side))) return false
-  if (!['move', 'move_with_ability', 'ability', 'drop'].includes(String(value.kind)) || !isRecord(value.actor)) return false
+  if (!['move', 'move_with_ability', 'ability', 'drop', 'extra_summon'].includes(String(value.kind)) || !isRecord(value.actor)) return false
   if (!validText(value.actor.piece_id, 256) || !validText(value.actor.piece_type_id, 256) || !validText(value.actor.piece_name, 160)) return false
   if (value.from != null && !validSquare(value.from, size) || value.to != null && !validSquare(value.to, size) || value.target != null && !validSquare(value.target, size)) return false
   if (!Array.isArray(value.ability_events) || value.ability_events.length > 16) return false
   return value.ability_events.every(event => isRecord(event) && validText(event.ability_id, 128) && validText(event.ability_name, 160) && (event.target == null || validSquare(event.target, size)))
 }
 
+function validDraws(value: unknown, initial: boolean): boolean {
+  if (value === undefined) return true
+  if (!Array.isArray(value) || value.length > (initial ? 3 : 1)) return false
+  return value.every(draw => isRecord(draw)
+    && ['white', 'black'].includes(String(draw.player_id))
+    && (draw.timing === 'turn_start' || initial && draw.timing === 'initial')
+    && Array.isArray(draw.piece_ids) && draw.piece_ids.length <= (draw.timing === 'initial' ? 3 : 1)
+    && draw.piece_ids.every(id => validText(id, 256)) && new Set(draw.piece_ids).size === draw.piece_ids.length)
+}
+
 function validAction(value: unknown, index: number, size: number): boolean {
   if (!isRecord(value) || value.ply !== index + 1 || !isRecord(value.action) || !validClock(value.clock)) return false
   if (!['white', 'black'].includes(String(value.player_id)) || !Number.isFinite(value.elapsed_ms) || !validNotation(value.notation, size) || !validDelta(value.state_delta)) return false
+  if (!validDraws(value.draws, false)) return false
   const type = value.action.type
+  if (type === 'extra_summon') {
+    const action = value.action
+    return action.player_id === value.player_id && (value.notation as Record<string, unknown>).side === value.player_id
+      && validPieceId(action.extra_piece_id) && validSquare(action.target_square, size)
+      && Array.isArray(action.sacrifice_piece_ids) && action.sacrifice_piece_ids.length <= 8192
+      && action.sacrifice_piece_ids.every(validPieceId)
+      && new Set(action.sacrifice_piece_ids).size === action.sacrifice_piece_ids.length
+  }
   if (!['move', 'drop', 'ability'].includes(String(type))) return false
   if (!validText(value.action.piece_id, 256) || value.action.player_id !== value.player_id || (value.notation as Record<string, unknown>).side !== value.player_id) return false
   if (type === 'move') return validSquare(value.action.from, size) && validSquare(value.action.to, size) && validText(value.action.move_option_id, 128)
@@ -139,9 +163,12 @@ function parseRecord(value: unknown): GameRecord | null {
     if (!isRecord(deck) || deck.side !== side || !validText(deck.deck_name, 160) || !Array.isArray(deck.deployments) || !Array.isArray(deck.pocket)) return null
     if (deck.deployments.length > MAX_REPLAY_PIECES || deck.pocket.length > MAX_REPLAY_PIECES) return null
     if (!deck.deployments.every(entry => isRecord(entry) && validText(entry.piece_name, 160) && validSquare(entry.square, size))) return null
+    if (deck.extra !== undefined && (!Array.isArray(deck.extra) || deck.extra.length > MAX_REPLAY_PIECES
+      || !deck.extra.every(entry => isRecord(entry) && validText(entry.piece_name, 160) && Number.isInteger(entry.count) && (entry.count as number) > 0 && (entry.count as number) <= MAX_REPLAY_PIECES))) return null
     if (!deck.pocket.every(entry => isRecord(entry) && validText(entry.piece_name, 160) && Number.isInteger(entry.count) && (entry.count as number) > 0 && (entry.count as number) <= MAX_REPLAY_PIECES)) return null
   }
   if (!Array.isArray(value.actions) || value.actions.length > MAX_REPLAY_ACTIONS || !value.actions.every((action, index) => validAction(action, index, size))) return null
+  if (!validDraws(value.initial_draws, true)) return null
   const moveNumbers = (value.actions as Array<{ notation: { move_number: number } }>).map(action => action.notation.move_number)
   if (moveNumbers.some((moveNumber, index) => index > 0 && (moveNumber < moveNumbers[index - 1] || moveNumber > moveNumbers[index - 1] + 1))) return null
   const turnNumbers = (value.actions as Array<{ notation: { turn_number: number } }>).map(action => action.notation.turn_number)
@@ -170,6 +197,8 @@ export async function decodeReplayCode(input: string): Promise<ReplayDecodeResul
   try {
     const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
     const record = parseRecord(value)
-    return record ? { ok: true, value: record } : { ok: false, error: 'invalid_schema' }
+    if (!record) return { ok: false, error: 'invalid_schema' }
+    const error = recordRulesVersionError(record.initial_state.ruleset, record.ruleset_version)
+    return error ? { ok: false, error } : { ok: true, value: record }
   } catch { return { ok: false, error: 'invalid_payload' } }
 }

@@ -1,3 +1,4 @@
+import { LEGACY_RULES_VERSION, STANDARD_RULES_VERSION } from './gameRulesVersions.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { reactive, readonly } from 'vue'
@@ -30,7 +31,7 @@ test('reconstructs drop, ammo, air layer, forced landing and transform effects a
 
 test('builds one frame per same-player canonical action in exact recorded order', () => {
   const initial = { board: { size: 12, squares: {}, air_squares: { e11: 'b' } }, pieces: { b: { current_square: { file: 4, rank: 10 }, layer: 'air' } }, history: [] } as unknown as GameState
-  const record = { initial_state: initial, actions: [
+  const record = { ruleset_version: LEGACY_RULES_VERSION, initial_state: initial, actions: [
     { state_delta: [{ op: 'set', path: ['pieces', 'b', 'current_square'], value: { file: 4, rank: 3 } }] },
     { state_delta: [{ op: 'set', path: ['pieces', 'b', 'current_square'], value: { file: 10, rank: 3 } }] },
     { state_delta: [{ op: 'set', path: ['current_player'], value: 'white' }] },
@@ -51,6 +52,7 @@ test('reconstructs readonly Vue proxy records and nested reactive delta values',
   }) as unknown as GameState
   const deltaValue = reactive({ file: 4, rank: 4 })
   const record = readonly({
+    ruleset_version: LEGACY_RULES_VERSION,
     initial_state: initial,
     actions: [{ state_delta: [
       { op: 'set' as const, path: ['board', 'squares', 'e3'], value: null },
@@ -69,6 +71,7 @@ test('returns a safe failure result for malformed or forbidden replay data', () 
   assert.deepEqual(buildReplayFramesResult({ actions: [] }), { ok: false, error: 'invalid_replay' })
 
   const malformed = {
+    ruleset_version: LEGACY_RULES_VERSION,
     initial_state: { board: { size: 8, squares: {} }, pieces: {}, piece_definitions: {}, history: [] },
     initial_clock: {},
     players: { white: {}, black: {} },
@@ -83,4 +86,37 @@ test('returns a safe failure result for malformed or forbidden replay data', () 
   }
   assert.deepEqual(buildReplayFramesResult(malformed), { ok: false, error: 'invalid_replay' })
   assert.equal(({} as { polluted?: boolean }).polluted, undefined)
+})
+
+test('Standard delta replay preserves both hands and recorded Draw order without resampling', () => {
+  const initial = { ruleset: 'standard', board: { size: 8, squares: {} }, pieces: { b4: { id: 'b4', type_id: 'knight', in_pocket: true }, w5: { id: 'w5', type_id: 'rook', in_pocket: true } }, players: {
+    white: { deck: { hand_pieces: ['w1','w2','w3','w4'], pocket_pieces: ['w5'] } }, black: { deck: { hand_pieces: ['b1','b2','b3'], pocket_pieces: ['b4'] } },
+  }, history: [] } as unknown as GameState
+  const record = { ruleset_version: STANDARD_RULES_VERSION, initial_state: initial, initial_draws: [{ player_id: 'white', timing: 'turn_start', piece_ids: ['w4'] }], actions: [
+    { draws: [{ player_id: 'black', timing: 'turn_start', piece_ids: ['b4'] }], state_delta: [
+      { op: 'set', path: ['players','black','deck','hand_pieces'], value: ['b1','b2','b3','b4'] }, { op: 'set', path: ['players','black','deck','pocket_pieces'], value: [] }, { op: 'set', path: ['pieces','b4','in_pocket'], value: false },
+    ] },
+    { draws: [{ player_id: 'white', timing: 'turn_start', piece_ids: ['w5'] }], state_delta: [
+      { op: 'set', path: ['players','white','deck','hand_pieces'], value: ['w1','w2','w3','w4','w5'] }, { op: 'set', path: ['players','white','deck','pocket_pieces'], value: [] }, { op: 'set', path: ['pieces','w5','in_pocket'], value: false },
+    ] },
+  ] } as unknown as GameRecord
+  const frames = buildReplayFrames(record)
+  assert.equal(frames[0].players.white.deck.hand_pieces!.length, 4)
+  assert.equal(frames[0].players.black.deck.hand_pieces!.length, 3)
+  assert.equal(frames[1].players.black.deck.hand_pieces!.length, 4)
+  assert.deepEqual(frames[2].players.white.deck.hand_pieces, ['w1','w2','w3','w4','w5'])
+  assert.equal(frames[1].pieces.b4.type_id, 'knight')
+  assert.equal(frames[2].pieces.w5.type_id, 'rook')
+  assert.deepEqual(buildReplayFrames(record), frames)
+})
+
+test('G7 versions are rejected before even attempting malformed delta replay', () => {
+  for (const [ruleset, version, expected] of [
+    ['standard', LEGACY_RULES_VERSION, 'unsupported_development_standard_record'],
+    ['standard', 'future', 'unsupported_rules_version'],
+    ['legacy', STANDARD_RULES_VERSION, 'unsupported_rules_version'],
+  ] as const) {
+    const record = { initial_state: { ruleset }, ruleset_version: version, actions: [{ state_delta: null }] } as unknown as GameRecord
+    assert.throws(() => buildReplayFrames(record), new RegExp(expected))
+  }
 })

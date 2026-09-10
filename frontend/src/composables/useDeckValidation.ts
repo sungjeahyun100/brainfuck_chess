@@ -1,3 +1,4 @@
+import { isDeckRuleset, parseDeckRuleset, type DeckRuleset } from '../deckRulesets.ts'
 import { reactive } from 'vue'
 import type {
   DeckPreset,
@@ -16,24 +17,72 @@ import { findBoardMap, normalizeBoardMapId } from '../boardMaps.ts'
 
 export const boardSizes = [8, 9, 10, 11, 12] as const
 
-export function baseZoneDepth(boardSize: number): number {
+export function baseZoneDepth(boardSize: number, ruleset: DeckRuleset = 'legacy'): number {
+  if (parseDeckRuleset(ruleset) === 'standard') return 2
   return boardSize >= 10 ? 3 : 2
 }
 
 export type SetupSide = 'white' | 'black'
 
-export function baseZoneRanks(boardSize: number, side: SetupSide = 'white'): number[] {
-  const depth = baseZoneDepth(boardSize)
+export function baseZoneRanks(boardSize: number, side: SetupSide = 'white', ruleset: DeckRuleset = 'legacy'): number[] {
+  const depth = baseZoneDepth(boardSize, ruleset)
   return Array.from(
     { length: depth },
     (_, index) => side === 'white' ? index : boardSize - 1 - index,
   )
 }
 
-export function frontmostBaseRank(boardSize: number, side: SetupSide = 'white'): number {
+/** Foremost rank value only; use frontZoneSquares for complete deployment geometry. */
+export function frontmostBaseRank(boardSize: number, side: SetupSide = 'white', ruleset: DeckRuleset = 'legacy'): number {
   const forward = side === 'white' ? 1 : -1
-  return baseZoneRanks(boardSize, side)
+  return baseZoneRanks(boardSize, side, ruleset)
     .reduce((front, rank) => rank * forward > front * forward ? rank : front)
+}
+
+export type SetupSquare = { file: number; rank: number }
+export type SetupZone = 'front' | 'back'
+
+/** Square-based deployment contract; Base/Home is every square with either zone. */
+export function deploymentZoneAtSquare(
+  square: SetupSquare, boardSize: number, side: SetupSide = 'white', ruleset: DeckRuleset = 'legacy',
+): SetupZone | null {
+  const format = parseDeckRuleset(ruleset)
+  const { file, rank } = square
+  if (!Number.isInteger(file) || !Number.isInteger(rank)
+    || file < 0 || file >= boardSize || rank < 0 || rank >= boardSize) return null
+  const depth = side === 'white' ? rank : boardSize - 1 - rank
+  if (format === 'standard') {
+    const centerWidth = boardSize % 2 === 0 ? 2 : 3
+    const centerStart = (boardSize - centerWidth) / 2
+    const centerEnd = centerStart + centerWidth - 1
+    if (depth > 1 || file < centerStart - 1 || file > centerEnd + 1) return null
+    return depth === 0 && file >= centerStart && file <= centerEnd ? 'back' : 'front'
+  }
+  const zoneDepth = baseZoneDepth(boardSize, format)
+  if (depth >= zoneDepth) return null
+  return depth === zoneDepth - 1 ? 'front' : 'back'
+}
+
+export function baseZoneSquares(
+  boardSize: number, side: SetupSide = 'white', ruleset: DeckRuleset = 'legacy',
+): SetupSquare[] {
+  return baseZoneRanks(boardSize, side, ruleset).flatMap(rank =>
+    Array.from({ length: boardSize }, (_, file) => ({ file, rank })))
+    .filter(square => deploymentZoneAtSquare(square, boardSize, side, ruleset) !== null)
+}
+
+export function frontZoneSquares(
+  boardSize: number, side: SetupSide = 'white', ruleset: DeckRuleset = 'legacy',
+): SetupSquare[] {
+  return baseZoneSquares(boardSize, side, ruleset)
+    .filter(square => deploymentZoneAtSquare(square, boardSize, side, ruleset) === 'front')
+}
+
+export function backZoneSquares(
+  boardSize: number, side: SetupSide = 'white', ruleset: DeckRuleset = 'legacy',
+): SetupSquare[] {
+  return baseZoneSquares(boardSize, side, ruleset)
+    .filter(square => deploymentZoneAtSquare(square, boardSize, side, ruleset) === 'back')
 }
 
 const builtInPieceCatalog: Omit<PieceCatalogItem, 'deploymentZone'>[] = [
@@ -41,7 +90,8 @@ const builtInPieceCatalog: Omit<PieceCatalogItem, 'deploymentZone'>[] = [
   { id: 'queen', name: 'Queen', score: 0, category: 'major', canPocket: true },
   { id: 'cannon-rook', name: 'Cannon Rook', score: 0, category: 'variant', canPocket: true, aliases: ['cannon', 'po rook', '포 룩'] },
   { id: 'amazon', name: 'Amazon', score: 0, category: 'variant', canPocket: true },
-  { id: 'guhang', name: '구행', score: 0, category: 'variant', canPocket: true, aliases: ['Guhang'] },
+  { standardDeckZone: 'extra', id: 'guhang', name: '구행', score: 0, category: 'variant', canPocket: true, aliases: ['Guhang'] },
+  { id: 'prime-minister', name: '국무총리', score: 0, category: 'variant', canPocket: true, aliases: ['Prime Minister', '총리'] },
   { id: 'tempest-queen', name: 'Tempest Queen', score: 0, category: 'variant', canPocket: true, aliases: ['storm queen'] },
   { id: 'tempest-rook', name: 'Tempest Rook', score: 0, category: 'variant', canPocket: true, aliases: ['storm rook'] },
   { id: 'tempest-bishop', name: 'Tempest Bishop', score: 0, category: 'variant', canPocket: true, aliases: ['storm bishop'] },
@@ -63,8 +113,14 @@ const builtInPieceCatalog: Omit<PieceCatalogItem, 'deploymentZone'>[] = [
   { id: 'green-camp', name: '그린캠프', score: 0, category: 'variant', canPocket: true },
   { id: 'mortar', name: '박격포병', score: 0, category: 'variant', canPocket: true },
   { id: 'tank', name: '탱크', score: 0, category: 'variant', canPocket: true },
-  { id: 'bomber', name: '폭격기', score: 0, category: 'variant', canPocket: true },
+  { standardDeckZone: 'extra', id: 'bomber', name: '폭격기', score: 0, category: 'variant', canPocket: true },
   { id: 'machine-gunner', name: '기관총 사수', score: 0, category: 'variant', canPocket: true },
+  { id: 'shell', name: '포탄', score: 0, category: 'variant', canPocket: true },
+  { id: 'sacrificial-shrine', name: '희생의 성소', score: 0, category: 'variant', canPocket: true },
+  { id: 'sacrificial-lamb', name: '희생양', score: 0, category: 'variant', canPocket: true },
+  { id: 'fanatic', name: '광신도', score: 0, category: 'variant', canPocket: true },
+  { id: 'wall', name: '성벽', score: 0, category: 'variant', canPocket: true },
+  { id: 'repairman', name: '수리병', score: 0, category: 'variant', canPocket: true },
   { id: 'surface-to-air-missile', name: '지대공 미사일', score: 0, category: 'variant', canPocket: true, aliases: ['SAM', '격추'] },
   { id: 'pawn', name: 'Pawn', score: 0, category: 'pawn', canPocket: true },
 ]
@@ -200,6 +256,10 @@ export function applyPieceMetadata(metadata: Record<string, PieceCatalogMetadata
     ) {
       throw new Error(`엔진 기물 정보가 누락되었거나 잘못되었습니다: ${piece.id}`)
     }
+    if (definition.standard_deck_zone !== undefined) {
+      if (!['main', 'extra'].includes(definition.standard_deck_zone)) throw new Error(`잘못된 덱 배치 정책: ${piece.id}`)
+      piece.standardDeckZone = definition.standard_deck_zone
+    }
     piece.score = definition.score
     piece.deploymentZone = definition.deployment_zone
   }
@@ -281,8 +341,28 @@ export function pieceScore(pieceType: DeckPieceType): number {
   return findPieceCatalogItem(pieceType)?.score ?? 0
 }
 
-export function canUseInPocket(pieceType: DeckPieceType): boolean {
-  return findPieceCatalogItem(pieceType)?.canPocket === true
+export const MAX_EXTRA_DECK_PIECES = 3
+
+export function normalizeExtra(value: unknown): DeckPieceType[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > 4096
+    || value.some(id => typeof id !== 'string' || !id || id.length > 256 || /[\p{Cc}]/u.test(id))) {
+    throw new Error('Extra Deck 데이터가 올바르지 않습니다.')
+  }
+  return [...value]
+}
+
+export function canUseInMain(pieceType: DeckPieceType, ruleset: DeckRuleset = 'legacy'): boolean {
+  const piece = findPieceCatalogItem(pieceType)
+  return Boolean(piece) && (parseDeckRuleset(ruleset) === 'legacy' || piece?.standardDeckZone !== 'extra')
+}
+
+export function canUseInExtra(pieceType: DeckPieceType, ruleset: DeckRuleset = 'legacy'): boolean {
+  return parseDeckRuleset(ruleset) === 'standard' && findPieceCatalogItem(pieceType)?.standardDeckZone === 'extra'
+}
+
+export function canUseInPocket(pieceType: DeckPieceType, ruleset: DeckRuleset = 'legacy'): boolean {
+  return findPieceCatalogItem(pieceType)?.canPocket === true && canUseInMain(pieceType, ruleset)
 }
 
 export function pieceLabel(pieceType: DeckPieceType): string {
@@ -321,7 +401,18 @@ export function createPresetStarting(boardSize: number, layout: DeckPresetLayout
   ]
 }
 
-export function createPresetDeck(boardSize: number, presetId = 'classic'): LobbyDeck {
+export function createPresetDeck(boardSize: number, presetId = 'classic', ruleset: DeckRuleset = 'legacy'): LobbyDeck {
+  if (parseDeckRuleset(ruleset) === 'standard') {
+    return {
+      ruleset,
+      starting: [
+        { pieceType: 'king', square: { file: Math.floor(boardSize / 2), rank: 0 } },
+        ...frontZoneSquares(boardSize, 'white', ruleset).map(square => ({ pieceType: 'pawn', square })),
+      ],
+      pocket: emptyPocket(),
+      extra: [],
+    }
+  }
   const preset = deckPresets.find(entry => entry.id === presetId) ?? deckPresets[0]
   const layout = presetLayoutForBoard(preset, boardSize)
   const pocket = emptyPocket()
@@ -346,22 +437,33 @@ export function calculateDeckScore(deck: LobbyDeck): number {
     )
 }
 
-function isInBaseZone(piece: LobbyPlacement, boardSize: number): boolean {
-  return piece.square.file >= 0
-    && piece.square.file < boardSize
-    && piece.square.rank >= 0
-    && piece.square.rank < baseZoneDepth(boardSize)
+function isInBaseZone(piece: LobbyPlacement, boardSize: number, ruleset: DeckRuleset = 'legacy'): boolean {
+  return deploymentZoneAtSquare(piece.square, boardSize, 'white', ruleset) !== null
 }
 
 export function placementRestriction(
   pieceType: DeckPieceType,
-  rank: number,
+  square: SetupSquare | number,
   boardSize: number,
   side: SetupSide = 'white',
+  ruleset: DeckRuleset = 'legacy',
 ): string | null {
   const piece = findPieceCatalogItem(pieceType)
   if (!piece) return '기물의 초기 배치 정보를 찾을 수 없습니다.'
-  const isFrontRank = rank === frontmostBaseRank(boardSize, side)
+  if (!canUseInMain(pieceType, ruleset)) return 'Standard Extra Deck 전용 기물은 Starting/Pocket에 넣을 수 없습니다.'
+  // The numeric overload preserves Legacy callers. Standard needs both coordinates.
+  if (parseDeckRuleset(ruleset) === 'standard') {
+    if (typeof square === 'number') return 'Standard 배치는 file과 rank 좌표가 모두 필요합니다.'
+    const zone = deploymentZoneAtSquare(square, boardSize, side, ruleset)
+    if (!zone) return 'Standard 기본 진영 밖에는 초기 배치할 수 없습니다.'
+    return zone === piece.deploymentZone ? null
+      : `이 기물은 Standard ${piece.deploymentZone === 'front' ? 'Front' : 'Back'} 구역에만 배치할 수 있습니다.`
+  }
+  const rank = typeof square === 'number' ? square : square.rank
+  if (typeof square !== 'number' && deploymentZoneAtSquare(square, boardSize, side, ruleset) === null) {
+    return '기본 진영 밖에는 초기 배치할 수 없습니다.'
+  }
+  const isFrontRank = rank === frontmostBaseRank(boardSize, side, ruleset)
   if (piece.deploymentZone === 'front' && !isFrontRank) {
     return '이 기물은 가장 앞쪽 시작 배치 줄에만 배치할 수 있습니다.'
   }
@@ -373,37 +475,94 @@ export function placementRestriction(
 
 export function canPieceBePlacedAtStart(
   pieceType: DeckPieceType,
-  rank: number,
+  square: SetupSquare | number,
   boardSize: number,
   side: SetupSide = 'white',
+  ruleset: DeckRuleset = 'legacy',
 ): boolean {
-  return baseZoneRanks(boardSize, side).includes(rank)
-    && placementRestriction(pieceType, rank, boardSize, side) === null
+  const rank = typeof square === 'number' ? square : square.rank
+  return baseZoneRanks(boardSize, side, ruleset).includes(rank)
+    && placementRestriction(pieceType, square, boardSize, side, ruleset) === null
 }
 
-export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '덱'): DeckSummary {
-  const totalScore = calculateDeckScore(deck)
-  const limit = scoreLimit(boardSize)
+function validateDeckStructure(deck: LobbyDeck, boardSize: number, name: string): string[] {
   const errors: string[] = []
+  if (deck.ruleset !== undefined && !isDeckRuleset(deck.ruleset)) {
+    errors.push('지원하지 않는 덱 룰입니다.')
+  }
   const normalizedName = name.trim()
 
   if (!normalizedName) {
     errors.push('덱 이름은 비어 있을 수 없습니다.')
+  } else if ([...normalizedName].length > 100 || /[\p{Cc}]/u.test(normalizedName)) {
+    errors.push('덱 이름은 제어 문자를 제외한 1~100자여야 합니다.')
   }
 
   if (!(boardSizes as readonly number[]).includes(boardSize)) {
     errors.push('지원하지 않는 보드 크기입니다.')
   }
 
+  let extra: string[] = []
+  try { extra = normalizeExtra(deck.extra) } catch (cause) { errors.push(cause instanceof Error ? cause.message : 'Extra Deck 데이터가 올바르지 않습니다.') }
   const occupiedSquares = new Set<string>()
   for (const piece of deck.starting) {
     if (!Number.isInteger(piece.square.file) || !Number.isInteger(piece.square.rank)) {
       errors.push('시작 기물 좌표는 정수여야 합니다.')
       continue
     }
+    if (piece.square.file < 0 || piece.square.file >= boardSize || piece.square.rank < 0 || piece.square.rank >= boardSize) {
+      errors.push('시작 기물 좌표가 보드 범위를 벗어났습니다.')
+    }
     const squareKey = `${piece.square.file}:${piece.square.rank}`
     if (occupiedSquares.has(squareKey)) errors.push('같은 칸에 여러 시작 기물을 배치할 수 없습니다.')
     occupiedSquares.add(squareKey)
+  }
+
+  if (deck.starting.length > 144 || Object.keys(deck.pocket).length > 256 || totalPocketCount(deck) > 4096) {
+    errors.push('덱 크기가 허용 범위를 벗어났습니다.')
+  }
+  for (const [pieceType, count] of Object.entries(deck.pocket)) {
+    if (!Number.isInteger(count) || count < 0 || count > 1024) {
+      errors.push(`${pieceLabel(pieceType)}의 포켓 수량이 올바르지 않습니다.`)
+    }
+  }
+  const usedTypes = new Set([
+    ...extra,
+    ...deck.starting.map(piece => piece.pieceType),
+    ...Object.entries(deck.pocket).filter(([, count]) => count > 0).map(([id]) => id),
+  ])
+  for (const id of usedTypes) {
+    if (!findPieceCatalogItem(id)) errors.push(`사용할 수 없는 기물 버전입니다: ${id}`)
+  }
+  return errors
+}
+
+function mapErrors(deck: SavedDeck): string[] {
+  const normalizedMapId = normalizeBoardMapId(deck.mapId, deck.boardSize)
+  const map = normalizedMapId ? findBoardMap(normalizedMapId) : null
+  return !map || map.boardSize !== deck.boardSize ? ['덱의 전용 맵 정보가 올바르지 않습니다.'] : []
+}
+
+/** Safe editable content; King, score, deployment and active-version rules belong to game start. */
+export function validateDeckForStorage(deck: SavedDeck): { valid: boolean; errors: string[] } {
+  const errors = [...validateDeckStructure(deck, deck.boardSize, deck.name), ...mapErrors(deck)]
+  return { valid: errors.length === 0, errors }
+}
+
+export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '덱'): DeckSummary {
+  const totalScore = calculateDeckScore(deck)
+  const limit = scoreLimit(boardSize)
+  const errors = validateDeckStructure(deck, boardSize, name)
+  if (deck.ruleset !== undefined && !isDeckRuleset(deck.ruleset)) {
+    return { totalScore, scoreLimit: limit, valid: false, errors }
+  }
+  const ruleset = parseDeckRuleset(deck.ruleset)
+  let extra: string[] = []
+  try { extra = normalizeExtra(deck.extra) } catch { return { totalScore, scoreLimit: limit, valid: false, errors } }
+  if (ruleset === 'legacy' && extra.length) errors.push('Legacy에서는 Extra Deck을 사용할 수 없습니다. Standard로 전환하거나 Extra 기물을 제거해 주세요.')
+  if (extra.length > MAX_EXTRA_DECK_PIECES) errors.push('Extra Deck은 최대 3기까지 사용할 수 있습니다.')
+  for (const pieceType of extra) {
+    if (!canUseInExtra(pieceType, ruleset)) errors.push(`${pieceLabel(pieceType)}은 Extra Deck에 넣을 수 없습니다.`)
   }
 
   const kingCount = deck.starting.filter(piece => piece.pieceType === 'king').length
@@ -416,11 +575,10 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
   }
 
   for (const [pieceType, count] of Object.entries(deck.pocket)) {
-    if (!Number.isInteger(count) || count < 0) {
-      errors.push(`${pieceLabel(pieceType)}의 포켓 수량이 올바르지 않습니다.`)
-    }
-    if (count > 0 && !canUseInPocket(pieceType)) {
-      errors.push(`${pieceLabel(pieceType)}은 포켓에 넣을 수 없습니다.`)
+    if (count > 0 && !canUseInPocket(pieceType, ruleset)) {
+      errors.push(canUseInMain(pieceType, ruleset)
+        ? `${pieceLabel(pieceType)}은 포켓에 넣을 수 없습니다.`
+        : `${pieceLabel(pieceType)}은 Standard Extra Deck 전용이므로 포켓에 넣을 수 없습니다.`)
     }
   }
 
@@ -428,23 +586,24 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
     errors.push(`덱 점수가 제한 점수보다 ${totalScore - limit}점 높습니다.`)
   }
 
-  if (deck.starting.some(piece => !isInBaseZone(piece, boardSize))) {
+  if (deck.starting.some(piece => !isInBaseZone(piece, boardSize, ruleset))) {
     errors.push('시작 기물은 해당 보드 크기의 기본 진영 안에만 배치할 수 있습니다.')
   }
   for (const piece of deck.starting) {
-    const restriction = placementRestriction(piece.pieceType, piece.square.rank, boardSize)
+    const restriction = placementRestriction(piece.pieceType, piece.square, boardSize, 'white', ruleset)
     if (restriction) {
       errors.push(`${pieceLabel(piece.pieceType)} (${piece.square.file + 1}, ${piece.square.rank + 1}): ${restriction}`)
     }
   }
-  const frontRank = frontmostBaseRank(boardSize)
-  const occupiedFrontFiles = new Set(
+  const frontZone = frontZoneSquares(boardSize, 'white', ruleset)
+  const occupiedFrontSquares = new Set(
     deck.starting
-      .filter(piece => piece.square.rank === frontRank && piece.square.file >= 0 && piece.square.file < boardSize)
-      .map(piece => piece.square.file),
+      .filter(piece => deploymentZoneAtSquare(piece.square, boardSize, 'white', ruleset) === 'front'
+        && (ruleset === 'legacy' || findPieceCatalogItem(piece.pieceType)?.deploymentZone === 'front'))
+      .map(piece => `${piece.square.file}:${piece.square.rank}`),
   )
-  if (occupiedFrontFiles.size !== boardSize) {
-    errors.push(`덱의 앞줄은 모든 칸에 기물이 배치되어야 합니다. (${occupiedFrontFiles.size}/${boardSize})`)
+  if (occupiedFrontSquares.size !== frontZone.length) {
+    errors.push(`덱의 앞줄은 모든 칸에 기물이 배치되어야 합니다. (${occupiedFrontSquares.size}/${frontZone.length})`)
   }
   for (const pieceType of new Set(deck.starting.map(piece => piece.pieceType))) {
     if (isUniqueStartingPiece(pieceType) && deck.starting.filter(piece => piece.pieceType === pieceType).length > 1) {
@@ -452,14 +611,13 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
     }
   }
   const usedTypes = [
+    ...extra,
     ...deck.starting.map(piece => piece.pieceType),
     ...Object.entries(deck.pocket).filter(([, count]) => count > 0).map(([pieceType]) => pieceType),
   ]
   for (const pieceType of new Set(usedTypes)) {
     const catalogPiece = findPieceCatalogItem(pieceType)
-    if (!catalogPiece) {
-      errors.push(`사용할 수 없는 기물 버전입니다: ${pieceType}`)
-    } else if (catalogPiece.custom && !catalogPiece.custom.active) {
+    if (catalogPiece?.custom && !catalogPiece.custom.active) {
       errors.push(`${catalogPiece.name} v${catalogPiece.custom.version}은 비활성화되어 새 게임에 사용할 수 없습니다.`)
     }
   }
@@ -473,17 +631,9 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
 }
 
 export function validateSavedDeck(deck: SavedDeck): DeckSummary {
-  const normalizedMapId = normalizeBoardMapId(deck.mapId, deck.boardSize)
-  const map = normalizedMapId ? findBoardMap(normalizedMapId) : null
   const summary = validateLobbyDeck(deck, deck.boardSize, deck.name)
-  if (!map || map.boardSize !== deck.boardSize) {
-    return {
-      ...summary,
-      valid: false,
-      errors: [...summary.errors, '덱의 전용 맵 정보가 올바르지 않습니다.'],
-    }
-  }
-  return summary
+  const errors = [...summary.errors, ...mapErrors(deck)]
+  return { ...summary, valid: errors.length === 0, errors }
 }
 
 export function validateDeckForGame(deck: SavedDeck, boardSize: number): DeckSummary {

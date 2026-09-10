@@ -5,7 +5,7 @@ SELECT current_database() AS database, current_user, session_user;
 
 SELECT current_database() = 'deck_chess' AS database_ok,
        current_user = session_user AS unaltered_role_ok,
-       session_user NOT IN ('deck_chess', 'deck_chess_test') AS admin_login_ok,
+       session_user NOT IN ('deck_chess', 'deck_chess_test', 'prod_app', 'test_app') AS admin_login_ok,
        NOT EXISTS (
            SELECT 1
            FROM pg_auth_members membership

@@ -18,6 +18,7 @@ export function usesMoveSubmission(option: MoveOptionExecution): boolean {
 export function isImmediateAbilityAction(action: AbilityAction): boolean {
   return !action.to
     && !action.target_piece_id
+    && (action.target_piece_ids?.length ?? 0) === 0
     && !action.pocket_piece_id
     && action.deployments.length === 0
 }

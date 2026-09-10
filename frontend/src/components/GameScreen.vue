@@ -1,8 +1,11 @@
 <template>
-  <div class="game-screen">
+  <div class="game-screen" :class="{ standard: isStandard, 'with-bot': Boolean(botPlayer) }" @keydown.esc="cancelInteraction">
     <!-- Header -->
     <div class="header">
-      <h2>덱체스 <small class="title-en">Deck Chess</small></h2>
+      <h2>
+        {{ state.challenge?.name ?? (debugBotMetrics ? '봇 디버거' : '덱체스') }}
+        <small class="title-en">{{ state.challenge ? 'Challenge · 상대: 봇' : debugBotMetrics ? 'Production Bot Test' : 'Deck Chess' }}</small>
+      </h2>
       <div class="turn-info">
         <span class="player-badge" :class="`player-${viewState.current_player}`">
           {{ viewState.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
@@ -117,10 +120,37 @@
       </div>
     </div>
 
+    <div v-if="sacrificeOpen" class="sacrifice-panel-overlay">
+      <div class="airdrop-box sacrifice-panel-box">
+        <h3>희생 대상 선택</h3>
+        <p>성소 주변의 아군 기물(킹 제외)은 모두 희생됩니다. 제거할 적 지상 기물을 점수 한도 안에서 선택하세요.</p>
+        <div class="airdrop-pocket">
+          <button
+            v-for="pieceId in sacrificeCandidateIds"
+            :key="pieceId"
+            :class="{ selected: sacrificeSelectedIds.includes(pieceId) }"
+            :disabled="!sacrificeSelectedIds.includes(pieceId) && sacrificeSelectedScore + pieceScore(pieceId) > sacrificeBudget"
+            @click="toggleSacrificeTarget(pieceId)"
+          >
+            <span><strong>{{ sacrificeSquareLabel(pieceId) }}</strong>{{ props.state.piece_definitions[props.state.pieces[pieceId].type_id]?.name ?? props.state.pieces[pieceId].type_id }}</span>
+            <small>{{ props.state.piece_definitions[props.state.pieces[pieceId].type_id]?.is_king ? '킹' : `${pieceScore(pieceId)}점` }}</small>
+          </button>
+        </div>
+        <small>선택 {{ sacrificeSelectedIds.length }}개 · {{ sacrificeSelectedScore }}점 / 한도 {{ sacrificeBudget }}점</small>
+        <div class="airdrop-actions">
+          <button @click="cancelSacrifice">취소</button>
+          <button class="confirm" :disabled="sacrificeSelectedIds.length === 0" @click="confirmSacrifice">희생 실행</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Game over overlay -->
     <div v-if="viewState.phase === 'ended'" class="game-over-overlay">
       <div class="game-over-box">
-        <h2>Game Over</h2>
+        <h2 v-if="state.challenge">
+          {{ viewState.result?.winner === state.challenge.player_id ? 'Challenge 클리어' : 'Challenge 실패' }}
+        </h2>
+        <h2 v-else>Game Over</h2>
         <p v-if="viewState.result?.winner">
           {{ viewState.result.winner === 'white' ? '⬜ White' : '⬛ Black' }} wins!
           <br><small>({{ viewState.result.reason }})</small>
@@ -135,42 +165,6 @@
     </div>
 
     <div class="main-layout" :class="{ locked: botThinking || botReplaying || isBotTurn }">
-      <!-- Left: Pocket (White) -->
-      <div class="pocket">
-        <h4>⬜ White Pocket</h4>
-        <div class="pocket-pieces">
-          <div
-            v-for="group in whitePocketGroups"
-            :key="group.typeId"
-            class="pocket-piece-row"
-            :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
-            draggable="true"
-            @click="onPocketClick(group.representativeId)"
-            @dragstart="onPocketDragStart($event, group.representativeId)"
-            @dragend="onPocketDragEnd"
-          >
-            <img
-              v-if="pieceImage(group.representativeId)"
-              class="pocket-piece-image"
-              :src="pieceImage(group.representativeId)"
-              :alt="pieceAlt(group.representativeId)"
-              draggable="false"
-            />
-            <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
-            <span class="pocket-piece-meta">
-              <strong>{{ group.name }}</strong>
-              <span class="pocket-count-bar">
-                <span :style="{ width: pocketGroupFillWidth(group.count, maxWhitePocketCount) }"></span>
-              </span>
-            </span>
-            <span class="pocket-piece-count">{{ group.count }}</span>
-          </div>
-        </div>
-        <div class="score-info" v-if="whiteDeck">
-          <span>{{ whiteDeck.total_score }} / {{ whiteDeck.score_limit }} pts</span>
-        </div>
-      </div>
-
       <!-- Center: Board -->
       <div class="board-column">
         <div class="game-clock" :class="clockClasses(topPlayer)">
@@ -191,8 +185,11 @@
           :selected-piece-id="visibleSelectedPieceId"
           :movable-squares="visibleMovableSquares"
           :attack-squares="visibleAttackSquares"
+          :attention-squares="sacrificeSelectedSquares"
+          :sacrifice-candidate-ids="summonActive ? summonSelection.candidates : []"
+          :selected-sacrifice-ids="summonActive ? summonSelection.selected : []"
           :threat-squares="visibleOpponentAttackSquares"
-          :drop-squares="visibleDropSquares"
+          :drop-squares="summonSquares.length ? summonSquares : visibleDropSquares"
           :last-move="lastMove"
           :orientation="boardOrientation"
           :ability-mode="visibleAbilityMode"
@@ -208,6 +205,9 @@
           <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
         </div>
 
+        <div v-if="isStandard" class="interaction-status" role="status">
+          <span>{{ interactionLabel }}</span><button v-if="interactionMode !== 'None'" type="button" @click="cancelInteraction">선택 취소</button>
+        </div>
         <div class="board-tools">
           <button
             class="threat-toggle"
@@ -250,48 +250,150 @@
         </div>
       </div>
 
-      <!-- Right: Pocket (Black) -->
-      <div class="pocket">
-        <h4>⬛ Black Pocket</h4>
-        <div class="pocket-pieces">
-          <div
-            v-for="group in blackPocketGroups"
-            :key="group.typeId"
-            class="pocket-piece-row"
-            :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
-            draggable="true"
-            @click="onPocketClick(group.representativeId)"
-            @dragstart="onPocketDragStart($event, group.representativeId)"
-            @dragend="onPocketDragEnd"
-          >
-            <img
-              v-if="pieceImage(group.representativeId)"
-              class="pocket-piece-image"
-              :src="pieceImage(group.representativeId)"
-              :alt="pieceAlt(group.representativeId)"
-              draggable="false"
-            />
-            <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
-            <span class="pocket-piece-meta">
-              <strong>{{ group.name }}</strong>
-              <span class="pocket-count-bar">
-                <span :style="{ width: pocketGroupFillWidth(group.count, maxBlackPocketCount) }"></span>
+      <aside class="hand-column" aria-label="양측 패">
+        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveOtherSide" :reveal="canRevealReserve(reserveOtherSide)" :reveal-pocket="false" :enabled="false" />
+        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveActiveSide" :reveal="canRevealReserve(reserveActiveSide)" :reveal-pocket="canRevealDeck(reserveActiveSide)"
+          :enabled="canUseSummonControls && state.phase === 'playing'" :selected-id="selectedPocketPieceId"
+          :summoning="summonActive" :candidates="summonSelection.candidates" :selected-sacrifices="summonSelection.selected"
+          :disabled-reason="controlTurnLabel" @select="onHandClick" />
+        <!-- Legacy reserves -->
+        <div v-if="!isStandard" class="pocket">
+          <h4>⬜ White Pocket</h4>
+          <div class="pocket-pieces">
+            <div
+              v-for="group in whitePocketGroups"
+              :key="group.typeId"
+              class="pocket-piece-row"
+              :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
+              draggable="true"
+              @click="onPocketClick(group.representativeId)"
+              @dragstart="onPocketDragStart($event, group.representativeId)"
+              @dragend="onPocketDragEnd"
+            >
+              <img
+                v-if="pieceImage(group.representativeId)"
+                class="pocket-piece-image"
+                :src="pieceImage(group.representativeId)"
+                :alt="pieceAlt(group.representativeId)"
+                draggable="false"
+              />
+              <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
+              <span class="pocket-piece-meta">
+                <strong>{{ group.name }}</strong>
+                <span class="pocket-count-bar">
+                  <span :style="{ width: pocketGroupFillWidth(group.count, maxWhitePocketCount) }"></span>
+                </span>
               </span>
-            </span>
-            <span class="pocket-piece-count">{{ group.count }}</span>
+              <span class="pocket-piece-count">{{ group.count }}</span>
+            </div>
+          </div>
+          <div class="score-info" v-if="whiteDeck && canRevealDeck('white')">
+            <span>{{ whiteDeck.total_score }} / {{ whiteDeck.score_limit }} pts</span>
           </div>
         </div>
-        <div class="score-info" v-if="blackDeck">
-          <span>{{ blackDeck.total_score }} / {{ blackDeck.score_limit }} pts</span>
+
+        <div v-if="!isStandard" class="pocket">
+          <h4>⬛ Black Pocket</h4>
+          <div class="pocket-pieces">
+            <div
+              v-for="group in blackPocketGroups"
+              :key="group.typeId"
+              class="pocket-piece-row"
+              :class="{ selected: selectedPocketPieceId ? group.pieceIds.includes(selectedPocketPieceId) : false }"
+              draggable="true"
+              @click="onPocketClick(group.representativeId)"
+              @dragstart="onPocketDragStart($event, group.representativeId)"
+              @dragend="onPocketDragEnd"
+            >
+              <img
+                v-if="pieceImage(group.representativeId)"
+                class="pocket-piece-image"
+                :src="pieceImage(group.representativeId)"
+                :alt="pieceAlt(group.representativeId)"
+                draggable="false"
+              />
+              <span v-else class="pocket-piece-symbol">{{ pieceSymbol(group.typeId) }}</span>
+              <span class="pocket-piece-meta">
+                <strong>{{ group.name }}</strong>
+                <span class="pocket-count-bar">
+                  <span :style="{ width: pocketGroupFillWidth(group.count, maxBlackPocketCount) }"></span>
+                </span>
+              </span>
+              <span class="pocket-piece-count">{{ group.count }}</span>
+            </div>
+          </div>
+          <div class="score-info" v-if="blackDeck && canRevealDeck('black')">
+            <span>{{ blackDeck.total_score }} / {{ blackDeck.score_limit }} pts</span>
+          </div>
         </div>
-      </div>
+
+      </aside>
 
       <aside class="game-sidebar">
+        <ExtraSummonPanel ref="summonPanel" :state="viewState" :viewer="deckViewer" :enabled="canUseSummonControls && state.phase === 'playing'"
+          :disabled-reason="controlTurnLabel" :load-options="loadSummonOptions" :submit="submitSummon"
+          @targets="summonSquares = $event" @selection="summonSelection = $event" @active="onSummonActive" />
+        <p v-if="isStandard" class="draw-info">턴 시작 드로우는 자동으로 Hand에 반영됩니다. {{ playMode === 'single' ? '로컬 2인은 양측 패가 보이며, 덱은 현재 차례만 확인할 수 있습니다.' : '상대는 Hand 장수만 공개됩니다.' }}</p>
         <h3>기보</h3>
         <div class="live-notation">
-          <div v-for="entry in liveNotation" :key="entry.ply"><span>{{ entry.ply }}. {{ entry.text }}</span></div>
+          <div v-for="entry in liveNotation" :key="entry.ply"><span>{{ entry.ply }}. {{ entry.text }}</span>
+            <details v-if="entry.detail"><summary>소환 상세</summary>{{ entry.detail }}</details>
+          </div>
           <p v-if="!liveNotation.length">아직 착수 기록이 없습니다.</p>
         </div>
+        <details v-if="debugBotMetrics" class="bot-debug-panel" open>
+          <summary>봇 디버그 수치</summary>
+          <template v-if="lastBotStats">
+            <div class="bot-debug-summary">
+              <span><small>평가 점수</small><strong>{{ signedNumber(lastBotStats.score) }}</strong></span>
+              <span><small>완료/도달 깊이</small><strong>{{ lastBotStats.completed_depth }} / {{ lastBotStats.depth_reached }}</strong></span>
+              <span><small>탐색 노드</small><strong>{{ lastBotStats.searched_nodes.toLocaleString() }}</strong></span>
+              <span><small>소요 시간</small><strong>{{ lastBotStats.elapsed_ms }}ms</strong></span>
+              <span><small>TT 적중률</small><strong>{{ percent(lastBotStats.tt_hits, lastBotStats.tt_probes) }}</strong></span>
+              <span><small>Beta cutoffs</small><strong>{{ lastBotStats.beta_cutoffs.toLocaleString() }}</strong></span>
+            </div>
+            <div class="bot-branching-flow">
+              <strong>Actions</strong>
+              <span>{{ lastBotStats.root_generated_legal_actions.toLocaleString() }} <i>→</i> {{ lastBotStats.root_unique_canonical_actions.toLocaleString() }} <i>→</i> {{ lastBotStats.root_beam_selected_actions.toLocaleString() }}</span>
+              <small>generated → canonical unique → beam selected</small>
+              <strong>Drops</strong>
+              <span>{{ lastBotStats.root_drop_actions_generated.toLocaleString() }} <i>→</i> {{ lastBotStats.root_drop_actions_selected.toLocaleString() }}</span>
+              <small>generated → selected</small>
+              <strong>Optional Board</strong>
+              <span>{{ lastBotStats.root_board_optional_actions_generated.toLocaleString() }} <i>→</i> {{ lastBotStats.root_board_optional_actions_selected.toLocaleString() }}</span>
+              <small>generated → selected</small>
+              <strong>Quiet Drop</strong>
+              <span>{{ lastBotStats.root_quiet_drop_actions_generated.toLocaleString() }} <i>→</i> {{ lastBotStats.root_quiet_drop_actions_selected.toLocaleString() }}</span>
+              <small>generated → selected</small>
+            </div>
+            <dl class="bot-debug-details">
+              <div><dt>Root mandatory tactical</dt><dd>{{ lastBotStats.root_mandatory_tactical_actions.toLocaleString() }}</dd></div>
+              <div><dt>Normal / qsearch 노드</dt><dd>{{ lastBotStats.normal_nodes.toLocaleString() }} / {{ lastBotStats.qnodes.toLocaleString() }}</dd></div>
+              <div><dt>반복 완료/시작</dt><dd>{{ lastBotStats.iterations_completed }} / {{ lastBotStats.iterations_started }}</dd></div>
+              <div><dt>TT probe / hit</dt><dd>{{ lastBotStats.tt_probes.toLocaleString() }} / {{ lastBotStats.tt_hits.toLocaleString() }}</dd></div>
+              <div><dt>TT cutoff / store</dt><dd>{{ lastBotStats.tt_cutoffs.toLocaleString() }} / {{ lastBotStats.tt_stores.toLocaleString() }}</dd></div>
+              <div><dt>Aspiration 재탐색</dt><dd>{{ lastBotStats.aspiration_researches }} / {{ lastBotStats.aspiration_searches }}</dd></div>
+              <div><dt>Fail low / high</dt><dd>{{ lastBotStats.aspiration_fail_lows }} / {{ lastBotStats.aspiration_fail_highs }}</dd></div>
+              <div><dt>Move generation</dt><dd>{{ nanosToMs(lastBotStats.move_generation_nanos) }}</dd></div>
+              <div><dt>Canonical dedup</dt><dd>{{ nanosToMs(lastBotStats.canonical_deduplication_nanos) }}</dd></div>
+              <div><dt>Move ordering</dt><dd>{{ nanosToMs(lastBotStats.move_ordering_nanos) }}</dd></div>
+            </dl>
+            <div class="bot-debug-session">
+              <strong>현재 테스트 합계</strong>
+              <small>{{ botDebugSummary.turns }}턴 · {{ botDebugSummary.totalNodes.toLocaleString() }}노드 · 평균 {{ Math.round(botDebugSummary.averageElapsedMs) }}ms</small>
+              <small>최대 완료 깊이 {{ botDebugSummary.maxCompletedDepth }} · TT 적중률 {{ nullablePercent(botDebugSummary.ttHitRate) }} · {{ nullableRate(botDebugSummary.nodesPerSecond) }}</small>
+            </div>
+            <div class="bot-debug-history">
+              <div v-for="turn in [...botDebugTurns].reverse()" :key="turn.turnNumber">
+                <b>T{{ turn.turnNumber }}</b>
+                <span :title="turn.action">{{ turn.action }}</span>
+                <small>{{ signedNumber(turn.stats.score) }} · {{ turn.stats.searched_nodes.toLocaleString() }}n · {{ turn.stats.elapsed_ms }}ms</small>
+              </div>
+            </div>
+            <button class="bot-debug-copy" type="button" @click="copyBotDebugData">{{ botDebugCopyStatus }}</button>
+          </template>
+          <p v-else>봇이 첫 수를 계산하면 탐색 수치가 여기에 기록됩니다.</p>
+        </details>
         <div class="sidebar-game-info">
           <strong>{{ timeControlLabel(viewState.clock.time_control) }}</strong>
           <span>Turn {{ viewState.turn_number }}</span>
@@ -311,12 +413,12 @@
       </button>
     </div>
 
-    <div v-if="error || botError" class="error-banner">{{ error || botError }}</div>
+    <div v-if="error || botError" class="error-banner" role="alert">{{ error || botError }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onUnmounted, watch } from 'vue'
 import type {
   AbilityDeployment,
   AiAction,
@@ -336,6 +438,11 @@ import type {
 import { abilityActionTargetsSquare, abilitySelectionSquares, isImmediateAbilityAction, moveOptionTargets, pendingForcedLandingPieceId, usesMoveSubmission } from '../moveOptionUi'
 import { api } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
+import ExtraSummonPanel from './ExtraSummonPanel.vue'
+import StandardReservePanel from './StandardReservePanel.vue'
+import { gameplayKey, gameActionError } from '../standardGameUi'
+import { summonDetail } from '../replayNotation'
+import type { ExtraSummonAction } from '../types/game'
 import Board from './Board.vue'
 import { applyTimelineFrame } from '../composables/useActionTimeline'
 import { CLOCK_URGENCY_THRESHOLDS_MS, timeControlLabel } from '../timeControls'
@@ -348,6 +455,7 @@ import {
   turnControlLabel,
   type PlayMode,
 } from '../gameControlPolicy'
+import { ratioPercent, summarizeBotDebugTurns, type BotDebugTurn } from '../botDebugMetrics'
 
 const props = defineProps<{
   state: GameState
@@ -356,6 +464,7 @@ const props = defineProps<{
   roomId?: string | null
   botPlayer?: PlayerId | null
   botDifficulty?: BotDifficulty
+  debugBotMetrics?: boolean
 }>()
 const emit = defineEmits<{
   stateUpdate: [state: GameState]
@@ -363,6 +472,8 @@ const emit = defineEmits<{
   replay: []
 }>()
 
+let selectionGeneration = 0
+const actionSubmitting = ref(false)
 const selectedPieceId = ref<string | null>(null)
 const selectedPocketPieceId = ref<string | null>(null)
 const abilityMode = ref(false)
@@ -380,6 +491,8 @@ const botThinking = ref(false)
 const botReplaying = ref(false)
 const botReplayMessage = ref<string | null>(null)
 const lastBotStats = ref<BotTurnStats | null>(null)
+const botDebugTurns = ref<BotDebugTurn[]>([])
+const botDebugCopyStatus = ref('디버그 JSON 복사')
 const replayCopyStatus = ref('기보 복사')
 const draggedPocketPieceId = ref<string | null>(null)
 const promotionRequest = ref<{ pieceId: string; to: Square; owner: PlayerId; options: string[] } | null>(null)
@@ -388,6 +501,9 @@ const airdropOpen = ref(false)
 const airdropSelectedPieceId = ref<string | null>(null)
 const airdropDraft = ref<AbilityDeployment[]>([])
 const airdropOptions = ref<LegalPieceOptions | null>(null)
+const sacrificeOpen = ref(false)
+const sacrificeSelectedIds = ref<string[]>([])
+const sacrificeOptions = ref<LegalPieceOptions | null>(null)
 let promotionResolve: ((choice: string | null) => void) | null = null
 const botPreviewSelectedPieceId = ref<string | null>(null)
 const botPreviewMovableSquares = ref<Square[]>([])
@@ -426,10 +542,18 @@ const dropOptionsCache = new Map<string, DropAction[]>()
 const dropOptionsRequests = new Map<string, Promise<DropAction[]>>()
 
 const viewState = computed(() => botReplayState.value ?? props.state)
-const topPlayer = computed<PlayerId>(() => props.localPlayer ? otherPlayer(props.localPlayer) : 'black')
-const bottomPlayer = computed<PlayerId>(() => props.localPlayer ?? 'white')
+const isStandard = computed(() => props.state.ruleset === 'standard')
+const reserveActiveSide = computed<PlayerId>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? 'white')
+const deckViewer = computed<PlayerId | null>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? null)
+function canRevealDeck(side: PlayerId) { return side === deckViewer.value }
+const reserveOtherSide = computed<PlayerId>(() => otherPlayer(reserveActiveSide.value))
+function canRevealReserve(side: PlayerId) { return props.playMode === 'single' || side === props.localPlayer }
+const positionKey = computed(() => gameplayKey(props.state))
+const topPlayer = computed<PlayerId>(() => isStandard.value && props.playMode === 'single' ? otherPlayer(viewState.value.current_player) : props.localPlayer ? otherPlayer(props.localPlayer) : 'black')
+const bottomPlayer = computed<PlayerId>(() => isStandard.value && props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? 'white')
 const liveNotation = computed(() => viewState.value.history.map((entry, index) => ({
   ply: index + 1,
+  detail: summonDetail(entry.action, viewState.value),
   text: viewState.value.record_notation?.[index]
     ? formatNotation(viewState.value.record_notation[index])
     : formatLiveAction(entry.action, viewState.value, entry.turn_number),
@@ -449,10 +573,10 @@ const opponentAbandonmentRemainingMs = computed(() => Math.max(
   (opponentPresence.value?.forfeit_at_ms ?? estimatedServerNowMs.value) - estimatedServerNowMs.value,
 ))
 const whitePocket = computed(() =>
-  viewState.value.players['white']?.deck.pocket_pieces ?? []
+  canRevealReserve('white') ? viewState.value.players['white']?.deck.pocket_pieces ?? [] : []
 )
 const blackPocket = computed(() =>
-  viewState.value.players['black']?.deck.pocket_pieces ?? []
+  canRevealReserve('black') ? viewState.value.players['black']?.deck.pocket_pieces ?? [] : []
 )
 const whitePocketGroups = computed(() => groupPocketPieces(whitePocket.value))
 const blackPocketGroups = computed(() => groupPocketPieces(blackPocket.value))
@@ -466,6 +590,40 @@ const controlContext = computed(() => ({
   localPlayer: props.localPlayer,
   botPlayer: props.botPlayer,
 }))
+const summonSquares = ref<Square[]>([])
+const summonPanel = ref<InstanceType<typeof ExtraSummonPanel> | null>(null)
+const summonActive = ref(false)
+const summonSelection = ref<{ candidates: string[]; selected: string[]; stage: 'sacrifice' | 'target' }>({ candidates: [], selected: [], stage: 'sacrifice' })
+const interactionMode = computed(() => summonActive.value ? (summonSelection.value.stage === 'target' ? 'ExtraSummonTarget' : 'ExtraSummonSacrifice')
+  : abilityMode.value || airdropOpen.value || sacrificeOpen.value ? 'Ability' : selectedPocketPieceId.value ? 'HandDrop' : selectedPieceId.value ? 'Move' : 'None')
+const interactionLabel = computed(() => ({ None: '기물을 선택하세요. Hand → 일반 착수 · Extra → 특수 소환', HandDrop: 'Hand 착수 · 표시된 보드 위치를 선택하세요.', ExtraSummonSacrifice: '특수 소환 · 점선 후보에서 제물을 선택하세요.', ExtraSummonTarget: '특수 소환 · 표시된 보드 위치를 선택하고 소환을 확정하세요.', Ability: '능력 사용 · 표시된 대상을 선택하세요.', Move: '이동 · 표시된 보드 위치를 선택하세요.' })[interactionMode.value])
+function resetOrdinaryInteraction() {
+  cancelPromotion(); airdropOpen.value = false; airdropDraft.value = []; airdropOptions.value = null
+  sacrificeOpen.value = false; sacrificeSelectedIds.value = []; sacrificeOptions.value = null
+  clearSelection()
+}
+function cancelInteraction() { resetOrdinaryInteraction(); summonPanel.value?.cancel() }
+function onSummonActive(active: boolean) {
+  summonActive.value = active
+  if (active) resetOrdinaryInteraction()
+}
+async function onHandClick(id: string) {
+  if (summonActive.value) { await summonPanel.value?.toggle(id); return }
+  if (!canUsePlayerControls.value || !isStandard.value) return
+  if (selectedPocketPieceId.value === id) { clearSelection(); return }
+  resetOrdinaryInteraction(); await selectPocketPiece(id)
+}
+function loadSummonOptions(id: string, selected: string[]) { return api.getSummonOptions(props.state.id, id, selected) }
+async function submitSummon(action: ExtraSummonAction) {
+  if (!canUseSummonControls.value) throw new Error('현재 차례에 소환할 수 없습니다.')
+  const { player_id: _player, ...intent } = action
+  actionSubmitting.value = true
+  try {
+    const next = await api.submitAction(props.state.id, intent)
+    emit('stateUpdate', next)
+    clearSelection()
+  } finally { actionSubmitting.value = false }
+}
 const canControlTurn = computed(() => canControlCurrentTurn(controlContext.value))
 const controlTurnLabel = computed(() => turnControlLabel(controlContext.value))
 const isBotTurn = computed(() => Boolean(
@@ -473,7 +631,8 @@ const isBotTurn = computed(() => Boolean(
   && props.state.current_player === props.botPlayer
   && props.state.phase === 'playing',
 ))
-const canUsePlayerControls = computed(() => canControlTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value)
+const canUseSummonControls = computed(() => canControlTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value && !actionSubmitting.value)
+const canUsePlayerControls = computed(() => canUseSummonControls.value && !summonActive.value && props.state.phase === 'playing')
 const visibleSelectedPieceId = computed(() => (
   botReplaying.value ? botPreviewSelectedPieceId.value : selectedPieceId.value
 ))
@@ -580,6 +739,41 @@ const airdropSquares = computed(() => {
   }).sort((left, right) => right.rank - left.rank || left.file - right.file)
 })
 const airdropUsedPieceIds = computed(() => new Set(airdropDraft.value.map(item => item.pocket_piece_id)))
+const sacrificeCandidateIds = computed(() => Array.from(new Set(
+  (sacrificeOptions.value?.abilityActions ?? []).flatMap(action => action.target_piece_id ? [action.target_piece_id] : []),
+)))
+const sacrificeBudget = computed(() => {
+  const shrine = selectedPieceId.value ? props.state.pieces[selectedPieceId.value] : undefined
+  if (!shrine?.current_square) return 0
+  let total = 0
+  for (let dx = -1; dx <= 1; dx += 1) {
+    for (let dy = -1; dy <= 1; dy += 1) {
+      if (dx === 0 && dy === 0) continue
+      const key = squareId({ file: shrine.current_square.file + dx, rank: shrine.current_square.rank + dy })
+      for (const id of [props.state.board.squares[key], props.state.board.air_squares?.[key]]) {
+        const piece = id ? props.state.pieces[id] : undefined
+        const definition = piece ? props.state.piece_definitions[piece.type_id] : undefined
+        if (piece?.owner === shrine.owner && !definition?.is_king) {
+          total += definition?.score ?? 0
+        }
+      }
+    }
+  }
+  return Math.min(8, total)
+})
+const sacrificeSelectedScore = computed(() => sacrificeSelectedIds.value.reduce(
+  (total, id) => total + pieceScore(id),
+  0,
+))
+const sacrificeSelectedSquares = computed(() => sacrificeSelectedIds.value.flatMap(pieceId => {
+  const square = props.state.pieces[pieceId]?.current_square
+  return square ? [square] : []
+}))
+
+function sacrificeSquareLabel(pieceId: string): string {
+  const square = props.state.pieces[pieceId]?.current_square
+  return square ? `${String.fromCharCode(97 + square.file)}${square.rank + 1}` : '-'
+}
 
 function abilityUnavailableReason(ability: MoveOptionDefinition): string {
   if (!selectedPiece.value) return '선택한 기물이 없습니다.'
@@ -637,8 +831,45 @@ const botStatusTitle = computed(() => {
   if (botThinking.value && !botReplaying.value) return '봇이 수를 계산하고 있습니다...'
   if (botReplaying.value) return '봇이 수를 두고 있습니다'
   if (botError.value) return '봇 턴 실행 실패'
-  return '봇 대전'
+  return props.debugBotMetrics ? '봇 디버그 실행' : '봇 대전'
 })
+const botDebugSummary = computed(() => summarizeBotDebugTurns(botDebugTurns.value))
+
+function signedNumber(value: number): string {
+  return value > 0 ? `+${value.toLocaleString()}` : value.toLocaleString()
+}
+
+function percent(numerator: number, denominator: number): string {
+  return nullablePercent(ratioPercent(numerator, denominator))
+}
+
+function nullablePercent(value: number | null): string {
+  return value === null ? '—' : `${value.toFixed(1)}%`
+}
+
+function nullableRate(value: number | null): string {
+  return value === null ? '처리 속도 —' : `${Math.round(value).toLocaleString()} 노드/초`
+}
+
+function nanosToMs(value: number): string {
+  return value > 0 ? `${(value / 1_000_000).toFixed(2)}ms` : 'release 계측 꺼짐'
+}
+
+async function copyBotDebugData() {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify({
+      game_id: props.state.id,
+      bot_player: props.botPlayer,
+      difficulty: props.botDifficulty ?? 'normal',
+      summary: botDebugSummary.value,
+      turns: botDebugTurns.value,
+    }, null, 2))
+    botDebugCopyStatus.value = '복사 완료'
+  } catch {
+    botDebugCopyStatus.value = '복사 실패'
+  }
+  window.setTimeout(() => { botDebugCopyStatus.value = '디버그 JSON 복사' }, 1_800)
+}
 
 function playerName(player: PlayerId): string {
   return player === 'white' ? 'White' : 'Black'
@@ -673,7 +904,7 @@ async function loadOpponentAttacks() {
     if (requestId === opponentAttackRequestSerial) {
       opponentAttacksVisible.value = false
       opponentAttackSquares.value = []
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
     }
   } finally {
     if (requestId === opponentAttackRequestSerial) {
@@ -709,10 +940,15 @@ function clearBotReplay() {
 }
 
 function actionLabel(action: AiAction): string {
+  if (action.type === 'extra_summon') {
+    const piece = props.state.pieces[action.extra_piece_id]
+    const name = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? '기물'
+    return `${name} Extra 소환 (제물 ${action.sacrifice_piece_ids.length}기): ${action.target_square.file + 1}, ${action.target_square.rank + 1}`
+  }
   const piece = props.state.pieces[action.piece_id]
-  const pieceName = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? action.piece_id
+  const pieceName = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? (isStandard.value ? '기물' : action.piece_id)
   if (action.type === 'drop') {
-    return `${pieceName} 포켓 기물 놓기: ${action.to.file + 1}, ${action.to.rank + 1}`
+    return `${pieceName} ${isStandard.value ? 'Hand 착수' : '포켓 기물 놓기'}: ${action.to.file + 1}, ${action.to.rank + 1}`
   }
   if (action.type === 'ability') {
     const target = action.to ? `: ${action.to.file + 1}, ${action.to.rank + 1}` : ''
@@ -867,6 +1103,8 @@ function previewBotAction(action: AiAction) {
     }
   } else if (action.type === 'drop') {
     botPreviewDropSquares.value = [action.to]
+  } else if (action.type === 'extra_summon') {
+    botPreviewDropSquares.value = [action.target_square]
   } else if (action.to) {
     botPreviewSelectedPieceId.value = action.piece_id
     botPreviewMovableSquares.value = [action.to]
@@ -879,7 +1117,7 @@ async function replayBotTurn(
   runId: number,
   timeline?: ActionTimelineFrame[],
 ) {
-  if (actions.length === 0) {
+  if (actions.length === 0 || (isStandard.value && timeline?.length !== actions.length)) {
     emit('stateUpdate', finalState)
     return
   }
@@ -927,11 +1165,18 @@ async function runBotTurn() {
       props.botDifficulty ?? 'normal',
     )
     if (runId !== botRunSerial) return
-    lastBotStats.value = response.stats
+    lastBotStats.value = response.stats ?? null
+    if (props.debugBotMetrics && response.stats) {
+      botDebugTurns.value = [...botDebugTurns.value, {
+        turnNumber: props.state.turn_number,
+        action: response.actions.map(actionLabel).join(' + '),
+        stats: response.stats,
+      }].slice(-50)
+    }
     await replayBotTurn(response.actions, response.game_state, runId, response.timeline)
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e)
-    if (message.includes('현재 턴 플레이어와 bot_player_id가 일치하지 않습니다.')) {
+    const message = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
+    if (e instanceof Error && e.message === '현재 턴 플레이어와 bot_player_id가 일치하지 않습니다.') {
       try {
         const syncedState = await api.getGame(props.state.id)
         emit('stateUpdate', syncedState)
@@ -951,6 +1196,15 @@ async function runBotTurn() {
     }
   }
 }
+
+watch(
+  () => props.state.id,
+  () => {
+    lastBotStats.value = null
+    botDebugTurns.value = []
+    botDebugCopyStatus.value = '디버그 JSON 복사'
+  },
+)
 
 watch(
   () => props.state.clock.server_now_ms,
@@ -981,6 +1235,12 @@ watch(
   },
 )
 
+watch(positionKey, () => {
+  cancelInteraction()
+  pieceOptionsCache.clear(); pieceOptionsRequests.clear(); dropOptionsCache.clear(); dropOptionsRequests.clear()
+})
+watch(() => props.localPlayer, cancelInteraction)
+
 watch(
   () => pendingForcedLandingPieceId(props.state),
   async (pieceId) => {
@@ -994,12 +1254,18 @@ watch(
 
 const PIECE_SYMBOLS: Record<string, string> = {
   king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘',
-  amazon: 'A', guhang: 'G', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-bishop': 'B', 'tempest-knight': 'N', 'bouncing-bishop': 'B', 'bouncing-rook': 'R', 'bouncing-queen': 'Q', nightrider: 'N', windmill: 'W',
+  amazon: 'A', guhang: 'G', 'prime-minister': '총', 'cannon-rook': 'C', 'tempest-queen': 'Q', 'tempest-rook': 'T', 'tempest-bishop': 'B', 'tempest-knight': 'N', 'bouncing-bishop': 'B', 'bouncing-rook': 'R', 'bouncing-queen': 'Q', nightrider: 'N', windmill: 'W',
   'pawn-white': '♙', 'pawn-black': '♟', 'tempest-pawn-white': '♙', 'tempest-pawn-black': '♟', 'bouncing-pawn-white': '♙', 'bouncing-pawn-black': '♟', 'dozer-white': 'D', 'dozer-black': 'D',
   tank: '🛡', bomber: '✈', 'surface-to-air-missile-white': '▲', 'surface-to-air-missile-black': '▲',
+  shell: '●', 'sacrificial-shrine': '祭', 'sacrificial-lamb': '羊', fanatic: '†', wall: '▥', repairman: '⚒',
 }
 function pieceSymbol(typeId: string): string {
   return PIECE_SYMBOLS[typeId] ?? '?'
+}
+
+function pieceScore(pieceId: string): number {
+  const piece = props.state.pieces[pieceId]
+  return piece ? props.state.piece_definitions[piece.type_id]?.score ?? 0 : 0
 }
 
 function pieceImage(pieceId: string): string | undefined {
@@ -1090,6 +1356,7 @@ function cancelPromotion() {
 }
 
 function clearSelection() {
+  selectionGeneration++
   overlapSelectionPieceIds.value = []
   selectedPieceId.value = null
   selectedPocketPieceId.value = null
@@ -1132,9 +1399,7 @@ async function chooseOverlappingPiece(pieceId: string) {
 
 function actionCacheKey(pieceId?: string, abilityId?: string | null): string {
   return [
-    props.state.id,
-    props.state.current_player,
-    props.state.turn_number,
+    positionKey.value,
     pieceId ?? '',
     abilityId ?? '',
   ].join(':')
@@ -1177,12 +1442,14 @@ async function loadPieceOptions(pieceId: string, abilityId: string | null = null
 }
 
 async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | null> {
+  const profileStarted = import.meta.env.DEV ? performance.now() : null
   const piece = props.state.pieces[pieceId]
   if (!piece || piece.owner !== props.state.current_player) {
     clearSelection()
     return null
   }
 
+  const ticket = ++selectionGeneration
   selectedPieceId.value = pieceId
   selectedPocketPieceId.value = null
   abilityMode.value = false
@@ -1194,14 +1461,37 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
 
   try {
     const options = await loadPieceOptions(pieceId)
-    if (selectedPieceId.value !== pieceId || abilityMode.value) return options
+    if (ticket !== selectionGeneration || selectedPieceId.value !== pieceId || abilityMode.value) return null
 
+    const stateUpdateStarted = profileStarted !== null ? performance.now() : null
     legalTargetSquares.value = options.legalTargets
     movableSquares.value = options.movable
     attackSquares.value = options.captures
+    if (profileStarted !== null) {
+      await nextTick()
+      requestAnimationFrame(() => {
+        const renderedAt = performance.now()
+        performance.measure('piece-options:click_to_render_ms', {
+          start: profileStarted,
+          end: renderedAt,
+          detail: { pieceId },
+        })
+        performance.measure('piece-options:state_update_to_render_ms', {
+          start: stateUpdateStarted!,
+          end: renderedAt,
+          detail: { pieceId },
+        })
+        console.debug(`[profiling] ${JSON.stringify({
+          path: 'piece-options',
+          click_to_render_ms: renderedAt - profileStarted,
+          state_update_to_render_ms: renderedAt - stateUpdateStarted!,
+        })}`)
+      })
+    }
     return options
-  } catch {
-    if (selectedPieceId.value === pieceId) {
+  } catch (cause) {
+    if (ticket === selectionGeneration && isStandard.value) error.value = gameActionError(cause)
+    if (ticket === selectionGeneration && selectedPieceId.value === pieceId) {
       legalTargetSquares.value = []
       movableSquares.value = []
       attackSquares.value = []
@@ -1211,51 +1501,57 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
 }
 
 async function toggleAbilityMode(abilityId: string) {
-  const ability = selectedPieceAbilities.value.find(ability => ability.id === abilityId)
-  if (!selectedPieceId.value || !ability || abilityUnavailableReason(ability)) return
+  if (!canUsePlayerControls.value) return
+  const ticket = ++selectionGeneration
+  try {
+    const ability = selectedPieceAbilities.value.find(ability => ability.id === abilityId)
+    if (!selectedPieceId.value || !ability || abilityUnavailableReason(ability)) return
 
-  if (abilityMode.value && activeAbilityId.value === abilityId) {
+    if (abilityMode.value && activeAbilityId.value === abilityId) {
+      const pieceId = selectedPieceId.value
+      abilityMode.value = false
+      activeAbilityId.value = null
+      const options = await loadPieceOptions(pieceId)
+      if (ticket === selectionGeneration && !abilityMode.value && selectedPieceId.value === pieceId) {
+        legalTargetSquares.value = options.legalTargets
+        movableSquares.value = options.movable
+        attackSquares.value = options.captures
+      }
+      return
+    }
+
+    abilityMode.value = true
+    activeAbilityId.value = abilityId
+    legalTargetSquares.value = []
+    movableSquares.value = []
+    attackSquares.value = []
+
     const pieceId = selectedPieceId.value
-    abilityMode.value = false
-    activeAbilityId.value = null
-    const options = await loadPieceOptions(pieceId)
-    if (!abilityMode.value && selectedPieceId.value === pieceId) {
-      legalTargetSquares.value = options.legalTargets
-      movableSquares.value = options.movable
+    const options = await loadPieceOptions(pieceId, abilityId)
+    if (ticket !== selectionGeneration || summonActive.value) return
+    if (abilityId === 'airdrop' && options.abilityActions.length > 0) {
+      airdropOptions.value = options
+      airdropDraft.value = []
+      airdropSelectedPieceId.value = airdropEligiblePieceIds.value[0] ?? null
+      airdropOpen.value = true
+    }
+    const immediateActions = options.abilityActions.filter(isImmediateAbilityAction)
+    const actorSquare = props.state.pieces[pieceId]?.current_square
+    const selfTargets = abilitySelectionSquares(options.abilityActions, actorSquare)
+    if (immediateActions.length === 1 && selfTargets.length === 0) {
+      await submitImmediateAbility(immediateActions[0])
+      return
+    }
+    if (selectedPieceId.value === pieceId && abilityMode.value && activeAbilityId.value === abilityId) {
+      legalTargetSquares.value = [...options.legalTargets, ...selfTargets]
+      movableSquares.value = [...options.movable, ...selfTargets]
       attackSquares.value = options.captures
     }
-    return
-  }
-
-  abilityMode.value = true
-  activeAbilityId.value = abilityId
-  legalTargetSquares.value = []
-  movableSquares.value = []
-  attackSquares.value = []
-
-  const pieceId = selectedPieceId.value
-  const options = await loadPieceOptions(pieceId, abilityId)
-  if (abilityId === 'airdrop' && options.abilityActions.length > 0) {
-    airdropOptions.value = options
-    airdropDraft.value = []
-    airdropSelectedPieceId.value = airdropEligiblePieceIds.value[0] ?? null
-    airdropOpen.value = true
-  }
-  const immediateActions = options.abilityActions.filter(isImmediateAbilityAction)
-  const actorSquare = props.state.pieces[pieceId]?.current_square
-  const selfTargets = abilitySelectionSquares(options.abilityActions, actorSquare)
-  if (immediateActions.length === 1 && selfTargets.length === 0) {
-    await submitImmediateAbility(immediateActions[0])
-    return
-  }
-  if (selectedPieceId.value === pieceId && abilityMode.value && activeAbilityId.value === abilityId) {
-    legalTargetSquares.value = [...options.legalTargets, ...selfTargets]
-    movableSquares.value = [...options.movable, ...selfTargets]
-    attackSquares.value = options.captures
-  }
+  } catch (cause) { if (ticket === selectionGeneration) { error.value = gameActionError(cause); clearSelection() } }
 }
 
 async function submitImmediateAbility(action: import('../types/game').AbilityAction) {
+  actionSubmitting.value = true
   try {
     const newState = await api.submitAction(props.state.id, {
       type: 'ability',
@@ -1264,8 +1560,9 @@ async function submitImmediateAbility(action: import('../types/game').AbilityAct
     })
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
   } finally {
+    actionSubmitting.value = false
     clearSelection()
   }
 }
@@ -1304,16 +1601,19 @@ function cancelAirdrop() {
 }
 
 async function confirmAirdrop() {
+  if (!canUsePlayerControls.value) return
   const pieceId = selectedPieceId.value
   if (!pieceId || airdropDraft.value.length === 0) return
+  actionSubmitting.value = true
   try {
     const newState = await api.submitAction(props.state.id, {
       type: 'ability', piece_id: pieceId, ability_id: 'airdrop', deployments: airdropDraft.value,
     })
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
   } finally {
+    actionSubmitting.value = false
     airdropOpen.value = false
     airdropDraft.value = []
     airdropOptions.value = null
@@ -1344,10 +1644,9 @@ async function loadDropOptions(): Promise<DropAction[]> {
 
 async function selectPocketPiece(pieceId: string): Promise<Square[]> {
   const piece = props.state.pieces[pieceId]
-  if (!piece || piece.owner !== props.state.current_player) {
-    clearSelection()
-    return []
-  }
+  const source = isStandard.value ? props.state.players[props.state.current_player]?.deck.hand_pieces ?? [] : props.state.players[props.state.current_player]?.deck.pocket_pieces ?? []
+  if (!piece || piece.owner !== props.state.current_player || !source.includes(pieceId)) return []
+  const ticket = ++selectionGeneration
 
   selectedPieceId.value = null
   selectedPocketPieceId.value = pieceId
@@ -1361,12 +1660,13 @@ async function selectPocketPiece(pieceId: string): Promise<Square[]> {
   try {
     const drops = await loadDropOptions()
     const targets = drops.filter(drop => drop.piece_id === pieceId).map(drop => drop.to)
-    if (selectedPocketPieceId.value === pieceId) {
+    if (ticket === selectionGeneration && selectedPocketPieceId.value === pieceId) {
       dropSquares.value = targets
     }
-    return targets
-  } catch {
-    if (selectedPocketPieceId.value === pieceId) {
+    return ticket === selectionGeneration ? targets : []
+  } catch (cause) {
+    if (ticket === selectionGeneration) error.value = gameActionError(cause)
+    if (ticket === selectionGeneration && selectedPocketPieceId.value === pieceId) {
       dropSquares.value = []
     }
     return []
@@ -1374,6 +1674,8 @@ async function selectPocketPiece(pieceId: string): Promise<Square[]> {
 }
 
 async function submitMove(pieceId: string, to: Square) {
+  if (!canUsePlayerControls.value) return
+  const position = positionKey.value
   const fromPiece = props.state.pieces[pieceId]
   if (!fromPiece?.current_square || sameSquare(fromPiece.current_square, to)) {
     clearSelection()
@@ -1386,6 +1688,7 @@ async function submitMove(pieceId: string, to: Square) {
   const options = selectedPieceId.value === pieceId && legalTargetSquares.value.length > 0
     ? await loadPieceOptions(pieceId, moveAbilityId)
     : await selectBoardPiece(pieceId)
+  if (position !== positionKey.value || !canUsePlayerControls.value || selectedPieceId.value !== pieceId) return
   if (!options || !isLegalSquare(to, options.legalTargets)) {
     clearSelection()
     return
@@ -1405,6 +1708,7 @@ async function submitMove(pieceId: string, to: Square) {
     promotion = chosen
   }
 
+  actionSubmitting.value = true
   try {
     const action: SubmitMoveAction = {
       type: 'move',
@@ -1416,16 +1720,26 @@ async function submitMove(pieceId: string, to: Square) {
     const newState = await api.submitAction(props.state.id, action)
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
   } finally {
+    actionSubmitting.value = false
     clearSelection()
   }
 }
 
 async function submitAbility(pieceId: string, to: Square) {
+  if (!canUsePlayerControls.value) return
+  const ticket = selectionGeneration
   const abilityId = activeAbilityId.value
   if (!abilityId) return
   const options = await loadPieceOptions(pieceId, abilityId)
+  if (ticket !== selectionGeneration || !canUsePlayerControls.value) return
+  if (abilityId === 'sacrifice') {
+    sacrificeOptions.value = options
+    sacrificeSelectedIds.value = []
+    sacrificeOpen.value = options.abilityActions.length > 0
+    return
+  }
   const actorSquare = props.state.pieces[pieceId]?.current_square
   const candidates = options.abilityActions.filter(action => abilityActionTargetsSquare(action, actorSquare, to))
   if (candidates.length === 0) { clearSelection(); return }
@@ -1441,6 +1755,7 @@ async function submitAbility(pieceId: string, to: Square) {
     if (!Number.isInteger(index) || !candidates[index]) return
     chosen = candidates[index]
   }
+  actionSubmitting.value = true
   try {
     const newState = await api.submitAction(props.state.id, {
       type: 'ability', piece_id: pieceId, ability_id: abilityId,
@@ -1448,19 +1763,64 @@ async function submitAbility(pieceId: string, to: Square) {
       pocket_piece_id: chosen.pocket_piece_id, to: chosen.to,
     })
     emit('stateUpdate', newState)
-  } catch (e: unknown) { error.value = e instanceof Error ? e.message : String(e) }
-  finally { clearSelection() }
+  } catch (e: unknown) { error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e) }
+  finally { actionSubmitting.value = false; clearSelection() }
+}
+
+function toggleSacrificeTarget(pieceId: string) {
+  if (sacrificeSelectedIds.value.includes(pieceId)) {
+    sacrificeSelectedIds.value = sacrificeSelectedIds.value.filter(id => id !== pieceId)
+    return
+  }
+  if (sacrificeSelectedScore.value + pieceScore(pieceId) <= sacrificeBudget.value) {
+    sacrificeSelectedIds.value = [...sacrificeSelectedIds.value, pieceId]
+  }
+}
+
+function cancelSacrifice() {
+  sacrificeOpen.value = false
+  sacrificeSelectedIds.value = []
+  sacrificeOptions.value = null
+  clearSelection()
+}
+
+async function confirmSacrifice() {
+  if (!canUsePlayerControls.value) return
+  const pieceId = selectedPieceId.value
+  if (!pieceId || sacrificeSelectedIds.value.length === 0) return
+  actionSubmitting.value = true
+  try {
+    const newState = await api.submitAction(props.state.id, {
+      type: 'ability',
+      piece_id: pieceId,
+      ability_id: 'sacrifice',
+      target_piece_ids: sacrificeSelectedIds.value,
+    })
+    emit('stateUpdate', newState)
+  } catch (e: unknown) {
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
+  } finally {
+    actionSubmitting.value = false
+    sacrificeOpen.value = false
+    sacrificeSelectedIds.value = []
+    sacrificeOptions.value = null
+    clearSelection()
+  }
 }
 
 async function submitDrop(pieceId: string, to: Square) {
+  if (!canUsePlayerControls.value) return
+  const position = positionKey.value
   const targets = selectedPocketPieceId.value === pieceId && dropSquares.value.length > 0
     ? dropSquares.value
     : await selectPocketPiece(pieceId)
+  if (position !== positionKey.value || selectedPocketPieceId.value !== pieceId || !canUsePlayerControls.value) return
   if (!isLegalSquare(to, targets)) {
     clearSelection()
     return
   }
 
+  actionSubmitting.value = true
   try {
     const action: SubmitDropAction = {
       type: 'drop',
@@ -1470,13 +1830,15 @@ async function submitDrop(pieceId: string, to: Square) {
     const newState = await api.submitAction(props.state.id, action)
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = gameActionError(e)
   } finally {
+    actionSubmitting.value = false
     clearSelection()
   }
 }
 
 async function onSquareClick(sq: Square) {
+  if (summonActive.value) { summonPanel.value?.chooseBoardSquare(sq); return }
   error.value = null
   if (promotionRequest.value) return
   if (!canUsePlayerControls.value) {
@@ -1528,6 +1890,7 @@ async function onSquareClick(sq: Square) {
 }
 
 async function onPocketClick(pieceId: string) {
+  if (isStandard.value) return
   error.value = null
   if (!canUsePlayerControls.value) {
     error.value = blockedControlMessage(controlContext.value)
@@ -1552,6 +1915,7 @@ function onBoardPieceDragStart(pieceId: string) {
 }
 
 function onBoardPieceClick(pieceId: string) {
+  if (summonActive.value) { summonPanel.value?.chooseBoardPiece(pieceId); return }
   error.value = null
   if (!canUsePlayerControls.value) {
     clearSelection()
@@ -1564,7 +1928,7 @@ function onBoardPieceClick(pieceId: string) {
     return
   }
   if (piece.owner !== props.state.current_player) return
-  if (abilityMode.value && activeAbilityId.value === 'bomb' && selectedPieceId.value === pieceId && piece.current_square) {
+  if (abilityMode.value && selectedPieceId.value === pieceId && piece.current_square) {
     void submitAbility(pieceId, piece.current_square)
     return
   }
@@ -1573,6 +1937,7 @@ function onBoardPieceClick(pieceId: string) {
 }
 
 async function onSquareDrop(sq: Square | null, pieceId: string) {
+  if (summonActive.value) return
   error.value = null
   if (!canUsePlayerControls.value || !sq) {
     clearSelection()
@@ -1585,6 +1950,7 @@ async function onSquareDrop(sq: Square | null, pieceId: string) {
     return
   }
 
+  if (isStandard.value && piece.in_pocket) return
   if (piece.in_pocket || draggedPocketPieceId.value === pieceId) {
     await submitDrop(pieceId, sq)
   } else {
@@ -1593,6 +1959,7 @@ async function onSquareDrop(sq: Square | null, pieceId: string) {
 }
 
 function onPocketDragStart(event: DragEvent, pieceId: string) {
+  if (isStandard.value) { event.preventDefault(); return }
   error.value = null
   if (!canUsePlayerControls.value) {
     event.preventDefault()
@@ -1627,7 +1994,7 @@ async function onResign() {
     clearSelection()
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
   }
 }
 </script>
@@ -1730,6 +2097,24 @@ async function onResign() {
 }
 .game-sidebar { width: 290px; max-height: 82vh; overflow: auto; display: grid; gap: 12px; padding: 12px; border-radius: 10px; background: rgba(19,26,39,.92); border: 1px solid rgba(255,255,255,.1); }
 .live-notation { display: grid; gap: 4px; color: #dbe2ec; }.live-notation > div { padding: 7px 8px; border-radius: 5px; background: rgba(255,255,255,.045); }.live-notation p { color: #a8b1c2; }
+.bot-debug-panel { padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); color: #dbe2ec; }
+.bot-debug-panel summary { cursor: pointer; color: #f4dfb0; font-weight: 700; }
+.bot-debug-panel > p { margin: 10px 0 0; color: #a8b1c2; font-size: .82rem; line-height: 1.45; }
+.bot-debug-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.bot-debug-summary span { display: grid; gap: 2px; padding: 7px; border-radius: 6px; background: rgba(217,164,65,.08); }
+.bot-debug-summary small, .bot-debug-session small { color: #a8b1c2; }
+.bot-debug-summary strong { font: 700 .92rem/1.2 ui-monospace, monospace; }
+.bot-branching-flow { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; margin-top: 10px; padding: 9px; border-radius: 6px; background: rgba(255,255,255,.04); }
+.bot-branching-flow span { text-align: right; font-family: ui-monospace, monospace; }.bot-branching-flow i { color: #d9a441; font-style: normal; }
+.bot-branching-flow small { grid-column: 1 / -1; color: #a8b1c2; }
+.bot-debug-details { display: grid; gap: 4px; margin: 10px 0; font-size: .78rem; }
+.bot-debug-details div { display: flex; justify-content: space-between; gap: 8px; }
+.bot-debug-details dt { color: #a8b1c2; }.bot-debug-details dd { margin: 0; font-family: ui-monospace, monospace; }
+.bot-debug-session { display: grid; gap: 3px; padding: 9px 0; border-block: 1px solid rgba(255,255,255,.08); }
+.bot-debug-history { display: grid; gap: 4px; max-height: 160px; overflow: auto; margin-top: 8px; }
+.bot-debug-history > div { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 2px 7px; padding: 6px; border-radius: 5px; background: rgba(255,255,255,.04); }
+.bot-debug-history span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.bot-debug-history small { grid-column: 2; color: #a8b1c2; }
+.bot-debug-copy { width: 100%; margin-top: 8px; padding: 7px; border: 1px solid rgba(217,164,65,.38); border-radius: 6px; background: rgba(217,164,65,.08); color: #f4dfb0; cursor: pointer; }
 .sidebar-game-info { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); color: #a8b1c2; }
 .game-over-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
@@ -1935,6 +2320,13 @@ async function onResign() {
   position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center;
   background: rgba(8, 20, 32, 0.68); padding: 20px;
 }
+.sacrifice-panel-overlay {
+  position: fixed; inset: 0; z-index: 70; display: flex; align-items: flex-start; justify-content: flex-end;
+  padding: 88px 24px 24px; pointer-events: none;
+}
+.sacrifice-panel-box { width: min(390px, 100%); max-height: calc(100vh - 112px); overflow: auto; pointer-events: auto; box-shadow: 0 20px 60px rgba(8, 20, 32, .35); }
+.sacrifice-panel-box .airdrop-pocket button > span { display: flex; align-items: center; gap: 10px; }
+.sacrifice-panel-box .airdrop-pocket button > span strong { color: #b45309; font-variant-numeric: tabular-nums; }
 .airdrop-box { width: min(680px, 100%); padding: 24px; border-radius: 14px; background: white; color: #1f2933; }
 .airdrop-box h3 { margin: 0 0 6px; }
 .airdrop-box > p { margin: 0 0 18px; color: #52606d; }
@@ -1952,6 +2344,8 @@ async function onResign() {
 .airdrop-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 @media (max-width: 900px) {
+  .sacrifice-panel-overlay { align-items: flex-end; justify-content: center; padding: 12px; }
+  .sacrifice-panel-box { max-height: 44vh; }
   .airdrop-layout { grid-template-columns: 1fr; }
   .game-screen { padding: 12px; }
   .header,
@@ -1990,5 +2384,45 @@ async function onResign() {
   .ability-help {
     text-align: left;
   }
+}
+
+
+/* Reserve room for the title, clocks and controls before sizing either ruleset's board. */
+.game-screen { --board-size: min(calc(100dvh - var(--game-chrome, 350px)), calc(100vw - 574px)); gap: 8px; padding: 10px; }
+.game-screen.with-bot { --game-chrome: 420px; }
+.main-layout, .standard .main-layout { display: grid; grid-template-columns: var(--board-size) 230px 280px; gap: 12px; align-items: start; justify-content: center; }
+.board-column, .standard .board-column { width: 100%; gap: 6px; }
+.game-clock, .board-tools, .selected-piece-panel, .game-screen :deep(.board-wrapper), .game-screen :deep(.board) { width: 100%; box-sizing: border-box; }
+.game-clock { padding: 6px 10px; line-height: 1.2; }
+.game-clock > span { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.game-clock > strong { grid-column: 2; grid-row: 1 / span 2; }
+.game-clock > small { grid-column: 1; }
+.game-clock strong { font-size: 1.35rem; }
+.hand-column { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-height: calc(100dvh - 180px); overflow: auto; }
+.hand-column .pocket { width: 100%; min-width: 0; flex: none; }
+.game-sidebar, .standard .game-sidebar { width: auto; min-width: 0; max-height: calc(100dvh - 180px); overflow: auto; gap: 8px; padding: 10px; }
+.bot-status { padding: 7px 12px; }
+.interaction-status { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; font-size:13px; color:#dce6f3; }
+.interaction-status button { flex-shrink:0; padding:6px; cursor:pointer; }
+.draw-info { font-size:12px; color:#b6c2d2; }
+.live-notation { max-height: 160px; overflow:auto; overflow-wrap:anywhere; }
+@media (max-width: 800px) {
+  .game-screen { --board-size: min(calc(100dvh - var(--game-chrome, 350px)), calc(100vw - 280px)); }
+  .main-layout, .standard .main-layout { grid-template-columns: var(--board-size) 230px; }
+  .board-column { grid-row: 1 / span 2; }
+  .hand-column { max-height: calc((100dvh - 180px) * .55); }
+  .game-sidebar, .standard .game-sidebar { grid-column: 2; max-height: calc((100dvh - 180px) * .45 - 12px); }
+}
+@media (max-width: 600px) {
+  .game-screen { --board-size: min(calc(100dvh - var(--game-chrome, 350px)), calc(100vw - 166px)); padding: 6px; }
+  .main-layout, .standard .main-layout { grid-template-columns: var(--board-size) minmax(0, 1fr); gap: 6px; }
+  .header, .turn-info { flex-wrap: wrap; gap: 6px; }
+  .hand-column { max-height: calc((100dvh - 280px) * .55); }
+  .game-sidebar, .standard .game-sidebar { max-height: calc((100dvh - 280px) * .45 - 6px); }
+  .header h2 { font-size: 18px; }
+  .title-en { display: none; }
+  .game-clock { gap: 2px 4px; padding: 5px; }
+  .game-clock strong { font-size: 1rem; }
+  .board-tools { flex-wrap: wrap; }
 }
 </style>

@@ -1,3 +1,4 @@
+import { assertRecordRulesVersion, recordRulesVersionError, type RecordRulesVersionError } from './gameRulesVersions.ts'
 import { toRaw } from 'vue'
 import type { GameState } from './types/game'
 import type { GameRecord, StateDeltaOperation } from './types/gameRecord'
@@ -75,7 +76,7 @@ function isRenderableReplayRecord(value: unknown): value is GameRecord {
 
 export type ReplayFramesResult =
   | { ok: true; frames: GameState[] }
-  | { ok: false; error: 'invalid_replay' }
+  | { ok: false; error: 'invalid_replay' | RecordRulesVersionError }
 
 export function applyStateDelta(state: GameState, operations: StateDeltaOperation[]): GameState {
   const next = clone(state) as unknown as Record<string, unknown>
@@ -97,6 +98,7 @@ export function applyStateDelta(state: GameState, operations: StateDeltaOperatio
 }
 
 export function buildReplayFrames(record: GameRecord): GameState[] {
+  assertRecordRulesVersion(record)
   const initialState = clone(record.initial_state)
   const frames: GameState[] = [{
     ...initialState,
@@ -108,6 +110,8 @@ export function buildReplayFrames(record: GameRecord): GameState[] {
 
 export function buildReplayFramesResult(record: unknown): ReplayFramesResult {
   if (!isRenderableReplayRecord(record)) return { ok: false, error: 'invalid_replay' }
+  const error = recordRulesVersionError(record.initial_state.ruleset, record.ruleset_version)
+  if (error) return { ok: false, error }
   try {
     return { ok: true, frames: buildReplayFrames(record) }
   } catch {

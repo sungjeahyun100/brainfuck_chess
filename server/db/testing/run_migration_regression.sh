@@ -29,6 +29,16 @@ run_migration() {
 
 run_fixture_sql "$REPOSITORY_ROOT/server/db/testing/ownership_fixture.sql"
 
+# Verify the original ownership contract before retention adds DELETE grants.
+for pass in 1 2; do
+  run_fixture_sql "$REPOSITORY_ROOT/server/db/shared/20260826000000_profile_visibility.sql"
+  for environment in test prod; do
+    run_fixture_sql "$REPOSITORY_ROOT/server/db/$environment/20260826000500_create_game_records.sql"
+    run_fixture_sql "$REPOSITORY_ROOT/server/db/$environment/20260826001000_game_record_ownership.sql"
+  done
+done
+run_fixture_sql "$REPOSITORY_ROOT/server/db/testing/verify_ownership_migrations.sql"
+
 run_migration test
 printf 'prod\n' | run_migration prod
 
@@ -37,6 +47,6 @@ printf 'prod\n' | run_migration prod
 run_migration test --verify-isolation
 printf 'prod\n' | run_migration prod
 
-run_fixture_sql "$REPOSITORY_ROOT/server/db/testing/verify_ownership_migrations.sql"
+run_fixture_sql "$REPOSITORY_ROOT/server/db/testing/verify_account_decks.sql"
 
 echo 'Disposable PostgreSQL migration regression PASS'

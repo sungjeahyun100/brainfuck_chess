@@ -63,6 +63,31 @@
       </div>
     </div>
 
+    <div v-if="labSacrificeOpen" class="lab-sacrifice-overlay">
+      <div class="lab-airdrop-box lab-sacrifice-box">
+        <h2>희생 대상 선택</h2>
+        <p>성소 주변의 아군 기물(킹 제외)은 모두 희생됩니다. 제거할 적 지상 기물을 점수 한도 안에서 선택하세요.</p>
+        <div class="lab-sacrifice-targets">
+          <button
+            v-for="pieceId in labSacrificeCandidateIds"
+            :key="pieceId"
+            type="button"
+            :class="{ selected: labSacrificeSelectedIds.includes(pieceId) }"
+            :disabled="!labSacrificeSelectedIds.includes(pieceId) && labSacrificeSelectedScore + labPieceScore(pieceId) > labSacrificeBudget"
+            @click="toggleLabSacrificeTarget(pieceId)"
+          >
+            <span><strong>{{ labPieceSquareLabel(pieceId) }}</strong>{{ pieceLabel(pieces.find(piece => piece.id === pieceId)?.pieceType ?? pieceId) }}</span>
+            <small>{{ isLabKing(pieceId) ? '킹' : `${labPieceScore(pieceId)}점` }}</small>
+          </button>
+        </div>
+        <small>선택 {{ labSacrificeSelectedIds.length }}개 · {{ labSacrificeSelectedScore }}점 / 한도 {{ labSacrificeBudget }}점</small>
+        <div class="lab-airdrop-actions">
+          <button class="btn-secondary" type="button" @click="cancelLabSacrifice">취소</button>
+          <button class="btn-start" type="button" :disabled="labSacrificeSelectedIds.length === 0" @click="confirmLabSacrifice">희생 실행</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="labAirdropOpen" class="lab-airdrop-overlay">
       <div class="lab-airdrop-box">
         <h2>공수부대 다중 소환</h2>
@@ -474,6 +499,9 @@ const activeAbilityId = ref<string | null>(null)
 const labAirdropOpen = ref(false)
 const labAirdropSelectedPieceId = ref<string | null>(null)
 const labAirdropDraft = ref<AbilityDeployment[]>([])
+const labSacrificeOpen = ref(false)
+const labSacrificeCandidateIds = ref<string[]>([])
+const labSacrificeSelectedIds = ref<string[]>([])
 const optionsLoading = ref(false)
 const optionsError = ref<string | null>(null)
 const draggedCatalogPiece = ref<string | null>(null)
@@ -543,6 +571,23 @@ const labAirdropSquares = computed(() => {
     return [action.to]
   }).sort((left, right) => right.rank - left.rank || left.file - right.file)
 })
+const labSacrificeBudget = computed(() => {
+  const shrine = selectedLabPiece.value
+  if (!shrine) return 0
+  const total = pieces.value.reduce((score, piece) => {
+    const adjacent = Math.abs(piece.square.file - shrine.square.file) <= 1
+      && Math.abs(piece.square.rank - shrine.square.rank) <= 1
+      && !sameSquare(piece.square, shrine.square)
+    return adjacent && piece.owner === shrine.owner && !isLabKing(piece.id)
+      ? score + labPieceScore(piece.id)
+      : score
+  }, 0)
+  return Math.min(8, total)
+})
+const labSacrificeSelectedScore = computed(() => labSacrificeSelectedIds.value.reduce(
+  (total, pieceId) => total + labPieceScore(pieceId),
+  0,
+))
 const renderedArrows = computed(() => {
   const rendered = arrows.value
     .map((arrow, index) => renderArrow(arrow, `arrow-${index}-${arrow.from}-${arrow.to}`, false))
@@ -638,6 +683,26 @@ function labPieceMaxAmmo(piece: PieceLabPiece): number {
   return labDefinitions.value[piece.pieceType]?.max_ammo ?? 0
 }
 
+function labPieceScore(pieceId: string): number {
+  const piece = pieces.value.find(entry => entry.id === pieceId)
+  return piece ? labPieceDefinition(piece)?.score ?? 0 : 0
+}
+
+function isLabKing(pieceId: string): boolean {
+  const piece = pieces.value.find(entry => entry.id === pieceId)
+  return Boolean(piece && (piece.pieceType === 'king' || labPieceDefinition(piece)?.is_king))
+}
+
+function labPieceSquareLabel(pieceId: string): string {
+  const square = pieces.value.find(entry => entry.id === pieceId)?.square
+  return square ? `${fileLabel(square.file)}${square.rank + 1}` : '-'
+}
+
+function labPieceDefinition(piece: Pick<PieceLabPiece, 'pieceType' | 'owner'>): PieceDefinition | undefined {
+  return labDefinitions.value[piece.pieceType]
+    ?? labDefinitions.value[`${piece.pieceType}-${piece.owner}`]
+}
+
 function initialPieceState(pieceType: string): Record<string, PieceStateValue> {
   return Object.fromEntries(
     (labDefinitions.value[pieceType]?.state_schema ?? [])
@@ -650,6 +715,7 @@ function displayPieceSymbol(pieceType: string): string {
     king: 'K',
     queen: 'Q',
     amazon: 'A',
+    'prime-minister': '총',
     'cannon-rook': 'C',
     'tempest-queen': 'Q',
     'tempest-rook': 'T',
@@ -683,6 +749,7 @@ function movementDescription(pieceType: string): string {
     knight: 'L자 형태로 도약하며 중간 기물에 막히지 않습니다.',
     pawn: 'White는 위로, Black은 아래로 전진합니다. 대각선 전방을 공격하고 시작 위치에서는 2칸 전진할 수 있습니다.',
     amazon: 'Queen의 장거리 행마와 Knight의 도약 행마를 모두 사용합니다.',
+    'prime-minister': '인접한 직선·대각선 칸으로 진입한 뒤, 주어진 Chessembly 분기를 따라 두 번째 칸으로 이동합니다.',
     'tempest-rook': '대각선으로 한 칸 진입한 뒤 그 지점에서 가로 또는 세로 방향으로 뻗어 나갑니다.',
     'tempest-bishop': '가로 또는 세로로 한 칸 진입한 뒤 그 지점에서 대각선으로 뻗어 나갑니다.',
     'bouncing-bishop': '대각선으로 이동하며 보드 가장자리에 도달하면 반사하여 계속 이동합니다.',
@@ -705,6 +772,12 @@ function movementDescription(pieceType: string): string {
     bomber: '지상에서 직교 1칸을 이동하고, 비행 시 별도 공중 레이어에서 퀸처럼 이동하며 지상을 폭격합니다.',
     'surface-to-air-missile': '전방 대각선 1칸 또는 전방 2칸으로 이동합니다. 격추로 자신 중심 5×3 범위의 적 비행 기물 하나를 제거합니다.',
     'machine-gunner': '상하좌우로 한 칸 이동하거나 포획합니다. 기관총 사격을 선택한 뒤 자기 자신을 누르면, 바로 앞의 2×3 영역에 있는 모든 기물을 제거합니다.',
+    shell: '스스로 이동할 수 없습니다. 포켓에서는 적 지상 기물 위에도 착수할 수 있으며, 착수하거나 폭발 능력을 사용하면 자신과 상하좌우 한 칸의 모든 지상 기물을 제거합니다.',
+    'sacrificial-shrine': '킹처럼 인접한 8방향으로 한 칸 이동하거나 포획합니다. 희생을 사용하면 주변 아군 기물을 제물로 바치고 그 점수 한도 안에서 적 지상 기물을 선택해 제거합니다.',
+    'sacrificial-lamb': '스스로 이동하거나 포획할 수 없습니다. 희생의 성소 주변에서 제물로 사용하는 기물입니다.',
+    fanatic: '전방으로 한 칸 또는, 앞칸이 비어 있으면 두 칸 전진합니다. 직접 포획되면 자신을 포획한 기물도 함께 죽습니다.',
+    wall: '스스로 이동하거나 포획할 수 없습니다. 일반 이동과 착수에 의한 포획을 막고 슬라이딩 행마를 차단하지만, 특수능력으로는 제거할 수 있습니다.',
+    repairman: '상하좌우로 한 칸 이동하거나 포획합니다. 전방 3칸에 아군 성벽이 하나 이상 있으면 나머지 빈칸을 성벽으로 채울 수 있습니다.',
   }
   return descriptions[pieceType] ?? 'Custom Piece: 등록된 Chessembly 행마법을 따릅니다.'
 }
@@ -758,12 +831,18 @@ function resetLabPieces() {
   abilitySquares.value = []
   abilities.value = []
   activeAbilityId.value = null
+  labSacrificeOpen.value = false
+  labSacrificeCandidateIds.value = []
+  labSacrificeSelectedIds.value = []
   loadedOptionsPieceId.value = null
   promotionRequest.value = null
   optionsError.value = null
 }
 
 function clearSelection() {
+  labSacrificeOpen.value = false
+  labSacrificeCandidateIds.value = []
+  labSacrificeSelectedIds.value = []
   overlapSelectionPieceIds.value = []
   selectedPieceId.value = null
   moves.value = []
@@ -853,6 +932,7 @@ function legalActionsForTarget(pieceId: string, to: Square): MoveAction[] {
 }
 
 async function applyCanonicalLabAction(action: TurnAction): Promise<boolean> {
+  if (action.type === 'extra_summon') return false
   optionsLoading.value = true
   optionsError.value = null
   try {
@@ -912,6 +992,9 @@ function syncLabState(state: GameState, actorId: string) {
   globalState.value = state.global_state ?? {}
   selectedPieceId.value = state.pieces[actorId]?.captured ? null : actorId
   activeAbilityId.value = null
+  labSacrificeOpen.value = false
+  labSacrificeCandidateIds.value = []
+  labSacrificeSelectedIds.value = []
   moves.value = []
   legalMoves.value = []
   legalDrops.value = []
@@ -942,6 +1025,14 @@ async function tryLabAbility(to: Square): Promise<boolean> {
     abilityActionTargetsSquare(action, selectedLabPiece.value?.square, to)
   ))
   if (candidates.length === 0) return false
+  if (activeAbilityId.value === 'sacrifice') {
+    labSacrificeCandidateIds.value = Array.from(new Set(
+      candidates.flatMap(action => action.target_piece_id ? [action.target_piece_id] : []),
+    ))
+    labSacrificeSelectedIds.value = []
+    labSacrificeOpen.value = labSacrificeCandidateIds.value.length > 0
+    return labSacrificeOpen.value
+  }
   let chosen = candidates[0]
   if (candidates.length > 1) {
     const choices = candidates.map((action, index) => {
@@ -1069,7 +1160,7 @@ async function onSquareClick(file: number, rank: number) {
     remainingFlightTurns: 0,
   }
   pieces.value = [...pieces.value, piece]
-  selectedPieceId.value = piece.id
+  clearSelection()
 }
 
 async function onAirPieceClick(piece: PieceLabPiece, file: number, rank: number) {
@@ -1377,7 +1468,7 @@ async function onSquareDrop(event: DragEvent, file: number, rank: number) {
         remainingFlightTurns: 0,
       },
     ]
-    selectedPieceId.value = pieces.value[pieces.value.length - 1]?.id ?? null
+    clearSelection()
   }
 }
 
@@ -1391,6 +1482,7 @@ function squareClasses(square: LabSquare): string[] {
     isMoveSquare(square) ? 'can-move' : '',
     isAttackSquare(square) ? 'can-attack' : '',
     isAbilitySquare(square) ? 'can-ability' : '',
+    isLabSacrificeSelectedSquare(square) ? 'sacrifice-selected' : '',
     lastMove.value && (sameSquare(square, lastMove.value.from) || sameSquare(square, lastMove.value.to)) ? 'last-move' : '',
   ].filter(Boolean)
 }
@@ -1403,6 +1495,13 @@ function isMoveSquare(square: Square): boolean {
 function isAttackSquare(square: Square): boolean {
   const id = squareId(square)
   return attacks.value.some(attack => squareId(attack) === id)
+}
+
+function isLabSacrificeSelectedSquare(square: Square): boolean {
+  return labSacrificeSelectedIds.value.some(pieceId => {
+    const target = pieces.value.find(piece => piece.id === pieceId)
+    return target ? sameSquare(target.square, square) : false
+  })
 }
 
 async function toggleAbility(ability: PieceLabMoveOption) {
@@ -1474,6 +1573,41 @@ async function confirmLabAirdrop() {
     piece_id: actor.id,
     ability_id: 'airdrop',
     deployments,
+  })
+}
+
+function toggleLabSacrificeTarget(pieceId: string) {
+  if (labSacrificeSelectedIds.value.includes(pieceId)) {
+    labSacrificeSelectedIds.value = labSacrificeSelectedIds.value.filter(id => id !== pieceId)
+    return
+  }
+  if (labSacrificeSelectedScore.value + labPieceScore(pieceId) <= labSacrificeBudget.value) {
+    labSacrificeSelectedIds.value = [...labSacrificeSelectedIds.value, pieceId]
+  }
+}
+
+function cancelLabSacrifice() {
+  labSacrificeOpen.value = false
+  labSacrificeCandidateIds.value = []
+  labSacrificeSelectedIds.value = []
+  activeAbilityId.value = null
+  abilitySquares.value = []
+}
+
+async function confirmLabSacrifice() {
+  const actor = selectedLabPiece.value
+  if (!actor || labSacrificeSelectedIds.value.length === 0) return
+  const targetPieceIds = [...labSacrificeSelectedIds.value]
+  labSacrificeOpen.value = false
+  labSacrificeCandidateIds.value = []
+  labSacrificeSelectedIds.value = []
+  await applyLabAbility({
+    type: 'ability',
+    player_id: actor.owner,
+    piece_id: actor.id,
+    ability_id: 'sacrifice',
+    target_piece_ids: targetPieceIds,
+    deployments: [],
   })
 }
 
@@ -1850,6 +1984,23 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+.lab-square.sacrifice-selected::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  z-index: 7;
+  border: 4px solid #ffcf4a;
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px rgba(208, 39, 55, .75), 0 0 24px 8px rgba(255, 207, 74, .9);
+  pointer-events: none;
+  animation: lab-sacrifice-pulse .7s ease-in-out infinite alternate;
+}
+
+@keyframes lab-sacrifice-pulse {
+  from { opacity: .45; transform: scale(.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 .lab-marker {
   position: absolute;
   z-index: 2;
@@ -2024,6 +2175,24 @@ onBeforeUnmount(() => {
   background: rgba(3, 12, 22, 0.76);
 }
 
+.lab-sacrifice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 88px 24px 24px;
+  pointer-events: none;
+}
+
+.lab-sacrifice-overlay .lab-sacrifice-box {
+  width: min(390px, 100%);
+  max-height: calc(100vh - 112px);
+  overflow: auto;
+  pointer-events: auto;
+}
+
 .lab-airdrop-box {
   width: min(680px, 100%);
   padding: 24px;
@@ -2042,12 +2211,21 @@ onBeforeUnmount(() => {
 .lab-airdrop-pocket button { display: flex; justify-content: space-between; padding: 10px; border: 2px solid var(--line); border-radius: 8px; color: inherit; background: rgba(255,255,255,.04); cursor: pointer; }
 .lab-airdrop-pocket button.selected { border-color: var(--accent); background: rgba(82, 208, 255, .14); }
 .lab-airdrop-pocket button.used { opacity: .42; }
+.lab-sacrifice-box { width: min(560px, 100%); }
+.lab-sacrifice-targets { display: grid; gap: 8px; max-height: 320px; margin: 18px 0 12px; overflow: auto; }
+.lab-sacrifice-targets button { display: flex; justify-content: space-between; padding: 12px; border: 2px solid var(--line); border-radius: 8px; color: inherit; background: rgba(255,255,255,.04); cursor: pointer; }
+.lab-sacrifice-targets button span { display: flex; gap: 10px; align-items: center; }
+.lab-sacrifice-targets button span strong { color: #ffcf4a; font-variant-numeric: tabular-nums; }
+.lab-sacrifice-targets button.selected { border-color: #d7a84a; background: rgba(215, 168, 74, .16); }
+.lab-sacrifice-targets button:disabled { cursor: not-allowed; opacity: .4; }
 .lab-airdrop-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .lab-airdrop-grid button { min-height: 72px; padding: 6px; border: 2px dashed #66839e; border-radius: 8px; color: inherit; background: rgba(255,255,255,.04); cursor: pointer; }
 .lab-airdrop-grid button.occupied { border-style: solid; border-color: #66d58a; background: rgba(102, 213, 138, .14); font-weight: 800; }
 .lab-airdrop-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 @media (max-width: 1200px) {
+  .lab-sacrifice-overlay { align-items: flex-end; justify-content: center; padding: 12px; }
+  .lab-sacrifice-overlay .lab-sacrifice-box { max-height: 44vh; }
   .lab-airdrop-layout { grid-template-columns: 1fr; }
   .piece-lab-grid {
     grid-template-columns: 1fr;
@@ -2056,5 +2234,9 @@ onBeforeUnmount(() => {
   .lab-board {
     width: min(100%, 86vh);
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lab-square.sacrifice-selected::before { animation: none; }
 }
 </style>

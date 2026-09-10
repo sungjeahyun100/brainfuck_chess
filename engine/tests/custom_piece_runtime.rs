@@ -80,6 +80,8 @@ fn state_with_piece(type_id: &str) -> GameState {
     let deck = Deck {
         player_id: "white".into(),
         starting_pieces: vec![piece_id.clone()],
+        hand_pieces: Vec::new(),
+        extra_deck_pieces: Vec::new(),
         pocket_pieces: Vec::new(),
         score_limit: 100,
         total_score: 7,
@@ -100,6 +102,8 @@ fn state_with_piece(type_id: &str) -> GameState {
             deck: Deck {
                 player_id: "black".into(),
                 starting_pieces: Vec::new(),
+                hand_pieces: Vec::new(),
+                extra_deck_pieces: Vec::new(),
                 pocket_pieces: Vec::new(),
                 score_limit: 100,
                 total_score: 0,
@@ -108,6 +112,7 @@ fn state_with_piece(type_id: &str) -> GameState {
         },
     );
     GameState {
+        ruleset: Default::default(),
         id: "custom-runtime".into(),
         board,
         pieces: HashMap::from([(piece_id, piece)]),

@@ -14,6 +14,8 @@ take-move(-1, 1);"
         id: "surface-to-air-missile-white".into(),
         name: "지대공 미사일".into(),
         score: 2,
+        ai_board_value: None,
+        ai_pocket_value: None,
         max_ammo: 2,
         deployment_zone: DeploymentZone::Front,
         chessembly_code: movement.clone(),

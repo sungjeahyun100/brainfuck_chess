@@ -1,5 +1,7 @@
 <template>
   <main class="lobby">
+    <p v-if="decksLoading" role="status">덱을 불러오는 중…</p>
+    <p v-if="decksError" class="error" role="alert">{{ decksError }} <button class="btn-secondary" @click="savedDecks.loadDecks">다시 불러오기</button></p>
     <div class="page-bar">
       <button class="btn-secondary" @click="$emit('back')">로비로</button>
       <div>
@@ -11,7 +13,7 @@
       </button>
     </div>
 
-    <section v-if="decks.length === 0" class="card empty-state">
+    <section v-if="!decksLoading && !decksError && decks.length === 0" class="card empty-state">
       <h2>먼저 덱을 만들어 주세요.</h2>
       <p>저장된 덱이 없으면 게임을 시작할 수 없습니다.</p>
       <button class="btn-start" @click="$emit('deck-building')">덱 빌딩으로 이동</button>
@@ -63,7 +65,7 @@
           <select v-model="primaryDeckId" class="text-input">
             <option value="">선택 안 함</option>
             <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
-              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }}
+              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }} · {{ deck.ruleset === 'standard' ? 'Standard' : 'Legacy' }}
             </option>
           </select>
           <p v-if="primaryDeck">{{ deckInfo(primaryDeck) }}</p>
@@ -74,7 +76,7 @@
           <select v-model="secondaryDeckId" class="text-input">
             <option value="">선택 안 함</option>
             <option v-for="deck in validDecks" :key="deck.id" :value="deck.id">
-              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }}
+              {{ deck.name }} · {{ boardMapLabel(deck.mapId) }} · {{ deck.ruleset === 'standard' ? 'Standard' : 'Legacy' }}
             </option>
           </select>
           <p v-if="secondaryDeck">{{ deckInfo(secondaryDeck) }}</p>
@@ -90,6 +92,7 @@
 </template>
 
 <script setup lang="ts">
+import { parseDeckRuleset } from '../deckRulesets'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { BotDifficulty } from '../types/game'
 import type { BotDeckSelection, DeckSelectMode, LobbyPlayer, SavedDeck, SingleDeckSelection } from '../types/deck'
@@ -113,7 +116,7 @@ const emit = defineEmits<{
 }>()
 
 const savedDecks = useSavedDecks()
-const decks = ref<SavedDeck[]>([])
+const { decks, loading: decksLoading, error: decksError } = savedDecks
 const primaryDeckId = ref('')
 const secondaryDeckId = ref('')
 const humanSide = ref<LobbyPlayer>('white')
@@ -128,20 +131,24 @@ const invalidDecks = computed(() => decks.value.filter(deck => !validateSavedDec
 const primaryDeck = computed(() => decks.value.find(deck => deck.id === primaryDeckId.value) ?? null)
 const secondaryDeck = computed(() => decks.value.find(deck => deck.id === secondaryDeckId.value) ?? null)
 const sameMap = computed(() => Boolean(primaryDeck.value && secondaryDeck.value && primaryDeck.value.mapId === secondaryDeck.value.mapId))
+const sameRuleset = computed(() => Boolean(primaryDeck.value && secondaryDeck.value && parseDeckRuleset(primaryDeck.value.ruleset) === parseDeckRuleset(secondaryDeck.value.ruleset)))
 const errorMessage = computed(() => {
   if (!primaryDeck.value || !secondaryDeck.value) return null
+  if (!sameRuleset.value) return '선택한 두 덱의 룰이 다릅니다. 같은 룰의 덱을 선택하세요.'
   if (!sameMap.value) return '선택한 두 덱의 맵이 다릅니다. 같은 맵 전용 덱을 선택하세요.'
   return null
 })
 const canStart = computed(() => Boolean(
-  primaryDeck.value
+  !decksLoading.value
+  && !decksError.value
+  && primaryDeck.value
   && secondaryDeck.value
   && sameMap.value
+  && sameRuleset.value
   && (props.mode !== 'single' || (isValidGameNickname(localNickname.value) && isValidGameNickname(guestNickname.value)))
 ))
 
 function refresh() {
-  decks.value = savedDecks.loadDecks()
   primaryDeckId.value = validDecks.value[0]?.id ?? ''
   secondaryDeckId.value = validDecks.value.find(deck => deck.id !== primaryDeckId.value)?.id ?? validDecks.value[0]?.id ?? ''
 }
@@ -175,7 +182,7 @@ function start() {
   }))
 }
 
-watch(() => props.mode, refresh)
+watch([() => props.mode, decks], refresh)
 onMounted(async () => {
   refresh()
   try {

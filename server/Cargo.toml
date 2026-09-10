@@ -3,6 +3,9 @@ name = "brainfuck-chess-server"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+profiling = ["brainfuck-chess-engine/profiling"]
+
 [dependencies]
 brainfuck-chess-engine = { path = "../engine" }
 axum = "0.7"
@@ -12,6 +15,7 @@ serde_json = "1"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 uuid = { version = "1", features = ["v4"] }
+getrandom = "0.4.2"
 dashmap = "6"
 async-trait = "0.1"
 base64 = "0.22"

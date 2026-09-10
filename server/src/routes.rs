@@ -1,4 +1,4 @@
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
 use crate::app_state::AppState;
@@ -11,17 +11,61 @@ mod custom_piece_image;
 pub(crate) fn api(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/games/:id/summon-options", post(get_summon_options))
         .route("/auth/session", post(crate::auth::session))
         .route("/auth/me", get(crate::auth::me))
         .route("/auth/profile", patch(crate::auth::update_profile))
         .route("/auth/google", post(crate::auth::google_login))
         .route("/auth/logout", post(crate::auth::logout))
+        .merge(
+            Router::new()
+                .route("/decks", get(crate::deck::list).post(crate::deck::create))
+                .route("/decks/import", post(crate::deck::import))
+                .route(
+                    "/decks/:id",
+                    get(crate::deck::get)
+                        .put(crate::deck::update)
+                        .delete(crate::deck::delete),
+                )
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::deck::MAX_DECK_BYTES,
+                ))
+                .layer(axum::middleware::map_response(
+                    |mut response: axum::response::Response| async move {
+                        response.headers_mut().insert(
+                            axum::http::header::CACHE_CONTROL,
+                            axum::http::HeaderValue::from_static("no-store"),
+                        );
+                        response
+                    },
+                )),
+        )
         .route("/piece-scores", get(get_piece_scores))
         .route("/piece-catalog", get(get_piece_catalog))
         .route("/games", post(create_game))
+        .route("/challenges", get(list_challenges))
+        .route("/challenges/:id/games", post(create_challenge_game))
         .route("/game-records", get(list_game_records))
         .route("/games/:id", get(get_game))
         .route("/games/:id/record", get(get_game_record))
+        .route("/games/:id/retention", patch(update_game_retention))
+        .route(
+            "/games/:id/analysis",
+            get(list_analysis_trees).post(create_analysis_tree),
+        )
+        .route("/games/:id/analysis/options", post(get_analysis_options))
+        .route(
+            "/games/:id/analysis/:tree_id",
+            patch(rename_analysis_tree).delete(delete_analysis_tree),
+        )
+        .route(
+            "/games/:id/analysis/:tree_id/nodes",
+            post(append_analysis_node),
+        )
+        .route(
+            "/games/:id/analysis/:tree_id/nodes/:node_id",
+            delete(delete_analysis_subtree),
+        )
         .route("/games/:id/actions", post(submit_action))
         .route("/games/:id/bot-turn", post(run_bot_turn))
         .route("/games/:id/resign", post(resign_game))
@@ -74,5 +118,8 @@ pub(crate) fn api(state: AppState) -> Router {
         .route("/rooms/:id/ready", post(ready_room))
         .route("/rooms/:id/unready", post(unready_room))
         .route("/rooms/:id/resign", post(resign_room))
+        .layer(axum::middleware::from_fn(
+            crate::game_view::prevent_live_caching,
+        ))
         .with_state(state)
 }

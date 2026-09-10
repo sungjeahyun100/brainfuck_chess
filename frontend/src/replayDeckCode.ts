@@ -1,3 +1,4 @@
+import { parseDeckRuleset } from './deckRulesets.ts'
 import type { CustomDeckPieceRef, LobbyDeck } from './types/deck'
 import type { BoardMapId, PlayerId } from './types/game'
 import type { GameRecord } from './types/gameRecord'
@@ -37,6 +38,8 @@ function customPieceRef(
 }
 
 export function frozenDeckCodeSource(record: GameRecord, side: PlayerId): FrozenDeckCodeSource | null {
+  let ruleset
+  try { ruleset = parseDeckRuleset(record.initial_state?.ruleset) } catch { return null }
   const deck = record.decks?.[side]
   if (!deck || !Number.isInteger(deck.board_size) || typeof deck.deck_name !== 'string'
     || !Array.isArray(deck.deployments) || !Array.isArray(deck.pocket)) return null
@@ -47,12 +50,17 @@ export function frozenDeckCodeSource(record: GameRecord, side: PlayerId): Frozen
     || !deck.deployments.every(piece => validIdentityPart(piece?.piece_type_id) && validSquare(piece?.square, boardSize))
     || !deck.pocket.every(piece => validIdentityPart(piece?.piece_type_id) && Number.isInteger(piece?.count) && piece.count > 0)) return null
 
+  const extra = deck.extra === undefined ? [] : deck.extra
+  if (!Array.isArray(extra) || extra.length > 4096
+    || !extra.every(piece => validIdentityPart(piece?.piece_type_id) && Number.isSafeInteger(piece.count) && piece.count > 0 && piece.count <= 4096)
+    || extra.reduce((sum, piece) => sum + piece.count, 0) > 4096) return null
+
   const manifest = Array.isArray(record.initial_state?.custom_piece_manifest)
     ? record.initial_state.custom_piece_manifest
     : []
   const customPieces = new Map<string, CustomDeckPieceRef>()
   const canonicalCustomIds = new Map<string, string>()
-  for (const entry of [...deck.deployments, ...deck.pocket]) {
+  for (const entry of [...deck.deployments, ...deck.pocket, ...extra]) {
     const pieceId = entry.piece_type_id as string
     if (entry.custom_piece) {
       const identity = customPieceRef(entry.custom_piece)
@@ -80,6 +88,8 @@ export function frozenDeckCodeSource(record: GameRecord, side: PlayerId): Frozen
   }
   const deckCodePieceId = (pieceId: string) => canonicalCustomIds.get(pieceId) ?? neutralPieceCatalogId(pieceId)
   return {
+    ruleset,
+    extra: extra.flatMap(piece => Array.from({ length: piece.count }, () => deckCodePieceId(piece.piece_type_id as string))),
     name: deck.deck_name, mapId: map.id, boardSize,
     starting: deck.deployments.map(piece => ({ pieceType: deckCodePieceId(piece.piece_type_id as string), square: { file: piece.square.file, rank: side === 'black' ? boardSize - 1 - piece.square.rank : piece.square.rank } })),
     pocket: Object.fromEntries(deck.pocket.map(piece => [deckCodePieceId(piece.piece_type_id as string), piece.count])),

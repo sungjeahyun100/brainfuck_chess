@@ -1,10 +1,11 @@
+import type { DeckRuleset } from '../deckRulesets'
 import type { BoardMapId, BotDifficulty, Square, TimeControlId } from './game'
 import type { CustomPieceImage } from './customPiece'
 
 export type LobbyPlayer = 'white' | 'black'
 export type DeckPieceType = string
 export type DeploymentZone = 'front' | 'back'
-export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop' | 'replay-import' | 'game-history'
+export type AppView = 'home' | 'deck-library' | 'deck-editor' | 'single-select' | 'bot-select' | 'bot-debugger' | 'challenges' | 'multiplayer' | 'piece-lab' | 'custom-piece-workshop' | 'replay-import' | 'game-history'
 
 export interface PieceCatalogItem {
   id: DeckPieceType
@@ -12,6 +13,7 @@ export interface PieceCatalogItem {
   score: number
   category: string
   canPocket: boolean
+  standardDeckZone?: 'main' | 'extra'
   deploymentZone: DeploymentZone
   uniqueStarting?: boolean
   aliases?: string[]
@@ -29,6 +31,7 @@ export interface PieceCatalogItem {
 export interface PieceCatalogMetadata {
   score: number
   deployment_zone: DeploymentZone
+  standard_deck_zone?: 'main' | 'extra'
 }
 
 export interface LobbyPlacement {
@@ -37,12 +40,19 @@ export interface LobbyPlacement {
 }
 
 export interface LobbyDeck {
+  /** Absent on legacy inputs and presets. */
+  ruleset?: DeckRuleset
   starting: LobbyPlacement[]
   pocket: Record<DeckPieceType, number>
+  /** One type reference per instance; absent old data means empty. */
+  extra?: DeckPieceType[]
   customPieces?: CustomDeckPieceRef[]
 }
 
 export interface SavedDeck extends LobbyDeck {
+  ruleset: DeckRuleset
+  /** Present only on account decks; required for optimistic concurrency. */
+  version?: number
   id: string
   name: string
   mapId: BoardMapId

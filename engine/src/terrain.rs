@@ -25,6 +25,15 @@ pub fn can_affect_square(state: &GameState, actor: &Piece, target: Square) -> bo
 }
 
 pub fn can_capture_piece(state: &GameState, actor: &Piece, victim: &Piece) -> bool {
+    victim.type_id != "wall"
+        && victim
+            .current_square
+            .is_none_or(|square| can_affect_square(state, actor, square))
+}
+
+/// Special abilities bypass ordinary capture immunity while still respecting
+/// board elevation and other spatial constraints.
+pub fn can_destroy_piece_with_ability(state: &GameState, actor: &Piece, victim: &Piece) -> bool {
     victim
         .current_square
         .is_none_or(|square| can_affect_square(state, actor, square))

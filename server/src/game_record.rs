@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use brainfuck_chess_engine::types::{
-    GameResult, GameState, MoveOptionKind, Piece, PieceId, PieceLayer, PlayerId, Square, TurnAction,
+    DeckRuleset, GameResult, GameState, MoveOptionKind, Piece, PieceId, PieceLayer, PlayerId,
+    Square, TurnAction,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -12,8 +13,54 @@ use crate::database::DataSchema;
 use crate::time_control::{ClockSnapshot, TimeControlId};
 
 pub(crate) const GAME_RECORD_FORMAT_VERSION: u32 = 2;
-pub(crate) const RULESET_VERSION: &str = "deck-chess-1";
+pub(crate) const LEGACY_RULES_VERSION: &str = "deck-chess-1";
+pub(crate) const STANDARD_RULES_VERSION: &str = "deck-chess-standard-1";
+
+/// Semantic engine dispatch, independent of JSON/snapshot/deck/account versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GameRulesVersion {
+    LegacyV1,
+    StandardV1,
+}
+
+pub(crate) fn current_rules_version_for(ruleset: DeckRuleset) -> &'static str {
+    match ruleset {
+        DeckRuleset::Legacy => LEGACY_RULES_VERSION,
+        DeckRuleset::Standard => STANDARD_RULES_VERSION,
+    }
+}
+
+pub(crate) fn supported_record_rules_version(
+    ruleset: DeckRuleset,
+    version: &str,
+) -> Result<GameRulesVersion, &'static str> {
+    match (ruleset, version) {
+        (DeckRuleset::Legacy, LEGACY_RULES_VERSION) => Ok(GameRulesVersion::LegacyV1),
+        (DeckRuleset::Standard, STANDARD_RULES_VERSION) => Ok(GameRulesVersion::StandardV1),
+        (DeckRuleset::Standard, LEGACY_RULES_VERSION) => {
+            Err("unsupported_development_standard_record")
+        }
+        _ => Err("unsupported_rules_version"),
+    }
+}
 pub(crate) const CHESSEMBLY_VERSION: &str = "chessembly-1";
+pub(crate) const AUTO_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RetentionMode {
+    Auto,
+    #[default]
+    Permanent,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum GameMode {
+    #[default]
+    Standard,
+    Challenge,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GameRecordPlayer {
@@ -62,6 +109,8 @@ pub(crate) struct DeckSnapshot {
     pub(crate) board_size: i32,
     pub(crate) deployments: Vec<DeckDeploymentSnapshot>,
     pub(crate) pocket: Vec<DeckPocketSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) extra: Vec<DeckPocketSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +120,7 @@ pub(crate) enum NotationActionKind {
     MoveWithAbility,
     Ability,
     Drop,
+    ExtraSummon,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +170,8 @@ pub(crate) struct RecordedAction {
     pub(crate) action: TurnAction,
     pub(crate) notation: RecordedNotationAction,
     pub(crate) state_delta: Vec<StateDeltaOperation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) draws: Vec<crate::draw::DrawResolution>,
     pub(crate) elapsed_ms: i64,
     pub(crate) clock_before_ms: Option<i64>,
     pub(crate) clock_after_ms: Option<i64>,
@@ -161,6 +213,11 @@ pub(crate) struct GameRecordSummary {
     pub(crate) players: HashMap<PlayerId, GameRecordPlayer>,
     pub(crate) time_control: TimeControlId,
     pub(crate) owner_side: PlayerId,
+    pub(crate) game_mode: GameMode,
+    pub(crate) challenge_id: Option<String>,
+    pub(crate) retention_mode: RetentionMode,
+    pub(crate) expires_at_ms: Option<i64>,
+    pub(crate) analysis_count: i64,
 }
 
 impl GameRecordSummary {
@@ -179,6 +236,11 @@ impl GameRecordSummary {
             players: record.players.clone(),
             time_control: record.time_control,
             owner_side: owner_side.into(),
+            game_mode: record.game_mode,
+            challenge_id: record.challenge_id.clone(),
+            retention_mode: record.retention_mode,
+            expires_at_ms: record.expires_at_ms,
+            analysis_count: 0,
         }
     }
 }
@@ -198,10 +260,20 @@ pub(crate) struct GameRecord {
     pub(crate) players: HashMap<PlayerId, GameRecordPlayer>,
     pub(crate) time_control: TimeControlId,
     pub(crate) initial_state: GameState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) initial_draws: Vec<crate::draw::DrawResolution>,
     pub(crate) initial_clock: ClockSnapshot,
     pub(crate) decks: HashMap<PlayerId, DeckSnapshot>,
     pub(crate) actions: Vec<RecordedAction>,
     pub(crate) final_clock: Option<ClockSnapshot>,
+    #[serde(default)]
+    pub(crate) game_mode: GameMode,
+    #[serde(default)]
+    pub(crate) challenge_id: Option<String>,
+    #[serde(default)]
+    pub(crate) retention_mode: RetentionMode,
+    #[serde(default)]
+    pub(crate) expires_at_ms: Option<i64>,
 }
 
 impl GameRecord {
@@ -213,7 +285,10 @@ impl GameRecord {
         initial_clock: ClockSnapshot,
         ownership: GameRecordOwnership,
     ) -> Self {
-        let map_id = format!("standard-{}x{}", initial_state.board.size, initial_state.board.size);
+        let map_id = format!(
+            "standard-{}x{}",
+            initial_state.board.size, initial_state.board.size
+        );
         Self::new_with_deck_names(
             initial_state,
             players,
@@ -238,16 +313,22 @@ impl GameRecord {
     ) -> Self {
         initial_state.history.clear();
         let decks = build_deck_snapshots(&initial_state, &deck_names, &map_id);
-        let white = players.get("white").and_then(|p| p.public_id.as_deref())
-            .or_else(|| players.get("white").map(|p| p.nickname.as_str())).unwrap_or("white");
-        let black = players.get("black").and_then(|p| p.public_id.as_deref())
-            .or_else(|| players.get("black").map(|p| p.nickname.as_str())).unwrap_or("black");
+        let white = players
+            .get("white")
+            .and_then(|p| p.public_id.as_deref())
+            .or_else(|| players.get("white").map(|p| p.nickname.as_str()))
+            .unwrap_or("white");
+        let black = players
+            .get("black")
+            .and_then(|p| p.public_id.as_deref())
+            .or_else(|| players.get("black").map(|p| p.nickname.as_str()))
+            .unwrap_or("black");
         Self {
             ownership,
             format_version: GAME_RECORD_FORMAT_VERSION,
             game_id: initial_state.id.clone(),
             display_name: replay_display_name(white, black, started_at_ms),
-            ruleset_version: RULESET_VERSION.into(),
+            ruleset_version: current_rules_version_for(initial_state.ruleset).into(),
             chessembly_version: CHESSEMBLY_VERSION.into(),
             started_at_ms,
             ended_at_ms: None,
@@ -257,8 +338,13 @@ impl GameRecord {
             initial_state,
             initial_clock,
             decks,
+            initial_draws: Vec::new(),
             actions: Vec::new(),
             final_clock: None,
+            game_mode: GameMode::Standard,
+            challenge_id: None,
+            retention_mode: RetentionMode::Permanent,
+            expires_at_ms: None,
         }
     }
 
@@ -272,7 +358,7 @@ impl GameRecord {
         clock: ClockSnapshot,
         state_before: &GameState,
         state_after: GameState,
-    ) {
+    ) -> &mut RecordedAction {
         let player_id = action_player_id(&action).clone();
         let notation = build_notation(&action, state_before);
         let state_delta = build_state_delta(state_before, &state_after);
@@ -282,11 +368,13 @@ impl GameRecord {
             action,
             notation,
             state_delta,
+            draws: Vec::new(),
             elapsed_ms,
             clock_before_ms,
             clock_after_ms,
             clock,
         });
+        self.actions.last_mut().unwrap()
     }
 
     pub(crate) fn finalize(&mut self, state: &GameState, clock: ClockSnapshot, ended_at_ms: i64) {
@@ -294,9 +382,95 @@ impl GameRecord {
             return;
         }
         self.ended_at_ms = Some(ended_at_ms);
+        self.retention_mode = RetentionMode::Auto;
+        self.expires_at_ms = Some(ended_at_ms.saturating_add(AUTO_RETENTION_MS));
         self.result = state.result.clone();
         self.final_clock = Some(clock);
     }
+
+    pub(crate) fn is_expired_at(&self, now_ms: i64) -> bool {
+        self.retention_mode == RetentionMode::Auto
+            && self.expires_at_ms.is_some_and(|expires| expires <= now_ms)
+    }
+
+    pub(crate) fn validate_rules_version(&self) -> Result<GameRulesVersion, &'static str> {
+        supported_record_rules_version(self.initial_state.ruleset, &self.ruleset_version)
+    }
+
+    pub(crate) fn state_at_ply(&self, ply: u32) -> Result<GameState, &'static str> {
+        let version = self.validate_rules_version()?;
+        if ply as usize > self.actions.len() {
+            return Err("invalid_ply");
+        }
+        crate::draw::validate_initial(&self.initial_state, &self.initial_draws)
+            .map_err(|_| "invalid_record")?;
+        let mut value = serde_json::to_value(&self.initial_state).map_err(|_| "invalid_record")?;
+        for recorded in self.actions.iter().take(ply as usize) {
+            if version == GameRulesVersion::LegacyV1 && !recorded.draws.is_empty() {
+                return Err("invalid_record");
+            }
+            let resolved = if version == GameRulesVersion::StandardV1 {
+                let before: GameState =
+                    serde_json::from_value(value.clone()).map_err(|_| "invalid_record")?;
+                let mut after = brainfuck_chess_engine::actions::submit_action(
+                    before.clone(),
+                    recorded.action.clone(),
+                )
+                .map_err(|_| "invalid_record")?;
+                crate::draw::replay_turn(&before, &mut after, &recorded.draws)
+                    .map_err(|_| "invalid_record")?;
+                Some(after)
+            } else {
+                None
+            };
+            for operation in &recorded.state_delta {
+                apply_delta_operation(&mut value, operation)?;
+            }
+            if let Some(expected) = resolved {
+                let actual: GameState =
+                    serde_json::from_value(value.clone()).map_err(|_| "invalid_record")?;
+                if crate::analysis::state_hash(&expected)? != crate::analysis::state_hash(&actual)?
+                {
+                    return Err("invalid_record");
+                }
+            }
+        }
+        let mut state: GameState = serde_json::from_value(value).map_err(|_| "invalid_record")?;
+        state.history.clear();
+        Ok(state)
+    }
+}
+
+fn apply_delta_operation(
+    root: &mut Value,
+    operation: &StateDeltaOperation,
+) -> Result<(), &'static str> {
+    let (path, replacement) = match operation {
+        StateDeltaOperation::Set { path, value } => (path, Some(value.clone())),
+        StateDeltaOperation::Remove { path } => (path, None),
+    };
+    if path.is_empty()
+        || path
+            .iter()
+            .any(|part| matches!(part.as_str(), "__proto__" | "prototype" | "constructor"))
+    {
+        return Err("invalid_record");
+    }
+    let mut parent = root;
+    for segment in &path[..path.len() - 1] {
+        parent = parent
+            .as_object_mut()
+            .and_then(|object| object.get_mut(segment))
+            .ok_or("invalid_record")?;
+    }
+    let object = parent.as_object_mut().ok_or("invalid_record")?;
+    let key = path.last().ok_or("invalid_record")?;
+    if let Some(value) = replacement {
+        object.insert(key.clone(), value);
+    } else {
+        object.remove(key);
+    }
+    Ok(())
 }
 
 fn piece_name(state: &GameState, piece: &Piece) -> String {
@@ -307,15 +481,23 @@ fn piece_name(state: &GameState, piece: &Piece) -> String {
         .unwrap_or_else(|| piece.type_id.clone())
 }
 
-fn custom_piece_snapshot(state: &GameState, piece_type_id: &str) -> Option<CustomDeckPieceSnapshot> {
+fn custom_piece_snapshot(
+    state: &GameState,
+    piece_type_id: &str,
+) -> Option<CustomDeckPieceSnapshot> {
     let rest = piece_type_id.strip_prefix("custom:")?;
     let (custom_piece_id, version_and_key) = rest.rsplit_once(":v")?;
     let (version, exposed_piece_key) = version_and_key.split_once(':')?;
     let version = version.parse().ok()?;
-    let manifest = state.custom_piece_manifest.iter().find(|entry| entry.exposed_type_id == piece_type_id)?;
+    let manifest = state
+        .custom_piece_manifest
+        .iter()
+        .find(|entry| entry.exposed_type_id == piece_type_id)?;
     Some(CustomDeckPieceSnapshot {
-        custom_piece_id: custom_piece_id.into(), version,
-        content_hash: manifest.content_hash.clone(), exposed_piece_key: exposed_piece_key.into(),
+        custom_piece_id: custom_piece_id.into(),
+        version,
+        content_hash: manifest.content_hash.clone(),
+        exposed_piece_key: exposed_piece_key.into(),
     })
 }
 
@@ -353,13 +535,18 @@ fn build_deck_snapshots(
             let mut counts = HashMap::<(String, String), u32>::new();
             for id in &player.deck.pocket_pieces {
                 if let Some(piece) = state.pieces.get(id) {
-                    *counts.entry((piece.type_id.clone(), piece_name(state, piece))).or_default() += 1;
+                    *counts
+                        .entry((piece.type_id.clone(), piece_name(state, piece)))
+                        .or_default() += 1;
                 }
             }
             let mut pocket = counts
                 .into_iter()
                 .map(|((piece_type_id, piece_name), count)| DeckPocketSnapshot {
-                    custom_piece: custom_piece_snapshot(state, &piece_type_id), piece_type_id, piece_name, count
+                    custom_piece: custom_piece_snapshot(state, &piece_type_id),
+                    piece_type_id,
+                    piece_name,
+                    count,
                 })
                 .collect::<Vec<_>>();
             pocket.sort_by(|left, right| left.piece_name.cmp(&right.piece_name));
@@ -378,6 +565,18 @@ fn build_deck_snapshots(
                     board_size: state.board.size,
                     deployments,
                     pocket,
+                    extra: player
+                        .deck
+                        .extra_deck_pieces
+                        .iter()
+                        .filter_map(|id| state.pieces.get(id))
+                        .map(|piece| DeckPocketSnapshot {
+                            piece_type_id: piece.type_id.clone(),
+                            piece_name: piece_name(state, piece),
+                            custom_piece: custom_piece_snapshot(state, &piece.type_id),
+                            count: 1,
+                        })
+                        .collect(),
                 },
             )
         })
@@ -389,6 +588,7 @@ fn actor_piece_id(action: &TurnAction) -> &PieceId {
         TurnAction::Move(action) => &action.piece_id,
         TurnAction::Drop(action) => &action.piece_id,
         TurnAction::Ability(action) => &action.piece_id,
+        TurnAction::ExtraSummon(action) => &action.extra_piece_id,
     }
 }
 
@@ -397,6 +597,7 @@ fn action_player_id(action: &TurnAction) -> &PlayerId {
         TurnAction::Move(action) => &action.player_id,
         TurnAction::Drop(action) => &action.player_id,
         TurnAction::Ability(action) => &action.player_id,
+        TurnAction::ExtraSummon(action) => &action.player_id,
     }
 }
 
@@ -478,6 +679,13 @@ fn build_notation(action: &TurnAction, state_before: &GameState) -> RecordedNota
             Some(drop_action.to),
             None,
         ),
+        TurnAction::ExtraSummon(action) => (
+            NotationActionKind::ExtraSummon,
+            None,
+            None,
+            Some(action.target_square),
+            None,
+        ),
         TurnAction::Ability(ability_action) => {
             let name = piece
                 .map(|piece| ability_name(state_before, piece, &ability_action.ability_id))
@@ -532,7 +740,7 @@ fn replay_state_value(state: &GameState) -> Value {
     value
 }
 
-fn build_state_delta(before: &GameState, after: &GameState) -> Vec<StateDeltaOperation> {
+pub(crate) fn build_state_delta(before: &GameState, after: &GameState) -> Vec<StateDeltaOperation> {
     let mut operations = Vec::new();
     diff_values(
         &replay_state_value(before),
@@ -636,6 +844,18 @@ pub(crate) trait GameRecordRepository: Send + Sync {
         user_id: &str,
         limit: i64,
     ) -> Result<Vec<GameRecordSummary>, &'static str>;
+    async fn set_retention(
+        &self,
+        _game_id: &str,
+        _user_id: &str,
+        _permanent: bool,
+        _now_ms: i64,
+    ) -> Result<Option<GameRecord>, &'static str> {
+        Err("unavailable")
+    }
+    async fn cleanup_expired(&self, _now_ms: i64) -> Result<u64, &'static str> {
+        Ok(0)
+    }
 }
 
 pub(crate) type GameRecordStore = Arc<dyn GameRecordRepository>;
@@ -658,6 +878,7 @@ impl GameRecordRepository for InMemoryGameRecordRepository {
             .read()
             .map_err(|_| "unavailable")?
             .get(game_id)
+            .filter(|record| !record.is_expired_at(crate::time_control::now_ms()))
             .cloned())
     }
     async fn list_summaries_for_user_id(
@@ -671,11 +892,50 @@ impl GameRecordRepository for InMemoryGameRecordRepository {
             .map_err(|_| "unavailable")?
             .values()
             .filter(|record| record.ownership.contains(user_id))
+            .filter(|record| !record.is_expired_at(crate::time_control::now_ms()))
             .map(|record| GameRecordSummary::from_record(record, user_id))
             .collect::<Vec<_>>();
         records.sort_by_key(|record| std::cmp::Reverse(record.started_at_ms));
         records.truncate(limit.max(0) as usize);
         Ok(records)
+    }
+    async fn set_retention(
+        &self,
+        game_id: &str,
+        user_id: &str,
+        permanent: bool,
+        now_ms: i64,
+    ) -> Result<Option<GameRecord>, &'static str> {
+        let mut records = self.0.write().map_err(|_| "unavailable")?;
+        let Some(record) = records.get_mut(game_id) else {
+            return Ok(None);
+        };
+        if !record.ownership.contains(user_id) {
+            return Err("forbidden");
+        }
+        record.retention_mode = if permanent {
+            RetentionMode::Permanent
+        } else {
+            RetentionMode::Auto
+        };
+        record.expires_at_ms = if permanent {
+            None
+        } else {
+            record
+                .ended_at_ms
+                .map(|ended| ended.saturating_add(AUTO_RETENTION_MS))
+        };
+        if record.is_expired_at(now_ms) {
+            records.remove(game_id);
+            return Ok(None);
+        }
+        Ok(Some(record.clone()))
+    }
+    async fn cleanup_expired(&self, now_ms: i64) -> Result<u64, &'static str> {
+        let mut records = self.0.write().map_err(|_| "unavailable")?;
+        let before = records.len();
+        records.retain(|_, record| !record.is_expired_at(now_ms));
+        Ok((before - records.len()) as u64)
     }
 }
 
@@ -697,7 +957,7 @@ impl PostgresGameRecordRepository {
 impl GameRecordRepository for PostgresGameRecordRepository {
     async fn save(&self, record: &GameRecord) -> Result<(), &'static str> {
         let value = serde_json::to_value(record).map_err(|_| "unavailable")?;
-        sqlx::query(&format!("INSERT INTO {} AS target (id, white_public_id, black_public_id, white_user_id, black_user_id, started_at_ms, ended_at_ms, result_reason, display_name, record_version, record) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO UPDATE SET white_user_id=COALESCE(EXCLUDED.white_user_id, target.white_user_id), black_user_id=COALESCE(EXCLUDED.black_user_id, target.black_user_id), ended_at_ms=EXCLUDED.ended_at_ms, result_reason=EXCLUDED.result_reason, record=EXCLUDED.record", self.table))
+        sqlx::query(&format!("INSERT INTO {} AS target (id, white_public_id, black_public_id, white_user_id, black_user_id, started_at_ms, ended_at_ms, result_reason, display_name, record_version, record, retention_mode, expires_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (id) DO UPDATE SET white_user_id=COALESCE(EXCLUDED.white_user_id, target.white_user_id), black_user_id=COALESCE(EXCLUDED.black_user_id, target.black_user_id), ended_at_ms=EXCLUDED.ended_at_ms, result_reason=EXCLUDED.result_reason, record=EXCLUDED.record, retention_mode=EXCLUDED.retention_mode, expires_at_ms=EXCLUDED.expires_at_ms", self.table))
             .bind(&record.game_id)
             .bind(record.players.get("white").and_then(|p| p.public_id.as_deref()))
             .bind(record.players.get("black").and_then(|p| p.public_id.as_deref()))
@@ -709,15 +969,18 @@ impl GameRecordRepository for PostgresGameRecordRepository {
             .bind(&record.display_name)
             .bind(record.format_version as i32)
             .bind(value)
+            .bind(match record.retention_mode { RetentionMode::Auto => "auto", RetentionMode::Permanent => "permanent" })
+            .bind(record.expires_at_ms)
             .execute(&self.pool).await.map_err(|_| "unavailable")?;
         Ok(())
     }
     async fn get(&self, game_id: &str) -> Result<Option<GameRecord>, &'static str> {
         let row = sqlx::query(&format!(
-            "SELECT record, white_user_id, black_user_id FROM {} WHERE id=$1",
+            "SELECT record, white_user_id, black_user_id, retention_mode, expires_at_ms FROM {} WHERE id=$1 AND NOT (retention_mode='auto' AND expires_at_ms <= $2)",
             self.table
         ))
         .bind(game_id)
+        .bind(crate::time_control::now_ms())
         .fetch_optional(&self.pool)
         .await
         .map_err(|_| "unavailable")?;
@@ -730,6 +993,15 @@ impl GameRecordRepository for PostgresGameRecordRepository {
             black_user_id: row.try_get("black_user_id").map_err(|_| "unavailable")?,
             persist: true,
         };
+        record.retention_mode = match row
+            .try_get::<String, _>("retention_mode")
+            .map_err(|_| "unavailable")?
+            .as_str()
+        {
+            "auto" => RetentionMode::Auto,
+            _ => RetentionMode::Permanent,
+        };
+        record.expires_at_ms = row.try_get("expires_at_ms").map_err(|_| "unavailable")?;
         Ok(Some(record))
     }
     async fn list_summaries_for_user_id(
@@ -737,8 +1009,8 @@ impl GameRecordRepository for PostgresGameRecordRepository {
         user_id: &str,
         limit: i64,
     ) -> Result<Vec<GameRecordSummary>, &'static str> {
-        let rows = sqlx::query(&format!("SELECT id, display_name, started_at_ms, ended_at_ms, record->'result' AS result, record->'players' AS players, record->'time_control' AS time_control, CASE WHEN black_user_id=$1 THEN 'black' ELSE 'white' END AS owner_side FROM {} WHERE white_user_id=$1 OR black_user_id=$1 ORDER BY started_at_ms DESC LIMIT $2", self.table))
-            .bind(user_id).bind(limit.clamp(1, 100)).fetch_all(&self.pool).await.map_err(|_| "unavailable")?;
+        let rows = sqlx::query(&format!("SELECT records.id, display_name, started_at_ms, ended_at_ms, record->'result' AS result, record->'players' AS players, record->'time_control' AS time_control, COALESCE(record->'game_mode', '\"standard\"'::jsonb) AS game_mode, record->>'challenge_id' AS challenge_id, CASE WHEN black_user_id=$1 THEN 'black' ELSE 'white' END AS owner_side, retention_mode, expires_at_ms, (SELECT COUNT(*) FROM {schema}.game_analysis_trees trees WHERE trees.game_id=records.id AND trees.owner_user_id=$1) AS analysis_count FROM {table} records WHERE (white_user_id=$1 OR black_user_id=$1) AND NOT (retention_mode='auto' AND expires_at_ms <= $2) ORDER BY started_at_ms DESC LIMIT $3", schema=self.table.split('.').next().unwrap_or("test"), table=self.table))
+            .bind(user_id).bind(crate::time_control::now_ms()).bind(limit.clamp(1, 100)).fetch_all(&self.pool).await.map_err(|_| "unavailable")?;
         rows.into_iter()
             .map(|row| {
                 Ok(GameRecordSummary {
@@ -746,13 +1018,84 @@ impl GameRecordRepository for PostgresGameRecordRepository {
                     display_name: row.try_get("display_name").map_err(|_| "unavailable")?,
                     started_at_ms: row.try_get("started_at_ms").map_err(|_| "unavailable")?,
                     ended_at_ms: row.try_get("ended_at_ms").map_err(|_| "unavailable")?,
-                    result: serde_json::from_value(row.try_get("result").map_err(|_| "unavailable")?).map_err(|_| "unavailable")?,
-                    players: serde_json::from_value(row.try_get("players").map_err(|_| "unavailable")?).map_err(|_| "unavailable")?,
-                    time_control: serde_json::from_value(row.try_get("time_control").map_err(|_| "unavailable")?).map_err(|_| "unavailable")?,
+                    result: serde_json::from_value(
+                        row.try_get("result").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
+                    players: serde_json::from_value(
+                        row.try_get("players").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
+                    time_control: serde_json::from_value(
+                        row.try_get("time_control").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
                     owner_side: row.try_get("owner_side").map_err(|_| "unavailable")?,
+                    game_mode: serde_json::from_value(
+                        row.try_get("game_mode").map_err(|_| "unavailable")?,
+                    )
+                    .map_err(|_| "unavailable")?,
+                    challenge_id: row.try_get("challenge_id").map_err(|_| "unavailable")?,
+                    retention_mode: match row
+                        .try_get::<String, _>("retention_mode")
+                        .map_err(|_| "unavailable")?
+                        .as_str()
+                    {
+                        "auto" => RetentionMode::Auto,
+                        _ => RetentionMode::Permanent,
+                    },
+                    expires_at_ms: row.try_get("expires_at_ms").map_err(|_| "unavailable")?,
+                    analysis_count: row.try_get("analysis_count").map_err(|_| "unavailable")?,
                 })
             })
             .collect()
+    }
+    async fn set_retention(
+        &self,
+        game_id: &str,
+        user_id: &str,
+        permanent: bool,
+        now_ms: i64,
+    ) -> Result<Option<GameRecord>, &'static str> {
+        let mode = if permanent { "permanent" } else { "auto" };
+        let row = sqlx::query(&format!("UPDATE {} SET retention_mode=$3, expires_at_ms=CASE WHEN $3='permanent' THEN NULL ELSE ended_at_ms + $4 END, record=jsonb_set(jsonb_set(record, '{{retention_mode}}', to_jsonb($3::text)), '{{expires_at_ms}}', CASE WHEN $3='permanent' THEN 'null'::jsonb ELSE to_jsonb(ended_at_ms + $4) END) WHERE id=$1 AND (white_user_id=$2 OR black_user_id=$2) RETURNING record, white_user_id, black_user_id, retention_mode, expires_at_ms", self.table))
+            .bind(game_id).bind(user_id).bind(mode).bind(AUTO_RETENTION_MS).fetch_optional(&self.pool).await.map_err(|_| "unavailable")?;
+        let Some(row) = row else { return Ok(None) };
+        let expires: Option<i64> = row.try_get("expires_at_ms").map_err(|_| "unavailable")?;
+        if mode == "auto" && expires.is_some_and(|value| value <= now_ms) {
+            sqlx::query(&format!("DELETE FROM {} WHERE id=$1", self.table))
+                .bind(game_id)
+                .execute(&self.pool)
+                .await
+                .map_err(|_| "unavailable")?;
+            return Ok(None);
+        }
+        let mut record: GameRecord =
+            serde_json::from_value(row.try_get("record").map_err(|_| "unavailable")?)
+                .map_err(|_| "unavailable")?;
+        record.ownership = GameRecordOwnership {
+            white_user_id: row.try_get("white_user_id").map_err(|_| "unavailable")?,
+            black_user_id: row.try_get("black_user_id").map_err(|_| "unavailable")?,
+            persist: true,
+        };
+        record.retention_mode = if permanent {
+            RetentionMode::Permanent
+        } else {
+            RetentionMode::Auto
+        };
+        record.expires_at_ms = expires;
+        Ok(Some(record))
+    }
+    async fn cleanup_expired(&self, now_ms: i64) -> Result<u64, &'static str> {
+        sqlx::query(&format!(
+            "DELETE FROM {} WHERE retention_mode='auto' AND expires_at_ms <= $1",
+            self.table
+        ))
+        .bind(now_ms)
+        .execute(&self.pool)
+        .await
+        .map(|result| result.rows_affected())
+        .map_err(|_| "unavailable")
     }
 }
 
@@ -770,12 +1113,97 @@ mod tests {
         );
     }
 
+    #[test]
+    fn finalized_records_use_thirty_days_from_the_authoritative_end_time() {
+        let mut record =
+            postgres_test_record("retention-finalize".into(), "owner".into(), "other".into());
+        let state = record.initial_state.clone();
+        let clock = record.initial_clock.clone();
+        record.finalize(&state, clock, 10_000);
+        assert_eq!(record.retention_mode, RetentionMode::Auto);
+        assert_eq!(record.expires_at_ms, Some(10_000 + AUTO_RETENTION_MS));
+    }
+
+    #[tokio::test]
+    async fn permanent_toggle_restores_original_expiry_and_cleanup_preserves_permanent() {
+        let repository = InMemoryGameRecordRepository::default();
+        let mut record =
+            postgres_test_record("retention-toggle".into(), "owner".into(), "other".into());
+        let state = record.initial_state.clone();
+        let clock = record.initial_clock.clone();
+        record.finalize(&state, clock, 1_000);
+        repository.save(&record).await.unwrap();
+        let permanent = repository
+            .set_retention(&record.game_id, "owner", true, AUTO_RETENTION_MS + 2_000)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(permanent.retention_mode, RetentionMode::Permanent);
+        assert_eq!(permanent.expires_at_ms, None);
+        assert_eq!(
+            repository
+                .cleanup_expired(AUTO_RETENTION_MS + 2_000)
+                .await
+                .unwrap(),
+            0
+        );
+        let removed = repository
+            .set_retention(&record.game_id, "owner", false, AUTO_RETENTION_MS + 2_000)
+            .await
+            .unwrap();
+        assert!(
+            removed.is_none(),
+            "unpinning after the original deadline deletes immediately"
+        );
+    }
+
+    #[tokio::test]
+    async fn logically_expired_records_are_hidden_before_physical_cleanup() {
+        let repository = InMemoryGameRecordRepository::default();
+        let mut expired =
+            postgres_test_record("expired-hidden".into(), "owner".into(), "other".into());
+        expired.retention_mode = RetentionMode::Auto;
+        expired.expires_at_ms = Some(0);
+        repository.save(&expired).await.unwrap();
+        assert!(repository.get(&expired.game_id).await.unwrap().is_none());
+        assert!(repository
+            .list_summaries_for_user_id("owner", 50)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(repository.cleanup_expired(1).await.unwrap(), 1);
+    }
+
+    #[test]
+    fn legacy_record_without_retention_fields_is_protected() {
+        let record =
+            postgres_test_record("legacy-retention".into(), "owner".into(), "other".into());
+        let mut value = serde_json::to_value(record).unwrap();
+        value.as_object_mut().unwrap().remove("retention_mode");
+        value.as_object_mut().unwrap().remove("expires_at_ms");
+        let restored: GameRecord = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.retention_mode, RetentionMode::Permanent);
+        assert_eq!(restored.expires_at_ms, None);
+    }
+
+    #[test]
+    fn reconstructed_analysis_base_does_not_mutate_the_canonical_record() {
+        let record =
+            postgres_test_record("immutable-canonical".into(), "owner".into(), "other".into());
+        let original_turn = record.initial_state.turn_number;
+        let mut analysis_base = record.state_at_ply(0).unwrap();
+        analysis_base.turn_number += 10;
+        assert_eq!(record.initial_state.turn_number, original_turn);
+        assert!(record.actions.is_empty());
+    }
+
     fn postgres_test_record(
         game_id: String,
         white_user_id: String,
         black_user_id: String,
     ) -> GameRecord {
         let state = GameState {
+            ruleset: Default::default(),
             id: game_id,
             board: Board {
                 size: 8,

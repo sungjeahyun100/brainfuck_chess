@@ -4,6 +4,7 @@ import {
   emptyPocket,
   findPieceCatalogItem,
   validateLobbyDeck,
+  validateDeckForStorage,
 } from './useDeckValidation.ts'
 
 export type DeckCodeImportResult =
@@ -27,6 +28,7 @@ export function importDeckCode(code: string, currentDeck: SavedDeck): DeckCodeIm
   for (const entry of decoded.value.pocket) pocket[entry.pieceId] = entry.count
 
   const usedPieceIds = new Set([
+    ...(decoded.value.extra ?? []),
     ...decoded.value.starting.map(piece => piece.pieceId),
     ...decoded.value.pocket.map(piece => piece.pieceId),
   ])
@@ -35,6 +37,9 @@ export function importDeckCode(code: string, currentDeck: SavedDeck): DeckCodeIm
     const catalogItem = findPieceCatalogItem(pieceId)
     if (!catalogItem) {
       return { ok: false, message: `존재하지 않거나 현재 사용할 수 없는 기물이 포함되어 있습니다: ${pieceId}` }
+    }
+    if (decoded.value.ruleset !== undefined && catalogItem.custom && !customPieces.some(piece => piece.id === catalogItem.custom?.id && piece.version === catalogItem.custom?.version && piece.exposedPieceKey === catalogItem.custom?.exposedPieceKey && piece.contentHash === catalogItem.custom?.contentHash)) {
+      return { ok: false, message: '커스텀 기물의 고정 참조가 현재 정의와 일치하지 않습니다.' }
     }
     if (catalogItem.custom && !customPieces.some(piece => piece.id === catalogItem.custom?.id && piece.version === catalogItem.custom?.version && piece.exposedPieceKey === catalogItem.custom?.exposedPieceKey)) {
       customPieces.push({
@@ -48,7 +53,10 @@ export function importDeckCode(code: string, currentDeck: SavedDeck): DeckCodeIm
 
   const candidate: SavedDeck = {
     ...currentDeck,
-    name: decoded.value.name?.trim() || currentDeck.name,
+    // DC1/DC2/DC3 are always Legacy, even when imported into a Standard draft.
+    ruleset: decoded.value.ruleset ?? 'legacy',
+    extra: [...(decoded.value.extra ?? [])],
+    name: decoded.value.ruleset !== undefined ? (decoded.value.name ?? currentDeck.name) : decoded.value.name?.trim() || currentDeck.name,
     mapId: decoded.value.mapId,
     boardSize: decoded.value.boardSize,
     starting: decoded.value.starting.map(piece => ({
@@ -59,10 +67,11 @@ export function importDeckCode(code: string, currentDeck: SavedDeck): DeckCodeIm
     customPieces,
   }
   const summary = validateLobbyDeck(candidate, candidate.boardSize, currentDeck.name.trim() || '불러온 덱')
-  if (!summary.valid) {
+  const validation = decoded.value.ruleset !== undefined ? validateDeckForStorage(candidate) : summary
+  if (!validation.valid) {
     return {
       ok: false,
-      message: summary.errors[0] ?? '현재 규칙에서는 사용할 수 없는 덱입니다.',
+      message: validation.errors[0] ?? '현재 규칙에서는 사용할 수 없는 덱입니다.',
     }
   }
   return { ok: true, deck: candidate, totalScore: summary.totalScore, scoreLimit: summary.scoreLimit }

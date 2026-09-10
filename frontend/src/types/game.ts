@@ -1,3 +1,4 @@
+import type { DeckRuleset } from '../deckRulesets'
 // Types mirroring the Rust engine's JSON serialization.
 
 export type PlayerId = 'white' | 'black'
@@ -143,6 +144,9 @@ export interface Deck {
   player_id: PlayerId
   starting_pieces: PieceId[]
   pocket_pieces: PieceId[]
+  /** Runtime only. Omitted for a hidden opponent hand and older states. */
+  hand_pieces?: PieceId[]
+  extra_deck_pieces?: PieceId[]
   score_limit: number
   total_score: number
 }
@@ -201,6 +205,7 @@ export interface AbilityAction {
   piece_id: PieceId
   ability_id: string
   target_piece_id?: PieceId
+  target_piece_ids?: PieceId[]
   pocket_piece_id?: PieceId
   to?: Square
   deployments: AbilityDeployment[]
@@ -216,12 +221,26 @@ export interface SubmitAbilityAction {
   piece_id: PieceId
   ability_id: string
   target_piece_id?: PieceId
+  target_piece_ids?: PieceId[]
   pocket_piece_id?: PieceId
   to?: Square
   deployments?: AbilityDeployment[]
 }
 
-export type SubmitAction = SubmitMoveAction | SubmitDropAction | SubmitAbilityAction
+export interface ExtraSummonAction {
+  type: 'extra_summon'
+  player_id: PlayerId
+  extra_piece_id: PieceId
+  sacrifice_piece_ids: PieceId[]
+  target_square: Square
+}
+export interface SummonOptions {
+  sacrifice_piece_ids: PieceId[]
+  policy: { sacrifice_zones: Array<'hand' | 'board'> }
+  cost: number
+  actions: Omit<ExtraSummonAction, 'type'>[]
+}
+export type SubmitAction = SubmitMoveAction | SubmitDropAction | SubmitAbilityAction | Omit<ExtraSummonAction, 'player_id'>
 
 export interface GlobalStateUpdate {
     key: string
@@ -236,11 +255,11 @@ export interface DropAction {
   captured_piece_id?: PieceId
 }
 
-export type TurnAction = MoveAction | DropAction | AbilityAction
+export type TurnAction = MoveAction | DropAction | AbilityAction | ExtraSummonAction
 
 export type BotDifficulty = 'easy' | 'normal' | 'hard'
 
-export type AiAction = MoveAction | DropAction | AbilityAction
+export type AiAction = MoveAction | DropAction | AbilityAction | ExtraSummonAction
 
 export interface ActionTimelineFrame {
   action: AiAction
@@ -249,8 +268,46 @@ export interface ActionTimelineFrame {
 }
 
 export interface BotTurnStats {
+  score: number
   searched_nodes: number
   depth_reached: number
+  completed_depth: number
+  iterations_started: number
+  iterations_completed: number
+  qnodes: number
+  beta_cutoffs: number
+  tt_probes: number
+  tt_hits: number
+  tt_cutoffs: number
+  tt_stores: number
+  aspiration_searches: number
+  aspiration_researches: number
+  aspiration_fail_lows: number
+  aspiration_fail_highs: number
+  generated_legal_actions: number
+  unique_canonical_actions: number
+  beam_selected_actions: number
+  mandatory_tactical_actions: number
+  drop_actions_generated: number
+  drop_actions_selected: number
+  board_optional_actions_generated: number
+  board_optional_actions_selected: number
+  quiet_drop_actions_generated: number
+  quiet_drop_actions_selected: number
+  normal_nodes: number
+  move_generation_nanos: number
+  canonical_deduplication_nanos: number
+  move_ordering_nanos: number
+  root_generated_legal_actions: number
+  root_unique_canonical_actions: number
+  root_beam_selected_actions: number
+  root_mandatory_tactical_actions: number
+  root_drop_actions_generated: number
+  root_drop_actions_selected: number
+  root_board_optional_actions_generated: number
+  root_board_optional_actions_selected: number
+  root_quiet_drop_actions_generated: number
+  root_quiet_drop_actions_selected: number
   elapsed_ms: number
 }
 
@@ -259,7 +316,7 @@ export interface BotTurnResponse {
   game_state: GameState
   actions: AiAction[]
   timeline: ActionTimelineFrame[]
-  stats: BotTurnStats
+  stats?: BotTurnStats
 }
 
 export type GamePhase = 'setup' | 'playing' | 'ended'
@@ -300,7 +357,22 @@ export interface GameResult {
   reason: GameEndReason
 }
 
+export interface ChallengeGameMetadata {
+  id: string
+  name: string
+  player_id: PlayerId
+  bot_player_id: PlayerId
+  bot_difficulty: BotDifficulty
+}
+
 export interface GameState {
+  /** Live Standard projection: counts for both sides; identities only in authorized decks. */
+  hand_counts?: Record<PlayerId, number>
+  /** Omitted Legacy on historical serialized states to preserve analysis hashes. */
+  ruleset?: DeckRuleset
+  /** Network snapshot revisions; absent in legacy replay/game-record payloads. */
+  catalog_revision?: number
+  state_revision?: number
   id: string
   board: Board
   pieces: Record<PieceId, Piece>
@@ -330,6 +402,7 @@ export interface GameState {
   presence?: { white: PlayerPresence; black: PlayerPresence }
   player_info: Record<PlayerId, GamePlayerInfo>
   record_notation?: import('./gameRecord').RecordedNotationAction[]
+  challenge?: ChallengeGameMetadata
 }
 
 export interface AttackMap {

@@ -1,0 +1,485 @@
+use async_trait::async_trait;
+use brainfuck_chess_engine::{
+    ai::BotDifficulty,
+    pieces::default_pieces::all_default_definitions,
+    rules::{
+        board_map_definition, calculate_score_limit, can_piece_be_placed_at_start_with_ruleset,
+        get_base_zone_squares_with_ruleset,
+    },
+    types::{DeckRuleset, PieceDefinition, Square},
+};
+use serde::Serialize;
+use sqlx::{PgPool, Row};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
+
+use crate::database::DataSchema;
+use crate::time_control::TimeControlId;
+use crate::{DeckPieceRef, PlayerDeckSpec, StartingPieceSpec};
+
+#[derive(Clone, Debug)]
+pub(crate) struct OfficialPlacement {
+    pub(crate) piece_type: &'static str,
+    /// Coordinates are authored from White's side and mirrored for the bot.
+    pub(crate) square: Square,
+    /// Exempts Front/Back classification within Base; Standard may also omit Front coverage.
+    /// Never exempts bounds, Base membership, ownership, King, score or zone eligibility.
+    pub(crate) allow_nonstandard_zone: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OfficialPocket {
+    pub(crate) piece_type: &'static str,
+    pub(crate) count: u32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ChallengeDefinition {
+    pub(crate) id: &'static str,
+    pub(crate) name: &'static str,
+    pub(crate) description: &'static str,
+    pub(crate) ruleset: DeckRuleset,
+    pub(crate) board_size: i32,
+    pub(crate) map_id: &'static str,
+    pub(crate) opponent_extra: Vec<&'static str>,
+    pub(crate) opponent_starting: Vec<OfficialPlacement>,
+    pub(crate) opponent_pocket: Vec<OfficialPocket>,
+    pub(crate) bot_difficulty: BotDifficulty,
+    pub(crate) time_control: TimeControlId,
+    pub(crate) enabled: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ChallengeSummary {
+    pub(crate) id: &'static str,
+    pub(crate) name: &'static str,
+    pub(crate) description: &'static str,
+    pub(crate) ruleset: DeckRuleset,
+    pub(crate) board_size: i32,
+    pub(crate) map_id: String,
+    pub(crate) bot_difficulty: BotDifficulty,
+    pub(crate) time_control: TimeControlId,
+    pub(crate) cleared: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ChallengeGameMetadata {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) player_id: String,
+    pub(crate) bot_player_id: String,
+    pub(crate) bot_difficulty: BotDifficulty,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ChallengeGameContext {
+    pub(crate) metadata: ChallengeGameMetadata,
+    pub(crate) registered_user_id: Option<String>,
+}
+
+fn placement(piece_type: &'static str, file: i32, rank: i32) -> OfficialPlacement {
+    OfficialPlacement {
+        piece_type,
+        square: Square::new(file, rank),
+        allow_nonstandard_zone: false,
+    }
+}
+
+fn nonstandard_placement(piece_type: &'static str, file: i32, rank: i32) -> OfficialPlacement {
+    OfficialPlacement {
+        piece_type,
+        square: Square::new(file, rank),
+        allow_nonstandard_zone: true,
+    }
+}
+
+pub(crate) fn definitions() -> Vec<ChallengeDefinition> {
+    let mut tempest_horde = vec![placement("king", 5, 0)];
+    tempest_horde.extend((0..12).map(|file| placement("tempest-pawn", file, 2)));
+
+    let mut tempest_set = vec![
+        placement("tempest-rook", 1, 0),
+        placement("tempest-knight", 2, 0),
+        placement("tempest-bishop", 3, 0),
+        placement("tempest-queen", 4, 0),
+        placement("king", 5, 0),
+        placement("tempest-bishop", 6, 0),
+        placement("tempest-knight", 7, 0),
+        placement("tempest-rook", 8, 0),
+    ];
+    tempest_set.extend((0..10).map(|file| nonstandard_placement("tempest-pawn", file, 1)));
+
+    vec![
+        ChallengeDefinition {
+            id: "tempest_horde",
+            name: "템페스트 호드",
+            description: "시작 진영과 포켓을 템페스트 폰으로 채운 물량형 봇에 맞서세요.",
+            ruleset: DeckRuleset::Legacy,
+            map_id: "standard-12x12",
+            opponent_extra: vec![],
+            board_size: 12,
+            opponent_starting: tempest_horde,
+            opponent_pocket: vec![OfficialPocket {
+                piece_type: "tempest-pawn",
+                count: 47,
+            }],
+            bot_difficulty: BotDifficulty::Normal,
+            time_control: TimeControlId::Unlimited,
+            enabled: true,
+        },
+        ChallengeDefinition {
+            id: "raining_men",
+            name: "사람비가 내려와",
+            description:
+                "구행을 교두보로 삼아 포켓의 공수부대 대원을 지속적으로 투입하는 봇입니다.",
+            ruleset: DeckRuleset::Legacy,
+            map_id: "standard-12x12",
+            opponent_extra: vec![],
+            board_size: 12,
+            opponent_starting: vec![placement("king", 5, 0), placement("guhang", 6, 0)],
+            opponent_pocket: vec![OfficialPocket {
+                piece_type: "paratrooper",
+                count: 31,
+            }],
+            bot_difficulty: BotDifficulty::Normal,
+            time_control: TimeControlId::Unlimited,
+            enabled: true,
+        },
+        ChallengeDefinition {
+            id: "tempest_set",
+            name: "템페스트 셋",
+            description: "표준 체스의 주요 기물을 실제 템페스트 계열 기물로 바꾼 테마 덱입니다.",
+            ruleset: DeckRuleset::Legacy,
+            map_id: "standard-10x10",
+            opponent_extra: vec![],
+            board_size: 10,
+            opponent_starting: tempest_set,
+            opponent_pocket: vec![],
+            bot_difficulty: BotDifficulty::Hard,
+            time_control: TimeControlId::Unlimited,
+            enabled: true,
+        },
+    ]
+}
+
+pub(crate) fn find(id: &str) -> Option<ChallengeDefinition> {
+    definitions()
+        .into_iter()
+        .find(|definition| definition.enabled && definition.id == id)
+}
+
+pub(crate) fn validate_registry(definitions: &[ChallengeDefinition]) -> Result<(), String> {
+    let catalog = all_default_definitions()
+        .into_iter()
+        .map(|definition| (definition.id.clone(), definition))
+        .collect::<HashMap<_, _>>();
+    let mut ids = HashSet::new();
+    for definition in definitions {
+        if definition.id.is_empty() || !ids.insert(definition.id) {
+            return Err(format!(
+                "Challenge id가 비어 있거나 중복됩니다: {}",
+                definition.id
+            ));
+        }
+        if !(8..=12).contains(&definition.board_size) {
+            return Err(format!("{}: 지원하지 않는 보드 크기입니다.", definition.id));
+        }
+        let map = board_map_definition(definition.map_id)
+            .ok_or_else(|| format!("{}: 알 수 없는 map입니다.", definition.id))?;
+        if map.board_size != definition.board_size {
+            return Err(format!("{}: map/board 크기가 다릅니다.", definition.id));
+        }
+        // Typed enums admit only supported rulesets, difficulties and time controls.
+        let base = get_base_zone_squares_with_ruleset(
+            &"white".into(),
+            definition.board_size,
+            definition.ruleset,
+        );
+        let mut squares = HashSet::new();
+        let mut king_count = 0;
+        let mut score = 0_u32;
+        for entry in &definition.opponent_starting {
+            let piece = resolved_definition(&catalog, entry.piece_type)?;
+            if entry.square.file < 0
+                || entry.square.file >= definition.board_size
+                || entry.square.rank < 0
+                || entry.square.rank >= definition.board_size
+                || !base.contains(&entry.square)
+                || !squares.insert(entry.square.to_id())
+            {
+                return Err(format!("{}: 잘못된 시작 배치입니다.", definition.id));
+            }
+            if !entry.allow_nonstandard_zone
+                && !can_piece_be_placed_at_start_with_ruleset(
+                    piece,
+                    &"white".into(),
+                    entry.square,
+                    definition.board_size,
+                    definition.ruleset,
+                )
+            {
+                return Err(format!(
+                    "{}: {} 배치 구역이 잘못되었습니다.",
+                    definition.id, entry.piece_type
+                ));
+            }
+            king_count += usize::from(piece.is_king);
+            if !piece.is_king {
+                score = score.saturating_add(piece.score);
+            }
+        }
+        let mut pocket_count = 0_u64;
+        for entry in &definition.opponent_pocket {
+            pocket_count += u64::from(entry.count);
+            if entry.count == 0 || entry.count > 1024 || pocket_count > 4096 {
+                return Err(format!(
+                    "{}: 포켓 수량은 항목당 1~1024, 총 4096 이하여야 합니다.",
+                    definition.id
+                ));
+            }
+            let piece = resolved_definition(&catalog, entry.piece_type)?;
+            if piece.is_king {
+                return Err(format!("{}: King은 포켓에 둘 수 없습니다.", definition.id));
+            }
+            score = score.saturating_add(piece.score.saturating_mul(entry.count));
+        }
+        if definition.ruleset == DeckRuleset::Standard
+            && !definition
+                .opponent_starting
+                .iter()
+                .any(|entry| entry.allow_nonstandard_zone)
+            && brainfuck_chess_engine::rules::get_front_zone_squares_with_ruleset(
+                &"white".into(),
+                definition.board_size,
+                definition.ruleset,
+            )
+            .iter()
+            .any(|square| !squares.contains(&square.to_id()))
+        {
+            return Err(format!(
+                "{}: Standard Front를 채우거나 공식 배치 예외를 명시해야 합니다.",
+                definition.id
+            ));
+        }
+        crate::validate_spec_deck_zones(&opponent_deck(definition, "black"))?;
+        if king_count != 1 {
+            return Err(format!(
+                "{}: 시작 덱에 King이 정확히 1개 필요합니다.",
+                definition.id
+            ));
+        }
+        if score > calculate_score_limit(definition.board_size) {
+            return Err(format!(
+                "{}: 공식 덱 점수가 상한을 초과합니다.",
+                definition.id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn resolved_definition<'a>(
+    catalog: &'a HashMap<String, PieceDefinition>,
+    id: &str,
+) -> Result<&'a PieceDefinition, String> {
+    let resolved = crate::resolve_piece_type("white", id)
+        .ok_or_else(|| format!("존재하지 않는 Challenge 기물 ID입니다: {id}"))?;
+    catalog
+        .get(&resolved)
+        .ok_or_else(|| format!("존재하지 않는 Challenge 기물 ID입니다: {id}"))
+}
+
+pub(crate) fn opponent_deck(definition: &ChallengeDefinition, side: &str) -> PlayerDeckSpec {
+    let starting = definition
+        .opponent_starting
+        .iter()
+        .map(|entry| StartingPieceSpec {
+            piece: DeckPieceRef::BuiltIn {
+                piece_type: entry.piece_type.into(),
+            },
+            square: if side == "black" {
+                Square::new(
+                    entry.square.file,
+                    definition.board_size - 1 - entry.square.rank,
+                )
+            } else {
+                entry.square
+            },
+        })
+        .collect();
+    let pocket = definition
+        .opponent_pocket
+        .iter()
+        .flat_map(|entry| {
+            (0..entry.count).map(|_| DeckPieceRef::BuiltIn {
+                piece_type: entry.piece_type.into(),
+            })
+        })
+        .collect();
+    PlayerDeckSpec {
+        extra: definition
+            .opponent_extra
+            .iter()
+            .map(|id| DeckPieceRef::BuiltIn {
+                piece_type: (*id).into(),
+            })
+            .collect(),
+        ruleset: definition.ruleset,
+        name: Some(definition.name.into()),
+        starting,
+        pocket,
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ChallengeClear {
+    pub(crate) challenge_id: String,
+    pub(crate) first_cleared_at_ms: i64,
+}
+
+#[async_trait]
+pub(crate) trait ChallengeProgressRepository: Send + Sync {
+    async fn record_clear(
+        &self,
+        user_id: &str,
+        challenge_id: &str,
+        cleared_at_ms: i64,
+    ) -> Result<(), &'static str>;
+    async fn list_clears(&self, user_id: &str) -> Result<Vec<ChallengeClear>, &'static str>;
+}
+
+pub(crate) type ChallengeProgressStore = Arc<dyn ChallengeProgressRepository>;
+
+#[derive(Default)]
+pub(crate) struct InMemoryChallengeProgressRepository(RwLock<HashMap<(String, String), i64>>);
+
+#[async_trait]
+impl ChallengeProgressRepository for InMemoryChallengeProgressRepository {
+    async fn record_clear(
+        &self,
+        user_id: &str,
+        challenge_id: &str,
+        cleared_at_ms: i64,
+    ) -> Result<(), &'static str> {
+        self.0
+            .write()
+            .map_err(|_| "unavailable")?
+            .entry((user_id.into(), challenge_id.into()))
+            .or_insert(cleared_at_ms);
+        Ok(())
+    }
+    async fn list_clears(&self, user_id: &str) -> Result<Vec<ChallengeClear>, &'static str> {
+        Ok(self
+            .0
+            .read()
+            .map_err(|_| "unavailable")?
+            .iter()
+            .filter(|((owner, _), _)| owner == user_id)
+            .map(|((_, challenge_id), cleared)| ChallengeClear {
+                challenge_id: challenge_id.clone(),
+                first_cleared_at_ms: *cleared,
+            })
+            .collect())
+    }
+}
+
+pub(crate) struct PostgresChallengeProgressRepository {
+    pool: PgPool,
+    table: String,
+}
+
+impl PostgresChallengeProgressRepository {
+    pub(crate) fn new(pool: PgPool, schema: DataSchema) -> Self {
+        Self {
+            pool,
+            table: format!("{}.challenge_clears", schema.name()),
+        }
+    }
+}
+
+#[async_trait]
+impl ChallengeProgressRepository for PostgresChallengeProgressRepository {
+    async fn record_clear(
+        &self,
+        user_id: &str,
+        challenge_id: &str,
+        cleared_at_ms: i64,
+    ) -> Result<(), &'static str> {
+        sqlx::query(&format!("INSERT INTO {} (user_id, challenge_id, first_cleared_at_ms) VALUES ($1,$2,$3) ON CONFLICT (user_id, challenge_id) DO NOTHING", self.table))
+            .bind(user_id).bind(challenge_id).bind(cleared_at_ms).execute(&self.pool).await.map_err(|_| "unavailable")?;
+        Ok(())
+    }
+    async fn list_clears(&self, user_id: &str) -> Result<Vec<ChallengeClear>, &'static str> {
+        let rows = sqlx::query(&format!(
+            "SELECT challenge_id, first_cleared_at_ms FROM {} WHERE user_id=$1",
+            self.table
+        ))
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|_| "unavailable")?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(ChallengeClear {
+                    challenge_id: row.try_get("challenge_id").map_err(|_| "unavailable")?,
+                    first_cleared_at_ms: row
+                        .try_get("first_cleared_at_ms")
+                        .map_err(|_| "unavailable")?,
+                })
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn official_registry_contains_the_three_valid_challenges() {
+        let registry = definitions();
+        assert_eq!(registry.len(), 3);
+        validate_registry(&registry).unwrap();
+        assert!(registry.iter().any(|entry| entry.id == "tempest_horde"));
+        assert!(registry.iter().any(|entry| entry.id == "raining_men"));
+        assert!(registry.iter().any(|entry| entry.id == "tempest_set"));
+    }
+
+    #[test]
+    fn tempest_set_has_a_complete_pawn_rank_next_to_the_black_home_rank() {
+        let tempest_set = find("tempest_set").unwrap();
+        let black_deck = opponent_deck(&tempest_set, "black");
+        let pawn_squares = black_deck
+            .starting
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    &entry.piece,
+                    DeckPieceRef::BuiltIn { piece_type } if piece_type == "tempest-pawn"
+                )
+            })
+            .map(|entry| (entry.square.file, entry.square.rank))
+            .collect::<HashSet<_>>();
+
+        assert_eq!(pawn_squares.len(), 10);
+        assert_eq!(
+            pawn_squares,
+            (0..10).map(|file| (file, 8)).collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn registry_rejects_duplicates_and_unknown_pieces() {
+        let mut registry = definitions();
+        registry[1].id = registry[0].id;
+        assert!(validate_registry(&registry).unwrap_err().contains("중복"));
+        let mut registry = definitions();
+        registry[0].opponent_starting[0].piece_type = "invented-piece";
+        assert!(validate_registry(&registry)
+            .unwrap_err()
+            .contains("존재하지 않는"));
+    }
+}
+
+#[cfg(test)]
+mod g8b_tests;

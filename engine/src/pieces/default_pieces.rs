@@ -11,6 +11,8 @@ macro_rules! legacy_piece_definition {
     ($($field:tt)*) => {{
         PieceDefinition {
             $($field)*
+            ai_board_value: None,
+            ai_pocket_value: None,
             state_schema: Vec::new(),
             move_layers: Vec::new(),
             move_options: Vec::new(),
@@ -35,6 +37,7 @@ mod bouncing_rook;
 mod cannon_rook;
 mod dozer_black;
 mod dozer_white;
+mod fanatic;
 mod green_camp;
 mod guhang;
 mod king;
@@ -45,8 +48,13 @@ mod nightrider;
 mod paratrooper;
 mod pawn_black;
 mod pawn_white;
+mod prime_minister;
 mod queen;
+mod repairman;
 mod rook;
+mod sacrificial_lamb;
+mod sacrificial_shrine;
+mod shell;
 mod surface_to_air_missile_black;
 mod surface_to_air_missile_white;
 mod tank;
@@ -56,6 +64,7 @@ mod tempest_pawn_black;
 mod tempest_pawn_white;
 mod tempest_queen;
 mod tempest_rook;
+mod wall;
 mod windmill;
 
 pub use airborne::airborne_definition;
@@ -75,6 +84,7 @@ pub use bouncing_rook::{bouncing_rook_chessembly_code, bouncing_rook_definition}
 pub use cannon_rook::cannon_rook_definition;
 pub use dozer_black::dozer_black_definition;
 pub use dozer_white::dozer_white_definition;
+pub use fanatic::fanatic_definition;
 pub use green_camp::green_camp_definition;
 pub use guhang::guhang_definition;
 pub use king::king_definition;
@@ -87,8 +97,16 @@ pub use nightrider::nightrider_definition;
 pub use paratrooper::paratrooper_definition;
 pub use pawn_black::pawn_black_definition;
 pub use pawn_white::pawn_white_definition;
+pub use prime_minister::prime_minister_definition;
 pub use queen::queen_definition;
+pub use repairman::repairman_definition;
+pub(crate) use repairman::REPAIR_WALLS_ABILITY_ID;
 pub use rook::rook_definition;
+pub use sacrificial_lamb::sacrificial_lamb_definition;
+pub use sacrificial_shrine::sacrificial_shrine_definition;
+pub(crate) use sacrificial_shrine::SACRIFICE_ABILITY_ID;
+pub use shell::shell_definition;
+pub(crate) use shell::DETONATE_ABILITY_ID;
 pub use surface_to_air_missile_black::surface_to_air_missile_black_definition;
 pub use surface_to_air_missile_white::surface_to_air_missile_white_definition;
 pub(crate) use surface_to_air_missile_white::INTERCEPT_ABILITY_ID;
@@ -100,6 +118,7 @@ pub use tempest_pawn_black::tempest_pawn_black_definition;
 pub use tempest_pawn_white::tempest_pawn_white_definition;
 pub use tempest_queen::tempest_queen_definition;
 pub use tempest_rook::tempest_rook_definition;
+pub use wall::wall_definition;
 pub use windmill::windmill_definition;
 
 /// Return all standard piece definitions in the established registration order.
@@ -120,6 +139,12 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         tank_definition(),
         bomber_definition(),
         machine_gunner_definition(),
+        shell_definition(),
+        sacrificial_shrine_definition(),
+        sacrificial_lamb_definition(),
+        fanatic_definition(),
+        wall_definition(),
+        repairman_definition(),
         amazon_definition(),
         guhang_definition(),
         cannon_rook_definition(),
@@ -127,6 +152,7 @@ pub fn all_default_definitions() -> Vec<PieceDefinition> {
         bouncing_bishop_definition(),
         bouncing_rook_definition(),
         bouncing_queen_definition(),
+        prime_minister_definition(),
         pawn_white_definition(),
         pawn_black_definition(),
         bouncing_pawn_white_definition(),

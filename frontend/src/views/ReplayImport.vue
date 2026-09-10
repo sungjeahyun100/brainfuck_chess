@@ -24,6 +24,8 @@ const code = ref('')
 const loading = ref(false)
 const error = ref<string | null>(null)
 const messages: Record<ReplayDecodeError, string> = {
+  unsupported_development_standard_record: '개발 단계 Standard 기록은 현재 규칙으로 재생할 수 없습니다.',
+  unsupported_rules_version: '지원하지 않는 게임 규칙 버전입니다.',
   empty: '기보 코드를 입력해 주세요.', too_large: '코드가 허용된 최대 길이를 초과했습니다.',
   invalid_format: 'DC-G2 형식의 기보 코드가 아닙니다.', unsupported_version: '지원하지 않는 기보 버전입니다.',
   invalid_payload: '기보 데이터가 손상되었거나 안전하게 압축 해제할 수 없습니다.', invalid_schema: '기보의 데이터 구조가 올바르지 않습니다.',

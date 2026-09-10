@@ -16,8 +16,9 @@
       :play-mode="playMode"
       :local-player="localPlayer"
       :room-id="currentRoom?.id ?? null"
-      :bot-player="playMode === 'bot' ? botPlayer : null"
+      :bot-player="playMode === 'bot' || playMode === 'challenge' ? botPlayer : null"
       :bot-difficulty="botDifficulty"
+      :debug-bot-metrics="botDebugMode"
       @state-update="onGameStateUpdate"
       @restart="restartToLobby"
       @replay="openReplayFromGame"
@@ -26,6 +27,7 @@
     <LobbyHome
       v-else-if="view === 'home'"
       @navigate="navigate"
+      @show-updates="updateLogDialog?.open()"
     />
     <DeckLibrary
       v-else-if="view === 'deck-library'"
@@ -36,7 +38,6 @@
       v-else-if="view === 'deck-editor'"
       :deck-id="editingDeckId"
       @back="navigate('deck-library')"
-      @saved="navigate('deck-library')"
       @test-piece="openPieceLabFromDeckEditor"
     />
     <PieceLab
@@ -59,6 +60,12 @@
       @back="navigate('home')"
       @loaded="openReplay"
     />
+    <Challenges
+      v-else-if="view === 'challenges'"
+      @back="navigate('home')"
+      @deck-building="navigate('deck-library')"
+      @started="startChallengeGame"
+    />
     <DeckSelect
       v-else-if="view === 'single-select'"
       mode="single"
@@ -73,6 +80,13 @@
       @deck-building="navigate('deck-library')"
       @start-bot="startBotGame"
     />
+    <BotDebugger
+      v-else-if="view === 'bot-debugger'"
+      :initial-selection="lastBotDebugSelection"
+      @back="navigate('home')"
+      @deck-building="navigate('deck-library')"
+      @start="startBotDebugGame"
+    />
     <MultiplayerLobby
       v-else
       @back="navigate('home')"
@@ -81,11 +95,12 @@
     />
 
     <p v-if="lobbyError && !gameState" class="global-error error">{{ lobbyError }}</p>
+    <UpdateLog ref="updateLogDialog" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import type { BotDifficulty, GameState } from './types/game'
 import type {
   AppView,
@@ -95,25 +110,30 @@ import type {
 } from './types/deck'
 import { api, type MultiplayerRoom } from './api/gameApi'
 import GameScreen from './components/GameScreen.vue'
+import UpdateLog from './components/UpdateLog.vue'
 import LobbyHome from './views/LobbyHome.vue'
 import DeckLibrary from './views/DeckLibrary.vue'
 import DeckEditor from './views/DeckEditor.vue'
 import DeckSelect from './views/DeckSelect.vue'
+import BotDebugger from './views/BotDebugger.vue'
 import MultiplayerLobby from './views/MultiplayerLobby.vue'
 import PieceLab from './views/PieceLab.vue'
 import CustomPieceWorkshop from './views/CustomPieceWorkshop.vue'
 import ReplayImport from './views/ReplayImport.vue'
 import ReplayPage from './views/ReplayPage.vue'
 import GameHistory from './views/GameHistory.vue'
+import Challenges from './views/Challenges.vue'
 import type { GameRecord } from './types/gameRecord'
 import { appEnv, envBannerLabel, showEnvBanner } from './config'
 import { useSavedDecks } from './composables/useSavedDecks'
 import { serializeNeutralDeck } from './composables/useDeckSerialization'
+import { parseDeckRuleset, type DeckRuleset } from './deckRulesets'
 import { validateSavedDeck } from './composables/useDeckValidation'
 import { mapSinglePlayerDecks, resolveLocalSide } from './singlePlayerSetup'
 import type { PlayMode } from './gameControlPolicy'
 
 const savedDecks = useSavedDecks()
+const updateLogDialog = ref<InstanceType<typeof UpdateLog> | null>(null)
 const view = ref<AppView>('home')
 const editingDeckId = ref<string | null>(null)
 const pieceLabReturnView = ref<AppView>('home')
@@ -126,6 +146,8 @@ const currentRoom = ref<MultiplayerRoom | null>(null)
 const localPlayer = ref<LobbyPlayer | null>(null)
 const playMode = ref<PlayMode>('single')
 const botDifficulty = ref<BotDifficulty>('normal')
+const botDebugMode = ref(false)
+const lastBotDebugSelection = ref<BotDeckSelection | null>(null)
 const lobbyError = ref<string | null>(null)
 const gamePollTimer = ref<number | null>(null)
 const replayRecord = ref<GameRecord | null>(null)
@@ -136,6 +158,7 @@ function navigate(nextView: AppView) {
   stopGamePolling()
   lobbyError.value = null
   replayRecord.value = null
+  botDebugMode.value = false
   if (nextView !== 'deck-editor' && nextView !== 'piece-lab') {
     editingDeckId.value = null
   }
@@ -186,8 +209,8 @@ function closePieceLab() {
   view.value = pieceLabReturnView.value === 'piece-lab' ? 'home' : pieceLabReturnView.value
 }
 
-function getValidDeck(deckId: string) {
-  const deck = savedDecks.getDeck(deckId)
+async function getValidDeck(deckId: string) {
+  const deck = await savedDecks.getDeck(deckId)
   if (!deck) {
     throw new Error('선택한 덱을 찾을 수 없습니다.')
   }
@@ -198,7 +221,10 @@ function getValidDeck(deckId: string) {
   return deck
 }
 
-function ensureSameMap(firstMapId: string, secondMapId: string) {
+function ensureCompatibleDecks(firstMapId: string, secondMapId: string, firstRuleset?: DeckRuleset, secondRuleset?: DeckRuleset) {
+  if (parseDeckRuleset(firstRuleset) !== parseDeckRuleset(secondRuleset)) {
+    throw new Error('선택한 두 덱의 룰이 다릅니다. 같은 룰의 덱을 선택하세요.')
+  }
   if (firstMapId !== secondMapId) {
     throw new Error('선택한 두 덱의 맵이 다릅니다. 같은 맵 전용 덱을 선택하세요.')
   }
@@ -207,10 +233,11 @@ function ensureSameMap(firstMapId: string, secondMapId: string) {
 async function startSingleGame(selection: SingleDeckSelection) {
   lobbyError.value = null
   playMode.value = 'single'
+  botDebugMode.value = false
   try {
-    const localDeck = getValidDeck(selection.localDeckId)
-    const opponentDeck = getValidDeck(selection.opponentDeckId)
-    ensureSameMap(localDeck.mapId, opponentDeck.mapId)
+    const localDeck = await getValidDeck(selection.localDeckId)
+    const opponentDeck = await getValidDeck(selection.opponentDeckId)
+    ensureCompatibleDecks(localDeck.mapId, opponentDeck.mapId, localDeck.ruleset, opponentDeck.ruleset)
     const resolvedSide = resolveLocalSide(selection.localSide)
     const { white: whiteDeck, black: blackDeck } = mapSinglePlayerDecks(resolvedSide, localDeck, opponentDeck)
 
@@ -231,13 +258,23 @@ async function startSingleGame(selection: SingleDeckSelection) {
 }
 
 async function startBotGame(selection: BotDeckSelection) {
+  await startConfiguredBotGame(selection, false)
+}
+
+async function startBotDebugGame(selection: BotDeckSelection) {
+  lastBotDebugSelection.value = selection
+  await startConfiguredBotGame(selection, true)
+}
+
+async function startConfiguredBotGame(selection: BotDeckSelection, debug: boolean) {
   lobbyError.value = null
   playMode.value = 'bot'
+  botDebugMode.value = debug
   botDifficulty.value = selection.difficulty
   try {
-    const humanDeck = getValidDeck(selection.humanDeckId)
-    const selectedBotDeck = getValidDeck(selection.botDeckId)
-    ensureSameMap(humanDeck.mapId, selectedBotDeck.mapId)
+    const humanDeck = await getValidDeck(selection.humanDeckId)
+    const selectedBotDeck = await getValidDeck(selection.botDeckId)
+    ensureCompatibleDecks(humanDeck.mapId, selectedBotDeck.mapId, humanDeck.ruleset, selectedBotDeck.ruleset)
 
     const whiteDeck = selection.humanSide === 'white' ? humanDeck : selectedBotDeck
     const blackDeck = selection.humanSide === 'black' ? humanDeck : selectedBotDeck
@@ -247,18 +284,30 @@ async function startBotGame(selection: BotDeckSelection) {
       serializeNeutralDeck(blackDeck, 'black'),
       humanDeck.mapId,
       selection.timeControl,
-      { localSide: selection.humanSide, guestNickname: `${selection.difficulty} Bot` },
+      { localSide: selection.humanSide, botPlayerId: selection.humanSide === 'white' ? 'black' : 'white', guestNickname: `${selection.difficulty} Bot${debug ? ' (Debug)' : ''}` },
     )
     localPlayer.value = selection.humanSide
     currentRoom.value = null
     gameState.value = state
   } catch (e: unknown) {
+    if (debug) botDebugMode.value = false
     lobbyError.value = e instanceof Error ? e.message : String(e)
   }
 }
 
+function startChallengeGame(payload: { state: GameState }) {
+  lobbyError.value = null
+  playMode.value = 'challenge'
+  botDebugMode.value = false
+  localPlayer.value = payload.state.challenge?.player_id ?? 'white'
+  botDifficulty.value = payload.state.challenge?.bot_difficulty ?? 'normal'
+  currentRoom.value = null
+  gameState.value = payload.state
+}
+
 function startMultiplayerGame(payload: { state: GameState; room: MultiplayerRoom; localPlayer: LobbyPlayer }) {
   playMode.value = 'multiplayer'
+  botDebugMode.value = false
   localPlayer.value = payload.localPlayer
   currentRoom.value = payload.room
   gameState.value = payload.state
@@ -277,13 +326,15 @@ function onGameStateUpdate(state: GameState) {
 }
 
 function restartToLobby() {
+  const returnToBotDebugger = botDebugMode.value
   stopGamePolling()
   gameState.value = null
   currentRoom.value = null
   localPlayer.value = null
   lobbyError.value = null
+  botDebugMode.value = false
   sessionStorage.removeItem(ACTIVE_MATCH_KEY)
-  view.value = 'home'
+  view.value = returnToBotDebugger ? 'bot-debugger' : 'home'
 }
 
 function stopGamePolling() {
@@ -297,9 +348,26 @@ function startGamePolling(gameId: string) {
   stopGamePolling()
   gamePollTimer.value = window.setInterval(async () => {
     try {
-      gameState.value = currentRoom.value && localPlayer.value
-        ? await api.heartbeatRoom(currentRoom.value.id, localPlayer.value)
+      const syncedState = currentRoom.value && localPlayer.value
+        ? await api.heartbeatRoom(currentRoom.value.id, localPlayer.value, gameState.value)
         : await api.getGame(gameId)
+      const updateStarted = import.meta.env.DEV ? performance.now() : null
+      if (gameState.value) Object.assign(gameState.value, syncedState)
+      else gameState.value = syncedState
+      if (updateStarted !== null) {
+        await nextTick()
+        requestAnimationFrame(() => {
+          const renderedAt = performance.now()
+          performance.measure('heartbeat:state_update_to_render_ms', {
+            start: updateStarted,
+            end: renderedAt,
+          })
+          console.debug(`[profiling] ${JSON.stringify({
+            path: 'heartbeat',
+            state_update_to_render_ms: renderedAt - updateStarted,
+          })}`)
+        })
+      }
       if (gameState.value.phase === 'ended') {
         stopGamePolling()
         sessionStorage.removeItem(ACTIVE_MATCH_KEY)
@@ -641,7 +709,7 @@ select {
 
 .editor-topbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px);
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px) minmax(120px, 160px);
   gap: 16px;
   align-items: end;
   padding: 18px;
@@ -1090,6 +1158,7 @@ select {
 }
 
 .pocket-drop-zone {
+  width: 100%;
   min-height: 64px;
   display: flex;
   align-items: center;
@@ -1100,6 +1169,11 @@ select {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.03);
   text-align: center;
+  cursor: pointer;
+}
+
+.pocket-drop-zone[aria-disabled="true"] {
+  cursor: not-allowed;
 }
 
 .pocket-drop-zone.ready {

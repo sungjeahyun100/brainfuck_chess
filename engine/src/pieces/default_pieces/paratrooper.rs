@@ -6,6 +6,8 @@ pub fn paratrooper_definition() -> PieceDefinition {
         id: "paratrooper".into(),
         name: "공수부대 대원".into(),
         score: 3,
+        ai_board_value: Some(0),
+        ai_pocket_value: Some(3),
         max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: String::new(),

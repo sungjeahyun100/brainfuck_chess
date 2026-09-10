@@ -15,6 +15,8 @@ take-move(0, -1);"
         id: "machine-gunner".into(),
         name: "기관총 사수".into(),
         score: 8,
+        ai_board_value: None,
+        ai_pocket_value: None,
         max_ammo: 0,
         deployment_zone: DeploymentZone::Back,
         chessembly_code: movement.clone(),

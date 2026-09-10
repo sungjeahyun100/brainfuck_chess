@@ -1,7 +1,13 @@
+use crate::challenge::{ChallengeGameContext, ChallengeGameMetadata};
 use crate::game_record::{
-    GameRecord, GameRecordOwnership, GameRecordPlayer, RecordedNotationAction,
+    GameMode, GameRecord, GameRecordOwnership, GameRecordPlayer, RecordedNotationAction,
 };
-use brainfuck_chess_engine::types::{GameEndReason, GamePhase, GameResult, GameState, PlayerId};
+use crate::game_view::{self, Audience, GameAccess};
+use brainfuck_chess_engine::custom_pieces::CustomPieceManifestEntry;
+use brainfuck_chess_engine::types::{
+    ActionRecord, Board, GameEndReason, GamePhase, GameResult, GameState, Piece, PieceDefinition,
+    PieceId, PieceTypeId, Player, PlayerId, Square,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
@@ -235,19 +241,83 @@ pub(crate) struct StoredGame {
     pub(crate) state: GameState,
     pub(crate) clock: ClockState,
     presence: Option<PresenceState>,
+    pub(crate) access: GameAccess,
     pub(crate) record: GameRecord,
     record_persisted: bool,
+    pub(crate) challenge: Option<ChallengeGameContext>,
+    catalog_revision: u64,
+    state_revision: u64,
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct GameView {
-    #[serde(flatten)]
+    #[serde(flatten, serialize_with = "serialize_game_view_state")]
     pub(crate) state: GameState,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub(crate) hand_counts: HashMap<PlayerId, usize>,
     pub(crate) clock: ClockSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) presence: Option<PresenceSnapshot>,
     pub(crate) player_info: HashMap<PlayerId, GameRecordPlayer>,
     pub(crate) record_notation: Vec<RecordedNotationAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) challenge: Option<ChallengeGameMetadata>,
+    pub(crate) catalog_revision: u64,
+    pub(crate) state_revision: u64,
+}
+
+// Wire views explicitly expose Legacy too. The persisted GameState serializer
+// remains unchanged for Legacy, preserving existing canonical analysis hashes.
+fn serialize_game_view_state<S: serde::Serializer>(
+    state: &GameState,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut value = serde_json::to_value(state).map_err(serde::ser::Error::custom)?;
+    value["ruleset"] = serde_json::to_value(state.ruleset).map_err(serde::ser::Error::custom)?;
+    value.serialize(serializer)
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct GameStaticData {
+    pub(crate) piece_definitions: HashMap<PieceTypeId, PieceDefinition>,
+    pub(crate) custom_piece_manifest: Vec<CustomPieceManifestEntry>,
+    pub(crate) player_info: HashMap<PlayerId, GameRecordPlayer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) challenge: Option<ChallengeGameMetadata>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct GameDynamicView {
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub(crate) hand_counts: HashMap<PlayerId, usize>,
+    pub(crate) ruleset: brainfuck_chess_engine::types::DeckRuleset,
+    pub(crate) id: String,
+    pub(crate) board: Board,
+    pub(crate) pieces: HashMap<PieceId, Piece>,
+    pub(crate) players: HashMap<PlayerId, Player>,
+    pub(crate) current_player: PlayerId,
+    pub(crate) turn_number: u32,
+    pub(crate) phase: GamePhase,
+    pub(crate) en_passant_target: Option<Square>,
+    pub(crate) en_passant_available_to: Option<PlayerId>,
+    pub(crate) global_state: HashMap<String, i32>,
+    pub(crate) result: Option<GameResult>,
+    pub(crate) clock: ClockSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) presence: Option<PresenceSnapshot>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct GameSyncView {
+    pub(crate) catalog_revision: u64,
+    pub(crate) state_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) catalog: Option<GameStaticData>,
+    pub(crate) dynamic: GameDynamicView,
+    pub(crate) latest_ply: usize,
+    pub(crate) new_history: Vec<ActionRecord>,
+    pub(crate) new_record_notation: Vec<RecordedNotationAction>,
+    pub(crate) resync_required: bool,
 }
 
 impl Deref for GameView {
@@ -325,9 +395,30 @@ impl StoredGame {
             state,
             clock,
             presence,
+            access: GameAccess::default(),
             record,
             record_persisted: false,
+            challenge: None,
+            catalog_revision: 1,
+            state_revision: 1,
         }
+    }
+
+    /// Freeze original deck composition first, then publish the playable initial state.
+    pub(crate) fn initialize_draws(&mut self) -> Result<(), String> {
+        if !self.record.initial_draws.is_empty() {
+            return Err("초기 Draw가 이미 확정되었습니다.".into());
+        }
+        let draws = crate::draw::initialize(&mut self.state, &mut crate::draw::random_index)?;
+        self.record.initial_draws = draws;
+        self.record.initial_state = self.state.clone();
+        Ok(())
+    }
+
+    pub(crate) fn set_challenge(&mut self, context: ChallengeGameContext) {
+        self.record.game_mode = GameMode::Challenge;
+        self.record.challenge_id = Some(context.metadata.id.clone());
+        self.challenge = Some(context);
     }
 
     pub(crate) fn heartbeat(&mut self, player: &str, now_ms: i64) {
@@ -355,9 +446,20 @@ impl StoredGame {
     }
 
     pub(crate) fn view(&self, now_ms: i64) -> GameView {
+        self.view_for(now_ms, Audience::Public)
+    }
+
+    pub(crate) fn audience(&self, client: Option<&str>) -> Audience<'_> {
+        self.access.audience(self.state.ruleset, client)
+    }
+
+    pub(crate) fn view_for(&self, now_ms: i64, audience: Audience<'_>) -> GameView {
         let running = self.state.phase != GamePhase::Ended;
+        let state = game_view::project_state(&self.state, audience);
+        let catalog_revision = game_view::catalog_revision(&state, self.catalog_revision, audience);
         GameView {
-            state: self.state.clone(),
+            state,
+            hand_counts: game_view::hand_counts(&self.state),
             clock: self.clock.snapshot(now_ms, running),
             presence: self.presence.as_ref().map(|presence| PresenceSnapshot {
                 white: presence_for(presence, "white", now_ms),
@@ -370,6 +472,84 @@ impl StoredGame {
                 .iter()
                 .map(|entry| entry.notation.clone())
                 .collect(),
+            challenge: self
+                .challenge
+                .as_ref()
+                .map(|context| context.metadata.clone()),
+            catalog_revision,
+            state_revision: self.state_revision,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sync_view(
+        &mut self,
+        now_ms: i64,
+        client_catalog_revision: Option<u64>,
+        since_ply: usize,
+    ) -> GameSyncView {
+        self.sync_view_for(now_ms, client_catalog_revision, since_ply, Audience::Public)
+    }
+
+    pub(crate) fn sync_view_for(
+        &mut self,
+        now_ms: i64,
+        client_catalog_revision: Option<u64>,
+        since_ply: usize,
+        audience: Audience<'_>,
+    ) -> GameSyncView {
+        let projected = game_view::project_state(&self.state, audience);
+        let catalog_revision =
+            game_view::catalog_revision(&projected, self.catalog_revision, audience);
+        self.state_revision = self.state_revision.saturating_add(1);
+        let running = self.state.phase != GamePhase::Ended;
+        let latest_ply = self.state.history.len();
+        let resync_required = since_ply > latest_ply;
+        let history_start = if resync_required { 0 } else { since_ply };
+        let catalog = (client_catalog_revision != Some(catalog_revision)).then(|| GameStaticData {
+            piece_definitions: projected.piece_definitions.clone(),
+            custom_piece_manifest: projected.custom_piece_manifest.clone(),
+            player_info: self.record.players.clone(),
+            challenge: self
+                .challenge
+                .as_ref()
+                .map(|context| context.metadata.clone()),
+        });
+
+        GameSyncView {
+            catalog_revision,
+            state_revision: self.state_revision,
+            catalog,
+            dynamic: GameDynamicView {
+                hand_counts: game_view::hand_counts(&self.state),
+                ruleset: self.state.ruleset,
+                id: self.state.id.clone(),
+                board: self.state.board.clone(),
+                pieces: projected.pieces,
+                players: projected.players,
+                current_player: self.state.current_player.clone(),
+                turn_number: self.state.turn_number,
+                phase: self.state.phase.clone(),
+                en_passant_target: self.state.en_passant_target,
+                en_passant_available_to: self.state.en_passant_available_to.clone(),
+                global_state: self.state.global_state.clone(),
+                result: self.state.result.clone(),
+                clock: self.clock.snapshot(now_ms, running),
+                presence: self.presence.as_ref().map(|presence| PresenceSnapshot {
+                    white: presence_for(presence, "white", now_ms),
+                    black: presence_for(presence, "black", now_ms),
+                }),
+            },
+            latest_ply,
+            new_history: self.state.history[history_start..].to_vec(),
+            new_record_notation: self
+                .record
+                .actions
+                .iter()
+                .skip(history_start)
+                .map(|entry| entry.notation.clone())
+                .collect(),
+            resync_required,
         }
     }
 
@@ -478,6 +658,7 @@ mod tests {
 
     fn empty_game() -> GameState {
         GameState {
+            ruleset: Default::default(),
             id: "clock-test".into(),
             board: Board {
                 size: 8,

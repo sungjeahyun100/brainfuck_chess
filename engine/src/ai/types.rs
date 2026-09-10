@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::types::{AbilityAction, DropAction, MoveAction};
+use crate::types::{AbilityAction, DropAction, ExtraSummonAction, MoveAction, TurnAction};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -8,6 +8,7 @@ pub enum AiAction {
     Move(MoveAction),
     Drop(DropAction),
     Ability(AbilityAction),
+    ExtraSummon(ExtraSummonAction),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,6 +33,7 @@ pub struct SearchLimits {
 pub struct SearchOptions {
     pub use_transposition_table: bool,
     pub use_aspiration_window: bool,
+    pub beam_enabled: bool,
 }
 
 impl Default for SearchOptions {
@@ -39,6 +41,7 @@ impl Default for SearchOptions {
         Self {
             use_transposition_table: true,
             use_aspiration_window: true,
+            beam_enabled: true,
         }
     }
 }
@@ -47,19 +50,19 @@ impl BotDifficulty {
     pub const fn limits(self) -> SearchLimits {
         match self {
             Self::Easy => SearchLimits {
-                max_depth_actions: 1,
+                max_depth_actions: 3,
                 max_nodes: 500,
                 soft_time_ms: 50,
                 hard_time_ms: 100,
             },
             Self::Normal => SearchLimits {
-                max_depth_actions: 2,
+                max_depth_actions: 4,
                 max_nodes: 3_000,
                 soft_time_ms: 150,
                 hard_time_ms: 300,
             },
             Self::Hard => SearchLimits {
-                max_depth_actions: 3,
+                max_depth_actions: 5,
                 max_nodes: 10_000,
                 soft_time_ms: 400,
                 hard_time_ms: 800,
@@ -98,6 +101,30 @@ pub struct SearchStats {
     pub aspiration_researches: u64,
     pub aspiration_fail_lows: u64,
     pub aspiration_fail_highs: u64,
+    pub generated_legal_actions: u64,
+    pub unique_canonical_actions: u64,
+    pub beam_selected_actions: u64,
+    pub mandatory_tactical_actions: u64,
+    pub drop_actions_generated: u64,
+    pub drop_actions_selected: u64,
+    pub board_optional_actions_generated: u64,
+    pub board_optional_actions_selected: u64,
+    pub quiet_drop_actions_generated: u64,
+    pub quiet_drop_actions_selected: u64,
+    pub normal_nodes: u64,
+    pub move_generation_nanos: u64,
+    pub canonical_deduplication_nanos: u64,
+    pub move_ordering_nanos: u64,
+    pub root_generated_legal_actions: u64,
+    pub root_unique_canonical_actions: u64,
+    pub root_beam_selected_actions: u64,
+    pub root_mandatory_tactical_actions: u64,
+    pub root_drop_actions_generated: u64,
+    pub root_drop_actions_selected: u64,
+    pub root_board_optional_actions_generated: u64,
+    pub root_board_optional_actions_selected: u64,
+    pub root_quiet_drop_actions_generated: u64,
+    pub root_quiet_drop_actions_selected: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +134,8 @@ pub struct BotTurnResult {
     /// Authoritative post-action snapshots. Replaying these frames yields the
     /// exact server state, including turn metadata and non-visual rule state.
     pub timeline: Vec<ActionTimelineFrame>,
+    /// Evaluation of the selected action from the bot player's perspective.
+    pub score: i32,
     pub searched_nodes: u64,
     pub depth_reached: u8,
     #[serde(default)]
@@ -132,8 +161,30 @@ mod tests {
             serde_json::from_str(r#"{"use_transposition_table":false}"#).unwrap();
         assert!(!legacy.use_transposition_table);
         assert!(legacy.use_aspiration_window);
+        assert!(legacy.beam_enabled);
 
         let defaults: SearchOptions = serde_json::from_str("{}").unwrap();
         assert_eq!(defaults, SearchOptions::default());
+    }
+}
+
+impl From<AiAction> for TurnAction {
+    fn from(action: AiAction) -> Self {
+        match action {
+            AiAction::Move(a) => Self::Move(a),
+            AiAction::Drop(a) => Self::Drop(a),
+            AiAction::Ability(a) => Self::Ability(a),
+            AiAction::ExtraSummon(a) => Self::ExtraSummon(a),
+        }
+    }
+}
+impl From<TurnAction> for AiAction {
+    fn from(action: TurnAction) -> Self {
+        match action {
+            TurnAction::Move(a) => Self::Move(a),
+            TurnAction::Drop(a) => Self::Drop(a),
+            TurnAction::Ability(a) => Self::Ability(a),
+            TurnAction::ExtraSummon(a) => Self::ExtraSummon(a),
+        }
     }
 }

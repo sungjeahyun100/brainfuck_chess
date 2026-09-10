@@ -11,6 +11,7 @@ pub fn submit_action(state: GameState, action: TurnAction) -> Result<GameState, 
         return Err("게임이 이미 종료되었습니다.".into());
     }
 
+    crate::hand::validate_hand_zones(&state)?;
     let legal = match &action {
         TurnAction::Move(action) => {
             action.player_id == state.current_player
@@ -31,6 +32,10 @@ pub fn submit_action(state: GameState, action: TurnAction) -> Result<GameState, 
                     .any(|candidate| candidate == *action)
         }
         TurnAction::Ability(action) => is_legal_ability_action(&state, action),
+        TurnAction::ExtraSummon(action) => {
+            crate::summon::validate_extra_summon(&state, action)?;
+            true
+        }
     };
     if !legal {
         return Err("canonical legal action이 아닙니다.".into());
@@ -74,6 +79,8 @@ mod tests {
                         deck: Deck {
                             player_id: id.into(),
                             starting_pieces: Vec::new(),
+                            hand_pieces: Vec::new(),
+                            extra_deck_pieces: Vec::new(),
                             pocket_pieces: Vec::new(),
                             score_limit: 39,
                             total_score: 0,
@@ -84,6 +91,7 @@ mod tests {
             })
             .collect();
         let mut state = GameState {
+            ruleset: Default::default(),
             id: "canonical-apply-parity".into(),
             board: create_board(8),
             pieces: HashMap::new(),

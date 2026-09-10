@@ -1543,6 +1543,7 @@ pub(crate) async fn test_action(
         TurnAction::Move(action) => action.piece_id.clone(),
         TurnAction::Drop(action) => action.piece_id.clone(),
         TurnAction::Ability(action) => action.piece_id.clone(),
+        TurnAction::ExtraSummon(action) => action.extra_piece_id.clone(),
     };
     let state = submit_action(state, input.action).map_err(|_| {
         validation(
@@ -1603,6 +1604,7 @@ fn build_test_state(board_spec: TestBoard, package: &CustomPiecePackage) -> ApiR
         .map(|definition| (definition.id.clone(), definition))
         .collect::<HashMap<_, _>>();
     let mut state = GameState {
+        ruleset: Default::default(),
         id: "custom-piece-test".into(),
         board: board.clone(),
         pieces: HashMap::new(),
@@ -1616,6 +1618,8 @@ fn build_test_state(board_spec: TestBoard, package: &CustomPiecePackage) -> ApiR
                     deck: Deck {
                         player_id: "white".into(),
                         starting_pieces: Vec::new(),
+                        hand_pieces: Vec::new(),
+                        extra_deck_pieces: Vec::new(),
                         pocket_pieces: Vec::new(),
                         score_limit: 0,
                         total_score: 0,
@@ -1630,6 +1634,8 @@ fn build_test_state(board_spec: TestBoard, package: &CustomPiecePackage) -> ApiR
                     deck: Deck {
                         player_id: "black".into(),
                         starting_pieces: Vec::new(),
+                        hand_pieces: Vec::new(),
+                        extra_deck_pieces: Vec::new(),
                         pocket_pieces: Vec::new(),
                         score_limit: 0,
                         total_score: 0,
@@ -1860,6 +1866,8 @@ mod tests {
             exposed_piece_key: created.exposed_piece_key.clone(),
         };
         let white = crate::PlayerDeckSpec {
+            extra: Vec::new(),
+            ruleset: Default::default(),
             name: None,
             starting: vec![
                 crate::StartingPieceSpec {
@@ -1879,6 +1887,8 @@ mod tests {
             pocket: vec![custom_ref],
         };
         let black = crate::PlayerDeckSpec {
+            extra: Vec::new(),
+            ruleset: Default::default(),
             name: None,
             starting: vec![crate::StartingPieceSpec {
                 piece: crate::DeckPieceRef::BuiltIn {
@@ -1942,6 +1952,7 @@ mod tests {
         assert_eq!(state.players["white"].deck.total_score, 22);
 
         let mut room = crate::MultiplayerRoom {
+            ruleset: Default::default(),
             id: "ROOM01".into(),
             board_size: 8,
             map_id: "standard-8x8".into(),
@@ -1954,6 +1965,8 @@ mod tests {
             guest_owner_id: Some("alice".into()),
             host_deck: Some(white),
             guest_deck: Some(crate::PlayerDeckSpec {
+                extra: Vec::new(),
+                ruleset: Default::default(),
                 name: None,
                 starting: vec![crate::StartingPieceSpec {
                     piece: crate::DeckPieceRef::BuiltIn {

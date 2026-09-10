@@ -46,8 +46,28 @@ RESET ROLE;
 
 SET ROLE deck_chess_schema_owner;
 CREATE TABLE prod.custom_piece_versions (id TEXT PRIMARY KEY);
-CREATE TABLE prod.custom_piece_images (id TEXT PRIMARY KEY);
+CREATE TABLE prod.custom_piece_images (
+    asset_id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    bytes BYTEA NOT NULL
+);
+GRANT SELECT, INSERT, UPDATE, DELETE
+    ON prod.custom_piece_versions, prod.custom_piece_images TO prod_app;
 CREATE TABLE test.custom_piece_versions (id TEXT PRIMARY KEY);
-CREATE TABLE test.custom_piece_images (id TEXT PRIMARY KEY);
+CREATE TABLE test.custom_piece_images (
+    asset_id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    bytes BYTEA NOT NULL
+);
+GRANT SELECT, INSERT, UPDATE, DELETE
+    ON test.custom_piece_versions, test.custom_piece_images TO test_app;
 REVOKE CREATE ON SCHEMA shared FROM deck_chess;
 RESET ROLE;

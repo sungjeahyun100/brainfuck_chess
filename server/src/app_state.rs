@@ -1,7 +1,12 @@
 use crate::stores::{AccountStore, CustomPieceStore, GameStore, RoomStore};
 use crate::{
     account::{InMemoryAccountRepository, PostgresAccountRepository},
+    analysis::{AnalysisStore, InMemoryAnalysisRepository, PostgresAnalysisRepository},
     auth::AuthState,
+    challenge::{
+        ChallengeProgressStore, InMemoryChallengeProgressRepository,
+        PostgresChallengeProgressRepository,
+    },
     custom_piece::{InMemoryCustomPieceRepository, PostgresCustomPieceRepository},
     database::{verify_database_contract, DataSchema},
     game_record::{GameRecordStore, InMemoryGameRecordRepository, PostgresGameRecordRepository},
@@ -10,12 +15,15 @@ use sqlx::postgres::PgPoolOptions;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
+    pub(crate) decks: crate::deck::DeckStore,
     pub(crate) games: GameStore,
     pub(crate) rooms: RoomStore,
     pub(crate) custom_pieces: CustomPieceStore,
     pub(crate) accounts: AccountStore,
     pub(crate) auth: AuthState,
     pub(crate) game_records: GameRecordStore,
+    pub(crate) analyses: AnalysisStore,
+    pub(crate) challenge_progress: ChallengeProgressStore,
 }
 
 impl AppState {
@@ -24,22 +32,29 @@ impl AppState {
         let custom_pieces: CustomPieceStore =
             std::sync::Arc::new(InMemoryCustomPieceRepository::default());
         Self {
+            decks: std::sync::Arc::new(crate::deck::tests::MemoryDeckRepository::default()),
             games: Default::default(),
             rooms: Default::default(),
             accounts: std::sync::Arc::new(InMemoryAccountRepository::new(custom_pieces.clone())),
             custom_pieces,
             auth: AuthState::for_tests(),
             game_records: std::sync::Arc::new(InMemoryGameRecordRepository::default()),
+            analyses: std::sync::Arc::new(InMemoryAnalysisRepository::default()),
+            challenge_progress: std::sync::Arc::new(InMemoryChallengeProgressRepository::default()),
         }
     }
 
     pub(crate) async fn from_env(app_env: &str) -> Result<Self, String> {
         let auth = AuthState::from_env(app_env)?;
         let data_schema = DataSchema::for_app_env(app_env)?;
-        let (custom_pieces, accounts, game_records): (
+        let mut decks: crate::deck::DeckStore =
+            std::sync::Arc::new(crate::deck::PostgresDeckRepository::new(None, data_schema));
+        let (custom_pieces, accounts, game_records, analyses, challenge_progress): (
             CustomPieceStore,
             AccountStore,
             GameRecordStore,
+            AnalysisStore,
+            ChallengeProgressStore,
         ) = match std::env::var("DATABASE_URL") {
             Ok(database_url) => {
                 let pool = PgPoolOptions::new()
@@ -49,13 +64,25 @@ impl AppState {
                     .await
                     .map_err(|error| format!("failed to connect to PostgreSQL: {error}"))?;
                 verify_database_contract(&pool, app_env, data_schema).await?;
+                decks = std::sync::Arc::new(crate::deck::PostgresDeckRepository::new(
+                    Some(pool.clone()),
+                    data_schema,
+                ));
                 (
                     std::sync::Arc::new(PostgresCustomPieceRepository::from_pool(
                         pool.clone(),
                         data_schema,
                     )),
                     std::sync::Arc::new(PostgresAccountRepository::new(pool.clone(), data_schema)),
-                    std::sync::Arc::new(PostgresGameRecordRepository::new(pool, data_schema)),
+                    std::sync::Arc::new(PostgresGameRecordRepository::new(
+                        pool.clone(),
+                        data_schema,
+                    )),
+                    std::sync::Arc::new(PostgresAnalysisRepository::new(pool.clone(), data_schema)),
+                    std::sync::Arc::new(PostgresChallengeProgressRepository::new(
+                        pool,
+                        data_schema,
+                    )),
                 )
             }
             Err(_) if app_env == "local" => {
@@ -68,17 +95,30 @@ impl AppState {
                     std::sync::Arc::new(InMemoryAccountRepository::new(custom_pieces.clone()));
                 let game_records: GameRecordStore =
                     std::sync::Arc::new(InMemoryGameRecordRepository::default());
-                (custom_pieces, accounts, game_records)
+                let challenge_progress: ChallengeProgressStore =
+                    std::sync::Arc::new(InMemoryChallengeProgressRepository::default());
+                let analyses: AnalysisStore =
+                    std::sync::Arc::new(InMemoryAnalysisRepository::default());
+                (
+                    custom_pieces,
+                    accounts,
+                    game_records,
+                    analyses,
+                    challenge_progress,
+                )
             }
             Err(_) => return Err(format!("DATABASE_URL is required for APP_ENV={app_env}")),
         };
         Ok(Self {
+            decks,
             games: Default::default(),
             rooms: Default::default(),
             custom_pieces,
             accounts,
             auth,
             game_records,
+            analyses,
+            challenge_progress,
         })
     }
 }
