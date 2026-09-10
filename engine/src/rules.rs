@@ -103,6 +103,16 @@ pub fn calculate_score_limit(board_size: i32) -> u32 {
     (board_size * board_size - 25).max(0) as u32
 }
 
+/// Standard Main Deck gets 20 additional points; Legacy keeps its original limit.
+pub fn calculate_score_limit_with_ruleset(board_size: i32, ruleset: DeckRuleset) -> u32 {
+    calculate_score_limit(board_size)
+        + if ruleset == DeckRuleset::Standard {
+            20
+        } else {
+            0
+        }
+}
+
 /// Deck availability is independent of Front/Back deployment geometry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -203,7 +213,7 @@ pub fn validate_deck_with_ruleset(
         }
     }
 
-    let score_limit = calculate_score_limit(board_size);
+    let score_limit = calculate_score_limit_with_ruleset(board_size, ruleset);
 
     // Count kings in starting pieces
     let king_count = deck

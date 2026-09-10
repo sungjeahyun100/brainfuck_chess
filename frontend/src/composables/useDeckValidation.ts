@@ -329,8 +329,8 @@ export const deckPresets: DeckPreset[] = [
   },
 ]
 
-export function scoreLimit(boardSize: number): number {
-  return boardSize * boardSize - 25
+export function scoreLimit(boardSize: number, ruleset: DeckRuleset = 'legacy'): number {
+  return boardSize * boardSize - 25 + (ruleset === 'standard' ? 20 : 0)
 }
 
 export function emptyPocket(): Record<DeckPieceType, number> {
@@ -551,7 +551,7 @@ export function validateDeckForStorage(deck: SavedDeck): { valid: boolean; error
 
 export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '덱'): DeckSummary {
   const totalScore = calculateDeckScore(deck)
-  const limit = scoreLimit(boardSize)
+  const limit = scoreLimit(boardSize, deck.ruleset === 'standard' ? 'standard' : 'legacy')
   const errors = validateDeckStructure(deck, boardSize, name)
   if (deck.ruleset !== undefined && !isDeckRuleset(deck.ruleset)) {
     return { totalScore, scoreLimit: limit, valid: false, errors }

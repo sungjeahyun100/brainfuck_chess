@@ -3479,3 +3479,62 @@ mod g5 {
         assert_eq!(serde_json::to_string(&decoded).unwrap(), encoded);
     }
 }
+
+#[test]
+fn standard_score_limit_increases_by_twenty_and_enforces_boundary() {
+    for (size, legacy) in [(8, 39), (9, 56), (10, 75), (11, 96), (12, 119)] {
+        assert_eq!(calculate_score_limit(size), legacy);
+        assert_eq!(
+            calculate_score_limit_with_ruleset(size, DeckRuleset::Legacy),
+            legacy
+        );
+        assert_eq!(
+            calculate_score_limit_with_ruleset(size, DeckRuleset::Standard),
+            legacy + 20
+        );
+        let mut state = make_game_state(size);
+        let (back, front) = standard_expected_zones(size);
+        add_piece(
+            &mut state,
+            "king",
+            "white",
+            "king",
+            back[0].file,
+            back[0].rank,
+        );
+        for (index, square) in front.iter().enumerate() {
+            add_piece(
+                &mut state,
+                &format!("front-{index}"),
+                "white",
+                "pawn-white",
+                square.file,
+                square.rank,
+            );
+        }
+        for index in front.len()..(legacy + 20) as usize {
+            add_pocket_piece(
+                &mut state,
+                &format!("pocket-{index}"),
+                "white",
+                "pawn-white",
+            );
+        }
+        let validate = |state: &GameState| {
+            validate_deck_with_ruleset(
+                &state.players["white"].deck,
+                size,
+                &state.pieces,
+                &state.piece_definitions,
+                DeckRuleset::Standard,
+            )
+        };
+        assert!(
+            validate(&state).valid,
+            "size {size}: {:?}",
+            validate(&state)
+        );
+        add_pocket_piece(&mut state, "overflow", "white", "pawn-white");
+        assert!(!validate(&state).valid);
+    }
+}

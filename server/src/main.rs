@@ -46,9 +46,9 @@ use brainfuck_chess_engine::{
     },
     pieces::default_pieces::all_default_definitions,
     rules::{
-        board_map_definition, calculate_deck_score, calculate_score_limit, create_board,
-        create_board_with_variant, get_base_zone_squares_with_ruleset, standard_board_map_id,
-        validate_deck_with_ruleset,
+        board_map_definition, calculate_deck_score, calculate_score_limit,
+        calculate_score_limit_with_ruleset, create_board, create_board_with_variant,
+        get_base_zone_squares_with_ruleset, standard_board_map_id, validate_deck_with_ruleset,
     },
     types::*,
 };
@@ -882,7 +882,7 @@ fn build_player_deck(
         pocket_pieces,
         hand_pieces: Vec::new(),
         extra_deck_pieces,
-        score_limit: calculate_score_limit(board_size),
+        score_limit: calculate_score_limit_with_ruleset(board_size, spec.ruleset),
         total_score: 0,
     };
 

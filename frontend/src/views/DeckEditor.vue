@@ -30,7 +30,7 @@
         <span class="limit-label">전용 맵</span>
         <select v-model="deck.mapId" class="text-input" @change="changeMap">
           <option v-for="map in boardMaps" :key="map.id" :value="map.id">
-            {{ map.name }} (최대 {{ scoreLimit(map.boardSize) }}점)
+            {{ map.name }} (최대 {{ scoreLimit(map.boardSize, deck.ruleset) }}점)
           </option>
         </select>
       </label>

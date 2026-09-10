@@ -3,8 +3,8 @@ use brainfuck_chess_engine::{
     ai::BotDifficulty,
     pieces::default_pieces::all_default_definitions,
     rules::{
-        board_map_definition, calculate_score_limit, can_piece_be_placed_at_start_with_ruleset,
-        get_base_zone_squares_with_ruleset,
+        board_map_definition, calculate_score_limit_with_ruleset,
+        can_piece_be_placed_at_start_with_ruleset, get_base_zone_squares_with_ruleset,
     },
     types::{DeckRuleset, PieceDefinition, Square},
 };
@@ -268,7 +268,7 @@ pub(crate) fn validate_registry(definitions: &[ChallengeDefinition]) -> Result<(
                 definition.id
             ));
         }
-        if score > calculate_score_limit(definition.board_size) {
+        if score > calculate_score_limit_with_ruleset(definition.board_size, definition.ruleset) {
             return Err(format!(
                 "{}: 공식 덱 점수가 상한을 초과합니다.",
                 definition.id
