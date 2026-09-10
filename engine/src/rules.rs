@@ -103,6 +103,25 @@ pub fn calculate_score_limit(board_size: i32) -> u32 {
     (board_size * board_size - 25).max(0) as u32
 }
 
+/// Deck availability is independent of Front/Back deployment geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeckZone {
+    Main,
+    Extra,
+}
+
+pub const MAX_EXTRA_DECK_PIECES: usize = 3;
+
+/// Built-in placement policy. Custom runtime IDs default to Main.
+pub fn piece_deck_zone(type_id: &str, ruleset: DeckRuleset) -> DeckZone {
+    if crate::summon::summon_policy(ruleset, type_id).is_some() {
+        DeckZone::Extra
+    } else {
+        DeckZone::Main
+    }
+}
+
 /// Sum the scores of all non-king pieces in a deck.
 pub fn calculate_deck_score(
     deck: &Deck,
@@ -141,6 +160,48 @@ pub fn validate_deck_with_ruleset(
     ruleset: DeckRuleset,
 ) -> ValidationResult {
     let mut errors = Vec::new();
+
+    if ruleset == DeckRuleset::Legacy && !deck.extra_deck_pieces.is_empty() {
+        errors.push("Legacy에서는 Extra Deck을 사용할 수 없습니다.".into());
+    }
+    if deck.extra_deck_pieces.len() > MAX_EXTRA_DECK_PIECES {
+        errors.push("Extra Deck은 최대 3기까지 사용할 수 있습니다.".into());
+    }
+    for id in deck.starting_pieces.iter().chain(&deck.pocket_pieces) {
+        if let Some(piece) = pieces.get(id) {
+            if piece_deck_zone(&piece.type_id, ruleset) == DeckZone::Extra {
+                errors.push(format!(
+                    "{}은(는) Standard Extra Deck 전용입니다.",
+                    piece.type_id
+                ));
+            }
+        }
+    }
+    let mut extra_ids = std::collections::HashSet::new();
+    for id in &deck.extra_deck_pieces {
+        let Some(piece) = pieces.get(id) else {
+            errors.push("Extra Deck 기물을 찾을 수 없습니다.".into());
+            continue;
+        };
+        if !extra_ids.insert(id)
+            || deck.starting_pieces.contains(id)
+            || deck.pocket_pieces.contains(id)
+            || piece.owner != deck.player_id
+            || piece.current_square.is_some()
+            || piece.in_pocket
+            || piece.captured
+        {
+            errors.push("Extra Deck zone 소속이 올바르지 않습니다.".into());
+        }
+        if !definitions.contains_key(&piece.type_id)
+            || piece_deck_zone(&piece.type_id, ruleset) != DeckZone::Extra
+        {
+            errors.push(format!(
+                "{}은(는) Extra Deck에 넣을 수 없습니다.",
+                piece.type_id
+            ));
+        }
+    }
 
     let score_limit = calculate_score_limit(board_size);
 
@@ -381,6 +442,9 @@ pub fn can_piece_be_placed_at_start_with_ruleset(
     board_size: i32,
     ruleset: DeckRuleset,
 ) -> bool {
+    if piece_deck_zone(&definition.id, ruleset) != DeckZone::Main {
+        return false;
+    }
     get_deployment_zone_squares_with_ruleset(
         player_id,
         board_size,

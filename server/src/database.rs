@@ -45,6 +45,16 @@ pub(crate) async fn verify_database_contract(
         ));
     }
 
+    let analysis_draw_contract = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='game_analysis_nodes' AND column_name='draws' AND data_type='jsonb' AND is_nullable='NO')"
+    ).bind(data_schema.name()).fetch_one(pool).await
+        .map_err(|_| "failed to inspect analysis Draw storage contract".to_owned())?;
+    if !analysis_draw_contract {
+        return Err(
+            "analysis Draw storage is not provisioned; run the approved admin migration".into(),
+        );
+    }
+
     let deck_contract = sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass($1) IS NOT NULL AND has_table_privilege(current_user, to_regclass($1), 'SELECT') AND has_table_privilege(current_user, to_regclass($1), 'INSERT') AND has_table_privilege(current_user, to_regclass($1), 'UPDATE') AND has_table_privilege(current_user, to_regclass($1), 'DELETE') AND (SELECT count(*)=10 FROM information_schema.columns WHERE table_schema=$2 AND table_name='decks' AND column_name IN ('id','owner_id','name','deck_data','format_version','created_at_ms','updated_at_ms','version','request_key','create_hash'))"
     ).bind(data_schema.table("decks")).bind(data_schema.name()).fetch_one(pool).await

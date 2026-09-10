@@ -40,6 +40,7 @@ BEGIN
             ('test', 'game_records', 'black_user_id'),
             ('test', 'game_records', 'retention_mode'),
             ('test', 'game_records', 'expires_at_ms'),
+            ('test', 'game_analysis_nodes', 'draws'),
             ('test', 'decks', 'id'),
             ('test', 'decks', 'owner_id'),
             ('test', 'decks', 'name'),

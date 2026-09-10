@@ -1,5 +1,7 @@
+use super::observation::BotObservation;
+use super::standard::*;
 use crate::legal_moves::{generate_drop_candidates_by_type, generate_legal_move_actions};
-use crate::types::{GamePhase, GameState, PlayerId};
+use crate::types::{DeckRuleset, GamePhase, GameState, PlayerId};
 
 pub const WIN_SCORE: i32 = 1_000_000;
 const KING_CAPTURE_THREAT: i32 = 100_000;
@@ -36,19 +38,19 @@ fn mobility(state: &GameState, player_id: &PlayerId) -> (usize, usize, bool) {
 }
 
 pub fn evaluate(state: &GameState, bot_player_id: &PlayerId) -> i32 {
-    evaluate_internal(state, bot_player_id, true)
+    let observation = BotObservation::new(state, bot_player_id);
+    evaluate_observed(
+        &observation.state,
+        bot_player_id,
+        observation.opponent_hand_count,
+        true,
+    )
 }
 
-pub(crate) fn evaluate_without_king_capture_threat(
+pub(crate) fn evaluate_observed(
     state: &GameState,
     bot_player_id: &PlayerId,
-) -> i32 {
-    evaluate_internal(state, bot_player_id, false)
-}
-
-fn evaluate_internal(
-    state: &GameState,
-    bot_player_id: &PlayerId,
+    opponent_hand_count: usize,
     include_king_capture_threat: bool,
 ) -> i32 {
     crate::profiling::record_evaluation(1);
@@ -64,7 +66,11 @@ fn evaluate_internal(
         };
     }
 
-    let mut score = material_balance(state, bot_player_id) * i64::from(MATERIAL_WEIGHT);
+    let mut score = if state.ruleset == DeckRuleset::Standard {
+        standard_material(state, bot_player_id, opponent_hand_count)
+    } else {
+        material_balance(state, bot_player_id) * i64::from(MATERIAL_WEIGHT)
+    };
 
     let opponent_id = state
         .players
@@ -92,6 +98,57 @@ fn evaluate_internal(
         }
     }
     score.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+fn standard_material(state: &GameState, bot: &PlayerId, hidden_count: usize) -> i64 {
+    let mut score = 0;
+    for p in state.pieces.values().filter(|p| !p.captured) {
+        let Some(def) = state.piece_definitions.get(&p.type_id) else {
+            continue;
+        };
+        if def.is_king {
+            continue;
+        }
+        let sign = if p.owner == *bot { 1 } else { -1 };
+        let value = if p.is_on_board() {
+            i64::from(def.ai_board_value()) * 100
+        } else if state
+            .players
+            .get(&p.owner)
+            .is_some_and(|owner| owner.deck.hand_pieces.contains(&p.id))
+        {
+            i64::from(def.ai_pocket_value()) * 100
+        } else if p.in_pocket {
+            i64::from(def.ai_pocket_value()) * POCKET_DISCOUNT_PERCENT
+        } else {
+            0
+        };
+        score += sign * value;
+    }
+    // Hidden Pocket has no public count. This fixed uncertainty survives empty
+    // authoritative pockets; Hand contributes only its publicly visible count.
+    score -= (hidden_count.min(8) as i64 * HIDDEN_HAND_VALUE + UNKNOWN_POCKET_THREAT)
+        .min(HIDDEN_RESERVE_THREAT_CAP);
+    // Extra is an option, not board material. Affordable public/known sacrifices
+    // determine its bounded net value, with no hypothetical Draw resolution.
+    for (owner, player) in &state.players {
+        let mut view = state.clone();
+        view.current_player = owner.clone();
+        for id in &player.deck.extra_deck_pieces {
+            let Some(def) = state
+                .pieces
+                .get(id)
+                .and_then(|p| state.piece_definitions.get(&p.type_id))
+            else {
+                continue;
+            };
+            if let Some(subset) = select_sacrifice_subsets(&view, id).first() {
+                let net = (i64::from(def.ai_board_value()) * 100 - subset.utility_loss).max(0);
+                score += if owner == bot { 1 } else { -1 } * (net / 4 + 25).min(300);
+            }
+        }
+    }
+    score
 }
 
 fn material_balance(state: &GameState, bot_player_id: &PlayerId) -> i64 {
@@ -205,6 +262,8 @@ mod tests {
         let deck = Deck {
             player_id: "white".into(),
             starting_pieces: Vec::new(),
+            hand_pieces: Vec::new(),
+            extra_deck_pieces: Vec::new(),
             pocket_pieces: vec!["piece".into()],
             score_limit: 39,
             total_score: 3,
@@ -259,4 +318,15 @@ mod tests {
 
         assert_eq!(material_balance(&state, &"white".into()), 12);
     }
+}
+
+#[cfg(test)]
+pub(crate) fn evaluate_without_king_capture_threat(state: &GameState, bot: &PlayerId) -> i32 {
+    let observation = BotObservation::new(state, bot);
+    evaluate_observed(
+        &observation.state,
+        bot,
+        observation.opponent_hand_count,
+        false,
+    )
 }

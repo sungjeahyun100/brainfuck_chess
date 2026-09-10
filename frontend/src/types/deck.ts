@@ -13,6 +13,7 @@ export interface PieceCatalogItem {
   score: number
   category: string
   canPocket: boolean
+  standardDeckZone?: 'main' | 'extra'
   deploymentZone: DeploymentZone
   uniqueStarting?: boolean
   aliases?: string[]
@@ -30,6 +31,7 @@ export interface PieceCatalogItem {
 export interface PieceCatalogMetadata {
   score: number
   deployment_zone: DeploymentZone
+  standard_deck_zone?: 'main' | 'extra'
 }
 
 export interface LobbyPlacement {
@@ -42,6 +44,8 @@ export interface LobbyDeck {
   ruleset?: DeckRuleset
   starting: LobbyPlacement[]
   pocket: Record<DeckPieceType, number>
+  /** One type reference per instance; absent old data means empty. */
+  extra?: DeckPieceType[]
   customPieces?: CustomDeckPieceRef[]
 }
 

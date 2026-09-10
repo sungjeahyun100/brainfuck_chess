@@ -144,6 +144,9 @@ export interface Deck {
   player_id: PlayerId
   starting_pieces: PieceId[]
   pocket_pieces: PieceId[]
+  /** Runtime only. Omitted for a hidden opponent hand and older states. */
+  hand_pieces?: PieceId[]
+  extra_deck_pieces?: PieceId[]
   score_limit: number
   total_score: number
 }
@@ -224,7 +227,20 @@ export interface SubmitAbilityAction {
   deployments?: AbilityDeployment[]
 }
 
-export type SubmitAction = SubmitMoveAction | SubmitDropAction | SubmitAbilityAction
+export interface ExtraSummonAction {
+  type: 'extra_summon'
+  player_id: PlayerId
+  extra_piece_id: PieceId
+  sacrifice_piece_ids: PieceId[]
+  target_square: Square
+}
+export interface SummonOptions {
+  sacrifice_piece_ids: PieceId[]
+  policy: { sacrifice_zones: Array<'hand' | 'board'> }
+  cost: number
+  actions: Omit<ExtraSummonAction, 'type'>[]
+}
+export type SubmitAction = SubmitMoveAction | SubmitDropAction | SubmitAbilityAction | Omit<ExtraSummonAction, 'player_id'>
 
 export interface GlobalStateUpdate {
     key: string
@@ -239,11 +255,11 @@ export interface DropAction {
   captured_piece_id?: PieceId
 }
 
-export type TurnAction = MoveAction | DropAction | AbilityAction
+export type TurnAction = MoveAction | DropAction | AbilityAction | ExtraSummonAction
 
 export type BotDifficulty = 'easy' | 'normal' | 'hard'
 
-export type AiAction = MoveAction | DropAction | AbilityAction
+export type AiAction = MoveAction | DropAction | AbilityAction | ExtraSummonAction
 
 export interface ActionTimelineFrame {
   action: AiAction
@@ -300,7 +316,7 @@ export interface BotTurnResponse {
   game_state: GameState
   actions: AiAction[]
   timeline: ActionTimelineFrame[]
-  stats: BotTurnStats
+  stats?: BotTurnStats
 }
 
 export type GamePhase = 'setup' | 'playing' | 'ended'
@@ -350,6 +366,8 @@ export interface ChallengeGameMetadata {
 }
 
 export interface GameState {
+  /** Live Standard projection: counts for both sides; identities only in authorized decks. */
+  hand_counts?: Record<PlayerId, number>
   /** Omitted Legacy on historical serialized states to preserve analysis hashes. */
   ruleset?: DeckRuleset
   /** Network snapshot revisions; absent in legacy replay/game-record payloads. */

@@ -284,7 +284,7 @@ async function startConfiguredBotGame(selection: BotDeckSelection, debug: boolea
       serializeNeutralDeck(blackDeck, 'black'),
       humanDeck.mapId,
       selection.timeControl,
-      { localSide: selection.humanSide, guestNickname: `${selection.difficulty} Bot${debug ? ' (Debug)' : ''}` },
+      { localSide: selection.humanSide, botPlayerId: selection.humanSide === 'white' ? 'black' : 'white', guestNickname: `${selection.difficulty} Bot${debug ? ' (Debug)' : ''}` },
     )
     localPlayer.value = selection.humanSide
     currentRoom.value = null

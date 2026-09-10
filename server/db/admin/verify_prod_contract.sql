@@ -40,6 +40,7 @@ BEGIN
             ('prod', 'game_records', 'black_user_id'),
             ('prod', 'game_records', 'retention_mode'),
             ('prod', 'game_records', 'expires_at_ms'),
+            ('prod', 'game_analysis_nodes', 'draws'),
             ('prod', 'decks', 'id'),
             ('prod', 'decks', 'owner_id'),
             ('prod', 'decks', 'name'),

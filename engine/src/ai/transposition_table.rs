@@ -44,6 +44,8 @@ struct PlayerKey {
     deck_player_id: String,
     starting_pieces: Vec<PieceId>,
     pocket_pieces: Vec<PieceId>,
+    extra_deck_pieces: Vec<PieceId>,
+    hand_pieces: Vec<PieceId>,
     score_limit: u32,
     total_score: u32,
     captured_pieces: Vec<PieceId>,
@@ -128,11 +130,17 @@ impl PositionKey {
                 pocket_pieces.sort();
                 let mut captured_pieces = player.captured_pieces.clone();
                 captured_pieces.sort();
+                let mut extra_deck_pieces = player.deck.extra_deck_pieces.clone();
+                extra_deck_pieces.sort();
+                let mut hand_pieces = player.deck.hand_pieces.clone();
+                hand_pieces.sort();
                 PlayerKey {
                     id: player.id.clone(),
                     deck_player_id: player.deck.player_id.clone(),
                     starting_pieces,
                     pocket_pieces,
+                    extra_deck_pieces,
+                    hand_pieces,
                     score_limit: player.deck.score_limit,
                     total_score: player.deck.total_score,
                     captured_pieces,
@@ -261,6 +269,8 @@ mod tests {
                     deck: Deck {
                         player_id: id.into(),
                         starting_pieces: Vec::new(),
+                        hand_pieces: Vec::new(),
+                        extra_deck_pieces: Vec::new(),
                         pocket_pieces: Vec::new(),
                         score_limit: 39,
                         total_score: 0,
@@ -553,6 +563,63 @@ mod tests {
         assert_ne!(
             PositionKey::from_state(&legacy),
             PositionKey::from_state(&standard)
+        );
+    }
+    #[test]
+    fn extra_membership_is_part_of_identity_and_order_is_not() {
+        let mut first = state();
+        first.ruleset = crate::types::DeckRuleset::Standard;
+        let base = PositionKey::from_state(&first);
+        first
+            .players
+            .get_mut("white")
+            .unwrap()
+            .deck
+            .extra_deck_pieces = vec!["extra-a".into(), "extra-b".into()];
+        assert_ne!(base, PositionKey::from_state(&first));
+        let mut reordered = first.clone();
+        reordered
+            .players
+            .get_mut("white")
+            .unwrap()
+            .deck
+            .extra_deck_pieces
+            .reverse();
+        assert_eq!(
+            PositionKey::from_state(&first),
+            PositionKey::from_state(&reordered)
+        );
+    }
+    #[test]
+    fn hand_membership_changes_position_key_but_order_does_not() {
+        let mut first = state();
+        first.ruleset = crate::types::DeckRuleset::Standard;
+        let base = PositionKey::from_state(&first);
+        first.players.get_mut("white").unwrap().deck.hand_pieces =
+            vec!["hand-a".into(), "hand-b".into()];
+        assert_ne!(base, PositionKey::from_state(&first));
+        let mut reordered = first.clone();
+        reordered
+            .players
+            .get_mut("white")
+            .unwrap()
+            .deck
+            .hand_pieces
+            .reverse();
+        assert_eq!(
+            PositionKey::from_state(&first),
+            PositionKey::from_state(&reordered)
+        );
+        reordered
+            .players
+            .get_mut("white")
+            .unwrap()
+            .deck
+            .hand_pieces
+            .pop();
+        assert_ne!(
+            PositionKey::from_state(&first),
+            PositionKey::from_state(&reordered)
         );
     }
 }

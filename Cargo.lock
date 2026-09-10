@@ -148,6 +148,7 @@ dependencies = [
  "base64",
  "brainfuck-chess-engine",
  "dashmap",
+ "getrandom 0.4.2",
  "hmac",
  "jsonwebtoken",
  "reqwest",

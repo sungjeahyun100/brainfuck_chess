@@ -1,3 +1,4 @@
+import { normalizeExtra } from './useDeckValidation.ts'
 import { parseDeckRuleset } from '../deckRulesets.ts'
 import type { SavedDeck } from '../types/deck'
 import type { BoardMapId } from '../types/game'
@@ -27,6 +28,7 @@ function readStorage(): SavedDeck[] {
     return [{
       ...deck,
       ruleset,
+      extra: normalizeExtra(deck.extra),
       mapId,
       customPieces: Array.isArray(deck.customPieces) ? deck.customPieces : [],
     }]
@@ -73,6 +75,7 @@ export function createNewSavedDeck(mapId: BoardMapId = 'standard-8x8'): SavedDec
 
   return {
     ruleset: 'legacy',
+    extra: [],
     id: nextId(),
     name: createDeckName(existing),
     mapId: map.id,
@@ -98,6 +101,7 @@ export function useLocalSavedDecks() {
     const normalized: SavedDeck = {
       ...deck,
       ruleset: parseDeckRuleset(deck.ruleset),
+      extra: normalizeExtra(deck.extra),
       mapId,
       name: deck.name.trim(),
       updatedAt: now,

@@ -243,3 +243,44 @@ test('game and room payloads carry deck and top-level ruleset independently of m
     assert.equal(calls.at(-1).deck.ruleset, ruleset)
   }
 })
+
+test('Standard sync replaces reserve identities and keeps own hand plus opponent counts without catalog', () => {
+  const own = { id: 'white', deck: { player_id: 'white', starting_pieces: [], pocket_pieces: [], hand_pieces: ['own-hand'], score_limit: 39, total_score: 1 }, captured_pieces: [] }
+  const opponent = { id: 'black', deck: { player_id: 'black', starting_pieces: [], pocket_pieces: [], score_limit: 39, total_score: 1 }, captured_pieces: [] }
+  const previous = { ...syncCurrent, ruleset: 'standard', players: { white: own, black: { ...opponent, deck: { ...opponent.deck, hand_pieces: ['previously-visible'] } } }, pieces: { 'previously-visible': { id: 'previously-visible' } } } as unknown as GameState
+  const sync = syncResponse()
+  sync.dynamic = { ...sync.dynamic, ruleset: 'standard', players: { white: own, black: opponent }, pieces: { 'own-hand': { id: 'own-hand', type_id: 'knight', owner: 'white' } } as unknown as GameState['pieces'], hand_counts: { white: 1, black: 2 } }
+  const merged = mergeGameSync(previous, sync)
+  assert.deepEqual(merged.players.white.deck.hand_pieces, ['own-hand'])
+  assert.equal(merged.hand_counts?.black, 2)
+  assert.equal(merged.players.black.deck.hand_pieces, undefined)
+  assert.ok(!JSON.stringify(merged).includes('previously-visible'))
+})
+
+test('live requests carry the tab capability and Bot creation explicitly fixes the bot side', async (t) => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => 'private-tab-capability' } })
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'sessionStorage', previous); else Reflect.deleteProperty(globalThis, 'sessionStorage') })
+  const calls: RequestInit[] = []
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    calls.push(init!)
+    return new Response('{}', { status: 200 })
+  }) as typeof fetch
+  const deck = { ruleset: 'standard' as const, starting: [], pocket: [] }
+  await api.createGame(8, deck, deck, 'standard-8x8', 'unlimited', { localSide: 'white', guestNickname: 'Bot', botPlayerId: 'black' })
+  await api.getGame('game')
+  assert.equal(JSON.parse(String(calls[0].body)).bot_player_id, 'black')
+  for (const call of calls) assert.equal(new Headers(call.headers).get('x-game-client-id'), 'private-tab-capability')
+})
+
+// Empty custom manifests are omitted by authoritative sparse serialization.
+{
+  const catalog = { piece_definitions: {}, player_info: {} } as never
+  const first = mergeGameSync(null, syncResponse({ catalog }))
+  assert.deepEqual(first.custom_piece_manifest, [])
+  const oldCatalog = { ...syncCurrent, custom_piece_manifest: [{ package_id: 'formerly-visible-reserve' }] } as unknown as GameState
+  const replacement = mergeGameSync(oldCatalog, syncResponse({ catalog }))
+  assert.deepEqual(replacement.custom_piece_manifest, [])
+  const noManifest = { ...syncCurrent }; delete (noManifest as Partial<GameState>).custom_piece_manifest
+  assert.deepEqual(mergeGameSync(noManifest, syncResponse()).custom_piece_manifest, [])
+}

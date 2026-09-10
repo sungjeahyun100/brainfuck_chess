@@ -1,3 +1,4 @@
+import { normalizeExtra } from '../composables/useDeckValidation.ts'
 import { parseDeckRuleset } from '../deckRulesets.ts'
 import type { SavedDeck } from '../types/deck.ts'
 
@@ -21,13 +22,14 @@ export function deckInput(deck: SavedDeck) {
       boardSize: deck.boardSize,
       starting: deck.starting,
       pocket: deck.pocket,
+      extra: normalizeExtra(deck.extra),
       customPieces: deck.customPieces ?? [],
     },
   }
 }
 
 function normalizeSavedDeck(deck: SavedDeck): SavedDeck {
-  return { ...deck, ruleset: parseDeckRuleset(deck.ruleset) }
+  return { ...deck, ruleset: parseDeckRuleset(deck.ruleset), extra: normalizeExtra(deck.extra) }
 }
 
 export function accountDeckApi(account: string) {

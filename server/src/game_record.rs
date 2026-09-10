@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use brainfuck_chess_engine::types::{
-    GameResult, GameState, MoveOptionKind, Piece, PieceId, PieceLayer, PlayerId, Square, TurnAction,
+    DeckRuleset, GameResult, GameState, MoveOptionKind, Piece, PieceId, PieceLayer, PlayerId,
+    Square, TurnAction,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -12,7 +13,36 @@ use crate::database::DataSchema;
 use crate::time_control::{ClockSnapshot, TimeControlId};
 
 pub(crate) const GAME_RECORD_FORMAT_VERSION: u32 = 2;
-pub(crate) const RULESET_VERSION: &str = "deck-chess-1";
+pub(crate) const LEGACY_RULES_VERSION: &str = "deck-chess-1";
+pub(crate) const STANDARD_RULES_VERSION: &str = "deck-chess-standard-1";
+
+/// Semantic engine dispatch, independent of JSON/snapshot/deck/account versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GameRulesVersion {
+    LegacyV1,
+    StandardV1,
+}
+
+pub(crate) fn current_rules_version_for(ruleset: DeckRuleset) -> &'static str {
+    match ruleset {
+        DeckRuleset::Legacy => LEGACY_RULES_VERSION,
+        DeckRuleset::Standard => STANDARD_RULES_VERSION,
+    }
+}
+
+pub(crate) fn supported_record_rules_version(
+    ruleset: DeckRuleset,
+    version: &str,
+) -> Result<GameRulesVersion, &'static str> {
+    match (ruleset, version) {
+        (DeckRuleset::Legacy, LEGACY_RULES_VERSION) => Ok(GameRulesVersion::LegacyV1),
+        (DeckRuleset::Standard, STANDARD_RULES_VERSION) => Ok(GameRulesVersion::StandardV1),
+        (DeckRuleset::Standard, LEGACY_RULES_VERSION) => {
+            Err("unsupported_development_standard_record")
+        }
+        _ => Err("unsupported_rules_version"),
+    }
+}
 pub(crate) const CHESSEMBLY_VERSION: &str = "chessembly-1";
 pub(crate) const AUTO_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 
@@ -79,6 +109,8 @@ pub(crate) struct DeckSnapshot {
     pub(crate) board_size: i32,
     pub(crate) deployments: Vec<DeckDeploymentSnapshot>,
     pub(crate) pocket: Vec<DeckPocketSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) extra: Vec<DeckPocketSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +120,7 @@ pub(crate) enum NotationActionKind {
     MoveWithAbility,
     Ability,
     Drop,
+    ExtraSummon,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +170,8 @@ pub(crate) struct RecordedAction {
     pub(crate) action: TurnAction,
     pub(crate) notation: RecordedNotationAction,
     pub(crate) state_delta: Vec<StateDeltaOperation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) draws: Vec<crate::draw::DrawResolution>,
     pub(crate) elapsed_ms: i64,
     pub(crate) clock_before_ms: Option<i64>,
     pub(crate) clock_after_ms: Option<i64>,
@@ -225,6 +260,8 @@ pub(crate) struct GameRecord {
     pub(crate) players: HashMap<PlayerId, GameRecordPlayer>,
     pub(crate) time_control: TimeControlId,
     pub(crate) initial_state: GameState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) initial_draws: Vec<crate::draw::DrawResolution>,
     pub(crate) initial_clock: ClockSnapshot,
     pub(crate) decks: HashMap<PlayerId, DeckSnapshot>,
     pub(crate) actions: Vec<RecordedAction>,
@@ -291,7 +328,7 @@ impl GameRecord {
             format_version: GAME_RECORD_FORMAT_VERSION,
             game_id: initial_state.id.clone(),
             display_name: replay_display_name(white, black, started_at_ms),
-            ruleset_version: RULESET_VERSION.into(),
+            ruleset_version: current_rules_version_for(initial_state.ruleset).into(),
             chessembly_version: CHESSEMBLY_VERSION.into(),
             started_at_ms,
             ended_at_ms: None,
@@ -301,6 +338,7 @@ impl GameRecord {
             initial_state,
             initial_clock,
             decks,
+            initial_draws: Vec::new(),
             actions: Vec::new(),
             final_clock: None,
             game_mode: GameMode::Standard,
@@ -320,7 +358,7 @@ impl GameRecord {
         clock: ClockSnapshot,
         state_before: &GameState,
         state_after: GameState,
-    ) {
+    ) -> &mut RecordedAction {
         let player_id = action_player_id(&action).clone();
         let notation = build_notation(&action, state_before);
         let state_delta = build_state_delta(state_before, &state_after);
@@ -330,11 +368,13 @@ impl GameRecord {
             action,
             notation,
             state_delta,
+            draws: Vec::new(),
             elapsed_ms,
             clock_before_ms,
             clock_after_ms,
             clock,
         });
+        self.actions.last_mut().unwrap()
     }
 
     pub(crate) fn finalize(&mut self, state: &GameState, clock: ClockSnapshot, ended_at_ms: i64) {
@@ -353,14 +393,46 @@ impl GameRecord {
             && self.expires_at_ms.is_some_and(|expires| expires <= now_ms)
     }
 
+    pub(crate) fn validate_rules_version(&self) -> Result<GameRulesVersion, &'static str> {
+        supported_record_rules_version(self.initial_state.ruleset, &self.ruleset_version)
+    }
+
     pub(crate) fn state_at_ply(&self, ply: u32) -> Result<GameState, &'static str> {
+        let version = self.validate_rules_version()?;
         if ply as usize > self.actions.len() {
             return Err("invalid_ply");
         }
+        crate::draw::validate_initial(&self.initial_state, &self.initial_draws)
+            .map_err(|_| "invalid_record")?;
         let mut value = serde_json::to_value(&self.initial_state).map_err(|_| "invalid_record")?;
         for recorded in self.actions.iter().take(ply as usize) {
+            if version == GameRulesVersion::LegacyV1 && !recorded.draws.is_empty() {
+                return Err("invalid_record");
+            }
+            let resolved = if version == GameRulesVersion::StandardV1 {
+                let before: GameState =
+                    serde_json::from_value(value.clone()).map_err(|_| "invalid_record")?;
+                let mut after = brainfuck_chess_engine::actions::submit_action(
+                    before.clone(),
+                    recorded.action.clone(),
+                )
+                .map_err(|_| "invalid_record")?;
+                crate::draw::replay_turn(&before, &mut after, &recorded.draws)
+                    .map_err(|_| "invalid_record")?;
+                Some(after)
+            } else {
+                None
+            };
             for operation in &recorded.state_delta {
                 apply_delta_operation(&mut value, operation)?;
+            }
+            if let Some(expected) = resolved {
+                let actual: GameState =
+                    serde_json::from_value(value.clone()).map_err(|_| "invalid_record")?;
+                if crate::analysis::state_hash(&expected)? != crate::analysis::state_hash(&actual)?
+                {
+                    return Err("invalid_record");
+                }
             }
         }
         let mut state: GameState = serde_json::from_value(value).map_err(|_| "invalid_record")?;
@@ -493,6 +565,18 @@ fn build_deck_snapshots(
                     board_size: state.board.size,
                     deployments,
                     pocket,
+                    extra: player
+                        .deck
+                        .extra_deck_pieces
+                        .iter()
+                        .filter_map(|id| state.pieces.get(id))
+                        .map(|piece| DeckPocketSnapshot {
+                            piece_type_id: piece.type_id.clone(),
+                            piece_name: piece_name(state, piece),
+                            custom_piece: custom_piece_snapshot(state, &piece.type_id),
+                            count: 1,
+                        })
+                        .collect(),
                 },
             )
         })
@@ -504,6 +588,7 @@ fn actor_piece_id(action: &TurnAction) -> &PieceId {
         TurnAction::Move(action) => &action.piece_id,
         TurnAction::Drop(action) => &action.piece_id,
         TurnAction::Ability(action) => &action.piece_id,
+        TurnAction::ExtraSummon(action) => &action.extra_piece_id,
     }
 }
 
@@ -512,6 +597,7 @@ fn action_player_id(action: &TurnAction) -> &PlayerId {
         TurnAction::Move(action) => &action.player_id,
         TurnAction::Drop(action) => &action.player_id,
         TurnAction::Ability(action) => &action.player_id,
+        TurnAction::ExtraSummon(action) => &action.player_id,
     }
 }
 
@@ -591,6 +677,13 @@ fn build_notation(action: &TurnAction, state_before: &GameState) -> RecordedNota
             None,
             None,
             Some(drop_action.to),
+            None,
+        ),
+        TurnAction::ExtraSummon(action) => (
+            NotationActionKind::ExtraSummon,
+            None,
+            None,
+            Some(action.target_square),
             None,
         ),
         TurnAction::Ability(ability_action) => {

@@ -905,8 +905,15 @@ pub struct Deck {
     pub player_id: PlayerId,
     /// Pieces placed on the board at game start
     pub starting_pieces: Vec<PieceId>,
-    /// Pieces held in pocket, deployable during drop turns
+    /// Pocket reserve; ordinary Legacy drops and explicit Pocket abilities use it
     pub pocket_pieces: Vec<PieceId>,
+    /// Authoritative runtime Hand membership (Standard only); never part of a saved deck.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hand_pieces: Vec<PieceId>,
+    /// Authoritative current Extra membership; disjoint from Board, Pocket and capture.
+    /// Empty is omitted to preserve historical Legacy state hashes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_deck_pieces: Vec<PieceId>,
     pub score_limit: u32,
     pub total_score: u32,
 }
@@ -928,6 +935,17 @@ pub enum TurnAction {
     Move(MoveAction),
     Drop(DropAction),
     Ability(AbilityAction),
+    ExtraSummon(ExtraSummonAction),
+}
+
+/// Exact player intent; capture outcomes are derived from authoritative target state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtraSummonAction {
+    pub player_id: PlayerId,
+    pub extra_piece_id: PieceId,
+    pub sacrifice_piece_ids: Vec<PieceId>,
+    pub target_square: Square,
 }
 
 /// A canonical, server-generated standalone ability action. Optional targets

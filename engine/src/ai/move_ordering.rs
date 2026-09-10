@@ -35,6 +35,44 @@ fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32, i32) {
             }
             (3, 0, drop_positional_score(state, action))
         }
+        AiAction::ExtraSummon(summon) => {
+            let impact = tactical_impact(state, action);
+            if impact.captures_king {
+                return (7, u32::MAX, 0);
+            }
+            let definition = state
+                .pieces
+                .get(&summon.extra_piece_id)
+                .and_then(|p| state.piece_definitions.get(&p.type_id));
+            let gain = definition.map_or(0, |d| i64::from(d.ai_board_value()) * 100);
+            let loss: i64 = summon
+                .sacrifice_piece_ids
+                .iter()
+                .map(|id| super::standard::sacrifice_utility(state, id))
+                .sum();
+            let paid: u64 = summon
+                .sacrifice_piece_ids
+                .iter()
+                .filter_map(|id| state.pieces.get(id))
+                .filter_map(|p| state.piece_definitions.get(&p.type_id))
+                .map(|d| u64::from(d.score))
+                .sum();
+            let overpaid = paid.saturating_sub(definition.map_or(0, |d| u64::from(d.score)));
+            let net = gain + i64::from(impact.removed_enemy_value) * 100
+                - loss
+                - overpaid.min(i64::MAX as u64 / 5) as i64 * 5;
+            (
+                if impact.removed_enemy_pieces > 0 && net >= 0 {
+                    6
+                } else if net >= 0 {
+                    3
+                } else {
+                    1
+                },
+                impact.removed_enemy_value,
+                net.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+            )
+        }
         AiAction::Ability(_) => {
             let impact = tactical_impact(state, action);
             if impact.captures_king {
@@ -80,7 +118,12 @@ fn drop_positional_score(state: &GameState, action: &crate::types::DropAction) -
     center_bonus + king_bonus(false, 3) + king_bonus(true, 1)
 }
 
-pub fn order_ai_actions(state: &GameState, actions: &mut [AiAction], _bot_player_id: &PlayerId) {
+pub fn order_ai_actions(state: &GameState, actions: &mut [AiAction], bot_player_id: &PlayerId) {
+    let observation = super::observation::BotObservation::new(state, bot_player_id);
+    order_known_actions(&observation.state, actions);
+}
+
+pub(crate) fn order_known_actions(state: &GameState, actions: &mut [AiAction]) {
     let mut scored = actions
         .iter()
         .cloned()
@@ -141,6 +184,13 @@ fn quiescence_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
                 (3, impact.removed_enemy_value)
             }
         }
+        AiAction::ExtraSummon(_) => {
+            let impact = tactical_impact(state, action);
+            (
+                if impact.captures_king { 7 } else { 3 },
+                impact.removed_enemy_value,
+            )
+        }
         AiAction::Ability(action) => (
             2,
             action
@@ -191,6 +241,13 @@ fn canonical_action_cmp(left: &AiAction, right: &AiAction) -> Ordering {
                     })
                     .unwrap_or_else(|| left.deployments.len().cmp(&right.deployments.len()))
             }),
+        (AiAction::ExtraSummon(left), AiAction::ExtraSummon(right)) => left
+            .extra_piece_id
+            .cmp(&right.extra_piece_id)
+            .then_with(|| left.sacrifice_piece_ids.cmp(&right.sacrifice_piece_ids))
+            .then_with(|| square_cmp(left.target_square, right.target_square)),
+        (AiAction::ExtraSummon(_), _) => Ordering::Greater,
+        (_, AiAction::ExtraSummon(_)) => Ordering::Less,
         (AiAction::Move(_), _) => Ordering::Less,
         (AiAction::Drop(_), AiAction::Move(_)) => Ordering::Greater,
         (AiAction::Drop(_), AiAction::Ability(_)) => Ordering::Less,

@@ -51,9 +51,11 @@ export interface PlayerDeckRequest {
   name?: string
   starting: DeckPlacementRequest[]
   pocket: DeckPieceRequest[]
+  extra?: DeckPieceRequest[]
 }
 
 export interface ChallengeSummary {
+  ruleset: DeckRuleset
   id: string
   name: string
   description: string
@@ -72,6 +74,8 @@ export interface MultiplayerRoom {
   board_variant: BoardVariant
   host_side: 'white' | 'black'
   guest_side: 'white' | 'black'
+  host_has_deck?: boolean
+  guest_has_deck?: boolean
   host_deck?: PlayerDeckRequest | null
   guest_deck?: PlayerDeckRequest | null
   host_ready: boolean
@@ -102,6 +106,7 @@ interface GameSyncCatalog {
 }
 
 interface GameDynamicView {
+  hand_counts?: GameState['hand_counts']
   ruleset?: DeckRuleset
   id: string
   board: GameState['board']
@@ -134,7 +139,9 @@ export function mergeGameSync(current: GameState | null, sync: GameSyncResponse)
     return current
   }
   const definitions = sync.catalog?.piece_definitions ?? current?.piece_definitions
-  const manifest = sync.catalog?.custom_piece_manifest ?? current?.custom_piece_manifest
+  // Empty manifests are sparse on the wire. A new catalog also replaces any
+  // formerly visible custom reserve packages instead of retaining them.
+  const manifest = sync.catalog ? sync.catalog.custom_piece_manifest ?? [] : current?.custom_piece_manifest ?? []
   const playerInfo = sync.catalog?.player_info ?? current?.player_info
   if (!definitions || !manifest || !playerInfo) {
     throw new Error('게임 카탈로그 재동기화가 필요합니다.')
@@ -221,6 +228,7 @@ async function request<T>(url: string, options?: RequestInit, profileName?: stri
     credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
+      'x-game-client-id': getClientId(),
     },
     ...options,
   })
@@ -261,6 +269,7 @@ export function withTurnActionType(action: import('../types/game').TurnAction): 
 }
 
 function getClientId(): string {
+  if (typeof sessionStorage === 'undefined') return ''
   const existing = sessionStorage.getItem(CLIENT_ID_KEY)
   if (existing) return existing
 
@@ -276,7 +285,7 @@ export const api = {
 
   createChallengeGame(
     challengeId: string,
-    playerDeck: PlayerDeckRequest,
+    playerDeck: PlayerDeckRequest & { map_id?: BoardMapId; board_size?: number },
     localNickname?: string,
   ): Promise<{ id: string; state: GameState }> {
     return request(`/api/challenges/${encodeURIComponent(challengeId)}/games`, {
@@ -299,7 +308,7 @@ export const api = {
     blackDeck: PlayerDeckRequest,
     mapId: BoardMapId,
     timeControl: TimeControlId,
-    player?: { localSide: PlayerId; localNickname?: string; guestNickname: string },
+    player?: { localSide: PlayerId; localNickname?: string; guestNickname: string; botPlayerId?: PlayerId },
   ): Promise<{ id: string; state: GameState }> {
     return request(`${BASE}`, {
       method: 'POST',
@@ -310,7 +319,7 @@ export const api = {
         white_deck: whiteDeck,
         black_deck: blackDeck,
         time_control: timeControl,
-        ...(player ? { local_side: player.localSide, local_nickname: player.localNickname, guest_nickname: player.guestNickname } : {}),
+        ...(player ? { local_side: player.localSide, local_nickname: player.localNickname, guest_nickname: player.guestNickname, ...(player.botPlayerId ? { bot_player_id: player.botPlayerId } : {}) } : {}),
       }),
     })
   },
@@ -335,8 +344,8 @@ export const api = {
     return request(`${BASE}/${id}/analysis`)
   },
 
-  getAnalysisOptions(id: string, position: { base_ply: number; tree_id?: string; node_id?: string; pending_actions?: TurnAction[] }, pieceId: string, moveOptionId?: string): Promise<{ moves: MoveAction[]; drops: DropAction[]; ability_actions: import('../types/game').AbilityAction[]; previews: AnalysisActionPreview[] }> {
-    return request<{ moves: MoveAction[]; drops: DropAction[]; ability_actions: import('../types/game').AbilityAction[]; previews: AnalysisActionPreview[] }>(`${BASE}/${id}/analysis/options`, { method: 'POST', body: JSON.stringify({ ...position, piece_id: pieceId, move_option_id: moveOptionId }) }).then(response => ({
+  getAnalysisOptions(id: string, position: { base_ply: number; tree_id?: string; node_id?: string; pending_actions?: TurnAction[] }, pieceId: string, moveOptionId?: string, sacrificePieceIds: string[] = []): Promise<{ summon?: import('../types/game').SummonOptions; moves: MoveAction[]; drops: DropAction[]; ability_actions: import('../types/game').AbilityAction[]; previews: AnalysisActionPreview[] }> {
+    return request<{ moves: MoveAction[]; drops: DropAction[]; ability_actions: import('../types/game').AbilityAction[]; previews: AnalysisActionPreview[] }>(`${BASE}/${id}/analysis/options`, { method: 'POST', body: JSON.stringify({ ...position, piece_id: pieceId, move_option_id: moveOptionId, sacrifice_piece_ids: sacrificePieceIds }) }).then(response => ({
       ...response,
       moves: response.moves.map(move => ({ ...move, type: 'move' })),
       drops: response.drops.map(drop => ({ ...drop, type: 'drop' })),
@@ -367,6 +376,10 @@ export const api = {
 
   deleteAnalysisSubtree(id: string, tree: AnalysisTree, nodeId: string): Promise<AnalysisTree> {
     return request(`${BASE}/${id}/analysis/${tree.id}/nodes/${nodeId}`, { method: 'DELETE', body: JSON.stringify({ expected_version: tree.version }) })
+  },
+
+  getSummonOptions(id: string, extraPieceId: string, sacrificePieceIds: string[]): Promise<import('../types/game').SummonOptions> {
+    return request(`${BASE}/${id}/summon-options`, { method: 'POST', body: JSON.stringify({ extra_piece_id: extraPieceId, sacrifice_piece_ids: sacrificePieceIds }) })
   },
 
   submitAction(id: string, action: SubmitAction): Promise<GameState> {

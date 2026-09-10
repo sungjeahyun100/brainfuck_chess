@@ -21,6 +21,8 @@
         <div>
           <p class="summary-title">{{ challenge.cleared ? '✓ 클리어' : '미클리어' }}</p>
           <h2>{{ challenge.name }}</h2>
+          <span class="ruleset-badge">{{ formatLabel(challenge.ruleset) }}</span>
+          <span>{{ boardMapLabel(challenge.map_id) }}</span>
           <p>{{ challenge.description }}</p>
           <strong>{{ challenge.board_size }}×{{ challenge.board_size }} · {{ difficultyLabel(challenge.bot_difficulty) }}</strong>
         </div>
@@ -31,7 +33,7 @@
     <template v-else>
       <section class="card challenge-detail">
         <div>
-          <p class="summary-title">{{ selectedChallenge.board_size }}×{{ selectedChallenge.board_size }} Challenge</p>
+          <p class="summary-title">{{ formatLabel(selectedChallenge.ruleset) }} · {{ boardMapLabel(selectedChallenge.map_id) }} Challenge</p>
           <p>{{ selectedChallenge.description }}</p>
         </div>
         <strong>상대: {{ difficultyLabel(selectedChallenge.bot_difficulty) }} 봇</strong>
@@ -52,7 +54,7 @@
           <div class="deck-card-main">
             <p class="summary-title">{{ availability(deck).valid ? '사용 가능' : '사용 불가' }}</p>
             <h2>{{ deck.name }}</h2>
-            <p>{{ deck.boardSize }}×{{ deck.boardSize }}</p>
+            <p>{{ formatLabel(deck.ruleset) }} · {{ boardMapLabel(deck.mapId) }} · {{ deck.boardSize }}×{{ deck.boardSize }}</p>
             <span>{{ availability(deck).reason }}</span>
           </div>
           <button class="btn-secondary" :disabled="!availability(deck).valid" @click="selectedDeckId = deck.id">
@@ -61,7 +63,7 @@
         </article>
       </section>
       <p v-if="startError" class="error">{{ startError }}</p>
-      <button v-if="decks.length" class="btn-start challenge-start" :disabled="!selectedDeckId || starting" @click="start">
+      <button v-if="decks.length" class="btn-start challenge-start" :disabled="!decks.some(deck => deck.id === selectedDeckId && availability(deck).valid) || starting || decksLoading || !!decksError" @click="start">
         {{ starting ? '시작 중…' : 'Challenge 시작' }}
       </button>
     </template>
@@ -69,6 +71,7 @@
 </template>
 
 <script setup lang="ts">
+import { boardMapLabel } from '../boardMaps'
 import { parseDeckRuleset } from '../deckRulesets'
 import { onMounted, ref, watch } from 'vue'
 import { api, type ChallengeSummary } from '../api/gameApi'
@@ -95,6 +98,10 @@ const startError = ref<string | null>(null)
 
 watch(decks, () => { selectedDeckId.value = decks.value.find(deck => availability(deck).valid)?.id ?? '' })
 
+function formatLabel(value: ChallengeSummary['ruleset']) {
+  return value === 'standard' ? 'Standard' : 'Legacy'
+}
+
 function difficultyLabel(value: BotDifficulty) {
   return ({ easy: 'Easy', normal: 'Normal', hard: 'Hard' } as const)[value]
 }
@@ -104,9 +111,10 @@ function availability(deck: SavedDeck): { valid: boolean; reason: string } {
   if (!challenge) return { valid: false, reason: '' }
   const summary = validateSavedDeck(deck)
   if (!summary.valid) return { valid: false, reason: summary.errors[0] ?? '유효하지 않은 덱입니다.' }
-  if (parseDeckRuleset(deck.ruleset) !== 'legacy') return { valid: false, reason: '기존 Challenge는 Legacy 덱만 사용할 수 있습니다.' }
+  if (parseDeckRuleset(deck.ruleset) !== challenge.ruleset) return { valid: false, reason: `이 챌린지는 ${formatLabel(challenge.ruleset)} 덱이 필요합니다.` }
+  if (deck.boardSize !== challenge.board_size) return { valid: false, reason: `이 챌린지는 ${challenge.board_size}×${challenge.board_size} 덱이 필요합니다.` }
   if (deck.mapId !== challenge.map_id) {
-    return { valid: false, reason: `이 Challenge는 ${challenge.board_size}×${challenge.board_size} 일반전 덱이 필요합니다.` }
+    return { valid: false, reason: `이 챌린지는 ${boardMapLabel(challenge.map_id)} 덱이 필요합니다.` }
   }
   return { valid: true, reason: `${summary.totalScore} / ${summary.scoreLimit}점` }
 }
@@ -124,7 +132,7 @@ async function start() {
   starting.value = true
   startError.value = null
   try {
-    const { state } = await api.createChallengeGame(challenge.id, serializeNeutralDeck(deck, 'white'))
+    const { state } = await api.createChallengeGame(challenge.id, { ...serializeNeutralDeck(deck, 'white'), map_id: deck.mapId, board_size: deck.boardSize })
     emit('started', { state, challenge })
   } catch (cause) {
     startError.value = cause instanceof Error ? cause.message : String(cause)
@@ -141,6 +149,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.ruleset-badge { justify-self: start; border: 1px solid rgba(217, 164, 65, .45); border-radius: 999px; padding: 3px 10px; color: #f4dfb0; font-size: .85rem; }
 .challenge-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
 .challenge-card { min-height: 230px; padding: 22px; display: flex; flex-direction: column; justify-content: space-between; gap: 20px; }
 .challenge-card > div, .challenge-detail > div { display: grid; gap: 10px; }

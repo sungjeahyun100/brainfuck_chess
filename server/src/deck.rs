@@ -33,6 +33,8 @@ pub(crate) struct DeckData {
     board_size: i32,
     starting: Vec<Placement>,
     pocket: BTreeMap<String, u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    extra: Vec<String>,
     custom_pieces: Vec<CustomRef>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -193,6 +195,7 @@ fn fingerprint(input: &DeckInput) -> String {
         .deck_data
         .starting
         .sort_by_key(|p| (p.square.rank, p.square.file, p.piece_type.clone()));
+    normalized.deck_data.extra.sort();
     normalized.deck_data.pocket.retain(|_, count| *count > 0);
     normalized
         .deck_data
@@ -396,6 +399,7 @@ impl DeckInput {
         let data = &self.deck_data;
         if !(8..=12).contains(&data.board_size)
             || data.starting.len() > 144
+            || data.extra.len() > 4096
             || data.pocket.len() > 256
             || data.custom_pieces.len() > 256
             || serde_json::to_vec(self)
@@ -479,6 +483,11 @@ impl DeckInput {
             }
             pocket.extend(std::iter::repeat(piece).take(*count as usize));
         }
+        let mut extra = Vec::new();
+        for id in &data.extra {
+            used.insert(id.as_str());
+            extra.push(resolve(id)?);
+        }
         if custom.keys().any(|key| !used.contains(key.as_str())) {
             return Err(invalid(
                 "사용하지 않는 커스텀 기물 참조가 포함되어 있습니다.",
@@ -489,6 +498,7 @@ impl DeckInput {
             name: Some(self.name.clone()),
             starting,
             pocket,
+            extra,
         })
     }
     async fn validate(mut self, app: &AppState, owner: &str) -> Result<Self> {

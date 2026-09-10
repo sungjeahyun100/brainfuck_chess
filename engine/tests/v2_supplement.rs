@@ -32,6 +32,8 @@ fn make_state() -> GameState {
                         deck: Deck {
                             player_id: id.into(),
                             starting_pieces: Vec::new(),
+                            hand_pieces: Vec::new(),
+                            extra_deck_pieces: Vec::new(),
                             pocket_pieces: Vec::new(),
                             score_limit: 39,
                             total_score: 0,

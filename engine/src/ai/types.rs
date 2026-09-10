@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::types::{AbilityAction, DropAction, MoveAction};
+use crate::types::{AbilityAction, DropAction, ExtraSummonAction, MoveAction, TurnAction};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -8,6 +8,7 @@ pub enum AiAction {
     Move(MoveAction),
     Drop(DropAction),
     Ability(AbilityAction),
+    ExtraSummon(ExtraSummonAction),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,5 +165,26 @@ mod tests {
 
         let defaults: SearchOptions = serde_json::from_str("{}").unwrap();
         assert_eq!(defaults, SearchOptions::default());
+    }
+}
+
+impl From<AiAction> for TurnAction {
+    fn from(action: AiAction) -> Self {
+        match action {
+            AiAction::Move(a) => Self::Move(a),
+            AiAction::Drop(a) => Self::Drop(a),
+            AiAction::Ability(a) => Self::Ability(a),
+            AiAction::ExtraSummon(a) => Self::ExtraSummon(a),
+        }
+    }
+}
+impl From<TurnAction> for AiAction {
+    fn from(action: TurnAction) -> Self {
+        match action {
+            TurnAction::Move(a) => Self::Move(a),
+            TurnAction::Drop(a) => Self::Drop(a),
+            TurnAction::Ability(a) => Self::Ability(a),
+            TurnAction::ExtraSummon(a) => Self::ExtraSummon(a),
+        }
     }
 }

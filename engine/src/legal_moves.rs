@@ -716,20 +716,18 @@ pub fn generate_piece_legal_drop_actions(
         return Vec::new();
     }
 
-    // A turn allows exactly one action: either one move or one pocket drop.
-    let Some(player) = game_state.players.get(player_id) else {
-        return Vec::new();
-    };
-    if !player.deck.pocket_pieces.contains(piece_id) {
+    if !crate::hand::is_ordinary_drop_source(game_state, player_id, piece_id) {
         return Vec::new();
     }
+    generate_piece_drop_targets(game_state, piece_id)
+}
 
+/// Target-only contract shared by ordinary Drop and ExtraSummon. No reserve impersonation.
+pub fn generate_piece_drop_targets(game_state: &GameState, piece_id: &PieceId) -> Vec<DropAction> {
+    let player_id = &game_state.current_player;
     let Some(piece) = game_state.pieces.get(piece_id) else {
         return Vec::new();
     };
-    if piece.owner != *player_id || !piece.in_pocket || piece.captured {
-        return Vec::new();
-    }
 
     let Some(def) = game_state.piece_definitions.get(&piece.type_id) else {
         return Vec::new();
@@ -1644,7 +1642,7 @@ pub fn generate_legal_drop_actions(game_state: &GameState) -> Vec<DropAction> {
     };
 
     let mut actions = Vec::new();
-    for piece_id in &player.deck.pocket_pieces {
+    for piece_id in crate::hand::ordinary_drop_pieces(game_state, player) {
         actions.extend(generate_piece_legal_drop_actions(game_state, piece_id));
     }
 
@@ -1669,11 +1667,11 @@ pub fn generate_drop_candidates_by_type(
     };
 
     let mut counts: HashMap<PieceTypeId, u16> = HashMap::new();
-    for piece_id in &player.deck.pocket_pieces {
+    for piece_id in crate::hand::ordinary_drop_pieces(game_state, player) {
         let Some(piece) = game_state.pieces.get(piece_id) else {
             continue;
         };
-        if piece.owner != *player_id || !piece.in_pocket || piece.captured {
+        if !crate::hand::is_ordinary_drop_source(game_state, player_id, piece_id) {
             continue;
         }
         let Some(definition) = game_state.piece_definitions.get(&piece.type_id) else {
@@ -1691,9 +1689,7 @@ pub fn generate_drop_candidates_by_type(
     type_counts
         .into_iter()
         .flat_map(|(piece_type_id, count)| {
-            let squares = player
-                .deck
-                .pocket_pieces
+            let squares = crate::hand::ordinary_drop_pieces(game_state, player)
                 .iter()
                 .filter_map(|id| game_state.pieces.get(id))
                 .find(|piece| piece.type_id == piece_type_id)

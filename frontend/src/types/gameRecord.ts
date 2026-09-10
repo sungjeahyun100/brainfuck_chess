@@ -9,9 +9,10 @@ export interface GameRecordPlayer { public_id: string | null; nickname: string; 
 export interface DeckSnapshot {
   snapshot_version?: number; side: PlayerId; deck_name: string; map_id?: string; board_size?: number
   deployments: Array<{ piece_type_id?: string; piece_name: string; custom_piece?: { custom_piece_id: string; version: number; content_hash: string; exposed_piece_key: string } | null; square: Square }>
+  extra?: DeckSnapshot['pocket']
   pocket: Array<{ piece_type_id?: string; piece_name: string; custom_piece?: { custom_piece_id: string; version: number; content_hash: string; exposed_piece_key: string } | null; count: number }>
 }
-export type NotationActionKind = 'move' | 'move_with_ability' | 'ability' | 'drop'
+export type NotationActionKind = 'move' | 'move_with_ability' | 'ability' | 'drop' | 'extra_summon'
 export interface ActorSnapshot { piece_id: string; piece_type_id: string; piece_name: string; from?: Square | null; layer: 'ground' | 'air'; current_ammo?: number | null; state: Record<string, PieceStateValue> }
 export interface AbilityEventSnapshot { ability_id: string; ability_name: string; target?: Square | null }
 export interface RecordedNotationAction {
@@ -20,7 +21,9 @@ export interface RecordedNotationAction {
   ability_events: AbilityEventSnapshot[]
 }
 export type StateDeltaOperation = { op: 'set'; path: string[]; value: unknown } | { op: 'remove'; path: string[] }
+export interface DrawResolution { player_id: PlayerId; timing: 'initial' | 'turn_start'; piece_ids: string[] }
 export interface RecordedAction {
+  draws?: DrawResolution[]
   ply: number; player_id: PlayerId; action: TurnAction; notation: RecordedNotationAction; state_delta: StateDeltaOperation[]
   elapsed_ms: number; clock_before_ms?: number | null; clock_after_ms?: number | null; clock: GameClock
 }
@@ -28,6 +31,7 @@ export interface GameRecord {
   format_version: 2; game_id: string; display_name: string; ruleset_version: string; chessembly_version: string
   started_at_ms: number; ended_at_ms?: number | null; result?: GameResult | null
   players: Record<PlayerId, GameRecordPlayer>; time_control: TimeControlId
+  initial_draws?: DrawResolution[]
   initial_state: ReplayInitialState; initial_clock: GameClock; decks: Record<PlayerId, DeckSnapshot>; actions: RecordedAction[]; final_clock?: GameClock | null
   game_mode?: 'standard' | 'challenge'; challenge_id?: string | null
   retention_mode?: 'auto' | 'permanent'; expires_at_ms?: number | null
@@ -40,6 +44,7 @@ export interface GameRecordSummary {
 }
 
 export interface AnalysisNode {
+  draws?: DrawResolution[]
   id: string; parent_node_id?: string | null; action: TurnAction; state_after: GameState; state_hash: string; created_at_ms: number
   /** Present only while an optimistic node is waiting for server persistence. */
   pending?: boolean
@@ -48,4 +53,4 @@ export interface AnalysisTree {
   id: string; game_id: string; name: string; base_ply: number; version: number; created_at_ms: number; updated_at_ms: number; nodes: AnalysisNode[]
 }
 export interface AnalysisAppendResult { node: AnalysisNode; version: number; updated_at_ms: number }
-export interface AnalysisActionPreview { action: TurnAction; state_delta: StateDeltaOperation[]; state_hash: string }
+export interface AnalysisActionPreview { action: TurnAction; state_delta: StateDeltaOperation[]; state_hash?: string; draw_pending?: boolean }

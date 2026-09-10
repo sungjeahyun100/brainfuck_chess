@@ -209,6 +209,7 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         TurnAction::Move(action) => action.player_id.clone(),
         TurnAction::Drop(action) => action.player_id.clone(),
         TurnAction::Ability(action) => action.player_id.clone(),
+        TurnAction::ExtraSummon(action) => action.player_id.clone(),
     };
     let is_forced_landing = matches!(
         &action,
@@ -239,13 +240,14 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         TurnAction::Ability(action) => {
             std::iter::once((action.piece_id.clone(), action.ability_id.clone())).collect()
         }
-        TurnAction::Drop(_) => Default::default(),
+        TurnAction::Drop(_) | TurnAction::ExtraSummon(_) => Default::default(),
     };
 
     game_state = match action.clone() {
         TurnAction::Move(action) => apply_move_action(game_state, action),
         TurnAction::Drop(action) => apply_drop_action(game_state, action),
         TurnAction::Ability(action) => apply_ability_action(game_state, action),
+        TurnAction::ExtraSummon(action) => crate::summon::apply_extra_summon(game_state, action),
     };
 
     game_state.history.push(ActionRecord {
@@ -813,21 +815,30 @@ fn replenish_depleted_ammo_at_home(game_state: &mut GameState, piece_id: &PieceI
     }
 }
 
-/// Apply a DropAction: move a pocket piece onto the board.
+/// Apply a canonical DropAction from the ruleset-specific runtime reserve.
 pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameState {
-    let mut removal = action
+    let removal = action
         .captured_piece_id
         .as_ref()
         .map(|id| remove_captured_piece(&mut game_state, id, &action.player_id))
         .unwrap_or_default();
-    // Remove from pocket list
     if let Some(player) = game_state.players.get_mut(&action.player_id) {
-        player
-            .deck
-            .pocket_pieces
-            .retain(|id| id != &action.piece_id);
+        let source = match game_state.ruleset {
+            DeckRuleset::Legacy => &mut player.deck.pocket_pieces,
+            DeckRuleset::Standard => &mut player.deck.hand_pieces,
+        };
+        source.retain(|id| id != &action.piece_id);
     }
 
+    apply_drop_placement(game_state, action, removal)
+}
+
+/// Apply only the destination and existing Drop effects, after the source zone was removed.
+fn apply_drop_placement(
+    mut game_state: GameState,
+    action: DropAction,
+    mut removal: RemovalOutcome,
+) -> GameState {
     // Update piece state
     if let Some(piece) = game_state.pieces.get_mut(&action.piece_id) {
         piece.in_pocket = false;
@@ -869,6 +880,15 @@ pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameS
     apply_removal_result(&mut game_state, &removal, &action.player_id);
 
     game_state
+}
+
+pub(crate) fn apply_extra_placement(mut state: GameState, action: DropAction) -> GameState {
+    let removal = action
+        .captured_piece_id
+        .as_ref()
+        .map(|id| remove_captured_piece(&mut state, id, &action.player_id))
+        .unwrap_or_default();
+    apply_drop_placement(state, action, removal)
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ mod custom_piece_image;
 pub(crate) fn api(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/games/:id/summon-options", post(get_summon_options))
         .route("/auth/session", post(crate::auth::session))
         .route("/auth/me", get(crate::auth::me))
         .route("/auth/profile", patch(crate::auth::update_profile))
@@ -117,5 +118,8 @@ pub(crate) fn api(state: AppState) -> Router {
         .route("/rooms/:id/ready", post(ready_room))
         .route("/rooms/:id/unready", post(unready_room))
         .route("/rooms/:id/resign", post(resign_room))
+        .layer(axum::middleware::from_fn(
+            crate::game_view::prevent_live_caching,
+        ))
         .with_state(state)
 }

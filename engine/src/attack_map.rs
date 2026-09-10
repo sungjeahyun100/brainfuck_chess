@@ -124,6 +124,8 @@ mod tests {
         let white_deck = Deck {
             player_id: "white".into(),
             starting_pieces: Vec::new(),
+            hand_pieces: Vec::new(),
+            extra_deck_pieces: Vec::new(),
             pocket_pieces: Vec::new(),
             score_limit: calculate_score_limit(board_size),
             total_score: 0,
@@ -131,6 +133,8 @@ mod tests {
         let black_deck = Deck {
             player_id: "black".into(),
             starting_pieces: Vec::new(),
+            hand_pieces: Vec::new(),
+            extra_deck_pieces: Vec::new(),
             pocket_pieces: Vec::new(),
             score_limit: calculate_score_limit(board_size),
             total_score: 0,

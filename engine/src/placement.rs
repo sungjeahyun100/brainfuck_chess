@@ -80,13 +80,8 @@ pub fn get_piece_placement_squares(
 
 /// Validate a drop action.
 pub fn validate_drop_action(game_state: &GameState, action: &DropAction) -> Result<(), String> {
-    // Piece must exist in the player's pocket
-    let player = game_state
-        .players
-        .get(&action.player_id)
-        .ok_or("플레이어를 찾을 수 없습니다.")?;
-    if !player.deck.pocket_pieces.contains(&action.piece_id) {
-        return Err("해당 기물이 포켓에 없습니다.".into());
+    if !crate::hand::is_ordinary_drop_source(game_state, &action.player_id, &action.piece_id) {
+        return Err("일반 착수 출처가 유효하지 않습니다.".into());
     }
 
     // Piece must not be a King

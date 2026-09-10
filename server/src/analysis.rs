@@ -17,6 +17,8 @@ pub(crate) struct AnalysisNode {
     pub(crate) id: String,
     pub(crate) parent_node_id: Option<String>,
     pub(crate) action: TurnAction,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) draws: Vec<crate::draw::DrawResolution>,
     pub(crate) state_after: GameState,
     pub(crate) state_hash: String,
     pub(crate) created_at_ms: i64,
@@ -45,6 +47,38 @@ pub(crate) struct AnalysisAppendResult {
     pub(crate) node: AnalysisNode,
     pub(crate) version: i64,
     pub(crate) updated_at_ms: i64,
+}
+
+/// Called only after the repository owns the idempotent write/version lock.
+/// The parent is transient; persisted nodes contain only the exact outcome.
+pub(crate) fn resolve_node(
+    node: &mut AnalysisNode,
+    parent: Option<&GameState>,
+    choose: &mut impl FnMut(usize) -> Result<usize, String>,
+) -> Result<(), &'static str> {
+    if let Some(parent) = parent {
+        let mut next = node.state_after.clone();
+        let draws =
+            crate::draw::turn_start(parent, &mut next, choose).map_err(|_| "draw_failed")?;
+        node.state_hash = state_hash(&next)?;
+        node.state_after = normalized_state(next);
+        node.draws = draws;
+    }
+    Ok(())
+}
+
+fn resolve_tree(
+    tree: &mut AnalysisTree,
+    parent: Option<&GameState>,
+    choose: &mut impl FnMut(usize) -> Result<usize, String>,
+) -> Result<(), &'static str> {
+    if let Some(parent) = parent {
+        let [node] = tree.nodes.as_mut_slice() else {
+            return Err("invalid_parent");
+        };
+        resolve_node(node, Some(parent), choose)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn normalized_state(mut state: GameState) -> GameState {
@@ -90,6 +124,7 @@ pub(crate) trait AnalysisRepository: Send + Sync {
         &self,
         tree: AnalysisTree,
         request_id: &str,
+        draw_parent: Option<&GameState>,
     ) -> Result<AnalysisTree, &'static str>;
     async fn append(
         &self,
@@ -98,6 +133,7 @@ pub(crate) trait AnalysisRepository: Send + Sync {
         node: AnalysisNode,
         expected_version: i64,
         request_id: &str,
+        draw_parent: Option<&GameState>,
     ) -> Result<Option<AnalysisAppendResult>, &'static str>;
     async fn rename(
         &self,
@@ -120,14 +156,35 @@ pub(crate) trait AnalysisRepository: Send + Sync {
 
 pub(crate) type AnalysisStore = Arc<dyn AnalysisRepository>;
 
-#[derive(Default)]
-pub(crate) struct InMemoryAnalysisRepository(RwLock<HashMap<String, AnalysisTree>>);
+pub(crate) struct InMemoryAnalysisRepository {
+    trees: RwLock<HashMap<String, AnalysisTree>>,
+    draw_source: Arc<dyn Fn(usize) -> Result<usize, String> + Send + Sync>,
+}
+impl Default for InMemoryAnalysisRepository {
+    fn default() -> Self {
+        Self {
+            trees: RwLock::default(),
+            draw_source: Arc::new(crate::draw::random_index),
+        }
+    }
+}
+#[cfg(test)]
+impl InMemoryAnalysisRepository {
+    pub(crate) fn with_draw_source(
+        source: impl Fn(usize) -> Result<usize, String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            trees: RwLock::default(),
+            draw_source: Arc::new(source),
+        }
+    }
+}
 
 #[async_trait]
 impl AnalysisRepository for InMemoryAnalysisRepository {
     async fn list(&self, game_id: &str, owner: &str) -> Result<Vec<AnalysisTree>, &'static str> {
         let mut trees = self
-            .0
+            .trees
             .read()
             .map_err(|_| "unavailable")?
             .values()
@@ -139,15 +196,19 @@ impl AnalysisRepository for InMemoryAnalysisRepository {
     }
     async fn create(
         &self,
-        tree: AnalysisTree,
+        mut tree: AnalysisTree,
         _request_id: &str,
+        draw_parent: Option<&GameState>,
     ) -> Result<AnalysisTree, &'static str> {
-        let mut trees = self.0.write().map_err(|_| "unavailable")?;
+        let mut trees = self.trees.write().map_err(|_| "unavailable")?;
         if let Some(existing) = trees.values().find(|entry| {
             entry.owner_user_id == tree.owner_user_id && entry.request_id == tree.request_id
         }) {
             return Ok(existing.clone());
         }
+        resolve_tree(&mut tree, draw_parent, &mut |upper| {
+            (self.draw_source)(upper)
+        })?;
         trees.insert(tree.id.clone(), tree.clone());
         Ok(tree)
     }
@@ -155,11 +216,12 @@ impl AnalysisRepository for InMemoryAnalysisRepository {
         &self,
         tree_id: &str,
         owner: &str,
-        node: AnalysisNode,
+        mut node: AnalysisNode,
         version: i64,
         _request_id: &str,
+        draw_parent: Option<&GameState>,
     ) -> Result<Option<AnalysisAppendResult>, &'static str> {
-        let mut trees = self.0.write().map_err(|_| "unavailable")?;
+        let mut trees = self.trees.write().map_err(|_| "unavailable")?;
         let Some(tree) = trees.get_mut(tree_id) else {
             return Ok(None);
         };
@@ -193,6 +255,9 @@ impl AnalysisRepository for InMemoryAnalysisRepository {
         {
             return Err("invalid_parent");
         }
+        resolve_node(&mut node, draw_parent, &mut |upper| {
+            (self.draw_source)(upper)
+        })?;
         tree.nodes.push(node.clone());
         tree.version += 1;
         tree.updated_at_ms = crate::time_control::now_ms();
@@ -210,7 +275,7 @@ impl AnalysisRepository for InMemoryAnalysisRepository {
         version: i64,
         now: i64,
     ) -> Result<Option<AnalysisTree>, &'static str> {
-        let mut trees = self.0.write().map_err(|_| "unavailable")?;
+        let mut trees = self.trees.write().map_err(|_| "unavailable")?;
         let Some(tree) = trees.get_mut(tree_id) else {
             return Ok(None);
         };
@@ -226,7 +291,7 @@ impl AnalysisRepository for InMemoryAnalysisRepository {
         Ok(Some(tree.clone()))
     }
     async fn delete_tree(&self, tree_id: &str, owner: &str) -> Result<bool, &'static str> {
-        let mut trees = self.0.write().map_err(|_| "unavailable")?;
+        let mut trees = self.trees.write().map_err(|_| "unavailable")?;
         if trees
             .get(tree_id)
             .is_some_and(|tree| tree.owner_user_id != owner)
@@ -243,7 +308,7 @@ impl AnalysisRepository for InMemoryAnalysisRepository {
         version: i64,
         now: i64,
     ) -> Result<Option<AnalysisTree>, &'static str> {
-        let mut trees = self.0.write().map_err(|_| "unavailable")?;
+        let mut trees = self.trees.write().map_err(|_| "unavailable")?;
         let Some(tree) = trees.get_mut(tree_id) else {
             return Ok(None);
         };
@@ -285,6 +350,8 @@ pub(crate) struct PostgresAnalysisRepository {
     pool: PgPool,
     trees: String,
     nodes: String,
+    #[cfg(test)]
+    draw_source: Option<Arc<dyn Fn(usize) -> Result<usize, String> + Send + Sync>>,
 }
 impl PostgresAnalysisRepository {
     pub(crate) fn new(pool: PgPool, schema: DataSchema) -> Self {
@@ -292,7 +359,17 @@ impl PostgresAnalysisRepository {
             pool,
             trees: schema.table("game_analysis_trees"),
             nodes: schema.table("game_analysis_nodes"),
+            #[cfg(test)]
+            draw_source: None,
         }
+    }
+    #[cfg(test)]
+    pub(crate) fn with_draw_source(
+        mut self,
+        source: impl Fn(usize) -> Result<usize, String> + Send + Sync + 'static,
+    ) -> Self {
+        self.draw_source = Some(Arc::new(source));
+        self
     }
     async fn get_tree(
         &self,
@@ -300,7 +377,12 @@ impl PostgresAnalysisRepository {
         owner: &str,
     ) -> Result<Option<AnalysisTree>, &'static str> {
         let mut trees = self
-            .list_by_clause("trees.id=$1 AND trees.owner_user_id=$2", tree_id, owner)
+            .list_by_clause(
+                "trees.id=$1 AND trees.owner_user_id=$2",
+                tree_id,
+                owner,
+                &self.pool,
+            )
             .await?;
         Ok(trees.pop())
     }
@@ -311,7 +393,7 @@ impl PostgresAnalysisRepository {
         request_id: &str,
     ) -> Result<Option<AnalysisAppendResult>, &'static str> {
         let row = sqlx::query(&format!(
-            "SELECT trees.version, trees.updated_at_ms, nodes.id, nodes.parent_node_id, nodes.action, nodes.state_after, nodes.state_hash, nodes.request_id, nodes.created_at_ms FROM {} nodes JOIN {} trees ON trees.id=nodes.analysis_tree_id WHERE nodes.analysis_tree_id=$1 AND nodes.request_id=$2 AND trees.owner_user_id=$3",
+            "SELECT trees.version, trees.updated_at_ms, nodes.id, nodes.parent_node_id, nodes.action, nodes.draws, nodes.state_after, nodes.state_hash, nodes.request_id, nodes.created_at_ms FROM {} nodes JOIN {} trees ON trees.id=nodes.analysis_tree_id WHERE nodes.analysis_tree_id=$1 AND nodes.request_id=$2 AND trees.owner_user_id=$3",
             self.nodes, self.trees
         ))
         .bind(tree_id)
@@ -329,6 +411,8 @@ impl PostgresAnalysisRepository {
                         row.try_get("action").map_err(|_| "unavailable")?,
                     )
                     .map_err(|_| "unavailable")?,
+                    draws: serde_json::from_value(row.try_get("draws").map_err(|_| "unavailable")?)
+                        .map_err(|_| "unavailable")?,
                     state_after: serde_json::from_value(
                         row.try_get("state_after").map_err(|_| "unavailable")?,
                     )
@@ -343,13 +427,14 @@ impl PostgresAnalysisRepository {
         })
         .transpose()
     }
-    async fn list_by_clause(
+    async fn list_by_clause<'e>(
         &self,
         clause: &str,
         first: &str,
         owner: &str,
+        executor: impl sqlx::PgExecutor<'e>,
     ) -> Result<Vec<AnalysisTree>, &'static str> {
-        let rows = sqlx::query(&format!("SELECT trees.id, trees.game_id, trees.owner_user_id, trees.name, trees.base_ply, trees.version, trees.request_id AS tree_request_id, trees.created_at_ms, trees.updated_at_ms, nodes.id AS node_id, nodes.parent_node_id, nodes.action, nodes.state_after, nodes.state_hash, nodes.request_id AS node_request_id, nodes.created_at_ms AS node_created_at_ms FROM {} trees LEFT JOIN {} nodes ON nodes.analysis_tree_id=trees.id WHERE {} ORDER BY trees.created_at_ms, nodes.created_at_ms", self.trees, self.nodes, clause)).bind(first).bind(owner).fetch_all(&self.pool).await.map_err(|_| "unavailable")?;
+        let rows = sqlx::query(&format!("SELECT trees.id, trees.game_id, trees.owner_user_id, trees.name, trees.base_ply, trees.version, trees.request_id AS tree_request_id, trees.created_at_ms, trees.updated_at_ms, nodes.id AS node_id, nodes.parent_node_id, nodes.action, nodes.draws, nodes.state_after, nodes.state_hash, nodes.request_id AS node_request_id, nodes.created_at_ms AS node_created_at_ms FROM {} trees LEFT JOIN {} nodes ON nodes.analysis_tree_id=trees.id WHERE {} ORDER BY trees.created_at_ms, nodes.created_at_ms", self.trees, self.nodes, clause)).bind(first).bind(owner).fetch_all(executor).await.map_err(|_| "unavailable")?;
         let mut output: Vec<AnalysisTree> = Vec::new();
         for row in rows {
             let id: String = row.try_get("id").map_err(|_| "unavailable")?;
@@ -384,6 +469,8 @@ impl PostgresAnalysisRepository {
                         row.try_get("action").map_err(|_| "unavailable")?,
                     )
                     .map_err(|_| "unavailable")?,
+                    draws: serde_json::from_value(row.try_get("draws").map_err(|_| "unavailable")?)
+                        .map_err(|_| "unavailable")?,
                     state_after: serde_json::from_value(
                         row.try_get("state_after").map_err(|_| "unavailable")?,
                     )
@@ -403,66 +490,143 @@ impl PostgresAnalysisRepository {
 #[async_trait]
 impl AnalysisRepository for PostgresAnalysisRepository {
     async fn list(&self, game: &str, owner: &str) -> Result<Vec<AnalysisTree>, &'static str> {
-        self.list_by_clause("trees.game_id=$1 AND trees.owner_user_id=$2", game, owner)
-            .await
+        self.list_by_clause(
+            "trees.game_id=$1 AND trees.owner_user_id=$2",
+            game,
+            owner,
+            &self.pool,
+        )
+        .await
     }
     async fn create(
         &self,
-        tree: AnalysisTree,
+        mut tree: AnalysisTree,
         request_id: &str,
+        draw_parent: Option<&GameState>,
     ) -> Result<AnalysisTree, &'static str> {
         let mut tx = self.pool.begin().await.map_err(|_| "unavailable")?;
-        let inserted = sqlx::query(&format!("INSERT INTO {} (id,game_id,owner_user_id,name,base_ply,version,request_id,created_at_ms,updated_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (owner_user_id,request_id) DO NOTHING", self.trees)).bind(&tree.id).bind(&tree.game_id).bind(&tree.owner_user_id).bind(&tree.name).bind(tree.base_ply as i32).bind(tree.version).bind(request_id).bind(tree.created_at_ms).bind(tree.updated_at_ms).execute(&mut *tx).await.map_err(|_| "unavailable")?.rows_affected();
-        if inserted > 0 {
-            for node in &tree.nodes {
-                sqlx::query(&format!("INSERT INTO {} (id,analysis_tree_id,parent_node_id,action,state_after,state_hash,request_id,created_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", self.nodes)).bind(&node.id).bind(&tree.id).bind(node.parent_node_id.as_deref()).bind(serde_json::to_value(&node.action).map_err(|_| "unavailable")?).bind(serde_json::to_value(&node.state_after).map_err(|_| "unavailable")?).bind(&node.state_hash).bind(request_id).bind(node.created_at_ms).execute(&mut *tx).await.map_err(|_| "unavailable")?;
-            }
-        }
-        tx.commit().await.map_err(|_| "unavailable")?;
-        if inserted > 0 {
-            Ok(tree)
-        } else {
-            let row = sqlx::query(&format!(
-                "SELECT id FROM {} WHERE owner_user_id=$1 AND request_id=$2",
-                self.trees
-            ))
-            .bind(&tree.owner_user_id)
-            .bind(request_id)
-            .fetch_one(&self.pool)
+        // JSON tuple encoding separates keys unambiguously, including schemas.
+        // A 64-bit hash collision can only serialize unrelated writes: identity
+        // is always checked using the full owner/request pair, never the hash.
+        let lock_key = serde_json::to_string(&[
+            "analysis-create-v1",
+            &self.trees,
+            &tree.owner_user_id,
+            request_id,
+        ])
+        .map_err(|_| "unavailable")?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(lock_key)
+            .execute(&mut *tx)
             .await
             .map_err(|_| "unavailable")?;
-            self.get_tree(
-                row.try_get::<String, _>("id")
-                    .map_err(|_| "unavailable")?
-                    .as_str(),
+        // Use the transaction connection for reload too (even a one-slot pool).
+        if let Some(existing) = self
+            .list_by_clause(
+                "trees.request_id=$1 AND trees.owner_user_id=$2",
+                request_id,
                 &tree.owner_user_id,
+                &mut *tx,
             )
             .await?
-            .ok_or("unavailable")
+            .pop()
+        {
+            tx.commit().await.map_err(|_| "unavailable")?;
+            return Ok(existing);
+        }
+        let inserted = sqlx::query(&format!("INSERT INTO {} (id,game_id,owner_user_id,name,base_ply,version,request_id,created_at_ms,updated_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (owner_user_id,request_id) DO NOTHING", self.trees)).bind(&tree.id).bind(&tree.game_id).bind(&tree.owner_user_id).bind(&tree.name).bind(tree.base_ply as i32).bind(tree.version).bind(request_id).bind(tree.created_at_ms).bind(tree.updated_at_ms).execute(&mut *tx).await.map_err(|error| {
+            if error.as_database_error().and_then(|error| error.constraint()) == Some("game_analysis_trees_pkey") {
+                "conflict"
+            } else {
+                "unavailable"
+            }
+        })?.rows_affected();
+        if inserted > 0 {
+            resolve_tree(&mut tree, draw_parent, &mut |upper| {
+                #[cfg(test)]
+                if let Some(source) = &self.draw_source {
+                    return source(upper);
+                }
+                crate::draw::random_index(upper)
+            })?;
+            for node in &tree.nodes {
+                sqlx::query(&format!("INSERT INTO {} (id,analysis_tree_id,parent_node_id,action,state_after,state_hash,request_id,created_at_ms,draws) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)", self.nodes)).bind(&node.id).bind(&tree.id).bind(node.parent_node_id.as_deref()).bind(serde_json::to_value(&node.action).map_err(|_| "unavailable")?).bind(serde_json::to_value(&node.state_after).map_err(|_| "unavailable")?).bind(&node.state_hash).bind(request_id).bind(node.created_at_ms).bind(serde_json::to_value(&node.draws).map_err(|_| "unavailable")?).execute(&mut *tx).await.map_err(|_| "unavailable")?;
+            }
+        }
+        if inserted > 0 {
+            tx.commit().await.map_err(|_| "unavailable")?;
+            Ok(tree)
+        } else {
+            // Retain the exact-key fallback for writers from older revisions
+            // which do not yet participate in the advisory-lock protocol.
+            let existing = self
+                .list_by_clause(
+                    "trees.request_id=$1 AND trees.owner_user_id=$2",
+                    request_id,
+                    &tree.owner_user_id,
+                    &mut *tx,
+                )
+                .await?
+                .pop()
+                .ok_or("unavailable")?;
+            tx.commit().await.map_err(|_| "unavailable")?;
+            Ok(existing)
         }
     }
     async fn append(
         &self,
         tree_id: &str,
         owner: &str,
-        node: AnalysisNode,
+        mut node: AnalysisNode,
         version: i64,
         request_id: &str,
+        draw_parent: Option<&GameState>,
     ) -> Result<Option<AnalysisAppendResult>, &'static str> {
         if let Some(existing) = self.get_append_result(tree_id, owner, request_id).await? {
             return Ok(Some(existing));
         }
         let mut tx = self.pool.begin().await.map_err(|_| "unavailable")?;
+        if draw_parent.is_some() {
+            let locked = sqlx::query(&format!(
+                "SELECT id FROM {} WHERE id=$1 AND owner_user_id=$2 FOR UPDATE",
+                self.trees
+            ))
+            .bind(tree_id)
+            .bind(owner)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|_| "unavailable")?;
+            if locked.is_none() {
+                return Ok(None);
+            }
+            let duplicate = sqlx::query(&format!(
+                "SELECT id FROM {} WHERE analysis_tree_id=$1 AND request_id=$2",
+                self.nodes
+            ))
+            .bind(tree_id)
+            .bind(request_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|_| "unavailable")?;
+            if duplicate.is_some() {
+                tx.rollback().await.map_err(|_| "unavailable")?;
+                return self.get_append_result(tree_id, owner, request_id).await;
+            }
+        }
         let updated=sqlx::query(&format!("UPDATE {} SET version=version+1,updated_at_ms=$4 WHERE id=$1 AND owner_user_id=$2 AND version=$3",self.trees)).bind(tree_id).bind(owner).bind(version).bind(node.created_at_ms).execute(&mut *tx).await.map_err(|_| "unavailable")?.rows_affected();
         if updated == 0 {
-            tx.rollback().await.ok();
+            tx.rollback().await.map_err(|_| "unavailable")?;
+            if let Some(existing) = self.get_append_result(tree_id, owner, request_id).await? {
+                return Ok(Some(existing));
+            }
             return if self.get_tree(tree_id, owner).await?.is_some() {
                 Err("conflict")
             } else {
                 Ok(None)
             };
         }
-        sqlx::query(&format!("INSERT INTO {} (id,analysis_tree_id,parent_node_id,action,state_after,state_hash,request_id,created_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (analysis_tree_id,request_id) DO NOTHING",self.nodes)).bind(&node.id).bind(tree_id).bind(node.parent_node_id.as_deref()).bind(serde_json::to_value(&node.action).map_err(|_| "unavailable")?).bind(serde_json::to_value(&node.state_after).map_err(|_| "unavailable")?).bind(&node.state_hash).bind(request_id).bind(node.created_at_ms).execute(&mut *tx).await.map_err(|_| "invalid_parent")?;
+        resolve_node(&mut node, draw_parent, &mut crate::draw::random_index)?;
+        sqlx::query(&format!("INSERT INTO {} (id,analysis_tree_id,parent_node_id,action,state_after,state_hash,request_id,created_at_ms,draws) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (analysis_tree_id,request_id) DO NOTHING",self.nodes)).bind(&node.id).bind(tree_id).bind(node.parent_node_id.as_deref()).bind(serde_json::to_value(&node.action).map_err(|_| "unavailable")?).bind(serde_json::to_value(&node.state_after).map_err(|_| "unavailable")?).bind(&node.state_hash).bind(request_id).bind(node.created_at_ms).bind(serde_json::to_value(&node.draws).map_err(|_| "unavailable")?).execute(&mut *tx).await.map_err(|_| "invalid_parent")?;
         tx.commit().await.map_err(|_| "unavailable")?;
         self.get_append_result(tree_id, owner, request_id).await
     }
@@ -540,6 +704,7 @@ pub(crate) fn new_tree(
         id: Uuid::new_v4().to_string(),
         parent_node_id: None,
         action,
+        draws: Vec::new(),
         state_hash: state_hash(&state_after)?,
         state_after,
         created_at_ms: now,
@@ -598,6 +763,7 @@ mod tests {
             id: id.into(),
             parent_node_id: parent.map(Into::into),
             action: action(),
+            draws: Vec::new(),
             state_hash: state_hash(&state).unwrap(),
             state_after: state,
             created_at_ms: 2,
@@ -620,7 +786,7 @@ mod tests {
         )
         .unwrap();
         let root = tree.nodes[0].id.clone();
-        let tree = repository.create(tree, "create").await.unwrap();
+        let tree = repository.create(tree, "create", None).await.unwrap();
         let tree_id = tree.id.clone();
         let first = repository
             .append(
@@ -629,6 +795,7 @@ mod tests {
                 node("a", Some(&root), "a"),
                 tree.version,
                 "a",
+                None,
             )
             .await
             .unwrap()
@@ -640,6 +807,7 @@ mod tests {
                 node("b", Some(&root), "b"),
                 first.version,
                 "b",
+                None,
             )
             .await
             .unwrap()
@@ -651,6 +819,7 @@ mod tests {
                 node("a-child", Some("a"), "a-child"),
                 second.version,
                 "a-child",
+                None,
             )
             .await
             .unwrap()
@@ -684,6 +853,7 @@ mod tests {
                 )
                 .unwrap(),
                 "create",
+                None,
             )
             .await
             .unwrap();
@@ -702,6 +872,7 @@ mod tests {
                 node("one", Some(&root), "retry"),
                 tree.version,
                 "retry",
+                None,
             )
             .await
             .unwrap()
@@ -713,6 +884,7 @@ mod tests {
                 node("two", Some(&root), "retry"),
                 tree.version,
                 "retry",
+                None,
             )
             .await
             .unwrap()
@@ -726,7 +898,8 @@ mod tests {
                     "owner",
                     node("stale", Some(&root), "stale"),
                     tree.version,
-                    "stale"
+                    "stale",
+                    None,
                 )
                 .await
                 .unwrap_err(),

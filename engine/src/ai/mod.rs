@@ -1,7 +1,9 @@
 mod beam;
 mod evaluate;
 mod move_ordering;
+mod observation;
 mod search;
+mod standard;
 mod transposition_table;
 mod types;
 
@@ -14,4 +16,10 @@ pub use search::{
 pub use types::{
     ActionTimelineFrame, AiAction, BotDecision, BotDifficulty, BotTurnResult, SearchLimits,
     SearchOptions, SearchStats,
+};
+
+pub use observation::BotObservation;
+pub use standard::{
+    sacrifice_utility, select_sacrifice_subsets, SacrificeSubset, EXTRA_SUBSET_LIMIT,
+    SUBSET_FRONTIER_LIMIT,
 };

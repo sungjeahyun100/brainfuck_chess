@@ -28,3 +28,18 @@ to this disposable migrated database:
 ```sh
 cargo test -p brainfuck-chess-server deck::tests::postgres_ -- --ignored
 ```
+
+For G3-C exact analysis Draw persistence, apply
+`20260910000000_analysis_draws.sql` in the matching environment release sequence
+(`migrate-db.sh` includes it). The server and runtime postflight require the
+`game_analysis_nodes.draws` JSONB column. The disposable fixture's `fixture-user`
+is used by this opt-in repository integration test:
+
+```sh
+cargo test --offline -p brainfuck-chess-server postgres_analysis_draws_roundtrip_and_concurrent_idempotency -- --ignored
+```
+
+Set `TEST_ANALYSIS_DATABASE_URL` to the disposable migrated test database first.
+The test creates a unique record and exercises concurrent create/append retries,
+SQL Draw round-trip, and validation using a freshly constructed repository.
+It removes its record on success; failed fixtures belong only in disposable DBs.

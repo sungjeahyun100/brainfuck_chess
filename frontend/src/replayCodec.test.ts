@@ -1,3 +1,4 @@
+import { LEGACY_RULES_VERSION, STANDARD_RULES_VERSION } from './gameRulesVersions.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { decodeReplayCode, encodeReplayCode, MAX_REPLAY_CODE_LENGTH, MAX_REPLAY_JSON_BYTES } from './replayCodec.ts'
@@ -95,6 +96,7 @@ test('G1 Replay retains explicit rulesets, leaves legacy JSON unchanged and reje
   for (const ruleset of [undefined, 'legacy', 'standard'] as const) {
     const original = structuredClone(record)
     if (ruleset !== undefined) original.initial_state.ruleset = ruleset
+    original.ruleset_version = ruleset === 'standard' ? STANDARD_RULES_VERSION : LEGACY_RULES_VERSION
     const decoded = await decodeReplayCode(await encodeReplayCode(original))
     assert.equal(decoded.ok, true)
     if (decoded.ok) assert.deepEqual(decoded.value, original)
@@ -102,5 +104,62 @@ test('G1 Replay retains explicit rulesets, leaves legacy JSON unchanged and reje
   for (const ruleset of ['future', null, 1]) {
     const malformed = { ...record, initial_state: { ...record.initial_state, ruleset } }
     assert.deepEqual(await decodeReplayCode(await encodeReplayCode(malformed as unknown as GameRecord)), { ok: false, error: 'invalid_schema' })
+  }
+})
+
+test('Draw resolution metadata round-trips and malformed timing, players and instances are rejected', async () => {
+  const standard = structuredClone(record)
+  standard.initial_state.ruleset = 'standard'
+  standard.ruleset_version = STANDARD_RULES_VERSION
+  standard.initial_draws = [
+    { player_id: 'white', timing: 'initial', piece_ids: ['w1','w2','w3'] },
+    { player_id: 'black', timing: 'initial', piece_ids: ['b1','b2','b3'] },
+    { player_id: 'white', timing: 'turn_start', piece_ids: ['w4'] },
+  ]
+  const decoded = await decodeReplayCode(await encodeReplayCode(standard))
+  assert.equal(decoded.ok, true)
+  if (decoded.ok) assert.deepEqual(decoded.value.initial_draws, standard.initial_draws)
+  for (const draws of [null, {}, [{ player_id: 'unknown', timing: 'initial', piece_ids: [] }], [{ player_id: 'white', timing: 'future', piece_ids: [] }], [{ player_id: 'white', timing: 'initial', piece_ids: ['duplicate','duplicate'] }], [{ player_id: 'black', timing: 'turn_start', piece_ids: ['one','two'] }]]) {
+    const bad = { ...standard, initial_draws: draws } as unknown as GameRecord
+    assert.deepEqual(await decodeReplayCode(await encodeReplayCode(bad)), { ok: false, error: 'invalid_schema' })
+  }
+})
+
+test('G5 canonical ExtraSummon preserves exact ordered sacrifices and rejects malformed IDs and squares', async () => {
+  const value = structuredClone(record)
+  value.initial_state.ruleset = 'standard'
+  value.ruleset_version = STANDARD_RULES_VERSION
+  value.actions = [{
+    ply: 1, player_id: 'white', elapsed_ms: 0, clock_before_ms: null, clock_after_ms: null, clock, state_delta: [],
+    action: { type: 'extra_summon', player_id: 'white', extra_piece_id: 'extra', sacrifice_piece_ids: ['q3','q1','q2'], target_square: { file: 4, rank: 0 } },
+    notation: { turn_number: 1, move_number: 1, side: 'white', kind: 'extra_summon', actor: { piece_id: 'extra', piece_type_id: 'guhang', piece_name: '구행', layer: 'ground', state: {} }, to: { file: 4, rank: 0 }, ability_events: [] },
+    draws: [{ player_id: 'black', timing: 'turn_start', piece_ids: ['drawn'] }],
+  }]
+  const decoded = await decodeReplayCode(await encodeReplayCode(value))
+  assert.equal(decoded.ok, true)
+  if (decoded.ok) assert.deepEqual(decoded.value.actions, value.actions)
+  for (const patch of [
+    { sacrifice_piece_ids: ['same','same'] }, { sacrifice_piece_ids: [''] }, { sacrifice_piece_ids: ['\u0000bad'] },
+    { extra_piece_id: '' }, { extra_piece_id: null }, { target_square: { file: 1 } },
+    { target_square: { file: 1.5, rank: 0 } }, { target_square: { file: -1, rank: 0 } },
+  ]) {
+    const bad = structuredClone(value)
+    Object.assign(bad.actions[0].action, patch)
+    assert.deepEqual(await decodeReplayCode(await encodeReplayCode(bad)), { ok: false, error: 'invalid_schema' })
+  }
+})
+
+test('G7 replay code preserves semantic versions and explicitly rejects development, mismatched and future records', async () => {
+  for (const [ruleset, version, expected] of [
+    ['standard', LEGACY_RULES_VERSION, 'unsupported_development_standard_record'],
+    ['standard', 'deck-chess-standard-2', 'unsupported_rules_version'],
+    ['legacy', STANDARD_RULES_VERSION, 'unsupported_rules_version'],
+    ['legacy', 'future', 'unsupported_rules_version'],
+  ] as const) {
+    const value = structuredClone(record)
+    value.initial_state.ruleset = ruleset
+    value.ruleset_version = version
+    assert.deepEqual(await decodeReplayCode(await encodeReplayCode(value)), { ok: false, error: expected })
+    assert.equal(value.ruleset_version, version)
   }
 })

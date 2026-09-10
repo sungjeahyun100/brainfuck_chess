@@ -111,6 +111,7 @@ fn input() -> DeckInput {
     DeckInput {
         name: "테스트 덱".into(),
         deck_data: DeckData {
+            extra: Vec::new(),
             ruleset: Default::default(),
             map_id: "standard-8x8".into(),
             board_size: 8,
@@ -379,6 +380,36 @@ async fn custom_references_preserve_pinned_version_and_reject_foreign_package() 
     assert_eq!(status, StatusCode::OK, "{saved}");
     assert_eq!(saved["customPieces"], payload["deckData"]["customPieces"]);
     assert!(deck.clone().validate(&app, "bob").await.is_err());
+    let mut extra_only_draft = deck.clone();
+    let custom_key = extra_only_draft.deck_data.custom_pieces[0].key();
+    extra_only_draft.deck_data.pocket.remove(&custom_key);
+    extra_only_draft.deck_data.extra = vec![custom_key.clone(), custom_key];
+    extra_only_draft.deck_data.ruleset = DeckRuleset::Standard;
+    let spec = extra_only_draft.spec().unwrap();
+    assert_eq!(spec.extra.len(), 2);
+    assert!(matches!(
+        spec.extra[0],
+        DeckPieceRef::Custom { version: 1, .. }
+    ));
+    let (status, extra_saved) = request(
+        &app,
+        "alice",
+        "POST",
+        "/decks/import",
+        serde_json::to_value(&extra_only_draft).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{extra_saved}");
+    assert_eq!(
+        extra_saved["customPieces"],
+        payload["deckData"]["customPieces"]
+    );
+    assert!(extra_only_draft
+        .clone()
+        .validate(&app, "bob")
+        .await
+        .is_err());
+    assert!(crate::validate_spec_deck_zones(&spec).is_err());
     app.custom_pieces
         .deactivate("alice", &deck.deck_data.custom_pieces[0].id, 1)
         .await
@@ -723,6 +754,7 @@ fn size_fixture(custom_count: usize, placements: usize) -> DeckInput {
     DeckInput {
         name: "😀".repeat(100),
         deck_data: DeckData {
+            extra: Vec::new(),
             ruleset: Default::default(),
             map_id: "standard-12x12".into(),
             board_size: 12,
@@ -938,5 +970,122 @@ async fn ruleset_account_api_roundtrip_update_import_and_unknown_rejection() {
             status,
             StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
         ));
+    }
+}
+
+#[tokio::test]
+async fn extra_account_roundtrip_import_identity_removal_and_draft_compatibility() {
+    let app = AppState::in_memory();
+    account(&app, "alice").await;
+    let old = serde_json::to_value(input()).unwrap();
+    assert!(old["deckData"].get("extra").is_none());
+    for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+        let mut value = old.clone();
+        value["deckData"]["ruleset"] = serde_json::json!(ruleset);
+        let decoded: DeckInput = serde_json::from_value(value).unwrap();
+        assert!(decoded.deck_data.extra.is_empty());
+        let mut explicit = decoded.clone();
+        explicit.deck_data.extra = vec![];
+        assert_eq!(fingerprint(&decoded), fingerprint(&explicit));
+    }
+    let mut source = input();
+    source.deck_data.ruleset = DeckRuleset::Standard;
+    let (_, empty) = request(
+        &app,
+        "alice",
+        "POST",
+        "/decks/import",
+        serde_json::to_value(&source).unwrap(),
+    )
+    .await;
+    source.deck_data.extra = vec!["guhang".into(), "bomber".into(), "bomber".into()];
+    let payload = serde_json::to_value(&source).unwrap();
+    let (status, created) = request(&app, "alice", "POST", "/decks/import", payload.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_ne!(empty["id"], created["id"]);
+    assert_eq!(created["extra"], payload["deckData"]["extra"]);
+    let (_, repeated) = request(&app, "alice", "POST", "/decks/import", payload.clone()).await;
+    assert_eq!(created["id"], repeated["id"]);
+    source.deck_data.extra.reverse();
+    assert_eq!(
+        fingerprint(&source),
+        fingerprint(&serde_json::from_value::<DeckInput>(payload).unwrap())
+    );
+    let path = format!("/decks/{}", created["id"].as_str().unwrap());
+    let (status, loaded) = request(&app, "alice", "GET", &path, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(loaded["extra"], created["extra"]);
+    source.deck_data.extra.clear();
+    let mut update = serde_json::to_value(&source).unwrap();
+    update["expectedVersion"] = created["version"].clone();
+    let (status, updated) = request(&app, "alice", "PUT", &path, update).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert!(serde_json::from_value::<SavedDeck>(updated)
+        .unwrap()
+        .data
+        .extra
+        .is_empty());
+    let (_, reloaded) = request(&app, "alice", "GET", &path, serde_json::Value::Null).await;
+    assert!(serde_json::from_value::<SavedDeck>(reloaded)
+        .unwrap()
+        .data
+        .extra
+        .is_empty());
+    // Invalid game decks are still editable drafts, including overflow and Legacy Extra.
+    for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
+        source.deck_data.ruleset = ruleset;
+        source.deck_data.extra = vec!["bomber".into(); 4];
+        let (status, saved) = request(
+            &app,
+            "alice",
+            "POST",
+            "/decks/import",
+            serde_json::to_value(&source).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["extra"].as_array().unwrap().len(), 4);
+        assert_eq!(
+            start_game(&app, source.clone()).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+}
+
+#[tokio::test]
+async fn g7_account_json_roundtrip_all_maps_and_fingerprint_multiplicity() {
+    let app = AppState::in_memory();
+    account(&app, "alice").await;
+    let mut source = input();
+    source.deck_data.ruleset = DeckRuleset::Standard;
+    source.deck_data.extra = vec!["guhang".into()];
+    let single = fingerprint(&source);
+    source.deck_data.extra.push("guhang".into());
+    assert_ne!(single, fingerprint(&source));
+    source.deck_data.extra.push("bomber".into());
+    let multiple = fingerprint(&source);
+    source.deck_data.extra.reverse();
+    assert_eq!(multiple, fingerprint(&source));
+    for size in 8..=12 {
+        let mut maps = vec![format!("standard-{size}x{size}")];
+        if size == 12 {
+            maps.push("central-high-ground-12x12".into());
+        }
+        for map in maps {
+            source.deck_data.board_size = size;
+            source.deck_data.map_id = map;
+            let value = serde_json::to_value(&source).unwrap();
+            let (status, saved) = request(&app, "alice", "POST", "/decks/import", value).await;
+            assert_eq!(status, StatusCode::OK, "{saved}");
+            let path = format!("/decks/{}", saved["id"].as_str().unwrap());
+            let (status, fetched) =
+                request(&app, "alice", "GET", &path, serde_json::Value::Null).await;
+            assert_eq!(status, StatusCode::OK);
+            let fetched: SavedDeck = serde_json::from_value(fetched).unwrap();
+            assert_eq!(
+                serde_json::to_value(fetched.data).unwrap(),
+                serde_json::to_value(&source.deck_data).unwrap()
+            );
+        }
     }
 }

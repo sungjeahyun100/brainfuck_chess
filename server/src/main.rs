@@ -18,7 +18,9 @@ mod challenge;
 mod custom_piece;
 mod database;
 mod deck;
+mod draw;
 mod game_record;
+mod game_view;
 mod profiling;
 mod request_guard;
 mod routes;
@@ -28,6 +30,7 @@ mod time_control;
 use account::ProfileVisibility;
 use app_state::AppState;
 use game_record::{GameRecordOwnership, GameRecordPlayer};
+use game_view::{Audience, GameAccess};
 use stores::RoomStore;
 use time_control::{now_ms, GameSyncView, GameView, StoredGame, TimeControlId};
 
@@ -50,6 +53,49 @@ use brainfuck_chess_engine::{
     types::*,
 };
 
+fn game_client(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get("x-game-client-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
+}
+
+fn opponent_player(side: &str) -> PlayerId {
+    if side == "white" {
+        "black".into()
+    } else {
+        "white".into()
+    }
+}
+
+fn require_control(
+    game: &StoredGame,
+    client: Option<&str>,
+    side: &str,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    if game
+        .challenge
+        .as_ref()
+        .is_some_and(|context| context.metadata.player_id != side)
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Challenge 상대 진영은 직접 조작할 수 없습니다.".into(),
+            }),
+        ));
+    }
+    if game.audience(client).controls(side) {
+        return Ok(());
+    }
+    Err((
+        StatusCode::FORBIDDEN,
+        Json(ErrorResponse {
+            error: "이 진영의 참가자만 요청할 수 있습니다.".into(),
+        }),
+    ))
+}
+
 // ─── API types ───────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -68,6 +114,8 @@ struct CreateGameRequest {
     #[serde(default)]
     local_side: Option<PlayerId>,
     #[serde(default)]
+    bot_player_id: Option<PlayerId>,
+    #[serde(default)]
     local_nickname: Option<String>,
     #[serde(default)]
     guest_nickname: Option<String>,
@@ -76,12 +124,23 @@ struct CreateGameRequest {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateChallengeGameRequest {
-    player_deck: PlayerDeckSpec,
+    player_deck: ChallengePlayerDeckSpec,
     #[serde(default)]
     local_nickname: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+// Format belongs to the submitted player deck, never to the server challenge.
+// Old Legacy clients omitted map/size; only that historical request defaults.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChallengePlayerDeckSpec {
+    #[serde(flatten)]
+    deck: PlayerDeckSpec,
+    map_id: Option<String>,
+    board_size: Option<i32>,
+}
+
+#[derive(Clone, Deserialize)]
 struct MultiplayerRoom {
     #[serde(default)]
     ruleset: DeckRuleset,
@@ -92,13 +151,9 @@ struct MultiplayerRoom {
     board_variant: BoardVariant,
     host_side: PlayerId,
     guest_side: PlayerId,
-    #[serde(skip_serializing)]
     host_client_id: String,
-    #[serde(skip_serializing)]
     guest_client_id: Option<String>,
-    #[serde(skip_serializing)]
     host_owner_id: String,
-    #[serde(skip_serializing)]
     guest_owner_id: Option<String>,
     host_deck: Option<PlayerDeckSpec>,
     guest_deck: Option<PlayerDeckSpec>,
@@ -107,6 +162,32 @@ struct MultiplayerRoom {
     game_id: Option<String>,
     #[serde(default)]
     time_control: TimeControlId,
+}
+
+impl Serialize for MultiplayerRoom {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut value = serde_json::json!({
+            "ruleset": self.ruleset, "id": self.id, "board_size": self.board_size,
+            "map_id": self.map_id, "board_variant": self.board_variant,
+            "host_side": self.host_side, "guest_side": self.guest_side,
+            "host_ready": self.host_ready, "guest_ready": self.guest_ready,
+            "game_id": self.game_id, "time_control": self.time_control,
+        });
+        // The lobby only needs readiness for Standard; reserve contents are private.
+        value["host_deck"] = if self.ruleset == DeckRuleset::Legacy {
+            serde_json::to_value(&self.host_deck).map_err(serde::ser::Error::custom)?
+        } else {
+            serde_json::Value::Null
+        };
+        value["guest_deck"] = if self.ruleset == DeckRuleset::Legacy {
+            serde_json::to_value(&self.guest_deck).map_err(serde::ser::Error::custom)?
+        } else {
+            serde_json::Value::Null
+        };
+        value["host_has_deck"] = self.host_deck.is_some().into();
+        value["guest_has_deck"] = self.guest_deck.is_some().into();
+        value.serialize(serializer)
+    }
 }
 
 #[derive(Deserialize)]
@@ -202,6 +283,8 @@ struct PlayerDeckSpec {
     name: Option<String>,
     starting: Vec<StartingPieceSpec>,
     pocket: Vec<DeckPieceRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    extra: Vec<DeckPieceRef>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -242,6 +325,77 @@ enum SubmitAction {
     Move(SubmitMoveRequest),
     Drop(SubmitDropRequest),
     Ability(SubmitAbilityRequest),
+    ExtraSummon(SubmitExtraSummonRequest),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SubmitExtraSummonRequest {
+    extra_piece_id: PieceId,
+    sacrifice_piece_ids: Vec<PieceId>,
+    target_square: Square,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SummonOptionsRequest {
+    extra_piece_id: PieceId,
+    #[serde(default)]
+    sacrifice_piece_ids: Vec<PieceId>,
+}
+#[derive(Serialize)]
+struct SummonOptionsResponse {
+    sacrifice_piece_ids: Vec<PieceId>,
+    policy: brainfuck_chess_engine::summon::SummonPolicy,
+    cost: u32,
+    actions: Vec<brainfuck_chess_engine::types::ExtraSummonAction>,
+}
+fn summon_options(
+    state: &GameState,
+    request: &SummonOptionsRequest,
+) -> Result<SummonOptionsResponse, String> {
+    use brainfuck_chess_engine::summon::*;
+    let sacrifice_piece_ids = sacrifice_candidates(state, &request.extra_piece_id)?;
+    let piece = &state.pieces[&request.extra_piece_id];
+    let cost = state.piece_definitions[&piece.type_id].score;
+    let mut seen = std::collections::HashSet::new();
+    let mut score = 0u64;
+    for id in &request.sacrifice_piece_ids {
+        if !seen.insert(id) || !sacrifice_piece_ids.contains(id) {
+            return Err("제물 선택이 유효하지 않습니다.".into());
+        }
+        score += u64::from(state.piece_definitions[&state.pieces[id].type_id].score);
+    }
+    let actions = if score >= u64::from(cost) {
+        generate_extra_summon_actions(state, &request.extra_piece_id, &request.sacrifice_piece_ids)?
+    } else {
+        Vec::new()
+    };
+    Ok(SummonOptionsResponse {
+        sacrifice_piece_ids,
+        policy: summon_policy(state.ruleset, &piece.type_id).ok_or("소환 정책이 없습니다.")?,
+        cost,
+        actions,
+    })
+}
+async fn get_summon_options(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<SummonOptionsRequest>,
+) -> Result<Json<SummonOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let game = app.games.get(&id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "게임을 찾을 수 없습니다.".into(),
+            }),
+        )
+    })?;
+    require_control(&game, game_client(&headers), &game.current_player)?;
+    summon_options(&game.state, &request)
+        .map(Json)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))
 }
 
 #[derive(Deserialize)]
@@ -336,8 +490,9 @@ struct BotTurnResponse {
     ok: bool,
     game_state: GameView,
     actions: Vec<AiAction>,
-    timeline: Vec<brainfuck_chess_engine::ai::ActionTimelineFrame>,
-    stats: BotTurnStats,
+    timeline: Vec<game_view::TimelineFrameView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stats: Option<BotTurnStats>,
 }
 
 #[derive(Serialize)]
@@ -564,6 +719,42 @@ fn make_piece_id(
     format!("{}_{}_{}", player_id, piece_type.replace('-', "_"), next).into()
 }
 
+// Admission checks for Extra/Main placement also run before room mutation.
+// Full geometry, score and package authorization remain in the game factory.
+fn validate_spec_deck_zones(spec: &PlayerDeckSpec) -> Result<(), String> {
+    use brainfuck_chess_engine::rules::{piece_deck_zone, DeckZone, MAX_EXTRA_DECK_PIECES};
+    if spec.ruleset == DeckRuleset::Legacy && !spec.extra.is_empty() {
+        return Err("Legacy에서는 Extra Deck을 사용할 수 없습니다.".into());
+    }
+    if spec.extra.len() > MAX_EXTRA_DECK_PIECES {
+        return Err("Extra Deck은 최대 3기까지 사용할 수 있습니다.".into());
+    }
+    let zone = |piece: &DeckPieceRef| -> Result<DeckZone, String> {
+        match piece {
+            DeckPieceRef::BuiltIn { piece_type } => {
+                let id = resolve_piece_type("white", piece_type)
+                    .ok_or_else(|| "알 수 없는 기물입니다.".to_string())?;
+                Ok(piece_deck_zone(&id, spec.ruleset))
+            }
+            // Custom definitions currently have no Extra eligibility metadata.
+            DeckPieceRef::Custom { .. } => Ok(DeckZone::Main),
+        }
+    };
+    for piece in spec.starting.iter().map(|p| &p.piece).chain(&spec.pocket) {
+        if zone(piece)? != DeckZone::Main {
+            return Err(
+                "Standard Extra Deck 전용 기물은 Starting/Pocket에 넣을 수 없습니다.".into(),
+            );
+        }
+    }
+    for piece in &spec.extra {
+        if zone(piece)? != DeckZone::Extra {
+            return Err("Extra Deck에 허용되지 않는 기물입니다.".into());
+        }
+    }
+    Ok(())
+}
+
 fn build_player_deck(
     player_id: &str,
     spec: &PlayerDeckSpec,
@@ -574,6 +765,7 @@ fn build_player_deck(
     packages: &HashMap<(String, u32), CustomPiecePackage>,
     enforce_user_validation: bool,
 ) -> Result<Deck, String> {
+    validate_spec_deck_zones(spec)?;
     let base_zone: HashSet<SquareId> =
         get_base_zone_squares_with_ruleset(&player_id.to_string(), board_size, spec.ruleset)
             .into_iter()
@@ -658,10 +850,38 @@ fn build_player_deck(
         pocket_pieces.push(piece_id);
     }
 
+    let mut extra_deck_pieces = Vec::new();
+    for reference in &spec.extra {
+        let type_id = resolve_deck_piece_type(player_id, reference, packages)?;
+        let definition = definitions
+            .get(&type_id)
+            .ok_or("알 수 없는 Extra 기물입니다.")?;
+        let piece_id = make_piece_id(player_id, &type_id, &mut counters);
+        let mut piece = Piece {
+            id: piece_id.clone(),
+            owner: player_id.into(),
+            type_id,
+            current_square: None,
+            in_pocket: false,
+            captured: false,
+            has_moved: false,
+            current_ammo: 0,
+            layer: PieceLayer::Ground,
+            remaining_flight_turns: 0,
+            state: HashMap::new(),
+            move_option_cooldowns: HashMap::new(),
+        };
+        piece.initialize_from_definition(definition);
+        pieces.insert(piece_id.clone(), piece);
+        extra_deck_pieces.push(piece_id);
+    }
+
     let mut deck = Deck {
         player_id: player_id.into(),
         starting_pieces,
         pocket_pieces,
+        hand_pieces: Vec::new(),
+        extra_deck_pieces,
         score_limit: calculate_score_limit(board_size),
         total_score: 0,
     };
@@ -979,6 +1199,8 @@ fn build_lab_game_state(
     let current_player = selected_piece.owner.clone();
 
     let white_deck = Deck {
+        hand_pieces: Vec::new(),
+        extra_deck_pieces: Vec::new(),
         player_id: "white".into(),
         starting_pieces: white_starting,
         pocket_pieces: white_pocket,
@@ -988,6 +1210,8 @@ fn build_lab_game_state(
     let black_deck = Deck {
         player_id: "black".into(),
         starting_pieces: black_starting,
+        hand_pieces: Vec::new(),
+        extra_deck_pieces: Vec::new(),
         pocket_pieces: black_pocket,
         score_limit: calculate_score_limit(req.board_size),
         total_score: 0,
@@ -1063,6 +1287,7 @@ fn materialize_neutral_deck(
             })
             .collect(),
         pocket: spec.pocket.clone(),
+        extra: spec.extra.clone(),
     }
 }
 
@@ -1076,7 +1301,8 @@ async fn resolve_custom_packages(
             .starting
             .iter()
             .map(|placement| &placement.piece)
-            .chain(deck.pocket.iter());
+            .chain(deck.pocket.iter())
+            .chain(deck.extra.iter());
         for piece in refs {
             let DeckPieceRef::Custom {
                 custom_piece_id,
@@ -1200,9 +1426,8 @@ async fn start_room_game(
     let (record_players, record_ownership) =
         game_record_players(app, white_owner, black_owner).await;
 
-    room.game_id = Some(game_id.clone());
     let now = now_ms();
-    let stored = StoredGame::new_with_players_and_deck_names(
+    let mut stored = StoredGame::new_with_players_and_deck_names(
         state,
         room.time_control,
         true,
@@ -1227,6 +1452,19 @@ async fn start_room_game(
         ]),
         room.map_id.clone(),
     );
+    stored.initialize_draws()?;
+    room.game_id = Some(game_id.clone());
+    stored.access = GameAccess::Multiplayer {
+        clients: HashMap::from([
+            (room.host_client_id.clone(), room.host_side.clone()),
+            (
+                room.guest_client_id
+                    .clone()
+                    .ok_or("참가자 식별자가 없습니다.")?,
+                room.guest_side.clone(),
+            ),
+        ]),
+    };
     let view = stored.view(now);
     app.games.insert(game_id.clone(), stored);
     Ok(Some(GameResponse {
@@ -1482,6 +1720,7 @@ struct PieceCatalogMetadata {
     score: u32,
     max_ammo: u32,
     deployment_zone: DeploymentZone,
+    standard_deck_zone: brainfuck_chess_engine::rules::DeckZone,
 }
 
 fn default_piece_catalog() -> HashMap<PieceTypeId, PieceCatalogMetadata> {
@@ -1489,8 +1728,12 @@ fn default_piece_catalog() -> HashMap<PieceTypeId, PieceCatalogMetadata> {
         .into_iter()
         .map(|definition| {
             (
-                definition.id,
+                definition.id.clone(),
                 PieceCatalogMetadata {
+                    standard_deck_zone: brainfuck_chess_engine::rules::piece_deck_zone(
+                        &definition.id,
+                        DeckRuleset::Standard,
+                    ),
                     score: definition.score,
                     max_ammo: definition.max_ammo,
                     deployment_zone: definition.deployment_zone,
@@ -1550,11 +1793,9 @@ async fn list_challenges(
                 id: definition.id,
                 name: definition.name,
                 description: definition.description,
+                ruleset: definition.ruleset,
                 board_size: definition.board_size,
-                map_id: format!(
-                    "standard-{}x{}",
-                    definition.board_size, definition.board_size
-                ),
+                map_id: definition.map_id.into(),
                 bot_difficulty: definition.bot_difficulty,
                 time_control: definition.time_control,
                 cleared: cleared.contains(definition.id),
@@ -1569,8 +1810,6 @@ async fn create_challenge_game(
     headers: HeaderMap,
     Json(req): Json<CreateChallengeGameRequest>,
 ) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_ruleset(DeckRuleset::Legacy, req.player_deck.ruleset)
-        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let definition = challenge::find(&challenge_id).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -1579,8 +1818,38 @@ async fn create_challenge_game(
             }),
         )
     })?;
+    create_challenge_game_from_definition(app, headers, req, &definition).await
+}
+
+async fn create_challenge_game_from_definition(
+    app: AppState,
+    headers: HeaderMap,
+    req: CreateChallengeGameRequest,
+    definition: &challenge::ChallengeDefinition,
+) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let bad_request = |error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error }));
+    challenge::validate_registry(std::slice::from_ref(definition)).map_err(bad_request)?;
+    ensure_ruleset(definition.ruleset, req.player_deck.deck.ruleset).map_err(bad_request)?;
+    let legacy = definition.ruleset == DeckRuleset::Legacy;
+    if req
+        .player_deck
+        .map_id
+        .as_deref()
+        .unwrap_or(if legacy { definition.map_id } else { "" })
+        != definition.map_id
+        || req
+            .player_deck
+            .board_size
+            .unwrap_or(if legacy { definition.board_size } else { 0 })
+            != definition.board_size
+    {
+        return Err(bad_request(
+            "플레이어 덱의 map/board가 Challenge와 일치해야 합니다.".into(),
+        ));
+    }
+    let player_deck = req.player_deck.deck;
     let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
-    let packages = resolve_custom_packages(&app, &[(&owner, &req.player_deck)])
+    let packages = resolve_custom_packages(&app, &[(&owner, &player_deck)])
         .await
         .map_err(|error| {
             (
@@ -1593,8 +1862,10 @@ async fn create_challenge_game(
     let state = build_game_state_with_variant(
         id.clone(),
         definition.board_size,
-        BoardVariant::Plain,
-        &req.player_deck,
+        brainfuck_chess_engine::rules::board_map_definition(definition.map_id)
+            .unwrap()
+            .variant,
+        &player_deck,
         &opponent_deck,
         packages,
         true,
@@ -1625,18 +1896,20 @@ async fn create_challenge_game(
         HashMap::from([
             (
                 "white".into(),
-                req.player_deck
+                player_deck
                     .name
                     .clone()
                     .unwrap_or_else(|| "Player Deck".into()),
             ),
             ("black".into(), definition.name.into()),
         ]),
-        format!(
-            "standard-{}x{}",
-            definition.board_size, definition.board_size
-        ),
+        definition.map_id.into(),
     );
+    stored.initialize_draws().map_err(draw_error)?;
+    stored.access = GameAccess::Local {
+        client: game_client(&headers).unwrap_or_default().to_owned(),
+        human: Some("white".into()),
+    };
     stored.set_challenge(challenge::ChallengeGameContext {
         metadata: challenge::ChallengeGameMetadata {
             id: definition.id.into(),
@@ -1647,7 +1920,7 @@ async fn create_challenge_game(
         },
         registered_user_id,
     });
-    let view = stored.view(now);
+    let view = stored.view_for(now, stored.audience(game_client(&headers)));
     app.games.insert(id.clone(), stored);
     Ok(Json(GameResponse { id, state: view }))
 }
@@ -1742,7 +2015,7 @@ async fn create_game(
     } else {
         game_record_players(&app, &owner, &owner).await
     };
-    let stored = StoredGame::new_with_players_and_deck_names(
+    let mut stored = StoredGame::new_with_players_and_deck_names(
         state,
         req.time_control,
         false,
@@ -1767,7 +2040,24 @@ async fn create_game(
         ]),
         map_id,
     );
-    let view = stored.view(now);
+    if let Some(bot) = req.bot_player_id.as_deref() {
+        if !matches!(bot, "white" | "black")
+            || req.local_side.as_deref() != Some(opponent_player(bot).as_str())
+        {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "Bot과 인간 진영이 올바르지 않습니다.".into(),
+                }),
+            ));
+        }
+    }
+    stored.initialize_draws().map_err(draw_error)?;
+    stored.access = GameAccess::Local {
+        client: game_client(&headers).unwrap_or_default().to_owned(),
+        human: req.bot_player_id.as_deref().map(opponent_player),
+    };
+    let view = stored.view_for(now, stored.audience(game_client(&headers)));
     app.games.insert(id.clone(), stored);
     Ok(Json(GameResponse { id, state: view }))
 }
@@ -1778,6 +2068,8 @@ async fn create_room(
     Json(req): Json<CreateRoomRequest>,
 ) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
     ensure_ruleset(req.ruleset, req.deck.ruleset)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    validate_spec_deck_zones(&req.deck)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     if req.board_size < 8 {
@@ -1850,6 +2142,8 @@ async fn join_room(
     Path(id): Path<String>,
     Json(req): Json<JoinRoomRequest>,
 ) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
+    validate_spec_deck_zones(&req.deck)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     let room_id = id.to_uppercase();
     let mut room = app.rooms.get_mut(&room_id).ok_or_else(|| {
@@ -1886,15 +2180,15 @@ async fn join_room(
         state.adjudicate(now);
         return Ok(Json(GameResponse {
             id: game_id.clone(),
-            state: state.view(now),
+            state: state.view_for(now, state.audience(Some(&req.client_id))),
         }));
     }
 
     room.guest_deck = Some(req.deck);
-    room.guest_client_id = Some(req.client_id);
+    room.guest_client_id = Some(req.client_id.clone());
     room.guest_owner_id = Some(owner);
     room.guest_ready = true;
-    let response = start_room_game(room.value_mut(), &app)
+    let mut response = start_room_game(room.value_mut(), &app)
         .await
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?
         .ok_or_else(|| {
@@ -1905,6 +2199,9 @@ async fn join_room(
                 }),
             )
         })?;
+    if let Some(game) = app.games.get(&response.id) {
+        response.state = game.view_for(now_ms(), game.audience(Some(&req.client_id)));
+    }
     Ok(Json(response))
 }
 
@@ -1914,6 +2211,8 @@ async fn select_room_deck(
     Path(id): Path<String>,
     Json(req): Json<SelectDeckRequest>,
 ) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
+    validate_spec_deck_zones(&req.deck)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     let room_id = id.to_uppercase();
     let mut room = app.rooms.get_mut(&room_id).ok_or_else(|| {
@@ -2117,11 +2416,14 @@ async fn resign_room(
         game.end_with_loss(&req.player_id, GameEndReason::Resignation);
     }
 
-    Ok(Json(game.view(now_ms())))
+    Ok(Json(
+        game.view_for(now_ms(), game.audience(Some(&req.client_id))),
+    ))
 }
 
 async fn resign_game(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(req): Json<ResignGameRequest>,
 ) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
@@ -2144,12 +2446,15 @@ async fn resign_game(
     })?;
 
     let game = entry.value_mut();
+    require_control(game, game_client(&headers), &req.player_id)?;
     if game.phase != GamePhase::Ended {
         game.clock.stop(now_ms());
         game.end_with_loss(&req.player_id, GameEndReason::Resignation);
     }
 
-    Ok(Json(game.view(now_ms())))
+    Ok(Json(
+        game.view_for(now_ms(), game.audience(game_client(&headers))),
+    ))
 }
 
 async fn heartbeat_room(
@@ -2204,7 +2509,12 @@ async fn heartbeat_room(
     }
     #[cfg(feature = "profiling")]
     let view_started = std::time::Instant::now();
-    let view = game.sync_view(now, req.catalog_revision, req.latest_ply);
+    let view = game.sync_view_for(
+        now,
+        req.catalog_revision,
+        req.latest_ply,
+        Audience::Player(&req.player_id),
+    );
     #[cfg(feature = "profiling")]
     let view_nanos = view_started.elapsed().as_nanos() as u64;
     drop(game);
@@ -2228,13 +2538,16 @@ async fn heartbeat_room(
 
 async fn get_game(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
     match app.games.get_mut(&id) {
         Some(mut game) => {
             let now = now_ms();
             game.adjudicate(now);
-            Ok(Json(game.view(now)))
+            Ok(Json(
+                game.view_for(now, game.audience(game_client(&headers))),
+            ))
         }
         None => Err((
             StatusCode::NOT_FOUND,
@@ -2275,7 +2588,7 @@ async fn get_game_record(
             return match app.game_records.get(&id).await {
                 Ok(Some(stored)) => {
                     ensure_game_record_access(&app, &headers, &stored).await?;
-                    Ok(Json(stored))
+                    completed_record_view(stored)
                 }
                 Ok(None) => Err((
                     StatusCode::NOT_FOUND,
@@ -2286,12 +2599,12 @@ async fn get_game_record(
                 Err(_) => Err(repository_error("unavailable")),
             };
         }
-        return Ok(Json(record));
+        return completed_record_view(record);
     }
     match app.game_records.get(&id).await {
         Ok(Some(record)) => {
             ensure_game_record_access(&app, &headers, &record).await?;
-            Ok(Json(record))
+            completed_record_view(record)
         }
         Ok(None) => Err((
             StatusCode::NOT_FOUND,
@@ -2306,6 +2619,48 @@ async fn get_game_record(
             }),
         )),
     }
+}
+
+/// Completed-record boundary: authoritative Hand/Draw identities are available only
+/// after existing access checks. This never changes live GameView projection.
+fn completed_record_view(
+    record: game_record::GameRecord,
+) -> Result<Json<game_record::GameRecord>, (StatusCode, Json<ErrorResponse>)> {
+    validate_completed_standard_record(&record)?;
+    Ok(Json(record))
+}
+
+fn validate_record_rules_version(
+    record: &game_record::GameRecord,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    record.validate_rules_version().map(|_| ()).map_err(|code| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(ErrorResponse { error: code.into() }),
+        )
+    })
+}
+
+fn validate_completed_standard_record(
+    record: &game_record::GameRecord,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    validate_record_rules_version(record)?;
+    if record.initial_state.ruleset == DeckRuleset::Standard {
+        if record.ended_at_ms.is_none() {
+            return Err(private_game_record_error());
+        }
+        record
+            .state_at_ply(record.actions.len() as u32)
+            .map_err(|_| {
+                (
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: "완료 기록의 Draw 무결성 검증에 실패했습니다.".into(),
+                    }),
+                )
+            })?;
+    }
+    Ok(())
 }
 
 async fn ensure_game_record_access(
@@ -2468,6 +2823,8 @@ struct AnalysisOptionsRequest {
     position: AnalysisPosition,
     piece_id: String,
     move_option_id: Option<String>,
+    #[serde(default)]
+    sacrifice_piece_ids: Vec<PieceId>,
 }
 #[derive(Serialize)]
 struct AnalysisOptionsResponse {
@@ -2475,14 +2832,20 @@ struct AnalysisOptionsResponse {
     drops: Vec<DropAction>,
     ability_actions: Vec<AbilityAction>,
     previews: Vec<AnalysisActionPreview>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summon: Option<SummonOptionsResponse>,
 }
 #[derive(Serialize)]
 struct AnalysisActionPreview {
     action: TurnAction,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    draw_pending: bool,
     state_delta: Vec<game_record::StateDeltaOperation>,
-    state_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state_hash: Option<String>,
 }
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CreateAnalysisRequest {
     base_ply: u32,
     name: Option<String>,
@@ -2490,6 +2853,7 @@ struct CreateAnalysisRequest {
     request_id: String,
 }
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AppendAnalysisRequest {
     parent_node_id: String,
     action: TurnAction,
@@ -2528,6 +2892,7 @@ async fn authenticated_record_owner(
                 }),
             )
         })?;
+    validate_completed_standard_record(&record)?;
     if !record.ownership.contains(&owner) {
         return Err(private_game_record_error());
     }
@@ -2579,11 +2944,44 @@ async fn owned_record_and_trees(
     Ok((owner, record, trees))
 }
 
+fn draw_error(_error: String) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(ErrorResponse {
+            error: "Draw 전이를 확정하지 못했습니다. 게임 상태는 변경되지 않았습니다.".into(),
+        }),
+    )
+}
+
+fn replay_analysis_node(
+    parent: GameState,
+    node: &analysis::AnalysisNode,
+) -> Result<GameState, String> {
+    if parent.ruleset == DeckRuleset::Legacy && node.draws.is_empty() {
+        return submit_engine_action(parent, node.action.clone());
+    }
+    let mut next = submit_engine_action(parent.clone(), node.action.clone())?;
+    draw::replay_turn(&parent, &mut next, &node.draws)?;
+    Ok(next)
+}
+
 fn validate_analysis_trees(
     record: &game_record::GameRecord,
     trees: &[analysis::AnalysisTree],
 ) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    validate_record_rules_version(record)?;
     for tree in trees {
+        if record.initial_state.ruleset == DeckRuleset::Standard
+            && tree
+                .nodes
+                .iter()
+                .map(|node| &node.id)
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != tree.nodes.len()
+        {
+            return Err(repository_error("conflict"));
+        }
         let base = record.state_at_ply(tree.base_ply).map_err(|_| {
             (
                 StatusCode::CONFLICT,
@@ -2615,19 +3013,19 @@ fn validate_analysis_trees(
                 .as_ref()
                 .and_then(|parent_id| verified.get(parent_id).cloned())
                 .unwrap_or_else(|| base.clone());
-            let expected = analysis::normalized_state(
-                submit_engine_action(parent, node.action.clone()).map_err(|_| {
+            let expected =
+                analysis::normalized_state(replay_analysis_node(parent, node).map_err(|_| {
                     (
                         StatusCode::CONFLICT,
                         Json(ErrorResponse {
                             error: "분석 수의 합법성 재검증에 실패했습니다.".into(),
                         }),
                     )
-                })?,
-            );
+                })?);
             let expected_hash = analysis::state_hash(&expected).map_err(repository_error)?;
             let actual_hash = analysis::state_hash(&node.state_after).map_err(repository_error)?;
-            let legacy_hash = analysis::is_legacy_state_hash(&node.state_hash);
+            let legacy_hash = expected.ruleset == DeckRuleset::Legacy
+                && analysis::is_legacy_state_hash(&node.state_hash);
             if expected_hash != actual_hash || (!legacy_hash && actual_hash != node.state_hash) {
                 eprintln!(
                     "analysis_integrity_failure game_id={} variation_id={} node_id={} parent_node_id={} base_ply={} expected_hash={} actual_hash={} stored_hash={}",
@@ -2662,6 +3060,19 @@ fn analysis_state(
     trees: &[analysis::AnalysisTree],
     position: &AnalysisPosition,
 ) -> Result<GameState, (StatusCode, Json<ErrorResponse>)> {
+    validate_record_rules_version(record)?;
+    if record.initial_state.ruleset == DeckRuleset::Standard {
+        validate_analysis_trees(record, trees)?;
+    }
+    if record.initial_state.ruleset == DeckRuleset::Standard && !position.pending_actions.is_empty()
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Standard 분석은 분기 저장 완료 후 다음 수를 선택하세요.".into(),
+            }),
+        ));
+    }
     if position.pending_actions.len() > 32 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -2732,19 +3143,19 @@ fn analysis_state(
                     )
                 })?
             };
-            let expected = analysis::normalized_state(
-                submit_engine_action(parent, node.action.clone()).map_err(|_| {
+            let expected =
+                analysis::normalized_state(replay_analysis_node(parent, node).map_err(|_| {
                     (
                         StatusCode::CONFLICT,
                         Json(ErrorResponse {
                             error: "분석 수의 합법성 재검증에 실패했습니다.".into(),
                         }),
                     )
-                })?,
-            );
+                })?);
             let expected_hash = analysis::state_hash(&expected).map_err(repository_error)?;
             let actual_hash = analysis::state_hash(&node.state_after).map_err(repository_error)?;
-            let legacy_hash = analysis::is_legacy_state_hash(&node.state_hash);
+            let legacy_hash = expected.ruleset == DeckRuleset::Legacy
+                && analysis::is_legacy_state_hash(&node.state_hash);
             if expected_hash != actual_hash || (!legacy_hash && actual_hash != node.state_hash) {
                 eprintln!("analysis_integrity_failure game_id={} variation_id={} node_id={} parent_node_id={} base_ply={} expected_hash={} actual_hash={} stored_hash={}", record.game_id, tree.id, node.id, node.parent_node_id.as_deref().unwrap_or("<root>"), tree.base_ply, expected_hash, actual_hash, node.state_hash);
                 return Err((
@@ -2783,12 +3194,8 @@ async fn list_analysis_trees(
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<analysis::AnalysisTree>>, (StatusCode, Json<ErrorResponse>)> {
-    let (owner, _, _) = owned_record_and_trees(&app, &headers, &id).await?;
-    app.analyses
-        .list(&id, &owner)
-        .await
-        .map(Json)
-        .map_err(repository_error)
+    let (_, _, trees) = owned_record_and_trees(&app, &headers, &id).await?;
+    Ok(Json(trees))
 }
 
 async fn get_analysis_options(
@@ -2838,21 +3245,51 @@ async fn get_analysis_options(
                 .collect()
         })
         .unwrap_or_default();
+    let summon = if state
+        .players
+        .get(&state.current_player)
+        .is_some_and(|p| p.deck.extra_deck_pieces.contains(&piece_id))
+    {
+        Some(
+            summon_options(
+                &state,
+                &SummonOptionsRequest {
+                    extra_piece_id: piece_id.clone(),
+                    sacrifice_piece_ids: request.sacrifice_piece_ids,
+                },
+            )
+            .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?,
+        )
+    } else {
+        None
+    };
     let legal_ready = started.elapsed();
     let actions = moves
         .iter()
         .cloned()
         .map(TurnAction::Move)
         .chain(drops.iter().cloned().map(TurnAction::Drop))
-        .chain(ability_actions.iter().cloned().map(TurnAction::Ability));
+        .chain(ability_actions.iter().cloned().map(TurnAction::Ability))
+        .chain(
+            summon
+                .iter()
+                .flat_map(|options| options.actions.iter().cloned())
+                .map(TurnAction::ExtraSummon),
+        );
     let previews = actions
         .filter_map(|action| {
             let next = submit_engine_action(state.clone(), action.clone()).ok()?;
             let state_after = analysis::normalized_state(next);
-            let state_hash = analysis::state_hash(&state_after).ok()?;
+            let draw_pending = draw::starts_turn(&state, &state_after);
+            let state_hash = if draw_pending {
+                None
+            } else {
+                Some(analysis::state_hash(&state_after).ok()?)
+            };
             let state_delta = game_record::build_state_delta(&state, &state_after);
             Some(AnalysisActionPreview {
                 action,
+                draw_pending,
                 state_delta,
                 state_hash,
             })
@@ -2872,6 +3309,7 @@ async fn get_analysis_options(
         drops,
         ability_actions,
         previews,
+        summon,
     }))
 }
 
@@ -2904,6 +3342,7 @@ async fn create_analysis_tree(
             }),
         )
     })?;
+    let draw_parent = (state.ruleset == DeckRuleset::Standard).then(|| state.clone());
     let next = submit_engine_action(state, request.action.clone())
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let count = app
@@ -2929,11 +3368,15 @@ async fn create_analysis_tree(
         request.request_id.clone(),
     )
     .map_err(repository_error)?;
-    app.analyses
-        .create(tree, &request.request_id)
+    let saved = app
+        .analyses
+        .create(tree, &request.request_id, draw_parent.as_ref())
         .await
-        .map(Json)
-        .map_err(repository_error)
+        .map_err(repository_error)?;
+    if draw_parent.is_some() {
+        validate_analysis_trees(&record, std::slice::from_ref(&saved))?;
+    }
+    Ok(Json(saved))
 }
 
 async fn append_analysis_node(
@@ -2975,6 +3418,7 @@ async fn append_analysis_node(
         pending_actions: Vec::new(),
     };
     let state = analysis_state(&record, &trees, &position)?;
+    let draw_parent = (state.ruleset == DeckRuleset::Standard).then(|| state.clone());
     let next = analysis::normalized_state(
         submit_engine_action(state, request.action.clone())
             .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?,
@@ -2983,6 +3427,7 @@ async fn append_analysis_node(
         id: Uuid::new_v4().to_string(),
         parent_node_id: Some(request.parent_node_id),
         action: request.action,
+        draws: Vec::new(),
         state_hash: analysis::state_hash(&next).map_err(repository_error)?,
         state_after: next,
         created_at_ms: now_ms(),
@@ -2997,6 +3442,7 @@ async fn append_analysis_node(
             node,
             request.expected_version,
             &request.request_id,
+            draw_parent.as_ref(),
         )
         .await
         .map_err(repository_error)?
@@ -3094,6 +3540,7 @@ async fn delete_analysis_subtree(
 
 async fn submit_action(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(req): Json<SubmitActionRequest>,
 ) -> Result<Json<GameView>, (StatusCode, Json<ErrorResponse>)> {
@@ -3107,6 +3554,7 @@ async fn submit_action(
     })?;
 
     let game = entry.value_mut();
+    require_control(game, game_client(&headers), &game.current_player)?;
     let now = now_ms();
     game.adjudicate(now);
 
@@ -3122,7 +3570,7 @@ async fn submit_action(
     let moving_player = game.current_player.clone();
     let clock_before = game.clock.snapshot(now, true);
     let state_before = game.state.clone();
-    let (next_state, recorded_action) = match req.action {
+    let (mut next_state, recorded_action) = match req.action {
         SubmitAction::Move(request) => {
             let piece = game.pieces.get(&request.piece_id).ok_or_else(|| {
                 (
@@ -3195,6 +3643,18 @@ async fn submit_action(
                 .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
             (state, action)
         }
+        SubmitAction::ExtraSummon(request) => {
+            let action =
+                TurnAction::ExtraSummon(brainfuck_chess_engine::types::ExtraSummonAction {
+                    player_id: game.current_player.clone(),
+                    extra_piece_id: request.extra_piece_id,
+                    sacrifice_piece_ids: request.sacrifice_piece_ids,
+                    target_square: request.target_square,
+                });
+            let state = submit_engine_action(game.state.clone(), action.clone())
+                .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+            (state, action)
+        }
         SubmitAction::Ability(request) => {
             let legal_action = AbilityAction {
                 player_id: game.current_player.clone(),
@@ -3223,6 +3683,8 @@ async fn submit_action(
             }),
         ));
     }
+    let draws = draw::turn_start(&state_before, &mut next_state, &mut draw::random_index)
+        .map_err(draw_error)?;
     game.state = next_state;
     let next_player = game.current_player.clone();
     let ended = game.phase == GamePhase::Ended;
@@ -3233,23 +3695,28 @@ async fn submit_action(
         .turn_started_at_ms
         .map(|started| confirmed_at.saturating_sub(started))
         .unwrap_or(0);
-    game.record.push_action(
-        moving_player.clone(),
-        recorded_action,
-        elapsed_ms,
-        player_clock_value(&clock_before, &moving_player),
-        player_clock_value(&clock_after, &moving_player),
-        clock_after,
-        &state_before,
-        game.state.clone(),
-    );
+    game.record
+        .push_action(
+            moving_player.clone(),
+            recorded_action,
+            elapsed_ms,
+            player_clock_value(&clock_before, &moving_player),
+            player_clock_value(&clock_after, &moving_player),
+            clock_after,
+            &state_before,
+            game.state.clone(),
+        )
+        .draws = draws;
     if ended {
         let final_state = game.state.clone();
         let final_clock = game.clock.snapshot(confirmed_at, false);
         game.record
             .finalize(&final_state, final_clock, confirmed_at);
     }
-    Ok(Json(game.view(confirmed_at)))
+    Ok(Json(game.view_for(
+        confirmed_at,
+        game.audience(game_client(&headers)),
+    )))
 }
 
 fn player_clock_value(clock: &time_control::ClockSnapshot, player: &str) -> Option<i64> {
@@ -3268,6 +3735,7 @@ fn player_clock_value(clock: &time_control::ClockSnapshot, player: &str) -> Opti
 
 async fn run_bot_turn(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(req): Json<BotTurnRequest>,
 ) -> Result<Json<BotTurnResponse>, (StatusCode, Json<ErrorResponse>)> {
@@ -3301,6 +3769,23 @@ async fn run_bot_turn(
             }),
         )
     })?;
+    if entry.ruleset == DeckRuleset::Standard {
+        match &entry.access {
+            GameAccess::Local {
+                human: Some(human), ..
+            } if *human == opponent_player(&req.bot_player_id) => {
+                require_control(&entry, game_client(&headers), human)?;
+            }
+            _ => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(ErrorResponse {
+                        error: "설정된 Bot 게임에서만 실행할 수 있습니다.".into(),
+                    }),
+                ))
+            }
+        }
+    }
     let started_at = now_ms();
     let difficulty = if let Some(context) = entry.challenge.as_ref() {
         if req.bot_player_id != context.metadata.bot_player_id {
@@ -3336,7 +3821,7 @@ async fn run_bot_turn(
     let moving_player = entry.current_player.clone();
     let clock_before = entry.clock.snapshot(started_at, true);
     let replay_initial_state = entry.state.clone();
-    let result = play_bot_turn_detailed(entry.state.clone(), &req.bot_player_id, difficulty)
+    let mut result = play_bot_turn_detailed(entry.state.clone(), &req.bot_player_id, difficulty)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let finished_at = now_ms();
     entry.adjudicate(finished_at);
@@ -3348,6 +3833,17 @@ async fn run_bot_turn(
             }),
         ));
     }
+    // Search has finished and the clock accepted the action. Only the final frame
+    // can start the next player's turn; intermediate forced landings never draw.
+    let draws = draw::turn_start(
+        &replay_initial_state,
+        &mut result.state,
+        &mut draw::random_index,
+    )
+    .map_err(draw_error)?;
+    if let Some(frame) = result.timeline.last_mut() {
+        frame.state = result.state.clone();
+    }
     entry.state = result.state.clone();
     let next_player = entry.current_player.clone();
     let ended = entry.phase == GamePhase::Ended;
@@ -3357,20 +3853,28 @@ async fn run_bot_turn(
     let clock_after = entry.clock.snapshot(finished_at, !ended);
     let mut frame_before = replay_initial_state;
     for (index, frame) in result.timeline.iter().enumerate() {
-        entry.record.push_action(
-            moving_player.clone(),
-            ai_action_to_turn_action(frame.action.clone()),
-            if index == 0 {
-                finished_at.saturating_sub(clock_before.turn_started_at_ms.unwrap_or(started_at))
-            } else {
-                0
-            },
-            player_clock_value(&clock_before, &moving_player),
-            player_clock_value(&clock_after, &moving_player),
-            clock_after.clone(),
-            &frame_before,
-            frame.state.clone(),
-        );
+        entry
+            .record
+            .push_action(
+                moving_player.clone(),
+                ai_action_to_turn_action(frame.action.clone()),
+                if index == 0 {
+                    finished_at
+                        .saturating_sub(clock_before.turn_started_at_ms.unwrap_or(started_at))
+                } else {
+                    0
+                },
+                player_clock_value(&clock_before, &moving_player),
+                player_clock_value(&clock_after, &moving_player),
+                clock_after.clone(),
+                &frame_before,
+                frame.state.clone(),
+            )
+            .draws = if index + 1 == result.timeline.len() {
+            draws.clone()
+        } else {
+            Vec::new()
+        };
         frame_before = frame.state.clone();
     }
     if ended {
@@ -3383,10 +3887,23 @@ async fn run_bot_turn(
 
     Ok(Json(BotTurnResponse {
         ok: true,
-        game_state: entry.view(finished_at),
+        game_state: entry.view_for(finished_at, entry.audience(game_client(&headers))),
         actions: result.actions,
-        timeline: result.timeline,
-        stats: BotTurnStats {
+        timeline: result
+            .timeline
+            .into_iter()
+            .map(|frame| game_view::TimelineFrameView {
+                action: frame.action,
+                state: game_view::TimelineStateView {
+                    state: game_view::project_state(
+                        &frame.state,
+                        entry.audience(game_client(&headers)),
+                    ),
+                    hand_counts: game_view::hand_counts(&frame.state),
+                },
+            })
+            .collect(),
+        stats: (entry.ruleset == DeckRuleset::Legacy).then_some(BotTurnStats {
             score: result.score,
             searched_nodes: result.searched_nodes,
             depth_reached: result.depth_reached,
@@ -3430,7 +3947,7 @@ async fn run_bot_turn(
             root_quiet_drop_actions_generated: result.stats.root_quiet_drop_actions_generated,
             root_quiet_drop_actions_selected: result.stats.root_quiet_drop_actions_selected,
             elapsed_ms: result.elapsed_ms,
-        },
+        }),
     }))
 }
 
@@ -3439,17 +3956,22 @@ fn ai_action_to_turn_action(action: AiAction) -> TurnAction {
         AiAction::Move(action) => TurnAction::Move(action),
         AiAction::Drop(action) => TurnAction::Drop(action),
         AiAction::Ability(action) => TurnAction::Ability(action),
+        AiAction::ExtraSummon(action) => TurnAction::ExtraSummon(action),
     }
 }
 
 async fn get_legal_moves(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<LegalMovesResponse>, (StatusCode, Json<ErrorResponse>)> {
     match app.games.get(&id) {
-        Some(state) => Ok(Json(LegalMovesResponse {
-            moves: generate_legal_move_actions(&state),
-        })),
+        Some(state) => {
+            require_control(&state, game_client(&headers), &state.current_player)?;
+            Ok(Json(LegalMovesResponse {
+                moves: generate_legal_move_actions(&state),
+            }))
+        }
         None => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -3461,12 +3983,16 @@ async fn get_legal_moves(
 
 async fn get_legal_drops(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<LegalDropsResponse>, (StatusCode, Json<ErrorResponse>)> {
     match app.games.get(&id) {
-        Some(state) => Ok(Json(LegalDropsResponse {
-            drops: generate_legal_drop_actions(&state),
-        })),
+        Some(state) => {
+            require_control(&state, game_client(&headers), &state.current_player)?;
+            Ok(Json(LegalDropsResponse {
+                drops: generate_legal_drop_actions(&state),
+            }))
+        }
         None => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -3529,6 +4055,7 @@ async fn get_player_attacks(
 
 async fn get_piece_options(
     State(app): State<AppState>,
+    headers: HeaderMap,
     Path((id, piece_id)): Path<(String, String)>,
     Query(query): Query<PieceOptionsQuery>,
 ) -> Result<Json<PieceOptionsResponse>, (StatusCode, Json<ErrorResponse>)> {
@@ -3537,6 +4064,7 @@ async fn get_piece_options(
     let piece_id = PieceId::from(piece_id);
     let response = match app.games.get(&id) {
         Some(state) => {
+            require_control(&state, game_client(&headers), &state.current_player)?;
             let ability_actions = query
                 .move_option_id
                 .as_deref()
@@ -3724,6 +4252,7 @@ async fn resolve_lab_packages(
     let owner = custom_piece::authenticated_owner(app, headers)
         .map_err(|error| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error })))?;
     let deck = PlayerDeckSpec {
+        extra: Vec::new(),
         ruleset: Default::default(),
         name: None,
         starting: custom_pieces
@@ -4319,6 +4848,7 @@ mod tests {
             square: Square::new(file, front_rank),
         }));
         PlayerDeckSpec {
+            extra: Vec::new(),
             ruleset: Default::default(),
             name: Some("Player Deck".into()),
             starting,
@@ -4483,6 +5013,7 @@ mod tests {
     fn test_app_with_game() -> (AppState, String) {
         let game_id = "test-game".to_string();
         let white_deck = PlayerDeckSpec {
+            extra: Vec::new(),
             ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
@@ -4501,6 +5032,7 @@ mod tests {
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
+            extra: Vec::new(),
             ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
@@ -4749,6 +5281,7 @@ mod tests {
             Path(game_id.clone()),
             headers.clone(),
             Json(AnalysisOptionsRequest {
+                sacrifice_piece_ids: Vec::new(),
                 position: AnalysisPosition {
                     base_ply: 0,
                     tree_id: Some(tree.id.clone()),
@@ -4950,6 +5483,7 @@ mod tests {
     #[test]
     fn game_creation_rejects_deployment_zone_mismatches_for_both_players() {
         let valid_white = PlayerDeckSpec {
+            extra: Vec::new(),
             ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
@@ -4962,6 +5496,7 @@ mod tests {
             pocket: vec![],
         };
         let valid_black = PlayerDeckSpec {
+            extra: Vec::new(),
             ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
@@ -5021,6 +5556,7 @@ mod tests {
 
         let response = match get_piece_options(
             State(app),
+            HeaderMap::new(),
             Path((game_id, piece_id.clone())),
             Query(PieceOptionsQuery::default()),
         )
@@ -5502,6 +6038,7 @@ mod tests {
 
         let response = match submit_action(
             State(app.clone()),
+            HeaderMap::new(),
             Path(game_id.clone()),
             Json(SubmitActionRequest {
                 action: SubmitAction::Move(SubmitMoveRequest {
@@ -5735,6 +6272,7 @@ mod tests {
             .white_user_id = Some("record-owner".into());
         let ended = resign_game(
             State(app.clone()),
+            HeaderMap::new(),
             Path(game_id.clone()),
             Json(ResignGameRequest {
                 player_id: "white".into(),
@@ -5775,6 +6313,7 @@ mod tests {
         let (app, game_id) = test_app_with_game();
         let unknown_option = submit_action(
             State(app.clone()),
+            HeaderMap::new(),
             Path(game_id.clone()),
             Json(SubmitActionRequest {
                 action: SubmitAction::Move(SubmitMoveRequest {
@@ -5790,6 +6329,7 @@ mod tests {
 
         let illegal_destination = submit_action(
             State(app),
+            HeaderMap::new(),
             Path(game_id),
             Json(SubmitActionRequest {
                 action: SubmitAction::Move(SubmitMoveRequest {
@@ -5813,6 +6353,7 @@ mod tests {
 
         let response = match run_bot_turn(
             State(app.clone()),
+            HeaderMap::new(),
             Path(game_id.clone()),
             Json(BotTurnRequest {
                 bot_player_id: "white".into(),
@@ -5840,6 +6381,7 @@ mod tests {
     async fn submit_move_action_applies_canonical_piece_state_effect() {
         let game_id = "windmill-game".to_string();
         let white_deck = PlayerDeckSpec {
+            extra: Vec::new(),
             ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
@@ -5858,6 +6400,7 @@ mod tests {
             pocket: vec![],
         };
         let black_deck = PlayerDeckSpec {
+            extra: Vec::new(),
             ruleset: Default::default(),
             name: None,
             starting: starting_with_front_line(
@@ -5880,6 +6423,7 @@ mod tests {
 
         let response = match submit_action(
             State(app),
+            HeaderMap::new(),
             Path(game_id),
             Json(SubmitActionRequest {
                 action: SubmitAction::Move(SubmitMoveRequest {
@@ -5917,6 +6461,7 @@ mod tests {
 
         let error = run_bot_turn(
             State(app.clone()),
+            HeaderMap::new(),
             Path(game_id.clone()),
             Json(BotTurnRequest {
                 bot_player_id: "white".into(),
@@ -5940,6 +6485,7 @@ mod tests {
         let (app, game_id) = test_app_with_game();
         let error = run_bot_turn(
             State(app),
+            HeaderMap::new(),
             Path(game_id),
             Json(BotTurnRequest {
                 bot_player_id: "white".into(),
@@ -6036,7 +6582,10 @@ mod tests {
                     game.record.game_mode,
                     game_record::GameMode::Standard
                 ));
-                assert_eq!(game.record.ruleset_version, "deck-chess-1");
+                assert_eq!(
+                    game.record.ruleset_version,
+                    game_record::current_rules_version_for(ruleset)
+                );
                 assert!(game.state.history.is_empty());
                 let expected_front =
                     brainfuck_chess_engine::rules::get_front_zone_squares_with_ruleset(
@@ -6313,5 +6862,235 @@ mod tests {
         }
         assert_eq!(app.rooms.len(), 1);
         assert!(app.games.is_empty());
+    }
+    #[test]
+    fn extra_factory_preserves_instances_scores_and_inert_zone() {
+        use brainfuck_chess_engine::legal_moves::{
+            generate_piece_legal_ability_actions, generate_piece_legal_drop_actions,
+            generate_piece_legal_move_actions,
+        };
+        for count in [0, 1, 3, 4] {
+            let mut spec = valid_player_deck_with_ruleset(8, DeckRuleset::Standard);
+            spec.pocket = vec![built_in("pawn"); 33];
+            spec.extra = (0..count)
+                .map(|i| built_in(if i == 0 { "guhang" } else { "bomber" }))
+                .collect();
+            let black = materialize_neutral_deck(&spec, "black", 8);
+            let result = build_game_state("extra".into(), 8, &spec, &black, vec![]);
+            if count == 4 {
+                assert!(result.unwrap_err().contains("최대 3기"));
+                continue;
+            }
+            let state = result.unwrap();
+            assert_eq!(state.piece_definitions["guhang"].score, 25);
+            assert_eq!(state.piece_definitions["bomber"].score, 13);
+            for side in ["white", "black"] {
+                let deck = &state.players[side].deck;
+                assert_eq!(deck.total_score, 39);
+                assert_eq!(deck.extra_deck_pieces.len(), count);
+                assert_eq!(
+                    deck.extra_deck_pieces.iter().collect::<HashSet<_>>().len(),
+                    count
+                );
+                let mut active = state.clone();
+                active.current_player = side.into();
+                for id in &deck.extra_deck_pieces {
+                    let piece = &state.pieces[id];
+                    assert_eq!(piece.owner, side);
+                    assert!(!piece.captured && !piece.in_pocket && piece.current_square.is_none());
+                    assert!(!deck.pocket_pieces.contains(id) && !deck.starting_pieces.contains(id));
+                    assert!(!state
+                        .board
+                        .squares
+                        .values()
+                        .chain(state.board.air_squares.values())
+                        .any(|p| p.as_ref() == Some(id)));
+                    assert!(generate_piece_legal_move_actions(&active, id).is_empty());
+                    assert!(generate_piece_legal_drop_actions(&active, id).is_empty());
+                    assert!(generate_piece_legal_ability_actions(&active, id, "takeoff").is_empty());
+                    let action = TurnAction::Drop(brainfuck_chess_engine::types::DropAction {
+                        player_id: side.into(),
+                        piece_id: id.clone(),
+                        to: Square::new(3, 0),
+                        captured_piece_id: None,
+                    });
+                    assert!(submit_engine_action(active.clone(), action).is_err());
+                }
+            }
+            let value = serde_json::to_value(&state).unwrap();
+            let roundtrip: GameState = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                roundtrip.players["white"].deck.extra_deck_pieces,
+                state.players["white"].deck.extra_deck_pieces
+            );
+            if count > 0 {
+                let mut changed = state.clone();
+                changed
+                    .players
+                    .get_mut("white")
+                    .unwrap()
+                    .deck
+                    .extra_deck_pieces
+                    .clear();
+                assert_ne!(
+                    analysis::state_hash(&state).unwrap(),
+                    analysis::state_hash(&changed).unwrap()
+                );
+            }
+        }
+        for kind in ["guhang", "bomber"] {
+            for ruleset in [DeckRuleset::Standard, DeckRuleset::Legacy] {
+                for pocket in [false, true] {
+                    let mut spec = valid_player_deck_with_ruleset(8, ruleset);
+                    if pocket {
+                        spec.pocket.push(built_in(kind));
+                    } else {
+                        spec.starting.push(StartingPieceSpec {
+                            piece: built_in(kind),
+                            square: Square::new(3, 0),
+                        });
+                    }
+                    let result = build_game_state(
+                        "main".into(),
+                        8,
+                        &spec,
+                        &materialize_neutral_deck(&spec, "black", 8),
+                        vec![],
+                    );
+                    assert_eq!(result.is_ok(), ruleset == DeckRuleset::Legacy);
+                }
+            }
+        }
+        let mut legacy = valid_player_deck(8);
+        legacy.extra.push(built_in("guhang"));
+        assert!(build_game_state(
+            "legacy".into(),
+            8,
+            &legacy,
+            &materialize_neutral_deck(&legacy, "black", 8),
+            vec![]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn extra_does_not_feed_existing_pocket_abilities() {
+        use brainfuck_chess_engine::legal_moves::generate_legal_ability_actions;
+        for actor in ["alternating-soldier", "airborne"] {
+            let mut spec = valid_player_deck_with_ruleset(8, DeckRuleset::Standard);
+            spec.starting.push(StartingPieceSpec {
+                piece: built_in(actor),
+                square: Square::new(3, 0),
+            });
+            spec.pocket = vec![built_in("paratrooper"), built_in("paratrooper")];
+            let base = build_game_state(
+                "abilities".into(),
+                8,
+                &spec,
+                &materialize_neutral_deck(&spec, "black", 8),
+                vec![],
+            )
+            .unwrap();
+            spec.extra = vec![built_in("guhang"), built_in("bomber")];
+            let extra = build_game_state(
+                "abilities".into(),
+                8,
+                &spec,
+                &materialize_neutral_deck(&spec, "black", 8),
+                vec![],
+            )
+            .unwrap();
+            let actions = generate_legal_ability_actions(&base);
+            assert!(!actions.is_empty(), "fixture must exercise {actor}");
+            assert_eq!(
+                serde_json::to_value(actions).unwrap(),
+                serde_json::to_value(generate_legal_ability_actions(&extra)).unwrap()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn extra_room_validation_reselection_game_and_sync() {
+        let app = AppState::in_memory();
+        let mut spec = valid_player_deck_with_ruleset(8, DeckRuleset::Standard);
+        spec.extra = vec![built_in("guhang"), built_in("bomber"), built_in("bomber")];
+        let (status, room) = ruleset_http(&app, "/rooms", serde_json::json!({"board_size":8,"ruleset":"standard","host_side":"black","client_id":"host","deck":spec,"time_control":"unlimited"})).await;
+        assert_eq!(status, StatusCode::OK, "{room}");
+        let id = room["id"].as_str().unwrap();
+        for client in ["host", "guest"] {
+            for invalid in [vec![built_in("guhang"); 4], vec![built_in("knight")]] {
+                let mut bad = spec.clone();
+                bad.extra = invalid;
+                let (status, _) = ruleset_http(
+                    &app,
+                    &format!("/rooms/{id}/select-deck"),
+                    serde_json::json!({"client_id":client,"deck":bad}),
+                )
+                .await;
+                assert_eq!(status, StatusCode::BAD_REQUEST);
+                assert!(app.rooms.get(id).unwrap().guest_deck.is_none());
+            }
+        }
+        let (status, selected) = ruleset_http(
+            &app,
+            &format!("/rooms/{id}/select-deck"),
+            serde_json::json!({"client_id":"host","deck":spec}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(selected["host_deck"].is_null());
+        assert_eq!(selected["host_has_deck"], true);
+        assert_eq!(
+            app.rooms
+                .get(id)
+                .unwrap()
+                .host_deck
+                .as_ref()
+                .unwrap()
+                .extra
+                .len(),
+            3
+        );
+        ruleset_http(
+            &app,
+            &format!("/rooms/{id}/ready"),
+            serde_json::json!({"client_id":"host"}),
+        )
+        .await;
+        let (status, game) = ruleset_http(
+            &app,
+            &format!("/rooms/{id}/join"),
+            serde_json::json!({"client_id":"guest","deck":spec}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{game}");
+        for side in ["white", "black"] {
+            assert_eq!(
+                game["state"]["players"][side]["deck"]["extra_deck_pieces"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                3
+            );
+        }
+        let (status, sync) = ruleset_http(
+            &app,
+            &format!("/rooms/{id}/heartbeat"),
+            serde_json::json!({"client_id":"host","player_id":"black","latest_ply":0}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{sync}");
+        for side in ["white", "black"] {
+            assert_eq!(
+                sync["dynamic"]["players"][side]["deck"]["extra_deck_pieces"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                3
+            );
+        }
+        spec.ruleset = DeckRuleset::Legacy;
+        let (status, _) = ruleset_http(&app, "/rooms", serde_json::json!({"board_size":8,"ruleset":"legacy","host_side":"white","client_id":"old","deck":spec})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }

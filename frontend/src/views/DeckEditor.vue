@@ -14,7 +14,7 @@
         <h1>{{ deck.name || '이름 없는 덱' }}</h1>
       </div>
       <div class="deck-editor-actions">
-        <button class="btn-secondary" :disabled="!deckSummary.valid || deck.ruleset === 'standard'" :title="deck.ruleset === 'standard' ? STANDARD_DECK_CODE_UNSUPPORTED : undefined" @click="copyDeckCode">덱 코드 복사</button>
+        <button class="btn-secondary" :disabled="!canCopyDeckCode" @click="copyDeckCode">덱 코드 복사</button>
         <button class="btn-secondary" @click="openImportDialog">덱 코드 불러오기</button>
         <button class="btn-secondary danger" @click="resetDeck">전체 초기화</button>
         <button class="btn-start" :disabled="!canSaveDeck || saving" @click="save">{{ saving ? '저장 중…' : '덱 저장' }}</button>
@@ -42,7 +42,7 @@
       </label>
     </section>
     <p v-if="deck.ruleset === 'standard'" class="deck-code-notice">
-      Standard는 중앙 Back과 주변 Front를 기본 진영으로 사용합니다. Front의 모든 칸을 채워야 합니다. 룰 변경 시 기존 배치는 유지되며, 기본 배치는 아래 프리셋으로 적용할 수 있습니다. {{ STANDARD_DECK_CODE_UNSUPPORTED }}
+      Standard는 중앙 Back과 주변 Front를 기본 진영으로 사용합니다. Front의 모든 칸을 채워야 합니다. 룰 변경 시 기존 배치는 유지되며, 기본 배치는 아래 프리셋으로 적용할 수 있습니다.
     </p>
     <p v-if="saveError" class="error">{{ saveError }}</p>
     <p v-if="saveNotice" class="deck-code-notice" role="status">{{ saveNotice }}</p>
@@ -71,7 +71,7 @@
 
     <section class="card deck-score-panel">
       <div class="deck-score-copy">
-        <span class="limit-label">덱 점수</span>
+        <span class="limit-label">{{ deck.ruleset === 'standard' ? 'Main Deck 점수' : '덱 점수' }}</span>
         <strong>{{ deckSummary.totalScore }} / {{ deckSummary.scoreLimit }}점</strong>
         <span>{{ deckSummary.valid ? '게임 사용 가능' : (canSaveDeck ? '저장 가능 · 게임 사용 불가' : '저장 불가') }}</span>
       </div>
@@ -79,6 +79,27 @@
         <span :style="{ width: scoreFillWidth }"></span>
       </div>
     </section>
+
+    <section v-if="deck.ruleset === 'standard'" class="card extra-deck-panel">
+      <h2>Extra Deck <small>{{ extraPieces.length }} / {{ MAX_EXTRA_DECK_PIECES }}기</small></h2>
+      <p>각 기물의 점수는 유지되며 Main Deck 점수 상한에 포함되지 않습니다.</p>
+      <div class="extra-slots">
+        <div v-for="(pieceType, index) in extraPieces" :key="index" class="extra-slot">
+          <img v-if="displayPieceAsset(pieceType)" :src="displayPieceAsset(pieceType)" alt="" />
+          <strong>{{ pieceLabel(pieceType) }}</strong><span>{{ pieceScore(pieceType) }}점</span>
+          <button class="btn-secondary" :aria-label="`${pieceLabel(pieceType)} Extra에서 제거`" @click="removeExtra(index)">제거</button>
+        </div>
+        <div v-for="index in Math.max(0, MAX_EXTRA_DECK_PIECES - extraPieces.length)" :key="`empty-${index}`" class="extra-slot empty">빈 슬롯</div>
+      </div>
+      <div class="extra-choices">
+        <button v-for="piece in extraCatalog" :key="piece.id" class="btn-secondary" :disabled="extraPieces.length >= MAX_EXTRA_DECK_PIECES" @click="addExtra(piece.id)">
+          {{ piece.name }} · {{ piece.score }}점 추가
+        </button>
+      </div>
+    </section>
+    <p v-else-if="extraPieces.length" class="error" role="alert">
+      Legacy에서는 남아 있는 Extra {{ extraPieces.length }}기를 사용할 수 없습니다. 내용은 보존됩니다. Standard로 전환해 제거하거나 전체 초기화를 사용해 주세요.
+    </p>
 
     <div class="builder-grid">
       <div class="piece-catalog-column">
@@ -283,8 +304,8 @@
         <button
           type="button"
           class="pocket-drop-zone"
-          :class="{ ready: pocketTargetPiece && canUseInPocket(pocketTargetPiece) }"
-          :aria-disabled="!pocketTargetPiece || !canUseInPocket(pocketTargetPiece)"
+          :class="{ ready: pocketTargetPiece && canUseInPocket(pocketTargetPiece, deck.ruleset) }"
+          :aria-disabled="!pocketTargetPiece || !canUseInPocket(pocketTargetPiece, deck.ruleset)"
           @click="onPocketClick"
           @dragover.prevent="onPocketDragOver"
           @drop.prevent="onPocketDrop($event)"
@@ -311,7 +332,7 @@
               <strong>{{ deck.pocket[piece.id] ?? 0 }}</strong>
             </span>
             <button class="pocket-remove-button" aria-label="포켓 기물 제거" @click="changePocketCount(piece.id, -1)">-</button>
-            <button class="pocket-add-button" aria-label="포켓 기물 추가" @click="changePocketCount(piece.id, 1)">+</button>
+            <button class="pocket-add-button" aria-label="포켓 기물 추가" :disabled="!canUseInPocket(piece.id, deck.ruleset)" @click="changePocketCount(piece.id, 1)">+</button>
           </div>
         </div>
         <div v-if="deckSummary.errors.length > 0" class="validation-list">
@@ -329,7 +350,7 @@
 
         <template v-if="!importCandidate">
           <label class="deck-code-input-label" for="deck-code-input">
-            다른 사용자가 공유한 DC1 덱 코드를 입력하세요.
+            공유받은 덱 코드를 입력하세요 (DC1~DC4).
           </label>
           <textarea
             id="deck-code-input"
@@ -337,7 +358,7 @@
             class="text-input deck-code-input"
             rows="6"
             maxlength="65536"
-            placeholder="DC1.xxxxxxxxxxxxxxxxxx"
+            placeholder="DC4.… 또는 기존 DC1~DC3 코드"
             autofocus
           ></textarea>
           <p v-if="importError" class="error" role="alert">{{ importError }}</p>
@@ -348,8 +369,11 @@
         </template>
 
         <template v-else>
-          <p>덱 코드를 현재 규칙으로 검증했습니다. 적용하기 전 내용을 확인해 주세요.</p>
+          <p>덱 코드의 구조를 검증했습니다. 게임 시작 시에는 플레이 가능 여부를 다시 검사합니다. 적용하기 전 내용을 확인해 주세요.</p>
           <dl class="deck-code-preview">
+            <div><dt>룰</dt><dd>{{ importCandidate.deck.ruleset }}</dd></div>
+            <div><dt>전용 맵</dt><dd>{{ importCandidate.deck.mapId }}</dd></div>
+            <div><dt>Extra</dt><dd>{{ importCandidate.deck.extra?.length ?? 0 }}</dd></div>
             <div><dt>보드 크기</dt><dd>{{ importCandidate.deck.boardSize }} x {{ importCandidate.deck.boardSize }}</dd></div>
             <div><dt>점수</dt><dd>{{ importCandidate.totalScore }} / {{ importCandidate.scoreLimit }}</dd></div>
             <div><dt>시작 기물</dt><dd>{{ importCandidate.deck.starting.length }}</dd></div>
@@ -376,6 +400,10 @@ import {
   baseZoneRanks,
   deploymentZoneAtSquare,
   canUseInPocket,
+  canUseInMain,
+  canUseInExtra,
+  normalizeExtra,
+  MAX_EXTRA_DECK_PIECES,
   createPresetDeck,
   deckPresets,
   emptyPocket,
@@ -394,7 +422,7 @@ import {
   replaceCustomPieceCatalog,
 } from '../composables/useDeckValidation'
 import { createNewSavedDeck, deckStorageIdentity, useSavedDecks } from '../composables/useSavedDecks'
-import { encodeDeckCode, STANDARD_DECK_CODE_UNSUPPORTED } from '../composables/useDeckCodeCodec'
+import { encodeDeckCode } from '../composables/useDeckCodeCodec'
 import { importDeckCode, type DeckCodeImportResult } from '../composables/useDeckCode'
 import { boardMaps, findBoardMap } from '../boardMaps'
 
@@ -487,6 +515,7 @@ function cloneSavedDeck(source: SavedDeck): SavedDeck {
       },
     })),
     pocket: { ...source.pocket },
+    extra: normalizeExtra(source.extra),
     createdAt: source.createdAt,
     updatedAt: source.updatedAt,
     customPieces: [...(source.customPieces ?? [])],
@@ -526,12 +555,22 @@ const activePocketCatalog = computed(() => {
   catalogRevision.value
   return pieceCatalog.filter(piece => piece.canPocket && (deck.value.pocket[piece.id] ?? 0) > 0)
 })
+const extraPieces = computed(() => deck.value.extra ?? [])
+const extraCatalog = computed(() => pieceCatalog.filter(piece => canUseInExtra(piece.id, deck.value.ruleset)))
+function addExtra(pieceType: DeckPieceType) {
+  if (!canUseInExtra(pieceType, deck.value.ruleset) || extraPieces.value.length >= MAX_EXTRA_DECK_PIECES) return
+  deck.value.extra = [...extraPieces.value, pieceType]
+}
+function removeExtra(index: number) {
+  deck.value.extra = extraPieces.value.filter((_, position) => position !== index)
+}
+
 const maxPocketCount = computed(() => Math.max(1, ...activePocketCatalog.value.map(piece => deck.value.pocket[piece.id] ?? 0)))
 const pocketTargetPiece = computed(() => draggedPiece.value ?? (placementTool.value === eraseTool ? null : placementTool.value))
 const pocketDropMessage = computed(() => {
   const pieceType = pocketTargetPiece.value
   if (!pieceType) return '기물을 선택한 뒤 여기를 누르거나, 드래그해서 포켓에 추가'
-  if (!canUseInPocket(pieceType)) return `${pieceLabel(pieceType)}은 포켓에 넣을 수 없습니다.`
+  if (!canUseInPocket(pieceType, deck.value.ruleset)) return `${pieceLabel(pieceType)}은 포켓에 넣을 수 없습니다.`
   return draggedPiece.value
     ? `${pieceLabel(pieceType)} 포켓에 추가`
     : `여기를 눌러 ${pieceLabel(pieceType)} 포켓에 추가`
@@ -549,7 +588,7 @@ function catalogSectionsFor(pieces: typeof pieceCatalog) {
       description: deck.value.ruleset === 'standard'
         ? (id === 'front' ? '중앙 Back을 둘러싼 Front 구역 전용' : '중앙 Back 구역 전용')
         : (id === 'front' ? '상대와 가까운 시작 줄 전용' : '나머지 시작 배치 줄 전용'),
-      pieces: pieces.filter(piece => piece.deploymentZone === id),
+      pieces: pieces.filter(piece => piece.deploymentZone === id && canUseInMain(piece.id, deck.value.ruleset)),
     }))
     .filter(section => section.pieces.length > 0)
 }
@@ -617,6 +656,7 @@ function updatePinnedVersion(oldPieceType: string, id: string) {
     deck.value.pocket[nextPieceType] = (deck.value.pocket[nextPieceType] ?? 0) + count
     delete deck.value.pocket[oldPieceType]
   }
+  deck.value.extra = (deck.value.extra ?? []).map(type => type === oldPieceType ? nextPieceType : type)
   deck.value.customPieces = [
     ...(deck.value.customPieces ?? []).filter(piece => piece.id !== id),
     {
@@ -669,7 +709,8 @@ function applyPreset(presetId: string) {
 }
 
 function resetDeck() {
-  if (!window.confirm('시작 배치와 포켓 기물을 모두 비우시겠습니까?')) return
+  if (!window.confirm('시작 배치, 포켓, Extra Deck 기물을 모두 비우시겠습니까?')) return
+  deck.value.extra = []
   deck.value.starting = []
   deck.value.pocket = emptyPocket()
   deck.value.customPieces = []
@@ -677,26 +718,28 @@ function resetDeck() {
   saveError.value = null
 }
 
+const canCopyDeckCode = computed(() => deck.value.ruleset === 'standard' || (deck.value.extra?.length ?? 0) > 0
+  ? validateDeckForStorage(deck.value).valid : deckSummary.value.valid)
+
 async function copyDeckCode() {
-  if (deck.value.ruleset === 'standard') {
-    deckCodeNoticeIsError.value = true
-    deckCodeNotice.value = STANDARD_DECK_CODE_UNSUPPORTED
-    return
-  }
   deckCodeNotice.value = null
-  if (!deckSummary.value.valid) {
+  if (!canCopyDeckCode.value) {
     deckCodeNoticeIsError.value = true
     deckCodeNotice.value = deckSummary.value.errors[0] ?? '유효한 덱만 공유할 수 있습니다.'
     return
   }
   try {
     if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
-    await navigator.clipboard.writeText(encodeDeckCode(deck.value))
+    const source = deck.value.ruleset === 'standard' || (deck.value.extra?.length ?? 0) > 0
+      ? { ...deck.value, customPieces: collectDeckCustomPieces(true) } : deck.value
+    const code = encodeDeckCode(source)
+    await navigator.clipboard.writeText(code)
     deckCodeNoticeIsError.value = false
     deckCodeNotice.value = '덱 코드를 복사했습니다.'
-  } catch {
+  } catch (cause) {
     deckCodeNoticeIsError.value = true
-    deckCodeNotice.value = '클립보드에 복사하지 못했습니다. 브라우저 권한을 확인해 주세요.'
+    deckCodeNotice.value = cause instanceof Error && cause.message.startsWith('덱 코드')
+      ? cause.message : '클립보드에 복사하지 못했습니다. 브라우저 권한을 확인해 주세요.'
   }
 }
 
@@ -715,6 +758,7 @@ function closeImportDialog() {
 
 function prepareImport() {
   importError.value = null
+  importCandidate.value = null
   const result = importDeckCode(importCode.value, deck.value)
   if (!result.ok) {
     importError.value = result.message
@@ -833,18 +877,18 @@ function onPocketClick() {
 
 function onPocketDragOver(event: DragEvent) {
   if (!draggedPiece.value || !event.dataTransfer) return
-  event.dataTransfer.dropEffect = canUseInPocket(draggedPiece.value) ? 'copy' : 'none'
+  event.dataTransfer.dropEffect = canUseInPocket(draggedPiece.value, deck.value.ruleset) ? 'copy' : 'none'
 }
 
 function onPocketDrop(event: DragEvent) {
   const pieceType = getDraggedPiece(event)
   draggedPiece.value = null
-  if (!pieceType || !canUseInPocket(pieceType)) return
+  if (!pieceType || !canUseInPocket(pieceType, deck.value.ruleset)) return
   changePocketCount(pieceType, 1)
 }
 
 function changePocketCount(pieceType: DeckPieceType, delta: number) {
-  if (!canUseInPocket(pieceType)) return
+  if (delta > 0 && !canUseInPocket(pieceType, deck.value.ruleset)) return
   deck.value.pocket[pieceType] ??= 0
   deck.value.pocket[pieceType] = Math.max(0, deck.value.pocket[pieceType] + delta)
 }
@@ -856,6 +900,24 @@ function emitTestPiece(pieceType: DeckPieceType) {
   })
 }
 
+function collectDeckCustomPieces(preservePinned = false): SavedDeck['customPieces'] {
+  const usedTypes = new Set([
+    ...(deck.value.extra ?? []),
+    ...deck.value.starting.map(piece => piece.pieceType),
+    ...Object.entries(deck.value.pocket).filter(([, count]) => count > 0).map(([pieceType]) => pieceType),
+  ])
+  return [...usedTypes]
+    .map(findPieceCatalogItem)
+    .filter((piece): piece is PieceCatalogItem => Boolean(piece?.custom))
+    .map(piece => (preservePinned ? deck.value.customPieces.find(ref =>
+      ref.id === piece.custom!.id && ref.version === piece.custom!.version && ref.exposedPieceKey === piece.custom!.exposedPieceKey) : undefined) ?? ({
+      id: piece.custom!.id,
+      version: piece.custom!.version,
+      contentHash: piece.custom!.contentHash,
+      exposedPieceKey: piece.custom!.exposedPieceKey,
+    }))
+}
+
 async function save() {
   if (!deckLoaded.value || saving.value) return
   saveError.value = null
@@ -865,19 +927,7 @@ async function save() {
     return
   }
   try {
-    const usedTypes = new Set([
-      ...deck.value.starting.map(piece => piece.pieceType),
-      ...Object.entries(deck.value.pocket).filter(([, count]) => count > 0).map(([pieceType]) => pieceType),
-    ])
-    deck.value.customPieces = [...usedTypes]
-      .map(findPieceCatalogItem)
-      .filter((piece): piece is PieceCatalogItem => Boolean(piece?.custom))
-      .map(piece => ({
-        id: piece.custom!.id,
-        version: piece.custom!.version,
-        contentHash: piece.custom!.contentHash,
-        exposedPieceKey: piece.custom!.exposedPieceKey,
-      }))
+    deck.value.customPieces = collectDeckCustomPieces()
     const revision = loadRevision
     const saved = await savedDecks.saveDeck(cloneSavedDeck(deck.value))
     if (revision !== loadRevision) return
@@ -894,6 +944,12 @@ async function save() {
 </script>
 
 <style scoped>
+.extra-deck-panel { margin: 16px 0; padding: 20px; }
+.extra-deck-panel p { color: #aab6c8; }
+.extra-slots, .extra-choices { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.extra-slot { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid #657690; border-radius: 8px; }
+.extra-slot img { width: 40px; height: 40px; object-fit: contain; }
+.extra-slot.empty { min-width: 130px; color: #aab6c8; border-style: dashed; }
 .placement-square.standard-zone-outside { background: #363b45; color: #a3a9b3; }
 .placement-square.standard-zone-back:not(.restricted) { box-shadow: inset 0 0 0 3px #547bb5; }
 .setup-zone-label { position: absolute; top: 3px; right: 5px; font-size: 11px; font-weight: 700; }

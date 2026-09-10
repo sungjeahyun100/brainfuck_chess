@@ -8,6 +8,7 @@ export function squareName(square: { file: number; rank: number } | null | undef
 
 export function formatNotation(notation: RecordedNotationAction): string {
   const name = notation.actor.piece_name
+  if (notation.kind === 'extra_summon') return `${name} - 특수 소환 - ${squareName(notation.to)}`
   if (notation.kind === 'drop') return `${name} - 착수 - ${squareName(notation.to)}`
   if (notation.kind === 'ability' || notation.kind === 'move_with_ability') {
     return `${name} - ${notation.ability_name ?? notation.ability_id ?? '능력'} - ${squareName(notation.from)} - ${squareName(notation.to ?? notation.target)}`
@@ -32,6 +33,11 @@ export function fullMoveNumber(engineTurnNumber: number): number {
 }
 
 export function formatLiveAction(action: TurnAction, state: GameState, engineTurnNumber: number): string {
+  if (action.type === 'extra_summon') {
+    const piece = state.pieces[action.extra_piece_id]
+    const name = state.piece_definitions[piece?.type_id ?? '']?.name ?? action.extra_piece_id
+    return `${name} - 특수 소환 - ${squareName(action.target_square)}`
+  }
   const piece = state.pieces[action.piece_id]
   const definition = piece ? state.piece_definitions[piece.type_id] : undefined
   const moveOption = action.type === 'move' ? definition?.move_options.find(option => option.id === action.move_option_id) : undefined
@@ -45,4 +51,17 @@ export function formatLiveAction(action: TurnAction, state: GameState, engineTur
     to: action.type === 'move' || action.type === 'drop' ? action.to : action.to, target: action.type === 'ability' ? action.to : undefined,
     ability_events: abilityId ? [{ ability_id: abilityId, ability_name: abilityName ?? abilityId, target: action.type === 'ability' ? action.to : undefined }] : [],
   })
+}
+
+/** Count-only automatic event. Safe for ordinary/live notation; never names pieces. */
+export function formatDraw(draw: { player_id: string; piece_ids: readonly string[] }): string {
+  return draw.piece_ids.length ? `${draw.player_id === 'white' ? '백' : '흑'} 드로우 ${draw.piece_ids.length}기` : ''
+}
+
+/** Committed sacrifices remain public removed pieces; selected IDs retain their order. */
+export function summonDetail(action: TurnAction | null | undefined, state: GameState): string {
+  if (action?.type !== 'extra_summon') return ''
+  const label = (id: string) => { const piece = state.pieces[id]; const def = state.piece_definitions[piece?.type_id ?? '']; return `${def?.name ?? id} [${def?.score ?? 0}]` }
+  const total = action.sacrifice_piece_ids.reduce((sum, id) => sum + (state.piece_definitions[state.pieces[id]?.type_id ?? '']?.score ?? 0), 0)
+  return `${label(action.extra_piece_id)} → ${squareName(action.target_square)} · 제물: ${action.sacrifice_piece_ids.map(label).join(', ')} · 합계 ${total}점`
 }

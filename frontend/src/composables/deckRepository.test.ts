@@ -393,3 +393,59 @@ test('unknown local ruleset is reported during guest load and account import dis
   assert.equal(backend.requests.filter(request => request.method === 'POST').length, 0)
   assert.equal(browser.getItem(key), original)
 })
+
+test('Extra roundtrips old/local/account decks, copies and removals without coordinate transforms', async t => {
+  const browser = storage(); const backend = fixture(); t.mock.method(globalThis, 'fetch', backend.fetcher)
+  const local = new LocalDeckRepository()
+  for (const ruleset of ['legacy', 'standard'] as const) {
+    const old = { ...createNewSavedDeck(), ruleset }
+    delete old.extra
+    if (ruleset === 'legacy') delete (old as Partial<SavedDeck>).ruleset
+    browser.setItem(key, JSON.stringify([old]))
+    assert.deepEqual((await local.getDeck(old.id))!.extra, [])
+  }
+  const account = new AccountDeckRepository('alice')
+  for (const extra of [[], ['guhang', 'bomber', 'bomber']]) {
+    const source = { ...createNewSavedDeck(), ruleset: 'standard' as const, extra }
+    for (const repo of [local, account]) {
+      const saved = await repo.saveDeck(source)
+      assert.deepEqual((await repo.getDeck(saved.id))!.extra, extra)
+      const white = serializeNeutralDeck(saved, 'white')
+      const black = serializeNeutralDeck(saved, 'black')
+      assert.deepEqual(white.extra, extra.map(piece_type => ({ piece_type })))
+      assert.deepEqual(black.extra, white.extra)
+      const cleared = await repo.saveDeck({ ...saved, extra: [] })
+      assert.deepEqual((await repo.getDeck(cleared.id))!.extra, [])
+    }
+  }
+  const oldAccount = { ...createNewSavedDeck(), id: 'old-extra', version: 1 }
+  delete oldAccount.extra
+  backend.decks.get('alice')!.set(oldAccount.id, oldAccount)
+  assert.deepEqual((await account.getDeck(oldAccount.id)).extra, [])
+  const malformedBase = createNewSavedDeck()
+  for (const extra of [null, {}, [1], [''], ['guhang\n']]) {
+    const raw = JSON.stringify([{ ...malformedBase, extra }])
+    browser.setItem(key, raw)
+    await assert.rejects(local.listDecks(), /Extra Deck 데이터/)
+    assert.equal(browser.getItem(key), raw)
+  }
+})
+
+test('G7 local reload and account fetch preserve all Standard content across every map/size', async t => {
+  storage(); const backend = fixture(); t.mock.method(globalThis, 'fetch', backend.fetcher)
+  for (const size of [8, 9, 10, 11, 12]) {
+    const maps = size === 12 ? ['standard-12x12', 'central-high-ground-12x12'] : [`standard-${size}x${size}`]
+    for (const map of maps) {
+      const source = { ...createNewSavedDeck(map as SavedDeck['mapId']), ruleset: 'standard' as const,
+        extra: ['guhang', 'guhang', 'bomber'], pocket: { knight: 2 } }
+      for (const repo of [new LocalDeckRepository(), new AccountDeckRepository('alice')]) {
+        const saved = await repo.saveDeck(source)
+        const reloaded = await (repo instanceof LocalDeckRepository ? new LocalDeckRepository() : new AccountDeckRepository('alice')).getDeck(saved.id)
+        assert.ok(reloaded)
+        for (const field of ['name', 'ruleset', 'mapId', 'boardSize', 'starting', 'pocket', 'extra', 'customPieces'] as const) {
+          assert.deepEqual(reloaded[field], source[field], `${field} ${map}`)
+        }
+      }
+    }
+  }
+})

@@ -192,8 +192,7 @@ test('ruleset editor selection is independent of size/map and is preserved by cl
   assert.equal(state.cloneSavedDeck(old).ruleset, 'legacy')
   assert.throws(() => state.cloneSavedDeck({ ...old, ruleset: 'future' }), /지원하지 않는 덱 룰/)
   state.deck.value.ruleset = 'standard'
-  await state.copyDeckCode()
-  assert.match(state.deckCodeNotice.value, /Standard.*지원하지/)
+  assert.equal(state.canCopyDeckCode.value, true)
   // Verify the real Vue template binds a separate labelled selector.
   assert.match(descriptor.template!.content, /<select v-model="deck.ruleset"/)
   assert.match(descriptor.template!.content, /<select v-model="deck.mapId"/)
@@ -232,10 +231,12 @@ test('Standard editor displays actual coordinates, restricts clicks/drags, and r
     state.placementTool.value = 'guhang'
     const vacancy = back.find(s => state.pieceAt(s.file, s.rank) === null)!
     state.onPlacementSquareClick(vacancy.file, vacancy.rank)
-    assert.equal(state.pieceAt(vacancy.file, vacancy.rank), 'guhang')
+    assert.equal(state.pieceAt(vacancy.file, vacancy.rank), null)
+    assert.match(state.placementError.value, /Extra Deck 전용/)
     state.onPieceDragStart({}, 'bomber')
     state.onPlacementDrop({}, vacancy.file, vacancy.rank)
-    assert.equal(state.pieceAt(vacancy.file, vacancy.rank), 'bomber')
+    assert.equal(state.pieceAt(vacancy.file, vacancy.rank), null)
+    assert.match(state.placementError.value, /Extra Deck 전용/)
     state.placementTool.value = state.eraseTool
     state.onPlacementSquareClick(front[0].file, front[0].rank)
     assert.equal(state.deckSummary.value.valid, false)
@@ -250,4 +251,99 @@ test('Standard editor displays actual coordinates, restricts clicks/drags, and r
   assert.equal(JSON.stringify(state.deck.value.starting), beforeMap)
   assert.match(descriptor.template!.content, /squareRestriction\(square.file, square.rank\)/)
   assert.match(descriptor.template!.content, /:disabled="deck.ruleset === 'standard' && !squareZone/)
+})
+
+test('Extra editor adds instances, enforces capacity, preserves drafts and separates Main score', async t => {
+  let saved: SavedDeck | undefined
+  const { state } = await editor(t, async deck => { saved = deck; return deck })
+  state.deck.value.ruleset = 'standard'
+  state.applyPreset('classic')
+  const main = state.deckSummary.value.totalScore
+  assert.deepEqual(state.extraPieces.value, [])
+  state.addExtra('guhang'); state.addExtra('bomber'); state.addExtra('bomber')
+  state.addExtra('guhang'); state.addExtra('knight')
+  assert.deepEqual(state.extraPieces.value, ['guhang', 'bomber', 'bomber'])
+  assert.equal(state.deckSummary.value.totalScore, main)
+  assert.equal(state.deckSummary.value.valid, true)
+  const clone = state.cloneSavedDeck(state.deck.value)
+  clone.extra.pop()
+  assert.equal(state.extraPieces.value.length, 3)
+  await state.save()
+  assert.deepEqual(saved!.extra, ['guhang', 'bomber', 'bomber'])
+  state.deck.value.pocket = { guhang: 1, bomber: 1 }
+  const before = JSON.stringify(state.deck.value)
+  state.deck.value.ruleset = 'legacy'
+  assert.match(state.deckSummary.value.errors.join(' '), /Legacy.*Extra/)
+  assert.equal(state.canSaveDeck.value, true)
+  state.deck.value.ruleset = 'standard'
+  assert.equal(JSON.stringify(state.deck.value), before)
+  assert.equal(state.deckSummary.value.valid, false)
+  state.changePocketCount('guhang', 1)
+  assert.equal(state.deck.value.pocket.guhang, 1)
+  state.changePocketCount('guhang', -1); state.changePocketCount('bomber', -1)
+  assert.equal(state.deckSummary.value.valid, true)
+  state.removeExtra(1)
+  await state.save()
+  assert.deepEqual(saved!.extra, ['guhang', 'bomber'])
+  assert.match(descriptor.template!.content, /extraPieces.length >= MAX_EXTRA_DECK_PIECES/)
+  assert.match(descriptor.template!.content, /Main Deck 점수 상한에 포함되지 않습니다/)
+})
+
+test('G7 real editor copies/imports DC4 atomically and DC3 explicitly restores Legacy', async t => {
+  const { state } = await editor(t, async deck => deck)
+  const codes: string[] = []
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (code: string) => { codes.push(code) } } })
+  t.after(() => { if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard); else Reflect.deleteProperty(navigator, 'clipboard') })
+  state.deck.value.ruleset = 'standard'
+  state.resetToClassic()
+  state.addExtra('guhang')
+  state.addExtra('guhang')
+  state.addExtra('bomber')
+  state.deck.value.pocket.knight = 2
+  await state.copyDeckCode()
+  assert.match(codes[0], /^DC4\./u)
+  const original = JSON.parse(JSON.stringify(state.deck.value))
+  state.openImportDialog()
+  state.importCode.value = codes[0]
+  state.prepareImport()
+  assert.ok(state.importCandidate.value)
+  state.importCode.value = 'DC4.invalid'
+  state.prepareImport()
+  assert.equal(state.importCandidate.value, null)
+  state.applyImportedDeck()
+  assert.deepEqual(JSON.parse(JSON.stringify(state.deck.value)), original)
+  const legacyCode = deckCodec.encodeDeckCode(createNewSavedDeck())
+  for (const [code, ruleset, extra] of [[legacyCode, 'legacy', []], [codes[0], 'standard', ['bomber', 'guhang', 'guhang']]] as const) {
+    state.openImportDialog(); state.importCode.value = code; state.prepareImport(); state.applyImportedDeck()
+    assert.equal(state.deck.value.ruleset, ruleset)
+    assert.deepEqual([...state.deck.value.extra], extra)
+  }
+  assert.equal(state.deck.value.boardSize, original.boardSize)
+  assert.equal(state.deck.value.mapId, original.mapId)
+  assert.equal(state.deck.value.pocket.knight, 2)
+  assert.deepEqual([...state.deck.value.starting], [...original.starting].sort((a,b) => a.square.rank-b.square.rank || a.square.file-b.square.file))
+})
+
+test('G7 custom Extra copy collects unsaved references and keeps pinned hashes without mutating the draft', async t => {
+  const { state } = await editor(t, async deck => deck)
+  const ref = { id: 'g7-editor', version: 2, contentHash: 'frozen', exposedPieceKey: 'hero' }
+  const id = 'custom:g7-editor:v2:hero'
+  validation.pieceCatalog.push({ id, name: 'Custom Extra', score: 3, category: 'custom', canPocket: true, deploymentZone: 'back',
+    custom: { ...ref, active: true, image: { kind: 'built_in', asset_key: 'knight' } } })
+  t.after(() => validation.pieceCatalog.splice(validation.pieceCatalog.findIndex(piece => piece.id === id), 1))
+  state.deck.value.ruleset = 'standard'
+  state.deck.value.extra = [id, id]
+  state.deck.value.customPieces = []
+  assert.deepEqual(state.collectDeckCustomPieces(true), [ref])
+  state.deck.value.customPieces = [{ ...ref, contentHash: 'original-hash' }]
+  assert.equal(state.collectDeckCustomPieces(true)[0].contentHash, 'original-hash')
+  const before = JSON.parse(JSON.stringify(state.deck.value))
+  const catalogBefore = JSON.parse(JSON.stringify(validation.pieceCatalog))
+  const malformed = deckCodec.encodeDeckCode({ ...state.cloneSavedDeck(state.deck.value), customPieces: [ref] })
+  state.openImportDialog()
+  state.importCode.value = malformed.replace(/^DC4\./u, 'DC3.')
+  state.prepareImport(); state.applyImportedDeck()
+  assert.deepEqual(JSON.parse(JSON.stringify(state.deck.value)), before)
+  assert.deepEqual(JSON.parse(JSON.stringify(validation.pieceCatalog)), catalogBefore)
 })

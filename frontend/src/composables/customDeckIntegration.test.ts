@@ -296,7 +296,7 @@ test('Standard exact Front/Back/Base sets and initial placement match every size
           const includes = (squares: {file: number; rank: number}[]) => squares.some(s => s.file === file && s.rank === rank)
           assert.equal(deploymentZoneAtSquare(square, size, side, 'standard'), includes(back) ? 'back' : includes(front) ? 'front' : null)
           for (const kind of ['king', 'knight', 'guhang', 'bomber']) {
-            assert.equal(canPieceBePlacedAtStart(kind, square, size, side, 'standard'), includes(back))
+            assert.equal(canPieceBePlacedAtStart(kind, square, size, side, 'standard'), !['guhang', 'bomber'].includes(kind) && includes(back))
           }
           assert.equal(canPieceBePlacedAtStart('pawn', square, size, side, 'standard'), includes(front))
         }
@@ -328,4 +328,36 @@ test('Standard preset is playable with every Front square and optional Back vaca
     assert.deepEqual(request.starting.map(p => p.square), standard.starting.map(p => ({ file: p.square.file, rank: size - 1 - p.square.rank })))
     if (size === 12) assert.equal(validateSavedDeck({ ...standard, mapId: 'central-high-ground-12x12' }).valid, true)
   }
+})
+
+test('Standard Extra validates instance count, eligibility and independent original scores', () => {
+  applyPieceMetadata(Object.fromEntries(pieceCatalog.filter(p => !p.custom).map(p => [p.id, {
+    score: p.id === 'guhang' ? 25 : p.id === 'bomber' ? 13 : p.id === 'pawn' ? 1 : 0,
+    deployment_zone: p.id === 'pawn' ? 'front' : 'back',
+  }])))
+  const base: SavedDeck = { ...deck('knight'), ...createPresetDeck(8, 'classic', 'standard'), ruleset: 'standard', boardSize: 8, mapId: 'standard-8x8' }
+  // Main 39/39 remains 39/39 even with 51 Extra points.
+  base.pocket = { pawn: 33 }
+  for (const extra of [[], ['guhang'], ['guhang', 'bomber', 'bomber']]) {
+    const result = validateSavedDeck({ ...base, extra })
+    assert.equal(result.valid, true, result.errors.join(' '))
+    assert.equal(result.totalScore, 39)
+  }
+  assert.equal(pieceCatalog.find(p => p.id === 'guhang')!.score, 25)
+  assert.equal(pieceCatalog.find(p => p.id === 'bomber')!.score, 13)
+  assert.match(validateSavedDeck({ ...base, extra: ['bomber', 'bomber', 'bomber', 'bomber'] }).errors.join(' '), /최대 3기/)
+  assert.equal(validateSavedDeck({ ...base, extra: ['knight'] }).valid, false)
+  for (const kind of ['guhang', 'bomber']) {
+    assert.equal(validateSavedDeck({ ...base, pocket: { [kind]: 1 } }).valid, false)
+    assert.equal(validateSavedDeck({ ...base, pocket: {}, starting: [...base.starting, { pieceType: kind, square: { file: 3, rank: 0 } }] }).valid, false)
+  }
+})
+
+test('Extra serialization collects pinned custom references without granting custom eligibility', () => {
+  replaceCustomPieceCatalog([record])
+  const type = customDeckPieceType(record)
+  const source = { ...deck(type), ruleset: 'standard' as const, extra: [type, type] }
+  const request = savedDeckToPlayerDeckRequest(source)
+  assert.deepEqual(request.extra, [request.pocket[0], request.pocket[0]])
+  assert.match(validateSavedDeck(source).errors.join(' '), /Extra Deck에 넣을 수 없습니다/)
 })

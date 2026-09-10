@@ -15,6 +15,9 @@
         :class="squareClasses(sq)"
         :data-file="sq.file"
         :data-rank="sq.rank"
+        role="button" tabindex="0"
+        :aria-label="`${fileLabel(sq.file)}${sq.rank + 1}${sacrificeMarker(sq) ? ' · ' + sacrificeMarker(sq) : ''}`"
+        @keydown.enter.prevent="onSquareClick(sq)" @keydown.space.prevent="onSquareClick(sq)"
         @click="onSquareClick(sq)"
         @pointerdown="onSquarePointerDown($event, sq)"
         @dragover.prevent
@@ -33,6 +36,7 @@
         <span v-if="showCoordinates && isRankLabelSquare(sq)" class="board-coordinate rank-coordinate">
           {{ sq.rank + 1 }}
         </span>
+        <span v-if="sacrificeMarker(sq)" class="sacrifice-marker">{{ sacrificeMarker(sq) }}</span>
         <span v-if="legalMarker(sq)" class="legal-move-dot" :class="legalMarker(sq)" />
         <span v-if="sq.piece" class="piece" :class="`owner-${sq.piece.owner}`">
           <img
@@ -175,6 +179,8 @@ const props = defineProps<{
   movableSquares: Square[]
   attackSquares: Square[]
   attentionSquares?: Square[]
+  sacrificeCandidateIds?: string[]
+  selectedSacrificeIds?: string[]
   threatSquares?: Square[]
   dropSquares: Square[]
   lastMove?: { from: Square; to: Square } | null
@@ -310,8 +316,15 @@ function terrainLabel(typeId: string) {
   return typeId === 'high-ground' ? '고지' : typeId
 }
 
+function sacrificeMarker(sq: SquareInfo): string {
+  const ids = [sq.piece?.id, sq.airPiece?.id].filter((id): id is string => Boolean(id))
+  if (ids.some(id => props.selectedSacrificeIds?.includes(id))) return '✓ 제물'
+  if (ids.some(id => props.sacrificeCandidateIds?.includes(id))) return '제물 후보'
+  return ''
+}
 function squareClasses(sq: SquareInfo) {
   const classes: string[] = [sq.isLight ? 'light' : 'dark']
+  if (sacrificeMarker(sq)) classes.push(sacrificeMarker(sq).startsWith('✓') ? 'sacrifice-selected' : 'sacrifice-candidate')
 
   if (lastMoveSquareIds.value.has(sq.id)) {
     classes.push('last-move')
@@ -985,4 +998,8 @@ function pieceAlt(piece: Piece): string {
 
 .piece.owner-white { color: #fff; text-shadow: 0 0 2px #333; }
 .piece.owner-black { color: #111; text-shadow: 0 0 2px #ccc; }
+.square.sacrifice-candidate { outline:2px dashed #2563eb; outline-offset:-3px; }
+.square.sacrifice-selected { outline:3px solid #f4cf72; outline-offset:-4px; }
+.sacrifice-marker { position:absolute; bottom:0; z-index:8; font-size:clamp(8px, 1.1vw, 11px); background:#15213a; color:#fff; padding:1px 3px; pointer-events:none; }
+.square:focus-visible { outline:3px solid #38bdf8; outline-offset:-3px; z-index:9; }
 </style>

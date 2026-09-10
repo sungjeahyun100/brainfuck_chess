@@ -28,6 +28,8 @@ fn make_game_state(board_size: i32) -> GameState {
     let white_deck = Deck {
         player_id: "white".into(),
         starting_pieces: Vec::new(),
+        hand_pieces: Vec::new(),
+        extra_deck_pieces: Vec::new(),
         pocket_pieces: Vec::new(),
         score_limit: calculate_score_limit(board_size),
         total_score: 0,
@@ -35,6 +37,8 @@ fn make_game_state(board_size: i32) -> GameState {
     let black_deck = Deck {
         player_id: "black".into(),
         starting_pieces: Vec::new(),
+        hand_pieces: Vec::new(),
+        extra_deck_pieces: Vec::new(),
         pocket_pieces: Vec::new(),
         score_limit: calculate_score_limit(board_size),
         total_score: 0,
@@ -2432,7 +2436,9 @@ fn standard_exact_geometry_and_initial_deployment_for_every_size_and_side() {
                 for file in -1..=size {
                     let square = Square::new(file, rank);
                     for definition in &definitions {
-                        let expected = if definition.deployment_zone == DeploymentZone::Back {
+                        let expected = if matches!(definition.id.as_str(), "guhang" | "bomber") {
+                            false
+                        } else if definition.deployment_zone == DeploymentZone::Back {
                             back.contains(&square)
                         } else {
                             front.contains(&square)
@@ -2499,7 +2505,7 @@ fn standard_front_fill_requires_every_front_square_and_leaves_back_optional() {
                 )
             };
             assert!(validate(&state).valid);
-            // G2 must still allow these Back pieces; Extra-only belongs to G4.
+            // G4 adds Extra-only eligibility without changing Back geometry.
             for kind in ["guhang", "bomber"] {
                 let mut extra_back = state.clone();
                 let square = mirror(back[1]);
@@ -2511,7 +2517,11 @@ fn standard_front_fill_requires_every_front_square_and_leaves_back_optional() {
                     square.file,
                     square.rank,
                 );
-                assert!(validate(&extra_back).valid);
+                assert!(!validate(&extra_back).valid);
+                assert_eq!(
+                    extra_back.piece_definitions[kind].deployment_zone,
+                    DeploymentZone::Back
+                );
             }
             for index in 0..front.len() {
                 let mut missing = state.clone();
@@ -2557,6 +2567,14 @@ fn runtime_drop_uses_full_home_union_attack_map_for_both_rulesets_and_maps() {
                     state.ruleset = ruleset;
                     state.current_player = side.into();
                     add_pocket_piece(&mut state, "reserve", side, "knight");
+                    if ruleset == DeckRuleset::Standard {
+                        brainfuck_chess_engine::hand::move_pocket_piece_to_hand(
+                            &mut state,
+                            &side.into(),
+                            &"reserve".into(),
+                        )
+                        .unwrap();
+                    }
                     let expected = if ruleset == DeckRuleset::Legacy {
                         get_base_zone_squares(&side.into(), size)
                     } else {
@@ -2625,5 +2643,839 @@ fn runtime_drop_uses_full_home_union_attack_map_for_both_rulesets_and_maps() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn extra_validation_enforces_explicit_disjoint_membership() {
+    let mut state = make_game_state(8);
+    state.ruleset = DeckRuleset::Standard;
+    add_piece(&mut state, "king", "white", "king", 4, 0);
+    for (index, square) in get_front_zone_squares_with_ruleset(&"white".into(), 8, state.ruleset)
+        .iter()
+        .enumerate()
+    {
+        add_piece(
+            &mut state,
+            &format!("pawn{index}"),
+            "white",
+            "pawn-white",
+            square.file,
+            square.rank,
+        );
+    }
+    add_pocket_piece(&mut state, "extra", "white", "guhang");
+    state
+        .players
+        .get_mut("white")
+        .unwrap()
+        .deck
+        .pocket_pieces
+        .clear();
+    state
+        .players
+        .get_mut("white")
+        .unwrap()
+        .deck
+        .extra_deck_pieces
+        .push("extra".into());
+    state
+        .pieces
+        .get_mut(&PieceId::from("extra"))
+        .unwrap()
+        .in_pocket = false;
+    let validate = |s: &GameState| {
+        validate_deck_with_ruleset(
+            &s.players["white"].deck,
+            8,
+            &s.pieces,
+            &s.piece_definitions,
+            s.ruleset,
+        )
+    };
+    assert!(validate(&state).valid);
+    let main = calculate_deck_score(
+        &state.players["white"].deck,
+        &state.pieces,
+        &state.piece_definitions,
+    );
+    assert_eq!(main, 6);
+    for failure in 0..8 {
+        let mut invalid = state.clone();
+        match failure {
+            0 => invalid
+                .players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .extra_deck_pieces
+                .push("extra".into()),
+            1 => invalid
+                .players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .pocket_pieces
+                .push("extra".into()),
+            2 => invalid
+                .players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .starting_pieces
+                .push("extra".into()),
+            3 => {
+                invalid
+                    .pieces
+                    .get_mut(&PieceId::from("extra"))
+                    .unwrap()
+                    .current_square = Some(Square::new(3, 0))
+            }
+            4 => {
+                invalid
+                    .pieces
+                    .get_mut(&PieceId::from("extra"))
+                    .unwrap()
+                    .captured = true
+            }
+            5 => {
+                invalid
+                    .pieces
+                    .get_mut(&PieceId::from("extra"))
+                    .unwrap()
+                    .owner = "black".into()
+            }
+            6 => {
+                invalid
+                    .pieces
+                    .get_mut(&PieceId::from("extra"))
+                    .unwrap()
+                    .in_pocket = true
+            }
+            _ => {
+                invalid.pieces.remove(&PieceId::from("extra"));
+            }
+        }
+        assert!(!validate(&invalid).valid, "failure {failure}");
+    }
+    state
+        .players
+        .get_mut("white")
+        .unwrap()
+        .deck
+        .extra_deck_pieces
+        .clear();
+    assert_eq!(
+        calculate_deck_score(
+            &state.players["white"].deck,
+            &state.pieces,
+            &state.piece_definitions
+        ),
+        main
+    );
+}
+
+#[test]
+fn hand_runtime_sparse_serialization_and_disjoint_zone_invariants() {
+    use brainfuck_chess_engine::hand::{move_pocket_piece_to_hand, validate_hand_zones};
+    let legacy = make_game_state(8);
+    let old_json = serde_json::to_value(&legacy).unwrap();
+    assert!(old_json["players"]["white"]["deck"]
+        .get("hand_pieces")
+        .is_none());
+    let old: GameState = serde_json::from_value(old_json).unwrap();
+    assert!(old.players.values().all(|p| p.deck.hand_pieces.is_empty()));
+    let mut state = make_game_state(8);
+    state.ruleset = DeckRuleset::Standard;
+    for id in ["hand-a", "hand-b"] {
+        add_pocket_piece(&mut state, id, "white", "knight");
+        move_pocket_piece_to_hand(&mut state, &"white".into(), &id.into()).unwrap();
+    }
+    assert_eq!(
+        state.players["white"].deck.hand_pieces,
+        vec!["hand-a", "hand-b"]
+    );
+    for id in ["hand-a", "hand-b"] {
+        assert_eq!(state.pieces[id].current_square, None);
+        assert!(!state.pieces[id].in_pocket && !state.pieces[id].captured);
+    }
+    validate_hand_zones(&state).unwrap();
+    let roundtrip: GameState =
+        serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+    assert_eq!(
+        roundtrip.players["white"].deck.hand_pieces,
+        vec!["hand-a", "hand-b"]
+    );
+    let corruptions: Vec<(&str, fn(&mut GameState))> = vec![
+        ("missing", |s| {
+            s.pieces.remove("hand-a");
+        }),
+        ("duplicate", |s| {
+            s.players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .hand_pieces
+                .push("hand-a".into())
+        }),
+        ("pocket", |s| {
+            s.players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .pocket_pieces
+                .push("hand-a".into())
+        }),
+        ("extra", |s| {
+            s.players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .extra_deck_pieces
+                .push("hand-a".into())
+        }),
+        ("starting", |s| {
+            s.players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .starting_pieces
+                .push("hand-a".into())
+        }),
+        ("board", |s| {
+            s.board
+                .squares
+                .insert(Square::new(0, 0).to_id(), Some("hand-a".into()));
+        }),
+        ("air board", |s| {
+            s.board
+                .air_squares
+                .insert(Square::new(0, 0).to_id(), Some("hand-a".into()));
+        }),
+        ("capture list", |s| {
+            s.players
+                .get_mut("black")
+                .unwrap()
+                .captured_pieces
+                .push("hand-a".into())
+        }),
+        ("owner", |s| {
+            s.pieces.get_mut("hand-a").unwrap().owner = "black".into()
+        }),
+        ("square", |s| {
+            s.pieces.get_mut("hand-a").unwrap().current_square = Some(Square::new(0, 0))
+        }),
+        ("pocket flag", |s| {
+            s.pieces.get_mut("hand-a").unwrap().in_pocket = true
+        }),
+        ("captured flag", |s| {
+            s.pieces.get_mut("hand-a").unwrap().captured = true
+        }),
+        ("other hand", |s| {
+            s.players
+                .get_mut("black")
+                .unwrap()
+                .deck
+                .hand_pieces
+                .push("hand-a".into())
+        }),
+        ("other pocket", |s| {
+            s.players
+                .get_mut("black")
+                .unwrap()
+                .deck
+                .pocket_pieces
+                .push("hand-a".into())
+        }),
+        ("legacy", |s| s.ruleset = DeckRuleset::Legacy),
+    ];
+    for (label, corrupt) in corruptions {
+        let mut bad = state.clone();
+        corrupt(&mut bad);
+        assert!(validate_hand_zones(&bad).is_err(), "{label}");
+        let request = TurnAction::Drop(DropAction {
+            player_id: "white".into(),
+            piece_id: "hand-a".into(),
+            to: Square::new(3, 0),
+            captured_piece_id: None,
+        });
+        assert!(submit_action(bad, request).is_err(), "{label}");
+    }
+}
+
+#[test]
+fn standard_drop_uses_only_hand_and_preserves_canonical_history_and_atomicity() {
+    use brainfuck_chess_engine::hand::move_pocket_piece_to_hand;
+    let mut state = make_game_state(8);
+    state.ruleset = DeckRuleset::Standard;
+    for (id, side) in [
+        ("own-hand", "white"),
+        ("other-hand", "black"),
+        ("pocket-only", "white"),
+        ("extra", "white"),
+        ("flags-only", "white"),
+    ] {
+        add_pocket_piece(&mut state, id, side, "knight");
+    }
+    for (id, side) in [("own-hand", "white"), ("other-hand", "black")] {
+        move_pocket_piece_to_hand(&mut state, &side.into(), &id.into()).unwrap();
+    }
+    for id in ["extra", "flags-only"] {
+        state
+            .players
+            .get_mut("white")
+            .unwrap()
+            .deck
+            .pocket_pieces
+            .retain(|p| p != id);
+        state.pieces.get_mut(id).unwrap().in_pocket = false;
+    }
+    state
+        .players
+        .get_mut("white")
+        .unwrap()
+        .deck
+        .extra_deck_pieces
+        .push("extra".into());
+    let before = serde_json::to_value(&state).unwrap();
+    for (id, to) in [
+        ("pocket-only", Square::new(3, 0)),
+        ("extra", Square::new(3, 0)),
+        ("other-hand", Square::new(3, 0)),
+        ("flags-only", Square::new(3, 0)),
+        ("own-hand", Square::new(0, 0)),
+        ("own-hand", Square::new(-1, 0)),
+    ] {
+        let request = DropAction {
+            player_id: "white".into(),
+            piece_id: id.into(),
+            to,
+            captured_piece_id: None,
+        };
+        assert!(brainfuck_chess_engine::placement::validate_drop_action(&state, &request).is_err());
+        assert!(submit_action(state.clone(), TurnAction::Drop(request)).is_err());
+        assert_eq!(serde_json::to_value(&state).unwrap(), before);
+    }
+    let actions = generate_legal_drop_actions(&state);
+    assert!(actions.iter().all(|a| a.piece_id == "own-hand"));
+    assert!(!actions.is_empty());
+    assert!(generate_drop_candidates_by_type(&state, &"white".into())
+        .iter()
+        .all(|a| a.count == 1));
+    let action = actions[0].clone();
+    let after = submit_action(state, TurnAction::Drop(action.clone())).unwrap();
+    assert!(after.players["white"].deck.hand_pieces.is_empty());
+    assert_eq!(
+        after.players["white"].deck.pocket_pieces,
+        vec!["pocket-only"]
+    );
+    assert_eq!(after.pieces["own-hand"].current_square, Some(action.to));
+    assert_eq!(after.board.get_piece_at(&action.to), Some(&action.piece_id));
+    assert_eq!(
+        serde_json::to_value(&after.history[0].action).unwrap(),
+        serde_json::to_value(TurnAction::Drop(action)).unwrap()
+    );
+    assert_eq!(after.history[0].player_id, "white");
+    assert_eq!(after.current_player, "black");
+    assert_eq!(after.turn_number, 2);
+}
+
+#[test]
+fn standard_hand_capture_drop_keeps_paratrooper_and_shell_followup_rules() {
+    for type_id in ["paratrooper", "shell"] {
+        let mut state = make_game_state(8);
+        state.ruleset = DeckRuleset::Standard;
+        add_pocket_piece(&mut state, "dropper", "white", type_id);
+        brainfuck_chess_engine::hand::move_pocket_piece_to_hand(
+            &mut state,
+            &"white".into(),
+            &"dropper".into(),
+        )
+        .unwrap();
+        add_piece(&mut state, "victim", "black", "knight", 3, 0);
+        let action = generate_piece_legal_drop_actions(&state, &"dropper".into())
+            .into_iter()
+            .find(|a| a.to == Square::new(3, 0))
+            .unwrap();
+        assert_eq!(action.captured_piece_id, Some("victim".into()));
+        let after = submit_action(state, TurnAction::Drop(action)).unwrap();
+        assert!(after.players["white"].deck.hand_pieces.is_empty());
+        assert!(after.pieces["victim"].captured);
+        assert_eq!(after.pieces["dropper"].captured, type_id == "shell");
+    }
+}
+
+#[test]
+fn standard_pocket_abilities_keep_their_sources_and_returns_without_automatic_draw() {
+    use brainfuck_chess_engine::hand::{move_pocket_piece_to_hand, validate_hand_zones};
+    for (actor, ability) in [
+        ("alternating-soldier", "relieve"),
+        ("airborne", "airdrop"),
+        ("green-camp", "recall"),
+    ] {
+        let mut state = make_game_state(8);
+        state.ruleset = DeckRuleset::Standard;
+        add_piece(&mut state, "actor", "white", actor, 3, 3);
+        let target_owner = if actor == "green-camp" {
+            "black"
+        } else {
+            "white"
+        };
+        add_piece(&mut state, "target", target_owner, "bishop", 4, 3);
+        add_pocket_piece(&mut state, "reserve", "white", "knight");
+        add_pocket_piece(&mut state, "hand", "white", "knight");
+        move_pocket_piece_to_hand(&mut state, &"white".into(), &"hand".into()).unwrap();
+        let actions = generate_piece_legal_ability_actions(&state, &"actor".into(), ability);
+        assert!(!actions.is_empty());
+        let mut with_extra = state.clone();
+        add_pocket_piece(&mut with_extra, "extra", "white", "knight");
+        with_extra
+            .players
+            .get_mut("white")
+            .unwrap()
+            .deck
+            .pocket_pieces
+            .retain(|p| p != "extra");
+        with_extra
+            .players
+            .get_mut("white")
+            .unwrap()
+            .deck
+            .extra_deck_pieces
+            .push("extra".into());
+        with_extra.pieces.get_mut("extra").unwrap().in_pocket = false;
+        assert_eq!(
+            actions,
+            generate_piece_legal_ability_actions(&with_extra, &"actor".into(), ability)
+        );
+        let mut action = actions[0].clone();
+        if actor == "airborne" {
+            action.deployments.push(AbilityDeployment {
+                pocket_piece_id: action.pocket_piece_id.take().unwrap(),
+                to: action.to.take().unwrap(),
+            });
+        }
+        let after = submit_action(state, TurnAction::Ability(action)).unwrap();
+        assert_eq!(after.players["white"].deck.hand_pieces, vec!["hand"]);
+        validate_hand_zones(&after).unwrap();
+        if actor == "airborne" {
+            assert!(after.pieces["reserve"].is_on_board());
+        } else {
+            assert!(after.pieces["target"].in_pocket);
+            assert!(after.players[target_owner]
+                .deck
+                .pocket_pieces
+                .contains(&"target".into()));
+            let mut next = after.clone();
+            next.current_player = target_owner.into();
+            assert!(generate_piece_legal_drop_actions(&next, &"target".into()).is_empty());
+            // G3-B can explicitly transfer even a returned original starting piece.
+            next.players
+                .get_mut(target_owner)
+                .unwrap()
+                .deck
+                .starting_pieces
+                .push("target".into());
+            move_pocket_piece_to_hand(&mut next, &target_owner.into(), &"target".into()).unwrap();
+            validate_hand_zones(&next).unwrap();
+        }
+    }
+}
+
+#[test]
+fn legacy_drop_candidates_and_transfer_rejection_keep_original_contract() {
+    let mut state = make_game_state(8);
+    add_pocket_piece(&mut state, "reserve", "white", "knight");
+    let before = serde_json::to_value(&state).unwrap();
+    assert!(brainfuck_chess_engine::hand::move_pocket_piece_to_hand(
+        &mut state,
+        &"white".into(),
+        &"reserve".into()
+    )
+    .is_err());
+    assert_eq!(serde_json::to_value(&state).unwrap(), before);
+    let actions = generate_legal_drop_actions(&state);
+    assert_eq!(
+        square_set(actions.iter().map(|a| a.to).collect()),
+        square_set(get_base_zone_squares(&"white".into(), 8))
+    );
+    let action = actions[0].clone();
+    let after = submit_action(state.clone(), TurnAction::Drop(action.clone())).unwrap();
+    assert!(after.players["white"].deck.pocket_pieces.is_empty());
+    assert_eq!(
+        serde_json::to_value(&after.history[0].action).unwrap(),
+        serde_json::to_value(TurnAction::Drop(action)).unwrap()
+    );
+    state
+        .players
+        .get_mut("white")
+        .unwrap()
+        .deck
+        .pocket_pieces
+        .clear();
+    state
+        .players
+        .get_mut("white")
+        .unwrap()
+        .deck
+        .hand_pieces
+        .push("reserve".into());
+    state.pieces.get_mut("reserve").unwrap().in_pocket = false;
+    assert!(generate_legal_drop_actions(&state).is_empty());
+}
+
+#[test]
+fn pocket_to_hand_transfer_failures_leave_the_entire_state_unchanged() {
+    use brainfuck_chess_engine::hand::move_pocket_piece_to_hand;
+    let mut base = make_game_state(8);
+    base.ruleset = DeckRuleset::Standard;
+    add_pocket_piece(&mut base, "reserve", "white", "knight");
+    let corruptions: Vec<fn(&mut GameState)> = vec![
+        |s| {
+            s.players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .pocket_pieces
+                .push("reserve".into())
+        },
+        |s| {
+            s.players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .extra_deck_pieces
+                .push("reserve".into())
+        },
+        |s| {
+            s.board
+                .squares
+                .insert(Square::new(0, 0).to_id(), Some("reserve".into()));
+        },
+        |s| {
+            s.players
+                .get_mut("black")
+                .unwrap()
+                .captured_pieces
+                .push("reserve".into())
+        },
+        |s| s.pieces.get_mut("reserve").unwrap().owner = "black".into(),
+        |s| s.pieces.get_mut("reserve").unwrap().in_pocket = false,
+    ];
+    for corrupt in corruptions {
+        let mut state = base.clone();
+        corrupt(&mut state);
+        let before = serde_json::to_value(&state).unwrap();
+        assert!(move_pocket_piece_to_hand(&mut state, &"white".into(), &"reserve".into()).is_err());
+        assert_eq!(serde_json::to_value(&state).unwrap(), before);
+    }
+}
+
+#[cfg(test)]
+mod g5 {
+    use super::*;
+    use brainfuck_chess_engine::summon::*;
+    fn setup(kind: &str, types: &[&str], zone: &str) -> (GameState, ExtraSummonAction) {
+        let mut state = make_game_state(8);
+        state.ruleset = DeckRuleset::Standard;
+        add_piece(&mut state, "wk", "white", "king", 3, 0);
+        add_piece(&mut state, "bk", "black", "king", 3, 7);
+        for (i, kind) in types.iter().enumerate() {
+            let id = format!("s{i}");
+            add_piece(&mut state, &id, "white", kind, i as i32, 3);
+            if zone != "board" && !(zone == "mixed" && i % 2 == 0) {
+                state
+                    .board
+                    .set_piece_at_layer(Square::new(i as i32, 3), PieceLayer::Ground, None);
+                let p = state.pieces.get_mut(&PieceId::from(id.clone())).unwrap();
+                p.current_square = None;
+                p.in_pocket = zone == "pocket";
+                let deck = &mut state.players.get_mut("white").unwrap().deck;
+                deck.starting_pieces
+                    .retain(|entry| entry != &PieceId::from(id.clone()));
+                if zone == "pocket" {
+                    deck.pocket_pieces.push(id.into());
+                } else {
+                    deck.hand_pieces.push(id.into());
+                }
+            }
+        }
+        for id in ["extra", "extra2"] {
+            let mut p = state.pieces[&PieceId::from("wk")].clone();
+            p.id = id.into();
+            p.type_id = kind.into();
+            p.current_square = None;
+            p.initialize_from_definition(&state.piece_definitions[kind]);
+            state.pieces.insert(id.into(), p);
+            state
+                .players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .extra_deck_pieces
+                .push(id.into());
+        }
+        (
+            state,
+            ExtraSummonAction {
+                player_id: "white".into(),
+                extra_piece_id: "extra".into(),
+                sacrifice_piece_ids: (0..types.len()).map(|i| format!("s{i}").into()).collect(),
+                target_square: Square::new(4, 0),
+            },
+        )
+    }
+    fn apply(state: &GameState, action: &ExtraSummonAction) -> Result<GameState, String> {
+        submit_action(state.clone(), TurnAction::ExtraSummon(action.clone()))
+    }
+    fn json(state: &GameState) -> serde_json::Value {
+        serde_json::to_value(state).unwrap()
+    }
+
+    #[test]
+    fn cost_thresholds_sources_and_full_overpayment_removal() {
+        for (kind, pieces, expected_score, success) in [
+            (
+                "guhang",
+                vec!["queen", "queen", "knight", "knight"],
+                24,
+                false,
+            ),
+            (
+                "guhang",
+                vec!["rook", "rook", "rook", "rook", "rook"],
+                25,
+                true,
+            ),
+            ("guhang", vec!["queen", "queen", "queen"], 27, true),
+            (
+                "bomber",
+                vec!["knight", "knight", "knight", "knight"],
+                12,
+                false,
+            ),
+            ("bomber", vec!["rook", "rook", "knight"], 13, true),
+            ("bomber", vec!["rook", "rook", "rook", "rook"], 20, true),
+        ] {
+            for zone in ["board", "hand", "mixed", "pocket"] {
+                let (state, action) = setup(kind, &pieces, zone);
+                assert_eq!(
+                    pieces
+                        .iter()
+                        .map(|kind| state.piece_definitions[*kind].score)
+                        .sum::<u32>(),
+                    expected_score
+                );
+                assert_eq!(
+                    state.piece_definitions[kind].score,
+                    if kind == "guhang" { 25 } else { 13 }
+                );
+                let before = json(&state);
+                let result = apply(&state, &action);
+                let allowed = success && (zone == "board" || kind == "guhang" && zone != "pocket");
+                assert_eq!(
+                    result.is_ok(),
+                    allowed,
+                    "{kind} {zone} {expected_score}: {result:?}"
+                );
+                assert_eq!(json(&state), before);
+                if let Ok(after) = result {
+                    for id in &action.sacrifice_piece_ids {
+                        let p = &after.pieces[id];
+                        assert!(p.captured);
+                        assert!(!p.in_pocket);
+                        assert!(p.current_square.is_none());
+                        assert!(!after.players["white"].deck.hand_pieces.contains(id));
+                    }
+                    assert_eq!(
+                        after.players["white"].deck.extra_deck_pieces,
+                        vec![PieceId::from("extra2")]
+                    );
+                    assert!(after.players.values().all(|p| p.captured_pieces.is_empty()));
+                    let p = &after.pieces[&action.extra_piece_id];
+                    assert!(p.is_on_board());
+                    assert_eq!(p.current_square, Some(action.target_square));
+                    assert!(!p.in_pocket);
+                    assert!(!p.captured);
+                    assert_eq!(
+                        p.current_ammo,
+                        state.pieces[&action.extra_piece_id].current_ammo
+                    );
+                    assert_eq!(after.current_player, "black");
+                    assert_eq!(after.history.len(), 1);
+                    assert_eq!(
+                        after.players["white"].deck.total_score,
+                        state.players["white"].deck.total_score
+                    );
+                    validate_summon_zones(&after).unwrap();
+                }
+            }
+        }
+    }
+    #[test]
+    fn untrusted_selection_and_invalid_state_never_change_any_zone() {
+        let (state, action) = setup("guhang", &["queen", "queen", "queen"], "mixed");
+        for bad_id in ["wk", "bk", "extra", "extra2", "missing"] {
+            let mut bad = action.clone();
+            bad.sacrifice_piece_ids.push(bad_id.into());
+            assert!(apply(&state, &bad).is_err());
+        }
+        let mut bad = action.clone();
+        bad.sacrifice_piece_ids.push("s0".into());
+        assert!(apply(&state, &bad).is_err());
+        for id in ["missing", "s0", "bk"] {
+            let mut bad = action.clone();
+            bad.extra_piece_id = id.into();
+            assert!(apply(&state, &bad).is_err());
+        }
+        let mut bad = action.clone();
+        bad.player_id = "black".into();
+        assert!(apply(&state, &bad).is_err());
+        for mutate in 0..5 {
+            let mut broken = state.clone();
+            match mutate {
+                0 => broken.ruleset = DeckRuleset::Legacy,
+                1 => broken.pieces.get_mut(&PieceId::from("s0")).unwrap().owner = "black".into(),
+                2 => broken
+                    .players
+                    .get_mut("white")
+                    .unwrap()
+                    .deck
+                    .extra_deck_pieces
+                    .push("extra".into()),
+                3 => {
+                    broken
+                        .board
+                        .squares
+                        .insert(Square::new(1, 5).to_id(), Some("extra".into()));
+                }
+                _ => {
+                    broken
+                        .pieces
+                        .get_mut(&PieceId::from("s0"))
+                        .unwrap()
+                        .current_square = Some(Square::new(7, 6))
+                }
+            };
+            let before = json(&broken);
+            assert!(apply(&broken, &action).is_err());
+            assert_eq!(before, json(&broken));
+        }
+    }
+    #[test]
+    fn targets_reuse_drop_contract_after_sacrifices_and_preserve_air_removal() {
+        let (mut state, mut action) = setup("guhang", &["queen", "queen", "queen"], "hand");
+        add_piece(&mut state, "attacker", "white", "rook", 0, 4);
+        action.target_square = Square::new(1, 4);
+        assert!(apply(&state, &action).is_ok());
+        for square in [
+            Square::new(-1, 0),
+            Square::new(8, 0),
+            Square::new(7, 6),
+            Square::new(3, 0),
+        ] {
+            action.target_square = square;
+            assert!(apply(&state, &action).is_err());
+        }
+        let (mut state, mut action) = setup("bomber", &["rook", "rook", "knight"], "board");
+        let id = PieceId::from("s0");
+        let sq = state.pieces[&id].current_square.unwrap();
+        state.board.set_piece_at_layer(sq, PieceLayer::Ground, None);
+        state
+            .board
+            .set_piece_at_layer(sq, PieceLayer::Air, Some(id.clone()));
+        state.pieces.get_mut(&id).unwrap().layer = PieceLayer::Air;
+        action.target_square = Square::new(4, 0);
+        let after = apply(&state, &action).unwrap();
+        assert!(after
+            .board
+            .get_piece_at_layer(&sq, PieceLayer::Air)
+            .is_none());
+        // Capturing on Drop is definition-driven and its endgame semantics are reused.
+        let (mut state, mut action) = setup("guhang", &["queen", "queen", "queen"], "hand");
+        state
+            .piece_definitions
+            .get_mut("guhang")
+            .unwrap()
+            .can_capture_on_drop = true;
+        add_piece(&mut state, "target", "black", "king", 4, 0);
+        action.target_square = Square::new(4, 0);
+        let after = apply(&state, &action).unwrap();
+        assert_eq!(after.phase, GamePhase::Ended);
+        assert!(after.players["white"]
+            .captured_pieces
+            .contains(&PieceId::from("target")));
+    }
+    #[test]
+    fn summon_drop_terrain_and_capture_immunity_are_shared() {
+        let (mut state, action) = setup("guhang", &["queen", "queen", "queen"], "hand");
+        state
+            .piece_definitions
+            .get_mut("guhang")
+            .unwrap()
+            .can_capture_on_drop = true;
+        add_piece(&mut state, "victim", "black", "rook", 4, 0);
+        state.board.terrain.insert(
+            action.target_square.to_id(),
+            TerrainCell {
+                type_id: HIGH_GROUND_TERRAIN_ID.into(),
+            },
+        );
+        assert!(apply(&state, &action).is_err());
+        state.board.terrain.clear();
+        assert!(apply(&state, &action).is_ok());
+        state.pieces.get_mut("victim").unwrap().type_id = "wall".into();
+        assert!(apply(&state, &action).is_err());
+        // Empty elevated tiles follow ordinary Drop, which allows non-capturing placement.
+        state
+            .board
+            .set_piece_at_layer(action.target_square, PieceLayer::Ground, None);
+        let p = state.pieces.get_mut("victim").unwrap();
+        p.current_square = None;
+        p.captured = true;
+        state.board.terrain.insert(
+            action.target_square.to_id(),
+            TerrainCell {
+                type_id: HIGH_GROUND_TERRAIN_ID.into(),
+            },
+        );
+        assert!(apply(&state, &action).is_ok());
+    }
+
+    #[test]
+    fn bounded_discovery_preserves_exact_intent_and_no_bot_subset_search() {
+        let (mut state, action) = setup("guhang", &["queen", "queen", "queen"], "hand");
+        let template = state.pieces[&PieceId::from("s0")].clone();
+        for i in 0..2000 {
+            let mut p = template.clone();
+            p.id = format!("large-{i}").into();
+            state
+                .players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .hand_pieces
+                .push(p.id.clone());
+            state.pieces.insert(p.id.clone(), p);
+        }
+        assert_eq!(
+            sacrifice_candidates(&state, &action.extra_piece_id)
+                .unwrap()
+                .len(),
+            2003
+        );
+        let actions = generate_extra_summon_actions(
+            &state,
+            &action.extra_piece_id,
+            &action.sacrifice_piece_ids,
+        )
+        .unwrap();
+        assert!(actions.len() <= 64);
+        assert!(actions
+            .iter()
+            .all(|a| a.sacrifice_piece_ids == action.sacrifice_piece_ids));
+        let encoded = serde_json::to_string(&TurnAction::ExtraSummon(action.clone())).unwrap();
+        let decoded: TurnAction = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), encoded);
     }
 }

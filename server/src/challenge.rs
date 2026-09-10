@@ -2,8 +2,11 @@ use async_trait::async_trait;
 use brainfuck_chess_engine::{
     ai::BotDifficulty,
     pieces::default_pieces::all_default_definitions,
-    rules::{calculate_score_limit, can_piece_be_placed_at_start},
-    types::{PieceDefinition, Square},
+    rules::{
+        board_map_definition, calculate_score_limit, can_piece_be_placed_at_start_with_ruleset,
+        get_base_zone_squares_with_ruleset,
+    },
+    types::{DeckRuleset, PieceDefinition, Square},
 };
 use serde::Serialize;
 use sqlx::{PgPool, Row};
@@ -19,7 +22,8 @@ pub(crate) struct OfficialPlacement {
     pub(crate) piece_type: &'static str,
     /// Coordinates are authored from White's side and mirrored for the bot.
     pub(crate) square: Square,
-    /// Official challenges may deliberately start outside normal deck setup zones.
+    /// Exempts Front/Back classification within Base; Standard may also omit Front coverage.
+    /// Never exempts bounds, Base membership, ownership, King, score or zone eligibility.
     pub(crate) allow_nonstandard_zone: bool,
 }
 
@@ -34,7 +38,10 @@ pub(crate) struct ChallengeDefinition {
     pub(crate) id: &'static str,
     pub(crate) name: &'static str,
     pub(crate) description: &'static str,
+    pub(crate) ruleset: DeckRuleset,
     pub(crate) board_size: i32,
+    pub(crate) map_id: &'static str,
+    pub(crate) opponent_extra: Vec<&'static str>,
     pub(crate) opponent_starting: Vec<OfficialPlacement>,
     pub(crate) opponent_pocket: Vec<OfficialPocket>,
     pub(crate) bot_difficulty: BotDifficulty,
@@ -47,6 +54,7 @@ pub(crate) struct ChallengeSummary {
     pub(crate) id: &'static str,
     pub(crate) name: &'static str,
     pub(crate) description: &'static str,
+    pub(crate) ruleset: DeckRuleset,
     pub(crate) board_size: i32,
     pub(crate) map_id: String,
     pub(crate) bot_difficulty: BotDifficulty,
@@ -106,6 +114,9 @@ pub(crate) fn definitions() -> Vec<ChallengeDefinition> {
             id: "tempest_horde",
             name: "템페스트 호드",
             description: "시작 진영과 포켓을 템페스트 폰으로 채운 물량형 봇에 맞서세요.",
+            ruleset: DeckRuleset::Legacy,
+            map_id: "standard-12x12",
+            opponent_extra: vec![],
             board_size: 12,
             opponent_starting: tempest_horde,
             opponent_pocket: vec![OfficialPocket {
@@ -121,6 +132,9 @@ pub(crate) fn definitions() -> Vec<ChallengeDefinition> {
             name: "사람비가 내려와",
             description:
                 "구행을 교두보로 삼아 포켓의 공수부대 대원을 지속적으로 투입하는 봇입니다.",
+            ruleset: DeckRuleset::Legacy,
+            map_id: "standard-12x12",
+            opponent_extra: vec![],
             board_size: 12,
             opponent_starting: vec![placement("king", 5, 0), placement("guhang", 6, 0)],
             opponent_pocket: vec![OfficialPocket {
@@ -135,6 +149,9 @@ pub(crate) fn definitions() -> Vec<ChallengeDefinition> {
             id: "tempest_set",
             name: "템페스트 셋",
             description: "표준 체스의 주요 기물을 실제 템페스트 계열 기물로 바꾼 테마 덱입니다.",
+            ruleset: DeckRuleset::Legacy,
+            map_id: "standard-10x10",
+            opponent_extra: vec![],
             board_size: 10,
             opponent_starting: tempest_set,
             opponent_pocket: vec![],
@@ -167,6 +184,17 @@ pub(crate) fn validate_registry(definitions: &[ChallengeDefinition]) -> Result<(
         if !(8..=12).contains(&definition.board_size) {
             return Err(format!("{}: 지원하지 않는 보드 크기입니다.", definition.id));
         }
+        let map = board_map_definition(definition.map_id)
+            .ok_or_else(|| format!("{}: 알 수 없는 map입니다.", definition.id))?;
+        if map.board_size != definition.board_size {
+            return Err(format!("{}: map/board 크기가 다릅니다.", definition.id));
+        }
+        // Typed enums admit only supported rulesets, difficulties and time controls.
+        let base = get_base_zone_squares_with_ruleset(
+            &"white".into(),
+            definition.board_size,
+            definition.ruleset,
+        );
         let mut squares = HashSet::new();
         let mut king_count = 0;
         let mut score = 0_u32;
@@ -176,16 +204,18 @@ pub(crate) fn validate_registry(definitions: &[ChallengeDefinition]) -> Result<(
                 || entry.square.file >= definition.board_size
                 || entry.square.rank < 0
                 || entry.square.rank >= definition.board_size
+                || !base.contains(&entry.square)
                 || !squares.insert(entry.square.to_id())
             {
                 return Err(format!("{}: 잘못된 시작 배치입니다.", definition.id));
             }
             if !entry.allow_nonstandard_zone
-                && !can_piece_be_placed_at_start(
+                && !can_piece_be_placed_at_start_with_ruleset(
                     piece,
                     &"white".into(),
                     entry.square,
                     definition.board_size,
+                    definition.ruleset,
                 )
             {
                 return Err(format!(
@@ -198,10 +228,12 @@ pub(crate) fn validate_registry(definitions: &[ChallengeDefinition]) -> Result<(
                 score = score.saturating_add(piece.score);
             }
         }
+        let mut pocket_count = 0_u64;
         for entry in &definition.opponent_pocket {
-            if entry.count == 0 {
+            pocket_count += u64::from(entry.count);
+            if entry.count == 0 || entry.count > 1024 || pocket_count > 4096 {
                 return Err(format!(
-                    "{}: 포켓 수량은 1 이상이어야 합니다.",
+                    "{}: 포켓 수량은 항목당 1~1024, 총 4096 이하여야 합니다.",
                     definition.id
                 ));
             }
@@ -211,6 +243,25 @@ pub(crate) fn validate_registry(definitions: &[ChallengeDefinition]) -> Result<(
             }
             score = score.saturating_add(piece.score.saturating_mul(entry.count));
         }
+        if definition.ruleset == DeckRuleset::Standard
+            && !definition
+                .opponent_starting
+                .iter()
+                .any(|entry| entry.allow_nonstandard_zone)
+            && brainfuck_chess_engine::rules::get_front_zone_squares_with_ruleset(
+                &"white".into(),
+                definition.board_size,
+                definition.ruleset,
+            )
+            .iter()
+            .any(|square| !squares.contains(&square.to_id()))
+        {
+            return Err(format!(
+                "{}: Standard Front를 채우거나 공식 배치 예외를 명시해야 합니다.",
+                definition.id
+            ));
+        }
+        crate::validate_spec_deck_zones(&opponent_deck(definition, "black"))?;
         if king_count != 1 {
             return Err(format!(
                 "{}: 시작 덱에 King이 정확히 1개 필요합니다.",
@@ -231,16 +282,10 @@ fn resolved_definition<'a>(
     catalog: &'a HashMap<String, PieceDefinition>,
     id: &str,
 ) -> Result<&'a PieceDefinition, String> {
-    let resolved = match id {
-        "pawn" => "pawn-white",
-        "tempest-pawn" => "tempest-pawn-white",
-        "bouncing-pawn" => "bouncing-pawn-white",
-        "dozer" => "dozer-white",
-        "surface-to-air-missile" => "surface-to-air-missile-white",
-        other => other,
-    };
+    let resolved = crate::resolve_piece_type("white", id)
+        .ok_or_else(|| format!("존재하지 않는 Challenge 기물 ID입니다: {id}"))?;
     catalog
-        .get(resolved)
+        .get(&resolved)
         .ok_or_else(|| format!("존재하지 않는 Challenge 기물 ID입니다: {id}"))
 }
 
@@ -272,7 +317,14 @@ pub(crate) fn opponent_deck(definition: &ChallengeDefinition, side: &str) -> Pla
         })
         .collect();
     PlayerDeckSpec {
-        ruleset: Default::default(),
+        extra: definition
+            .opponent_extra
+            .iter()
+            .map(|id| DeckPieceRef::BuiltIn {
+                piece_type: (*id).into(),
+            })
+            .collect(),
+        ruleset: definition.ruleset,
         name: Some(definition.name.into()),
         starting,
         pocket,
@@ -428,3 +480,6 @@ mod tests {
             .contains("존재하지 않는"));
     }
 }
+
+#[cfg(test)]
+mod g8b_tests;

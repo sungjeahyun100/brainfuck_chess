@@ -125,6 +125,12 @@ Legacy의 기존 Pocket 착수 방식은 그대로 보존한다.
 
 랜덤 결과는 서버가 결정해야 한다.
 
+**G3 분할 확정 (2026-09-10):** G3-A는 명시적 runtime Hand, Standard 일반 Drop의 Hand 출처, 서버의 상대 Hand 비공개 투영만 구현한다. Draw/RNG는 G3-B에서 구현하며 초기 3기와 실제 턴 시작 1기를 분리한다. White/Black 모두 첫 실제 턴에 +1 Draw가 있다. Hand 상한은 없고 Pocket이 비면 정상 진행한다. 자기 Hand는 내용을, 상대 Hand는 장수만 공개한다. 기존 Pocket 조작 Ability는 Standard에서도 Pocket을 직접 사용하며, Pocket 복귀는 자동 Hand 이동을 일으키지 않는다. 저장 덱에는 Hand를 추가하지 않는다. G3-C/G7은 Draw 기록/재현 및 완료 기록의 공개 정책을 다룬다.
+
+---
+
+**G3-C 확정 (2026-09-10):** 기존 기록 접근 정책으로 열람이 허용된 완료 Replay에서는 양측 Hand 및 initial/turn Draw의 실제 PieceId를 공개한다. 진행 중 Hand/Pocket privacy와 Extra 공개 처리는 그대로 유지한다. Draw는 player action이 아닌 automatic transition이다. Standard Analysis preview는 RNG를 소비하지 않으며 필요한 Draw는 `draw_pending: true`로 표시하고 final hash를 생략한다. 분기 저장의 멱등성/버전 검사 이후에만 서버 Draw를 한 번 확정하고 `AnalysisNode.draws`와 최종 state/hash를 함께 저장한다. 재조회와 Replay는 확정 resolution을 재적용하며 RNG를 실행하지 않는다. 결과와 검증은 `standard-format-g3c-implementation.md`에 기록한다.
+
 ---
 
 ## 2.3 Extra Deck
@@ -140,12 +146,14 @@ Extra Deck의 기본 규칙:
 - Extra Deck의 기물은 자신의 기물을 제물로 바쳐 필드에 특수 소환할 수 있다.
 - 아무 별도 설명이 없는 경우 제물은 필드 위의 자신의 기물을 기준으로 한다.
 - 기물에 따라 Hand / Pocket / Board 중 허용되는 제물 위치를 별도로 지정할 수 있는 구조여야 한다.
-- 제물 가치의 합은 기본적으로 소환 대상 기물의 점수와 동등해야 한다.
+- 제물 가치의 합은 소환 대상 기물의 기존 score 이상이어야 한다 (`>=`). 선택한 초과 제물도 전부 제거하며 환급하지 않는다.
 - Extra Deck의 기물 최대 개수는 현재 기준으로 `3종류`가 아니라 `3기`다.
 
 Extra Deck의 기물은 Main Deck과 별도의 zone으로 취급한다.
 
 ---
+
+**G5 확정 (2026-09-10):** Extra는 양측 공개 zone이고 동일 타입 여러 인스턴스를 총 3기까지 허용한다. 구행은 자기 Hand/Board, 폭격기는 자기 Board의 non-King 기물만 제물로 사용한다. 중복 PieceId/상대/잘못된 zone은 거부한다. `ExtraSummon` 하나로 선택 목록 전체를 제거하고 Extra→Board를 원자 적용한다. 소환 후 해당 ID는 Extra에서 제거되며 포획·Pocket 복귀·Draw로 자동 복원되지 않는다. 소환 위치는 일반 Standard Drop의 Base ∪ Attack Map 및 target 규칙을 재사용한다. 실제 턴 전환 후에만 기존 Draw를 적용한다. G5에는 최소 게임/분석 소환 UI와 exact Record/Replay/Analysis를 포함하며 전체 HUD는 G6, Deck Code는 G7, Bot 소환 전략은 G8이다.
 
 ## 2.4 현재 Extra Deck 전용 기물
 
@@ -172,15 +180,7 @@ Extra Deck의 기물은 Main Deck과 별도의 zone으로 취급한다.
 필요한 Goal에 도달했을 때 사용자에게 결정이 필요하다고 보고하거나,
 코드 구조상 여러 선택지를 지원할 수 있도록 확장 지점만 만든다.
 
-- Hand 최대 장수
-- 상대 Hand의 기물 종류 공개 여부
-- Extra Deck의 공개 정보 범위
-- 첫 번째 턴 시작 시 추가 1장 드로우를 수행하는지
 - Pocket이 비었을 때의 정확한 UI 동작
-- Extra Deck 기본 소환 위치
-- Extra Deck 기물을 한 번 소환한 뒤의 재사용 가능 여부
-- Extra Deck에서 동일 기물을 여러 장 넣을 수 있는지에 대한 별도 제한
-- 특수 소환 비용이 정확히 동일해야 하는지에 대한 향후 예외 규칙
 - 포켓 제물을 사용하는 기물의 구체적 규칙
 - Standard 전용 봇 평가 방식
 
@@ -371,6 +371,8 @@ Legacy의 기존 배치 영역은 변하지 않는다.
 
 # 8. Goal 3 — Hand / Draw
 
+G3-A/B/C로 나누어 구현한다. G3-A 결과 및 현재 서버 공개 계약은 `standard-format-g3a-implementation.md`를 참조한다. 아래 Draw 완료 조건은 G3 전체의 조건이며 G3-A에 적용하지 않는다.
+
 ## 목적
 
 Standard에 Pocket → Hand → Board 흐름을 추가한다.
@@ -543,6 +545,8 @@ Standard를 기존 저장 및 기록 시스템에 완전히 통합한다.
 
 ---
 
+**G7 동결 (2026-09-10):** Standard 및 Extra가 남은 Legacy 초안은 DC4로 공유하고, 빈 Extra의 Legacy 출력은 기존 DC3를 유지한다. Standard의 첫 stable semantic record version은 `deck-chess-standard-1`, Legacy는 `deck-chess-1`이다. 개발 단계 Standard+Legacy-version 및 unknown version은 Replay/Analysis 전에 거부한다. 저장 DB format_version=1, GameRecord format_version=2, snapshot_version=1은 유지한다. 구현·호환성 표·검증은 `standard-format-g7-implementation.md`를 참조한다.
+
 # 13. Goal 8 — Bot / Challenge
 
 ## 목적
@@ -566,6 +570,8 @@ Standard 안정화 전에 Bot을 억지로 맞추지 않는다.
 - 소환 후 가치
 
 ---
+
+**G8-B 동결 (2026-09-10):** ChallengeDefinition은 ruleset/canonical map/Starting/Pocket/Extra를 명시한다. 기존 tempest_horde/raining_men/tempest_set은 기존 콘텐츠 그대로 Legacy이며 공개 Standard Challenge를 추가하지 않는다. Standard는 test-only definition으로 production 생성/Draw/fair Bot/ExtraSummon/privacy/Record/Replay/Analysis/clear를 검증한다. 결과와 G1~G8 최종 회귀 및 배포 전 잔여 작업은 `standard-format-g8b-implementation.md`에 기록한다.
 
 # 14. Worktree 운영 규칙
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="game-screen">
+  <div class="game-screen" :class="{ standard: isStandard }" @keydown.esc="cancelInteraction">
     <!-- Header -->
     <div class="header">
       <h2>
@@ -166,7 +166,7 @@
 
     <div class="main-layout" :class="{ locked: botThinking || botReplaying || isBotTurn }">
       <!-- Left: Pocket (White) -->
-      <div class="pocket">
+      <div v-if="!isStandard" class="pocket">
         <h4>⬜ White Pocket</h4>
         <div class="pocket-pieces">
           <div
@@ -203,6 +203,7 @@
 
       <!-- Center: Board -->
       <div class="board-column">
+        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveOtherSide" :reveal="canRevealReserve(reserveOtherSide)" :enabled="false" />
         <div class="game-clock" :class="clockClasses(topPlayer)">
           <span><b>{{ playerInfo(topPlayer).nickname }}</b><small><template v-if="playerInfo(topPlayer).public_id">@{{ playerInfo(topPlayer).public_id }} · </template>{{ topPlayer.toUpperCase() }}</small></span>
           <strong>{{ formattedClock(topPlayer) }}</strong>
@@ -222,8 +223,10 @@
           :movable-squares="visibleMovableSquares"
           :attack-squares="visibleAttackSquares"
           :attention-squares="sacrificeSelectedSquares"
+          :sacrifice-candidate-ids="summonActive ? summonSelection.candidates : []"
+          :selected-sacrifice-ids="summonActive ? summonSelection.selected : []"
           :threat-squares="visibleOpponentAttackSquares"
-          :drop-squares="visibleDropSquares"
+          :drop-squares="summonSquares.length ? summonSquares : visibleDropSquares"
           :last-move="lastMove"
           :orientation="boardOrientation"
           :ability-mode="visibleAbilityMode"
@@ -239,6 +242,13 @@
           <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
         </div>
 
+        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveActiveSide" :reveal="canRevealReserve(reserveActiveSide)"
+          :enabled="canUseSummonControls && state.phase === 'playing'" :selected-id="selectedPocketPieceId"
+          :summoning="summonActive" :candidates="summonSelection.candidates" :selected-sacrifices="summonSelection.selected"
+          :disabled-reason="controlTurnLabel" @select="onHandClick" />
+        <div v-if="isStandard" class="interaction-status" role="status">
+          <span>{{ interactionLabel }}</span><button v-if="interactionMode !== 'None'" type="button" @click="cancelInteraction">선택 취소</button>
+        </div>
         <div class="board-tools">
           <button
             class="threat-toggle"
@@ -282,7 +292,7 @@
       </div>
 
       <!-- Right: Pocket (Black) -->
-      <div class="pocket">
+      <div v-if="!isStandard" class="pocket">
         <h4>⬛ Black Pocket</h4>
         <div class="pocket-pieces">
           <div
@@ -318,9 +328,15 @@
       </div>
 
       <aside class="game-sidebar">
+        <ExtraSummonPanel ref="summonPanel" :state="viewState" :enabled="canUseSummonControls && state.phase === 'playing'"
+          :disabled-reason="controlTurnLabel" :load-options="loadSummonOptions" :submit="submitSummon"
+          @targets="summonSquares = $event" @selection="summonSelection = $event" @active="onSummonActive" />
+        <p v-if="isStandard" class="draw-info">턴 시작 드로우는 자동으로 Hand에 반영됩니다. {{ playMode === 'single' ? '로컬 2인은 양측 reserve를 확인할 수 있습니다.' : '상대는 Hand 장수만 공개됩니다.' }}</p>
         <h3>기보</h3>
         <div class="live-notation">
-          <div v-for="entry in liveNotation" :key="entry.ply"><span>{{ entry.ply }}. {{ entry.text }}</span></div>
+          <div v-for="entry in liveNotation" :key="entry.ply"><span>{{ entry.ply }}. {{ entry.text }}</span>
+            <details v-if="entry.detail"><summary>소환 상세</summary>{{ entry.detail }}</details>
+          </div>
           <p v-if="!liveNotation.length">아직 착수 기록이 없습니다.</p>
         </div>
         <details v-if="debugBotMetrics" class="bot-debug-panel" open>
@@ -395,7 +411,7 @@
       </button>
     </div>
 
-    <div v-if="error || botError" class="error-banner">{{ error || botError }}</div>
+    <div v-if="error || botError" class="error-banner" role="alert">{{ error || botError }}</div>
   </div>
 </template>
 
@@ -420,6 +436,11 @@ import type {
 import { abilityActionTargetsSquare, abilitySelectionSquares, isImmediateAbilityAction, moveOptionTargets, pendingForcedLandingPieceId, usesMoveSubmission } from '../moveOptionUi'
 import { api } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
+import ExtraSummonPanel from './ExtraSummonPanel.vue'
+import StandardReservePanel from './StandardReservePanel.vue'
+import { gameplayKey, gameActionError } from '../standardGameUi'
+import { summonDetail } from '../replayNotation'
+import type { ExtraSummonAction } from '../types/game'
 import Board from './Board.vue'
 import { applyTimelineFrame } from '../composables/useActionTimeline'
 import { CLOCK_URGENCY_THRESHOLDS_MS, timeControlLabel } from '../timeControls'
@@ -449,6 +470,8 @@ const emit = defineEmits<{
   replay: []
 }>()
 
+let selectionGeneration = 0
+const actionSubmitting = ref(false)
 const selectedPieceId = ref<string | null>(null)
 const selectedPocketPieceId = ref<string | null>(null)
 const abilityMode = ref(false)
@@ -517,10 +540,16 @@ const dropOptionsCache = new Map<string, DropAction[]>()
 const dropOptionsRequests = new Map<string, Promise<DropAction[]>>()
 
 const viewState = computed(() => botReplayState.value ?? props.state)
-const topPlayer = computed<PlayerId>(() => props.localPlayer ? otherPlayer(props.localPlayer) : 'black')
-const bottomPlayer = computed<PlayerId>(() => props.localPlayer ?? 'white')
+const isStandard = computed(() => props.state.ruleset === 'standard')
+const reserveActiveSide = computed<PlayerId>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? 'white')
+const reserveOtherSide = computed<PlayerId>(() => otherPlayer(reserveActiveSide.value))
+function canRevealReserve(side: PlayerId) { return props.playMode === 'single' || side === props.localPlayer }
+const positionKey = computed(() => gameplayKey(props.state))
+const topPlayer = computed<PlayerId>(() => isStandard.value && props.playMode === 'single' ? otherPlayer(viewState.value.current_player) : props.localPlayer ? otherPlayer(props.localPlayer) : 'black')
+const bottomPlayer = computed<PlayerId>(() => isStandard.value && props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? 'white')
 const liveNotation = computed(() => viewState.value.history.map((entry, index) => ({
   ply: index + 1,
+  detail: summonDetail(entry.action, viewState.value),
   text: viewState.value.record_notation?.[index]
     ? formatNotation(viewState.value.record_notation[index])
     : formatLiveAction(entry.action, viewState.value, entry.turn_number),
@@ -557,6 +586,40 @@ const controlContext = computed(() => ({
   localPlayer: props.localPlayer,
   botPlayer: props.botPlayer,
 }))
+const summonSquares = ref<Square[]>([])
+const summonPanel = ref<InstanceType<typeof ExtraSummonPanel> | null>(null)
+const summonActive = ref(false)
+const summonSelection = ref<{ candidates: string[]; selected: string[]; stage: 'sacrifice' | 'target' }>({ candidates: [], selected: [], stage: 'sacrifice' })
+const interactionMode = computed(() => summonActive.value ? (summonSelection.value.stage === 'target' ? 'ExtraSummonTarget' : 'ExtraSummonSacrifice')
+  : abilityMode.value || airdropOpen.value || sacrificeOpen.value ? 'Ability' : selectedPocketPieceId.value ? 'HandDrop' : selectedPieceId.value ? 'Move' : 'None')
+const interactionLabel = computed(() => ({ None: '기물을 선택하세요. Hand → 일반 착수 · Extra → 특수 소환', HandDrop: 'Hand 착수 · 표시된 보드 위치를 선택하세요.', ExtraSummonSacrifice: '특수 소환 · 점선 후보에서 제물을 선택하세요.', ExtraSummonTarget: '특수 소환 · 표시된 보드 위치를 선택하고 소환을 확정하세요.', Ability: '능력 사용 · 표시된 대상을 선택하세요.', Move: '이동 · 표시된 보드 위치를 선택하세요.' })[interactionMode.value])
+function resetOrdinaryInteraction() {
+  cancelPromotion(); airdropOpen.value = false; airdropDraft.value = []; airdropOptions.value = null
+  sacrificeOpen.value = false; sacrificeSelectedIds.value = []; sacrificeOptions.value = null
+  clearSelection()
+}
+function cancelInteraction() { resetOrdinaryInteraction(); summonPanel.value?.cancel() }
+function onSummonActive(active: boolean) {
+  summonActive.value = active
+  if (active) resetOrdinaryInteraction()
+}
+async function onHandClick(id: string) {
+  if (summonActive.value) { await summonPanel.value?.toggle(id); return }
+  if (!canUsePlayerControls.value || !isStandard.value) return
+  if (selectedPocketPieceId.value === id) { clearSelection(); return }
+  resetOrdinaryInteraction(); await selectPocketPiece(id)
+}
+function loadSummonOptions(id: string, selected: string[]) { return api.getSummonOptions(props.state.id, id, selected) }
+async function submitSummon(action: ExtraSummonAction) {
+  if (!canUseSummonControls.value) throw new Error('현재 차례에 소환할 수 없습니다.')
+  const { player_id: _player, ...intent } = action
+  actionSubmitting.value = true
+  try {
+    const next = await api.submitAction(props.state.id, intent)
+    emit('stateUpdate', next)
+    clearSelection()
+  } finally { actionSubmitting.value = false }
+}
 const canControlTurn = computed(() => canControlCurrentTurn(controlContext.value))
 const controlTurnLabel = computed(() => turnControlLabel(controlContext.value))
 const isBotTurn = computed(() => Boolean(
@@ -564,7 +627,8 @@ const isBotTurn = computed(() => Boolean(
   && props.state.current_player === props.botPlayer
   && props.state.phase === 'playing',
 ))
-const canUsePlayerControls = computed(() => canControlTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value)
+const canUseSummonControls = computed(() => canControlTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value && !actionSubmitting.value)
+const canUsePlayerControls = computed(() => canUseSummonControls.value && !summonActive.value && props.state.phase === 'playing')
 const visibleSelectedPieceId = computed(() => (
   botReplaying.value ? botPreviewSelectedPieceId.value : selectedPieceId.value
 ))
@@ -836,7 +900,7 @@ async function loadOpponentAttacks() {
     if (requestId === opponentAttackRequestSerial) {
       opponentAttacksVisible.value = false
       opponentAttackSquares.value = []
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
     }
   } finally {
     if (requestId === opponentAttackRequestSerial) {
@@ -872,10 +936,15 @@ function clearBotReplay() {
 }
 
 function actionLabel(action: AiAction): string {
+  if (action.type === 'extra_summon') {
+    const piece = props.state.pieces[action.extra_piece_id]
+    const name = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? '기물'
+    return `${name} Extra 소환 (제물 ${action.sacrifice_piece_ids.length}기): ${action.target_square.file + 1}, ${action.target_square.rank + 1}`
+  }
   const piece = props.state.pieces[action.piece_id]
-  const pieceName = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? action.piece_id
+  const pieceName = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? (isStandard.value ? '기물' : action.piece_id)
   if (action.type === 'drop') {
-    return `${pieceName} 포켓 기물 놓기: ${action.to.file + 1}, ${action.to.rank + 1}`
+    return `${pieceName} ${isStandard.value ? 'Hand 착수' : '포켓 기물 놓기'}: ${action.to.file + 1}, ${action.to.rank + 1}`
   }
   if (action.type === 'ability') {
     const target = action.to ? `: ${action.to.file + 1}, ${action.to.rank + 1}` : ''
@@ -1030,6 +1099,8 @@ function previewBotAction(action: AiAction) {
     }
   } else if (action.type === 'drop') {
     botPreviewDropSquares.value = [action.to]
+  } else if (action.type === 'extra_summon') {
+    botPreviewDropSquares.value = [action.target_square]
   } else if (action.to) {
     botPreviewSelectedPieceId.value = action.piece_id
     botPreviewMovableSquares.value = [action.to]
@@ -1042,7 +1113,7 @@ async function replayBotTurn(
   runId: number,
   timeline?: ActionTimelineFrame[],
 ) {
-  if (actions.length === 0) {
+  if (actions.length === 0 || (isStandard.value && timeline?.length !== actions.length)) {
     emit('stateUpdate', finalState)
     return
   }
@@ -1090,8 +1161,8 @@ async function runBotTurn() {
       props.botDifficulty ?? 'normal',
     )
     if (runId !== botRunSerial) return
-    lastBotStats.value = response.stats
-    if (props.debugBotMetrics) {
+    lastBotStats.value = response.stats ?? null
+    if (props.debugBotMetrics && response.stats) {
       botDebugTurns.value = [...botDebugTurns.value, {
         turnNumber: props.state.turn_number,
         action: response.actions.map(actionLabel).join(' + '),
@@ -1100,8 +1171,8 @@ async function runBotTurn() {
     }
     await replayBotTurn(response.actions, response.game_state, runId, response.timeline)
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e)
-    if (message.includes('현재 턴 플레이어와 bot_player_id가 일치하지 않습니다.')) {
+    const message = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
+    if (e instanceof Error && e.message === '현재 턴 플레이어와 bot_player_id가 일치하지 않습니다.') {
       try {
         const syncedState = await api.getGame(props.state.id)
         emit('stateUpdate', syncedState)
@@ -1159,6 +1230,12 @@ watch(
     if (opponentAttacksVisible.value) void loadOpponentAttacks()
   },
 )
+
+watch(positionKey, () => {
+  cancelInteraction()
+  pieceOptionsCache.clear(); pieceOptionsRequests.clear(); dropOptionsCache.clear(); dropOptionsRequests.clear()
+})
+watch(() => props.localPlayer, cancelInteraction)
 
 watch(
   () => pendingForcedLandingPieceId(props.state),
@@ -1275,6 +1352,7 @@ function cancelPromotion() {
 }
 
 function clearSelection() {
+  selectionGeneration++
   overlapSelectionPieceIds.value = []
   selectedPieceId.value = null
   selectedPocketPieceId.value = null
@@ -1317,9 +1395,7 @@ async function chooseOverlappingPiece(pieceId: string) {
 
 function actionCacheKey(pieceId?: string, abilityId?: string | null): string {
   return [
-    props.state.id,
-    props.state.current_player,
-    props.state.turn_number,
+    positionKey.value,
     pieceId ?? '',
     abilityId ?? '',
   ].join(':')
@@ -1369,6 +1445,7 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
     return null
   }
 
+  const ticket = ++selectionGeneration
   selectedPieceId.value = pieceId
   selectedPocketPieceId.value = null
   abilityMode.value = false
@@ -1380,7 +1457,7 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
 
   try {
     const options = await loadPieceOptions(pieceId)
-    if (selectedPieceId.value !== pieceId || abilityMode.value) return options
+    if (ticket !== selectionGeneration || selectedPieceId.value !== pieceId || abilityMode.value) return null
 
     const stateUpdateStarted = profileStarted !== null ? performance.now() : null
     legalTargetSquares.value = options.legalTargets
@@ -1408,8 +1485,9 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
       })
     }
     return options
-  } catch {
-    if (selectedPieceId.value === pieceId) {
+  } catch (cause) {
+    if (ticket === selectionGeneration && isStandard.value) error.value = gameActionError(cause)
+    if (ticket === selectionGeneration && selectedPieceId.value === pieceId) {
       legalTargetSquares.value = []
       movableSquares.value = []
       attackSquares.value = []
@@ -1419,51 +1497,57 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
 }
 
 async function toggleAbilityMode(abilityId: string) {
-  const ability = selectedPieceAbilities.value.find(ability => ability.id === abilityId)
-  if (!selectedPieceId.value || !ability || abilityUnavailableReason(ability)) return
+  if (!canUsePlayerControls.value) return
+  const ticket = ++selectionGeneration
+  try {
+    const ability = selectedPieceAbilities.value.find(ability => ability.id === abilityId)
+    if (!selectedPieceId.value || !ability || abilityUnavailableReason(ability)) return
 
-  if (abilityMode.value && activeAbilityId.value === abilityId) {
+    if (abilityMode.value && activeAbilityId.value === abilityId) {
+      const pieceId = selectedPieceId.value
+      abilityMode.value = false
+      activeAbilityId.value = null
+      const options = await loadPieceOptions(pieceId)
+      if (ticket === selectionGeneration && !abilityMode.value && selectedPieceId.value === pieceId) {
+        legalTargetSquares.value = options.legalTargets
+        movableSquares.value = options.movable
+        attackSquares.value = options.captures
+      }
+      return
+    }
+
+    abilityMode.value = true
+    activeAbilityId.value = abilityId
+    legalTargetSquares.value = []
+    movableSquares.value = []
+    attackSquares.value = []
+
     const pieceId = selectedPieceId.value
-    abilityMode.value = false
-    activeAbilityId.value = null
-    const options = await loadPieceOptions(pieceId)
-    if (!abilityMode.value && selectedPieceId.value === pieceId) {
-      legalTargetSquares.value = options.legalTargets
-      movableSquares.value = options.movable
+    const options = await loadPieceOptions(pieceId, abilityId)
+    if (ticket !== selectionGeneration || summonActive.value) return
+    if (abilityId === 'airdrop' && options.abilityActions.length > 0) {
+      airdropOptions.value = options
+      airdropDraft.value = []
+      airdropSelectedPieceId.value = airdropEligiblePieceIds.value[0] ?? null
+      airdropOpen.value = true
+    }
+    const immediateActions = options.abilityActions.filter(isImmediateAbilityAction)
+    const actorSquare = props.state.pieces[pieceId]?.current_square
+    const selfTargets = abilitySelectionSquares(options.abilityActions, actorSquare)
+    if (immediateActions.length === 1 && selfTargets.length === 0) {
+      await submitImmediateAbility(immediateActions[0])
+      return
+    }
+    if (selectedPieceId.value === pieceId && abilityMode.value && activeAbilityId.value === abilityId) {
+      legalTargetSquares.value = [...options.legalTargets, ...selfTargets]
+      movableSquares.value = [...options.movable, ...selfTargets]
       attackSquares.value = options.captures
     }
-    return
-  }
-
-  abilityMode.value = true
-  activeAbilityId.value = abilityId
-  legalTargetSquares.value = []
-  movableSquares.value = []
-  attackSquares.value = []
-
-  const pieceId = selectedPieceId.value
-  const options = await loadPieceOptions(pieceId, abilityId)
-  if (abilityId === 'airdrop' && options.abilityActions.length > 0) {
-    airdropOptions.value = options
-    airdropDraft.value = []
-    airdropSelectedPieceId.value = airdropEligiblePieceIds.value[0] ?? null
-    airdropOpen.value = true
-  }
-  const immediateActions = options.abilityActions.filter(isImmediateAbilityAction)
-  const actorSquare = props.state.pieces[pieceId]?.current_square
-  const selfTargets = abilitySelectionSquares(options.abilityActions, actorSquare)
-  if (immediateActions.length === 1 && selfTargets.length === 0) {
-    await submitImmediateAbility(immediateActions[0])
-    return
-  }
-  if (selectedPieceId.value === pieceId && abilityMode.value && activeAbilityId.value === abilityId) {
-    legalTargetSquares.value = [...options.legalTargets, ...selfTargets]
-    movableSquares.value = [...options.movable, ...selfTargets]
-    attackSquares.value = options.captures
-  }
+  } catch (cause) { if (ticket === selectionGeneration) { error.value = gameActionError(cause); clearSelection() } }
 }
 
 async function submitImmediateAbility(action: import('../types/game').AbilityAction) {
+  actionSubmitting.value = true
   try {
     const newState = await api.submitAction(props.state.id, {
       type: 'ability',
@@ -1472,8 +1556,9 @@ async function submitImmediateAbility(action: import('../types/game').AbilityAct
     })
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
   } finally {
+    actionSubmitting.value = false
     clearSelection()
   }
 }
@@ -1512,16 +1597,19 @@ function cancelAirdrop() {
 }
 
 async function confirmAirdrop() {
+  if (!canUsePlayerControls.value) return
   const pieceId = selectedPieceId.value
   if (!pieceId || airdropDraft.value.length === 0) return
+  actionSubmitting.value = true
   try {
     const newState = await api.submitAction(props.state.id, {
       type: 'ability', piece_id: pieceId, ability_id: 'airdrop', deployments: airdropDraft.value,
     })
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
   } finally {
+    actionSubmitting.value = false
     airdropOpen.value = false
     airdropDraft.value = []
     airdropOptions.value = null
@@ -1552,10 +1640,9 @@ async function loadDropOptions(): Promise<DropAction[]> {
 
 async function selectPocketPiece(pieceId: string): Promise<Square[]> {
   const piece = props.state.pieces[pieceId]
-  if (!piece || piece.owner !== props.state.current_player) {
-    clearSelection()
-    return []
-  }
+  const source = isStandard.value ? props.state.players[props.state.current_player]?.deck.hand_pieces ?? [] : props.state.players[props.state.current_player]?.deck.pocket_pieces ?? []
+  if (!piece || piece.owner !== props.state.current_player || !source.includes(pieceId)) return []
+  const ticket = ++selectionGeneration
 
   selectedPieceId.value = null
   selectedPocketPieceId.value = pieceId
@@ -1569,12 +1656,13 @@ async function selectPocketPiece(pieceId: string): Promise<Square[]> {
   try {
     const drops = await loadDropOptions()
     const targets = drops.filter(drop => drop.piece_id === pieceId).map(drop => drop.to)
-    if (selectedPocketPieceId.value === pieceId) {
+    if (ticket === selectionGeneration && selectedPocketPieceId.value === pieceId) {
       dropSquares.value = targets
     }
-    return targets
-  } catch {
-    if (selectedPocketPieceId.value === pieceId) {
+    return ticket === selectionGeneration ? targets : []
+  } catch (cause) {
+    if (ticket === selectionGeneration) error.value = gameActionError(cause)
+    if (ticket === selectionGeneration && selectedPocketPieceId.value === pieceId) {
       dropSquares.value = []
     }
     return []
@@ -1582,6 +1670,8 @@ async function selectPocketPiece(pieceId: string): Promise<Square[]> {
 }
 
 async function submitMove(pieceId: string, to: Square) {
+  if (!canUsePlayerControls.value) return
+  const position = positionKey.value
   const fromPiece = props.state.pieces[pieceId]
   if (!fromPiece?.current_square || sameSquare(fromPiece.current_square, to)) {
     clearSelection()
@@ -1594,6 +1684,7 @@ async function submitMove(pieceId: string, to: Square) {
   const options = selectedPieceId.value === pieceId && legalTargetSquares.value.length > 0
     ? await loadPieceOptions(pieceId, moveAbilityId)
     : await selectBoardPiece(pieceId)
+  if (position !== positionKey.value || !canUsePlayerControls.value || selectedPieceId.value !== pieceId) return
   if (!options || !isLegalSquare(to, options.legalTargets)) {
     clearSelection()
     return
@@ -1613,6 +1704,7 @@ async function submitMove(pieceId: string, to: Square) {
     promotion = chosen
   }
 
+  actionSubmitting.value = true
   try {
     const action: SubmitMoveAction = {
       type: 'move',
@@ -1624,16 +1716,20 @@ async function submitMove(pieceId: string, to: Square) {
     const newState = await api.submitAction(props.state.id, action)
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
   } finally {
+    actionSubmitting.value = false
     clearSelection()
   }
 }
 
 async function submitAbility(pieceId: string, to: Square) {
+  if (!canUsePlayerControls.value) return
+  const ticket = selectionGeneration
   const abilityId = activeAbilityId.value
   if (!abilityId) return
   const options = await loadPieceOptions(pieceId, abilityId)
+  if (ticket !== selectionGeneration || !canUsePlayerControls.value) return
   if (abilityId === 'sacrifice') {
     sacrificeOptions.value = options
     sacrificeSelectedIds.value = []
@@ -1655,6 +1751,7 @@ async function submitAbility(pieceId: string, to: Square) {
     if (!Number.isInteger(index) || !candidates[index]) return
     chosen = candidates[index]
   }
+  actionSubmitting.value = true
   try {
     const newState = await api.submitAction(props.state.id, {
       type: 'ability', piece_id: pieceId, ability_id: abilityId,
@@ -1662,8 +1759,8 @@ async function submitAbility(pieceId: string, to: Square) {
       pocket_piece_id: chosen.pocket_piece_id, to: chosen.to,
     })
     emit('stateUpdate', newState)
-  } catch (e: unknown) { error.value = e instanceof Error ? e.message : String(e) }
-  finally { clearSelection() }
+  } catch (e: unknown) { error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e) }
+  finally { actionSubmitting.value = false; clearSelection() }
 }
 
 function toggleSacrificeTarget(pieceId: string) {
@@ -1684,8 +1781,10 @@ function cancelSacrifice() {
 }
 
 async function confirmSacrifice() {
+  if (!canUsePlayerControls.value) return
   const pieceId = selectedPieceId.value
   if (!pieceId || sacrificeSelectedIds.value.length === 0) return
+  actionSubmitting.value = true
   try {
     const newState = await api.submitAction(props.state.id, {
       type: 'ability',
@@ -1695,8 +1794,9 @@ async function confirmSacrifice() {
     })
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
   } finally {
+    actionSubmitting.value = false
     sacrificeOpen.value = false
     sacrificeSelectedIds.value = []
     sacrificeOptions.value = null
@@ -1705,14 +1805,18 @@ async function confirmSacrifice() {
 }
 
 async function submitDrop(pieceId: string, to: Square) {
+  if (!canUsePlayerControls.value) return
+  const position = positionKey.value
   const targets = selectedPocketPieceId.value === pieceId && dropSquares.value.length > 0
     ? dropSquares.value
     : await selectPocketPiece(pieceId)
+  if (position !== positionKey.value || selectedPocketPieceId.value !== pieceId || !canUsePlayerControls.value) return
   if (!isLegalSquare(to, targets)) {
     clearSelection()
     return
   }
 
+  actionSubmitting.value = true
   try {
     const action: SubmitDropAction = {
       type: 'drop',
@@ -1722,13 +1826,15 @@ async function submitDrop(pieceId: string, to: Square) {
     const newState = await api.submitAction(props.state.id, action)
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = gameActionError(e)
   } finally {
+    actionSubmitting.value = false
     clearSelection()
   }
 }
 
 async function onSquareClick(sq: Square) {
+  if (summonActive.value) { summonPanel.value?.chooseBoardSquare(sq); return }
   error.value = null
   if (promotionRequest.value) return
   if (!canUsePlayerControls.value) {
@@ -1780,6 +1886,7 @@ async function onSquareClick(sq: Square) {
 }
 
 async function onPocketClick(pieceId: string) {
+  if (isStandard.value) return
   error.value = null
   if (!canUsePlayerControls.value) {
     error.value = blockedControlMessage(controlContext.value)
@@ -1804,6 +1911,7 @@ function onBoardPieceDragStart(pieceId: string) {
 }
 
 function onBoardPieceClick(pieceId: string) {
+  if (summonActive.value) { summonPanel.value?.chooseBoardPiece(pieceId); return }
   error.value = null
   if (!canUsePlayerControls.value) {
     clearSelection()
@@ -1825,6 +1933,7 @@ function onBoardPieceClick(pieceId: string) {
 }
 
 async function onSquareDrop(sq: Square | null, pieceId: string) {
+  if (summonActive.value) return
   error.value = null
   if (!canUsePlayerControls.value || !sq) {
     clearSelection()
@@ -1837,6 +1946,7 @@ async function onSquareDrop(sq: Square | null, pieceId: string) {
     return
   }
 
+  if (isStandard.value && piece.in_pocket) return
   if (piece.in_pocket || draggedPocketPieceId.value === pieceId) {
     await submitDrop(pieceId, sq)
   } else {
@@ -1845,6 +1955,7 @@ async function onSquareDrop(sq: Square | null, pieceId: string) {
 }
 
 function onPocketDragStart(event: DragEvent, pieceId: string) {
+  if (isStandard.value) { event.preventDefault(); return }
   error.value = null
   if (!canUsePlayerControls.value) {
     event.preventDefault()
@@ -1879,7 +1990,7 @@ async function onResign() {
     clearSelection()
     emit('stateUpdate', newState)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e)
   }
 }
 </script>
@@ -2270,4 +2381,16 @@ async function onResign() {
     text-align: left;
   }
 }
+
+.standard .main-layout { display:grid; grid-template-columns:minmax(0, 680px) minmax(280px, 360px); justify-content:center; }
+.standard .board-column { width:100%; }
+.standard .board-tools, .standard .selected-piece-panel, .standard .game-clock, .standard :deep(.board) { width:100%; box-sizing:border-box; }
+.standard :deep(.board-wrapper) { width:100%; }
+.standard .game-sidebar { width:auto; min-width:0; max-height:none; }
+.interaction-status { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; font-size:13px; color:#dce6f3; }
+.interaction-status button { flex-shrink:0; padding:8px; cursor:pointer; }
+.draw-info { font-size:12px; color:#b6c2d2; }
+.standard .live-notation { max-height:300px; overflow:auto; overflow-wrap:anywhere; }
+@media (max-width: 1000px) { .standard .main-layout { grid-template-columns:minmax(0, 680px); } }
+@media (max-width: 480px) { .game-screen.standard { padding:6px; } .standard .header, .standard .turn-info { flex-wrap:wrap; gap:6px; } }
 </style>

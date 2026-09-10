@@ -95,7 +95,29 @@ test('directional built-in engine ids become canonical neutral Deck Code ids', (
 test('Standard replay decks cannot silently export as Legacy DC3', () => {
   const record = replayRecord()
   record.initial_state.ruleset = 'standard'
-  assert.equal(frozenDeckCodeSource(record, 'white'), null)
+  const source = frozenDeckCodeSource(record, 'white')!
+  assert.equal(source.ruleset, 'standard')
+  assert.match(encodeDeckCode(source), /^DC4\./u)
   record.initial_state.ruleset = 'future' as never
+  assert.equal(frozenDeckCodeSource(record, 'white'), null)
+})
+
+test('G7 frozen Standard decks retain original Pocket and Extra-only custom references', () => {
+  const record = replayRecord('king')
+  record.initial_state.ruleset = 'standard'
+  const identity = { custom_piece_id: 'airship', version: 7, content_hash: 'sha256_frozen', exposed_piece_key: 'captain' }
+  record.decks.white.extra = [
+    { piece_type_id: 'guhang', piece_name: '구행', count: 2 },
+    { piece_type_id: 'old-custom-runtime', piece_name: 'Old', count: 1, custom_piece: identity },
+  ]
+  const source = frozenDeckCodeSource(record, 'white')!
+  assert.deepEqual(source.extra, ['guhang', 'guhang', 'custom:airship:v7:captain'])
+  assert.equal(source.pocket.rook, 1)
+  assert.equal(source.customPieces!.length, 1)
+  const decoded = decodeDeckCode(encodeDeckCode(source))
+  assert.ok(decoded.ok)
+  assert.equal(decoded.value.ruleset, 'standard')
+  assert.deepEqual(decoded.value.extra, ['custom:airship:v7:captain', 'guhang', 'guhang'])
+  record.decks.white.extra[0].count = Number.MAX_SAFE_INTEGER
   assert.equal(frozenDeckCodeSource(record, 'white'), null)
 })

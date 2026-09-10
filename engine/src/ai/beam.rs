@@ -95,7 +95,7 @@ enum OptionalCategory {
 fn optional_category(state: &GameState, action: &AiAction) -> OptionalCategory {
     match action {
         AiAction::Move(_) => OptionalCategory::Board,
-        AiAction::Drop(_) => OptionalCategory::QuietDrop,
+        AiAction::Drop(_) | AiAction::ExtraSummon(_) => OptionalCategory::QuietDrop,
         AiAction::Ability(ability) => {
             let source_is_in_pocket = state
                 .pieces
@@ -188,11 +188,15 @@ enum CanonicalActionKey {
 /// Collapse only actions whose interchangeable pocket pieces have identical
 /// rule-relevant state. Board-piece moves retain their concrete identity.
 pub(crate) fn canonicalize_actions(state: &GameState, actions: Vec<AiAction>) -> Vec<AiAction> {
+    // Standard retains exact reserve identities: custom effects may reference IDs.
+    if state.ruleset == crate::types::DeckRuleset::Standard {
+        return actions;
+    }
     let mut seen = HashSet::new();
     let mut unique = Vec::with_capacity(actions.len());
     for action in actions {
         let key = match &action {
-            AiAction::Move(_) => {
+            AiAction::Move(_) | AiAction::ExtraSummon(_) => {
                 unique.push(action);
                 continue;
             }
@@ -322,6 +326,11 @@ pub(crate) fn tactical_impact(state: &GameState, action: &AiAction) -> TacticalI
                 promotion: false,
             }
         }
+        AiAction::ExtraSummon(summon) => {
+            let next =
+                apply_canonical_action(state.clone(), TurnAction::ExtraSummon(summon.clone()));
+            transition_impact(state, &next, &summon.player_id)
+        }
         AiAction::Ability(ability) => {
             let next = apply_canonical_action(state.clone(), TurnAction::Ability(ability.clone()));
             transition_impact(state, &next, &ability.player_id)
@@ -406,6 +415,7 @@ pub(crate) fn select_beam_actions(
                 AiAction::Move(action) => TurnAction::Move(action.clone()),
                 AiAction::Drop(action) => TurnAction::Drop(action.clone()),
                 AiAction::Ability(action) => TurnAction::Ability(action.clone()),
+                AiAction::ExtraSummon(action) => TurnAction::ExtraSummon(action.clone()),
             };
             let next = apply_canonical_action(state.clone(), turn_action);
             !has_immediate_king_capture(&next, &threatened_player)
@@ -491,6 +501,8 @@ mod tests {
                         deck: Deck {
                             player_id: id.into(),
                             starting_pieces: Vec::new(),
+                            hand_pieces: Vec::new(),
+                            extra_deck_pieces: Vec::new(),
                             pocket_pieces: Vec::new(),
                             score_limit: 1_000,
                             total_score: 0,

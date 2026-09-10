@@ -11,7 +11,7 @@
       <section class="replay-board-area">
         <div class="replay-player"><div><strong>{{ record.players.black.nickname }}</strong><small v-if="record.players.black.public_id">@{{ record.players.black.public_id }}</small></div><b>{{ clockText('black') }}</b></div>
         <div class="replay-board-readonly" aria-label="읽기 전용 리플레이 보드">
-          <Board ref="boardRef" :board="state.board" :pieces="state.pieces" :definitions="state.piece_definitions" :selected-piece-id="selectedPieceId" :movable-squares="movableSquares" :attack-squares="attackSquares" :threat-squares="[]" :drop-squares="dropSquares" :last-move="lastMove" orientation="white" :ability-mode="false" @square-click="onSquareClick" @piece-click="onBoardPieceClick" @piece-drag-start="selectPiece" @square-drop="onSquareDrop" />
+          <Board ref="boardRef" :board="state.board" :pieces="state.pieces" :definitions="state.piece_definitions" :selected-piece-id="selectedPieceId" :movable-squares="movableSquares" :attack-squares="attackSquares" :threat-squares="[]" :sacrifice-candidate-ids="summonActive ? summonSelection.candidates : []" :selected-sacrifice-ids="summonActive ? summonSelection.selected : []" :drop-squares="summonSquares.length ? summonSquares : dropSquares" :last-move="lastMove" orientation="white" :ability-mode="false" @square-click="onSquareClick" @piece-click="onBoardPieceClick" @piece-drag-start="selectPiece" @square-drop="onSquareDrop" />
         </div>
         <div class="replay-player"><div><strong>{{ record.players.white.nickname }}</strong><small v-if="record.players.white.public_id">@{{ record.players.white.public_id }}</small></div><b>{{ clockText('white') }}</b></div>
         <section class="replay-controls" aria-label="리플레이 재생 조작">
@@ -24,27 +24,40 @@
           </div>
         </section>
         <section v-if="canManage" class="analysis-tools" aria-label="분석 착수">
-          <p>기물을 고르고 표시된 칸에 두면 현재 수순에서 분기합니다. 저장 중에도 계속 둘 수 있습니다.</p>
-          <div v-if="pocketPieces.length" class="analysis-pocket"><small>{{ state.current_player === 'white' ? '백' : '흑' }} 포켓</small><button v-for="piece in pocketPieces" :key="piece.id" :class="{ active: selectedPieceId === piece.id }" @click="selectPiece(piece.id)">{{ state.piece_definitions[piece.type_id]?.name ?? piece.type_id }}</button></div>
+          <p>기물을 고르고 표시된 칸에 두면 현재 수순에서 분기합니다. {{ isStandard ? '저장이 완료되면 다음 수를 둘 수 있습니다.' : '저장 중에도 계속 둘 수 있습니다.' }}</p>
+          <div v-if="!isStandard && pocketPieces.length" class="analysis-pocket"><small>{{ state.current_player === 'white' ? '백' : '흑' }} {{ isStandard ? '손패' : '포켓' }}</small><button v-for="piece in pocketPieces" :key="piece.id" :class="{ active: selectedPieceId === piece.id }" @click="selectPiece(piece.id)">{{ state.piece_definitions[piece.type_id]?.name ?? piece.type_id }}</button></div>
           <div v-if="immediateAbilities.length" class="analysis-pocket"><small>즉시 능력</small><button v-for="action in immediateAbilities" :key="`${action.piece_id}:${action.ability_id}`" @click="playAnalysisAction(action)">{{ action.ability_id }}</button></div>
+          <p v-if="actionPreviews.some(preview => preview.draw_pending)">드로우가 필요한 후보는 이 수 이후 무작위 드로우가 발생합니다. Pocket이 비어 있으면 0기이며, 분기를 저장할 때 결과가 확정됩니다.</p>
+          <button v-if="selectedPieceId && !committing" @click="clearSelection">선택 취소</button>
+          <p v-if="committing">분기를 저장하고 드로우 결과를 확정하는 중입니다.</p>
           <p v-if="analysisError" class="error">{{ analysisError }}</p>
         </section>
       </section>
       <aside class="replay-sidebar">
+        <ExtraSummonPanel ref="summonPanel" :state="state" :enabled="canManage && !committing" :load-options="loadSummonOptions" :submit="playAnalysisAction" @selection="summonSelection = $event" @targets="summonSquares = $event" @active="summonActive = $event; clearSelection()" />
+        <p v-if="currentSummonDetail">{{ currentSummonDetail }}</p>
+        <section v-if="isStandard && record.ended_at_ms != null" aria-label="완료 대국 손패와 드로우">
+          <StandardReservePanel v-for="side in replaySides" :key="side" :state="state" :side="side" :reveal="true"
+            :enabled="canManage && !committing && side === state.current_player" :selected-id="selectedPieceId"
+            :summoning="summonActive" :candidates="summonSelection.candidates" :selected-sacrifices="summonSelection.selected"
+            @select="id => summonActive ? summonPanel?.toggle(id) : selectPiece(id)" />
+          <h3>현재 시점 드로우</h3>
+          <p v-for="(draw, index) in currentDraws.filter(draw => draw.piece_ids.length)" :key="index">{{ formatDraw(draw) }} · {{ draw.timing === 'initial' ? '초기' : '턴 시작' }}<small class="draw-identities">{{ draw.piece_ids.map(resolvedPiece).join(', ') }}</small></p>
+        </section>
         <section><h3>덱</h3><div class="deck-summary" v-for="side in replaySides" :key="side">
           <strong>{{ side === 'white' ? '백' : '흑' }} · {{ record.decks[side].deck_name }}</strong>
           <small>{{ deploymentText(side) }}</small><small>{{ pocketText(side) }}</small>
           <button class="btn-secondary" :disabled="!canCopyDeck(side)" @click="copyDeck(side)">{{ deckCopyLabel(side) }}</button>
         </div></section>
         <section><h3>기보</h3><div class="notation-list">
-          <button class="notation-row" :class="{ active: !activeTree && ply === 0 }" @click="go(0)">0. 시작 위치</button>
+          <button class="notation-row" :class="{ active: !activeTree && ply === 0 }" @click="go(0)">0. 시작 위치 <small>{{ drawSummary(record.initial_draws) }}</small></button>
           <article v-for="tree in treesAtPly(0)" :key="tree.id" class="variation-branch">
             <div class="variation-heading"><button @click="openNode(tree, tree.nodes[0])">{{ tree.name }}</button><span><button title="이름 변경" @click="renameTree(tree)">✎</button><button title="분기 삭제" @click="removeTree(tree)">×</button></span></div>
             <div v-for="item in flattenedNodes(tree)" :key="item.node.id" class="variation-row" :style="{ marginLeft: `${item.depth * 14}px` }"><button class="variation-move" :class="{ active: activeNode?.id === item.node.id, pending: item.node.pending }" @click="openNode(tree,item.node)">{{ item.branch }} {{ item.label }}<small v-if="item.node.pending"> · 저장 중</small></button><button v-if="!item.node.pending" class="variation-delete" title="이 수와 하위 분기 삭제" @click="removeSubtree(tree,item.node)">×</button></div>
           </article>
           <div v-for="row in notationRows" :key="row.moveNumber" class="notation-full-move"><b>{{ row.moveNumber }}.</b><div class="notation-entries">
             <template v-for="entry in row.entries" :key="entry.ply">
-              <button class="notation-row" :class="{ active: !activeTree && ply === entry.ply }" @click="go(entry.ply)"><span>{{ formatNotation(entry.notation) }}</span><small>{{ duration(entry.elapsed_ms) }}</small></button>
+              <button class="notation-row" :class="{ active: !activeTree && ply === entry.ply }" @click="go(entry.ply)"><span>{{ formatNotation(entry.notation) }}<small class="draw-identities">{{ drawSummary(entry.draws) }}</small></span><small>{{ duration(entry.elapsed_ms) }}</small></button>
               <article v-for="tree in treesAtPly(entry.ply)" :key="tree.id" class="variation-branch">
                 <div class="variation-heading"><button @click="openNode(tree, tree.nodes[0])">{{ tree.name }}</button><span><button title="이름 변경" @click="renameTree(tree)">✎</button><button title="분기 삭제" @click="removeTree(tree)">×</button></span></div>
                 <div v-for="item in flattenedNodes(tree)" :key="item.node.id" class="variation-row" :style="{ marginLeft: `${item.depth * 14}px` }"><button class="variation-move" :class="{ active: activeNode?.id === item.node.id, pending: item.node.pending }" @click="openNode(tree,item.node)">{{ item.branch }} {{ item.label }}<small v-if="item.node.pending"> · 저장 중</small></button><button v-if="!item.node.pending" class="variation-delete" title="이 수와 하위 분기 삭제" @click="removeSubtree(tree,item.node)">×</button></div>
@@ -59,7 +72,9 @@
     <section v-else class="replay-error" role="alert">
       <p class="eyebrow">Read-only Replay</p>
       <h2>리플레이를 불러올 수 없습니다.</h2>
-      <p>리플레이 데이터 복원 중 오류가 발생했습니다.</p>
+      <p v-if="!replayResult.ok && replayResult.error === 'unsupported_development_standard_record'">개발 단계 Standard 기록은 현재 규칙으로 재생할 수 없습니다.</p>
+      <p v-else-if="!replayResult.ok && replayResult.error === 'unsupported_rules_version'">지원하지 않는 게임 규칙 버전입니다.</p>
+      <p v-else>리플레이 데이터 복원 중 오류가 발생했습니다.</p>
       <button class="btn-secondary" @click="$emit('close')">로비로</button>
     </section>
   </main>
@@ -69,13 +84,16 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import Board from '../components/Board.vue'
 import { encodeReplayCode } from '../replayCodec'
-import { formatLiveAction, formatNotation, groupNotation, squareName } from '../replayNotation'
+import { formatDraw, formatLiveAction, formatNotation, groupNotation, squareName } from '../replayNotation'
 import { applyStateDelta, buildReplayFramesResult } from '../replayState'
 import { actionIdentity, analysisPosition, reconcileOptimisticNode } from '../replayAnalysis'
 import { abilityActionTargetsSquare, abilitySelectionSquares, isImmediateAbilityAction, moveOptionTargets } from '../moveOptionUi'
 import { timeControlLabel } from '../timeControls'
+import ExtraSummonPanel from '../components/ExtraSummonPanel.vue'
+import StandardReservePanel from '../components/StandardReservePanel.vue'
+import { summonDetail } from '../replayNotation'
 import type { PlayerId, Square, TurnAction } from '../types/game'
-import type { AnalysisActionPreview, AnalysisNode, AnalysisTree, GameRecord } from '../types/gameRecord'
+import type { AnalysisActionPreview, AnalysisNode, AnalysisTree, DrawResolution, GameRecord } from '../types/gameRecord'
 import { api } from '../api/gameApi'
 import { encodeDeckCode } from '../composables/useDeckCodeCodec'
 import { frozenDeckCodeSource } from '../replayDeckCode'
@@ -88,6 +106,11 @@ const boardRef = ref<InstanceType<typeof Board> | null>(null)
 const canManage = ref(false)
 const trees = ref<AnalysisTree[]>([]), activeTree = ref<AnalysisTree | null>(null), activeNode = ref<AnalysisNode | null>(null)
 const selectedPieceId = ref<string | null>(null), legalActions = ref<TurnAction[]>([]), analysisError = ref<string | null>(null)
+const committing = ref(false)
+const isStandard = computed(() => props.record.initial_state.ruleset === 'standard')
+const currentDraws = computed(() => activeNode.value?.draws ?? (ply.value === 0 ? props.record.initial_draws : props.record.actions[ply.value - 1]?.draws) ?? [])
+function drawSummary(draws?: DrawResolution[]) { return (draws ?? []).map(formatDraw).filter(Boolean).join(' · ') }
+function resolvedPiece(id: string) { const piece = state.value?.pieces[id]; return `${piece ? state.value?.piece_definitions[piece.type_id]?.name ?? piece.type_id : '알 수 없는 기물'} (${id})` }
 const actionPreviews = ref<AnalysisActionPreview[]>([])
 const deckCopyStatus = ref<Record<PlayerId, string>>({ white: '덱 코드 복사', black: '덱 코드 복사' })
 let timer: number | null = null
@@ -107,7 +130,12 @@ const abilitySelfTargets = computed(() => abilitySelectionSquares(
 const movableSquares = computed(() => [...targetGroups.value.movable, ...abilitySelfTargets.value])
 const attackSquares = computed(() => targetGroups.value.captures)
 const dropSquares = computed(() => legalActions.value.filter(action => action.type === 'drop').map(action => action.to))
-const pocketPieces = computed(() => state.value?.players[state.value.current_player]?.deck.pocket_pieces.map(id => state.value?.pieces[id]).filter((piece): piece is NonNullable<typeof piece> => !!piece) ?? [])
+const pocketPieces = computed(() => {
+  if (!state.value) return []
+  const deck = state.value.players[state.value.current_player]?.deck
+  const ids = isStandard.value ? deck?.hand_pieces ?? [] : deck?.pocket_pieces ?? []
+  return ids.map(id => state.value?.pieces[id]).filter((piece): piece is NonNullable<typeof piece> => !!piece)
+})
 const immediateAbilities = computed(() => legalActions.value.filter((action): action is Extract<TurnAction,{type:'ability'}> => action.type === 'ability' && isImmediateAbilityAction(action)))
 const deckCodeSources = computed(() => ({
   white: frozenDeckCodeSource(props.record, 'white'),
@@ -133,11 +161,22 @@ function clearSelection() { selectedPieceId.value = null; legalActions.value = [
 function go(next: number) { activeTree.value = null; activeNode.value = null; clearSelection(); ply.value = Math.max(0, Math.min(actionCount.value, next)); if (ply.value === actionCount.value) stop() }
 function toggleAutoplay() { if (!replayResult.value.ok) return; if (playing.value) { stop(); return } playing.value = true; timer = window.setInterval(() => go(ply.value + 1), 900) }
 async function copyCode() { try { await navigator.clipboard.writeText(await encodeReplayCode(props.record)); copyStatus.value = '복사 완료' } catch { copyStatus.value = '복사 실패' } window.setTimeout(() => { copyStatus.value = '기보 복사' }, 1800) }
+const summonSquares = ref<Square[]>([])
+const summonPanel = ref<InstanceType<typeof ExtraSummonPanel> | null>(null)
+const summonActive = ref(false)
+const summonSelection = ref<{ candidates: string[]; selected: string[]; stage: 'sacrifice' | 'target' }>({ candidates: [], selected: [], stage: 'sacrifice' })
+const currentSummonDetail = computed(() => state.value ? summonDetail(activeNode.value?.action ?? props.record.actions[ply.value - 1]?.action, state.value) : '')
+async function loadSummonOptions(id: string, selected: string[]) {
+  const result = await api.getAnalysisOptions(props.record.game_id, position(), id, undefined, selected)
+  if (!result.summon) throw new Error('소환 후보를 가져오지 못했습니다.')
+  actionPreviews.value = result.previews
+  return result.summon
+}
 function position() {
   return analysisPosition(activeTree.value,activeNode.value,ply.value)
 }
 async function selectPiece(pieceId: string) {
-  if(!canManage.value)return
+  if(!canManage.value || committing.value || summonActive.value)return
   const piece=state.value?.pieces[pieceId]
   if (!piece || piece.owner !== state.value?.current_player) { clearSelection(); return }
   const started=performance.now();analysisError.value=null; selectedPieceId.value=pieceId; legalActions.value=[]; actionPreviews.value=[]
@@ -150,10 +189,10 @@ async function selectPiece(pieceId: string) {
   } catch(cause){ analysisError.value=cause instanceof Error?cause.message:String(cause);clearSelection() }
 }
 function sameSquare(a:Square|undefined,b:Square){return !!a&&a.file===b.file&&a.rank===b.rank}
-function actionChoiceLabel(action:TurnAction){if(action.type==='move')return action.promotion?`승격: ${action.promotion}`:`이동: ${action.move_option_id}`;if(action.type==='ability')return `능력: ${action.ability_id}`;return '포켓 배치'}
+function actionChoiceLabel(action:TurnAction){if(action.type==='move')return action.promotion?`승격: ${action.promotion}`:`이동: ${action.move_option_id}`;if(action.type==='ability')return `능력: ${action.ability_id}`;return isStandard.value ? '손패 배치' : '포켓 배치'}
 function chooseAction(actions:TurnAction[]){if(actions.length<=1)return actions[0];const answer=window.prompt(actions.map((action,index)=>`${index+1}. ${actionChoiceLabel(action)}`).join('\n'));const index=Number(answer)-1;return Number.isInteger(index)?actions[index]:undefined}
-async function onSquareClick(square: Square) { if (!state.value) return; const pieceId=state.value.board.squares[`${square.file}_${square.rank}`]; if (!selectedPieceId.value) { if(pieceId) await selectPiece(pieceId); return } const actorSquare=state.value.pieces[selectedPieceId.value]?.current_square;const action=chooseAction(legalActions.value.filter(candidate=>sameSquare(candidate.to,square)||(candidate.type==='ability'&&abilityActionTargetsSquare(candidate,actorSquare,square)))); if(!action){if(pieceId) await selectPiece(pieceId);else clearSelection();return} await playAnalysisAction(action) }
-async function onBoardPieceClick(pieceId:string){const piece=state.value?.pieces[pieceId];if(selectedPieceId.value&&piece?.current_square){await onSquareClick(piece.current_square);return}await selectPiece(pieceId)}
+async function onSquareClick(square: Square) { if (summonActive.value) { summonPanel.value?.chooseBoardSquare(square); return } if (!state.value) return; const pieceId=state.value.board.squares[`${square.file}_${square.rank}`]; if (!selectedPieceId.value) { if(pieceId) await selectPiece(pieceId); return } const actorSquare=state.value.pieces[selectedPieceId.value]?.current_square;const action=chooseAction(legalActions.value.filter(candidate=>sameSquare(candidate.type === 'extra_summon' ? candidate.target_square : candidate.to,square)||(candidate.type==='ability'&&abilityActionTargetsSquare(candidate,actorSquare,square)))); if(!action){if(pieceId) await selectPiece(pieceId);else clearSelection();return} await playAnalysisAction(action) }
+async function onBoardPieceClick(pieceId:string){if(summonActive.value){summonPanel.value?.chooseBoardPiece(pieceId);return}const piece=state.value?.pieces[pieceId];if(selectedPieceId.value&&piece?.current_square){await onSquareClick(piece.current_square);return}await selectPiece(pieceId)}
 async function onSquareDrop(square: Square|null,pieceId:string){if(!square)return;await selectPiece(pieceId);await onSquareClick(square)}
 function sameAction(left:TurnAction,right:TurnAction){return actionIdentity(left)===actionIdentity(right)}
 function previewFor(action:TurnAction){return actionPreviews.value.find(item=>sameAction(item.action,action))}
@@ -169,10 +208,12 @@ function replaceLocalNode(tree:AnalysisTree,localId:string,persisted:AnalysisNod
   if(activeNode.value?.id===localId&&replacement)activeNode.value=replacement
 }
 async function playAnalysisAction(action: TurnAction) {
+  if (committing.value) return
+  if (isStandard.value) { committing.value = true; stop(); try { await persistWithoutPreview(action) } finally { committing.value = false }; return }
   const interactionStarted=performance.now()
   analysisError.value=null
   const preview=previewFor(action)
-  if(!preview){await persistWithoutPreview(action);return}
+  if(!preview || preview.draw_pending || !preview.state_hash){await persistWithoutPreview(action);return}
   if(!state.value){analysisError.value='현재 분석 상태를 확인할 수 없습니다.';clearSelection();return}
   let localState
   try{localState=applyStateDelta(state.value,preview.state_delta)}catch{await persistWithoutPreview(action);return}
@@ -227,14 +268,14 @@ function replaceTree(tree:AnalysisTree){const index=trees.value.findIndex(item=>
 function openNode(tree:AnalysisTree,node:AnalysisNode){activeTree.value=tree;activeNode.value=node;ply.value=tree.base_ply;clearSelection()}
 function returnToActual(){const base=activeTree.value?.base_ply??ply.value;go(base)}
 function treesAtPly(value:number){return trees.value.filter(tree=>tree.base_ply===value)}
-function nodeLabel(tree:AnalysisTree,node:AnalysisNode){const parent=node.parent_node_id?tree.nodes.find(item=>item.id===node.parent_node_id):undefined;const before=parent?.state_after??(replayResult.value.ok?replayResult.value.frames[tree.base_ply]:undefined)??node.state_after;return formatLiveAction(node.action,before,before.turn_number)}
+function nodeLabel(tree:AnalysisTree,node:AnalysisNode){const parent=node.parent_node_id?tree.nodes.find(item=>item.id===node.parent_node_id):undefined;const before=parent?.state_after??(replayResult.value.ok?replayResult.value.frames[tree.base_ply]:undefined)??node.state_after;return [formatLiveAction(node.action,before,before.turn_number), drawSummary(node.draws)].filter(Boolean).join(' · ')}
 function flattenedNodes(tree:AnalysisTree){const children=(parent:string|null)=>tree.nodes.filter(node=>(node.parent_node_id??null)===parent);const result:Array<{node:AnalysisNode;depth:number;label:string;branch:string}>=[];const visit=(node:AnalysisNode,depth:number)=>{const siblings=children(node.parent_node_id??null);result.push({node,depth,label:nodeLabel(tree,node),branch:siblings.length>1?'├─':'└─'});children(node.id).forEach(child=>visit(child,depth+1))};children(null).forEach(node=>visit(node,0));return result}
 async function renameTree(tree:AnalysisTree){const name=window.prompt('Variation 이름',tree.name)?.trim();if(!name||name===tree.name)return;try{const updated=await api.renameAnalysis(props.record.game_id,tree,name);replaceTree(updated);if(activeTree.value?.id===tree.id)activeTree.value=updated}catch(cause){analysisError.value=cause instanceof Error?cause.message:String(cause)}}
 async function removeTree(tree:AnalysisTree){if(!window.confirm(`"${tree.name}" variation과 모든 하위 분기를 삭제할까요?`))return;try{await api.deleteAnalysis(props.record.game_id,tree.id);trees.value=trees.value.filter(item=>item.id!==tree.id);if(activeTree.value?.id===tree.id)returnToActual()}catch(cause){analysisError.value=cause instanceof Error?cause.message:String(cause)}}
 async function removeSubtree(tree:AnalysisTree,node:AnalysisNode){if(!window.confirm('이 수와 모든 하위 분기를 삭제할까요?'))return;try{const updated=await api.deleteAnalysisSubtree(props.record.game_id,tree,node.id);replaceTree(updated);if(activeNode.value?.id===node.id){activeTree.value=updated;activeNode.value=updated.nodes.find(item=>item.id===node.parent_node_id)??null}}catch(cause){analysisError.value=cause instanceof Error?cause.message:String(cause)}}
 async function toggleRetention(){const permanent=props.record.retention_mode!=='permanent';const originalExpiry=(props.record.ended_at_ms??Infinity)+30*86_400_000;if(!permanent&&originalExpiry<=Date.now()&&!window.confirm('이 대국은 기본 보존 기간 30일이 이미 지났습니다.\n영구 저장을 해제하면 삭제됩니다.'))return;try{const updated=await api.updateGameRetention(props.record.game_id,permanent);props.record.retention_mode=updated.retention_mode;props.record.expires_at_ms=updated.expires_at_ms}catch(cause){if(!permanent&&originalExpiry<=Date.now()){emit('close');return}analysisError.value=cause instanceof Error?cause.message:String(cause)}}
 function keydown(event: KeyboardEvent) { const target = event.target as HTMLElement | null; if (target?.matches('input, textarea, select, [contenteditable="true"]')) return; if (event.key === 'ArrowLeft') { event.preventDefault(); go(ply.value - 1) } else if (event.key === 'ArrowRight') { event.preventDefault(); go(ply.value + 1) } }
-onMounted(async () => { window.addEventListener('keydown', keydown); try { trees.value=await api.listAnalysis(props.record.game_id);canManage.value=true } catch { trees.value=[] } }); onUnmounted(() => { stop(); window.removeEventListener('keydown', keydown) })
+onMounted(async () => { window.addEventListener('keydown', keydown); if (!replayResult.value.ok) return; try { trees.value=await api.listAnalysis(props.record.game_id);canManage.value=true } catch { trees.value=[] } }); onUnmounted(() => { stop(); window.removeEventListener('keydown', keydown) })
 </script>
 
 <style scoped>
@@ -258,6 +299,7 @@ onMounted(async () => { window.addEventListener('keydown', keydown); try { trees
 .analysis-tools { display:grid;gap:8px;padding:10px 12px;border:1px solid rgba(217,164,65,.28);border-radius:8px;background:rgba(19,26,39,.82); }
 .analysis-tools p { margin:0;color:#a8b1c2;font-size:12px; }
 .game-info { display: grid; gap: 5px; color: #a8b1c2; }
+.draw-identities { display:block;overflow-wrap:anywhere;font-size:12px;color:#a8b1c2; }
 .analysis-pocket { display:flex;flex-wrap:wrap;gap:5px;align-items:center; }.analysis-pocket button.active { outline:1px solid #d9a441; }
 .variation-branch { display:grid;gap:3px;margin:2px 0 4px 8px;padding:5px 5px 5px 9px;border-left:2px solid rgba(217,164,65,.55);background:rgba(255,255,255,.025); }
 .variation-heading { display:flex;justify-content:space-between;gap:5px; }.variation-heading>button { color:#d9a441;background:transparent;border:0;text-align:left; }.variation-heading span { display:flex;gap:3px; }.variation-heading span button { min-width:28px; }

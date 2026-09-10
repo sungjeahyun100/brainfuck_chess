@@ -29,6 +29,8 @@ fn empty_state(name: &str, board_size: i32) -> GameState {
                     deck: Deck {
                         player_id: id.to_string(),
                         starting_pieces: Vec::new(),
+                        hand_pieces: Vec::new(),
+                        extra_deck_pieces: Vec::new(),
                         pocket_pieces: Vec::new(),
                         score_limit: 100,
                         total_score: 0,
