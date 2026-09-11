@@ -16,6 +16,8 @@ export function gameplayKey(state: GameState): string {
 export function gameActionError(cause: unknown): string {
   const message = cause instanceof Error ? cause.message : ''
   const messages: Record<string, string> = {
+    'DRAW_REQUIRED': '먼저 덱을 눌러 카드를 드로우하세요.',
+    'DRAW_NOT_REQUIRED': '이번 턴에는 더 이상 드로우할 수 없습니다.',
     '제물 점수가 소환 비용보다 부족합니다.': '제물 점수가 부족합니다.',
     'Hand 기물이 없습니다.': '선택한 기물이 더 이상 Hand에 없습니다.',
     'Extra 기물이 없습니다.': '더 이상 Extra Deck에 없는 기물입니다.',

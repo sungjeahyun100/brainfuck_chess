@@ -30,6 +30,12 @@
       <button v-if="botError && isBotTurn && !botThinking && !botReplaying" @click="runBotTurn">다시 시도</button>
     </div>
 
+    <div v-if="isStandard && viewState.phase === 'playing'" :key="viewState.current_player + ':' + viewState.turn_number" class="draw-turn-banner" role="status" aria-live="polite">
+      <strong>{{ canControlTurn ? '당신의 턴' : '상대의 턴' }}</strong>
+      <span v-if="drawRequired && canControlTurn">덱을 눌러 카드를 드로우하세요.</span>
+      <span v-else-if="canControlTurn">기물을 이동하거나 손패 카드를 선택하세요.</span>
+    </div>
+
     <!-- Promotion picker overlay -->
     <div v-if="promotionRequest" class="promotion-overlay">
       <div class="promotion-box">
@@ -165,9 +171,19 @@
     </div>
 
     <div class="main-layout" :class="{ locked: botThinking || botReplaying || isBotTurn }">
+      <aside v-if="isStandard" class="opponent-hand" aria-label="상대 손패">
+        <StandardReservePanel v-if="isStandard" presentation="hand" :state="viewState" :side="reserveOtherSide" :reveal="false" :enabled="false">
+          <template #clock>
+            <span class="hand-clock" :class="clockClasses(reserveOtherSide)" :title="playerInfo(reserveOtherSide).public_id ? '@' + playerInfo(reserveOtherSide).public_id : undefined">
+              <b>{{ playerInfo(reserveOtherSide).nickname }}</b><strong>{{ formattedClock(reserveOtherSide) }}</strong>
+              <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
+            </span>
+          </template>
+        </StandardReservePanel>
+      </aside>
       <!-- Center: Board -->
       <div class="board-column">
-        <div class="game-clock" :class="clockClasses(topPlayer)">
+        <div v-if="!isStandard" class="game-clock" :class="clockClasses(topPlayer)">
           <span><b>{{ playerInfo(topPlayer).nickname }}</b><small><template v-if="playerInfo(topPlayer).public_id">@{{ playerInfo(topPlayer).public_id }} · </template>{{ topPlayer.toUpperCase() }}</small></span>
           <strong>{{ formattedClock(topPlayer) }}</strong>
           <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
@@ -178,7 +194,13 @@
           <span>자동 기권까지 {{ formatDuration(opponentAbandonmentRemainingMs) }}</span>
         </div>
 
+        <div class="board-stage">
+          <StandardReservePanel v-if="isStandard" class="opponent-deck" presentation="deck" deck-label="상대 덱"
+            :state="viewState" :side="reserveOtherSide" :reveal="false" />
         <Board
+          :inert="!canUseSummonControls"
+          :aria-disabled="!canUseSummonControls"
+          :class="{ 'board-waiting': !canUseSummonControls }"
           :board="viewState.board"
           :pieces="viewState.pieces"
           :definitions="viewState.piece_definitions"
@@ -198,8 +220,12 @@
           @piece-click="onBoardPieceClick"
           @square-drop="onSquareDrop"
         />
+          <StandardReservePanel v-if="isStandard" class="own-deck" presentation="deck" deck-label="내 덱"
+            :state="viewState" :side="reserveActiveSide" :reveal="false" :reveal-pocket="canRevealDeck(reserveActiveSide)"
+            :draw-enabled="canDraw" :draw-required="drawRequired && canControlTurn" :drawing="actionSubmitting" @draw="drawCard" />
+        </div>
 
-        <div class="game-clock" :class="clockClasses(bottomPlayer)">
+        <div v-if="!isStandard" class="game-clock" :class="clockClasses(bottomPlayer)">
           <span><b>{{ playerInfo(bottomPlayer).nickname }}</b><small><template v-if="playerInfo(bottomPlayer).public_id">@{{ playerInfo(bottomPlayer).public_id }} · </template>{{ bottomPlayer.toUpperCase() }}</small></span>
           <strong>{{ formattedClock(bottomPlayer) }}</strong>
           <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
@@ -223,39 +249,21 @@
           </small>
         </div>
 
-        <div v-if="selectedPieceId && selectedPieceDefinition" class="selected-piece-panel" :class="{ active: abilityMode }">
-          <div>
-            <strong>{{ selectedPieceDefinition.name }}</strong>
-            <small v-if="abilityMode && selectedAbility">특수 능력 모드 · {{ selectedAbility.name }}</small>
-            <small v-else-if="selectedPieceAbilities.length">특수 능력 사용 가능</small>
-            <small v-else>일반 이동 모드</small>
-          </div>
-          <div v-if="selectedPieceAbilities.length" class="ability-actions">
-            <button
-              v-for="ability in selectedPieceAbilities"
-              :key="ability.id"
-              class="ability-button"
-              :class="{ active: abilityMode && activeAbilityId === ability.id }"
-              type="button"
-              :disabled="Boolean(abilityUnavailableReason(ability))"
-              :title="abilityUnavailableReason(ability) || ability.description"
-              @click="toggleAbilityMode(ability.id)"
-            >
-              {{ ability.name || '특수 능력' }}
-            </button>
-          </div>
-          <small v-if="selectedPieceAbilities.length && selectedAbilityHelpText" class="ability-help">
-            {{ selectedAbilityHelpText }}
-          </small>
-        </div>
+
       </div>
 
-      <aside class="hand-column" aria-label="양측 패">
-        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveOtherSide" :reveal="canRevealReserve(reserveOtherSide)" :reveal-pocket="false" :enabled="false" />
-        <StandardReservePanel v-if="isStandard" :state="viewState" :side="reserveActiveSide" :reveal="canRevealReserve(reserveActiveSide)" :reveal-pocket="canRevealDeck(reserveActiveSide)"
+      <aside class="hand-column" :aria-label="isStandard ? '내 손패' : '양측 패'">
+        <StandardReservePanel v-if="isStandard" presentation="hand" :state="viewState" :side="reserveActiveSide" :reveal="canRevealReserve(reserveActiveSide)"
           :enabled="canUseSummonControls && state.phase === 'playing'" :selected-id="selectedPocketPieceId"
           :summoning="summonActive" :candidates="summonSelection.candidates" :selected-sacrifices="summonSelection.selected"
-          :disabled-reason="controlTurnLabel" @select="onHandClick" />
+          @select="onHandClick">
+          <template #clock>
+            <span class="hand-clock" :class="clockClasses(reserveActiveSide)" :title="playerInfo(reserveActiveSide).public_id ? '@' + playerInfo(reserveActiveSide).public_id : undefined">
+              <b>{{ playerInfo(reserveActiveSide).nickname }}</b><strong>{{ formattedClock(reserveActiveSide) }}</strong>
+              <small>{{ timeControlLabel(viewState.clock.time_control) }}</small>
+            </span>
+          </template>
+        </StandardReservePanel>
         <!-- Legacy reserves -->
         <div v-if="!isStandard" class="pocket">
           <h4>⬜ White Pocket</h4>
@@ -330,10 +338,35 @@
       </aside>
 
       <aside class="game-sidebar">
+        <div v-if="selectedPieceId && selectedPieceDefinition" class="selected-piece-panel" :class="{ active: abilityMode }">
+          <div>
+            <strong>{{ selectedPieceDefinition.name }}</strong>
+            <small v-if="abilityMode && selectedAbility">특수 능력 모드 · {{ selectedAbility.name }}</small>
+            <small v-else-if="selectedPieceAbilities.length">특수 능력 사용 가능</small>
+            <small v-else>일반 이동 모드</small>
+          </div>
+          <div v-if="selectedPieceAbilities.length" class="ability-actions">
+            <button
+              v-for="ability in selectedPieceAbilities"
+              :key="ability.id"
+              class="ability-button"
+              :class="{ active: abilityMode && activeAbilityId === ability.id }"
+              type="button"
+              :disabled="Boolean(abilityUnavailableReason(ability))"
+              :title="abilityUnavailableReason(ability) || ability.description"
+              @click="toggleAbilityMode(ability.id)"
+            >
+              {{ ability.name || '특수 능력' }}
+            </button>
+          </div>
+          <small v-if="selectedPieceAbilities.length && selectedAbilityHelpText" class="ability-help">
+            {{ selectedAbilityHelpText }}
+          </small>
+        </div>
         <ExtraSummonPanel ref="summonPanel" :state="viewState" :viewer="deckViewer" :enabled="canUseSummonControls && state.phase === 'playing'"
-          :disabled-reason="controlTurnLabel" :load-options="loadSummonOptions" :submit="submitSummon"
+          :disabled-reason="drawRequired ? '먼저 카드를 드로우해야 합니다.' : controlTurnLabel" :load-options="loadSummonOptions" :submit="submitSummon"
           @targets="summonSquares = $event" @selection="summonSelection = $event" @active="onSummonActive" />
-        <p v-if="isStandard" class="draw-info">턴 시작 드로우는 자동으로 Hand에 반영됩니다. {{ playMode === 'single' ? '로컬 2인은 양측 패가 보이며, 덱은 현재 차례만 확인할 수 있습니다.' : '상대는 Hand 장수만 공개됩니다.' }}</p>
+
         <h3>기보</h3>
         <div class="live-notation">
           <div v-for="entry in liveNotation" :key="entry.ply"><span>{{ entry.ply }}. {{ entry.text }}</span>
@@ -596,7 +629,7 @@ const summonActive = ref(false)
 const summonSelection = ref<{ candidates: string[]; selected: string[]; stage: 'sacrifice' | 'target' }>({ candidates: [], selected: [], stage: 'sacrifice' })
 const interactionMode = computed(() => summonActive.value ? (summonSelection.value.stage === 'target' ? 'ExtraSummonTarget' : 'ExtraSummonSacrifice')
   : abilityMode.value || airdropOpen.value || sacrificeOpen.value ? 'Ability' : selectedPocketPieceId.value ? 'HandDrop' : selectedPieceId.value ? 'Move' : 'None')
-const interactionLabel = computed(() => ({ None: '기물을 선택하세요. Hand → 일반 착수 · Extra → 특수 소환', HandDrop: 'Hand 착수 · 표시된 보드 위치를 선택하세요.', ExtraSummonSacrifice: '특수 소환 · 점선 후보에서 제물을 선택하세요.', ExtraSummonTarget: '특수 소환 · 표시된 보드 위치를 선택하고 소환을 확정하세요.', Ability: '능력 사용 · 표시된 대상을 선택하세요.', Move: '이동 · 표시된 보드 위치를 선택하세요.' })[interactionMode.value])
+const interactionLabel = computed(() => drawRequired.value ? '먼저 덱을 눌러 카드를 드로우하세요.' : ({ None: '기물을 선택하세요. Hand → 일반 착수 · Extra → 특수 소환', HandDrop: 'Hand 착수 · 표시된 보드 위치를 선택하세요.', ExtraSummonSacrifice: '특수 소환 · 점선 후보에서 제물을 선택하세요.', ExtraSummonTarget: '특수 소환 · 표시된 보드 위치를 선택하고 소환을 확정하세요.', Ability: '능력 사용 · 표시된 대상을 선택하세요.', Move: '이동 · 표시된 보드 위치를 선택하세요.' })[interactionMode.value])
 function resetOrdinaryInteraction() {
   cancelPromotion(); airdropOpen.value = false; airdropDraft.value = []; airdropOptions.value = null
   sacrificeOpen.value = false; sacrificeSelectedIds.value = []; sacrificeOptions.value = null
@@ -624,6 +657,19 @@ async function submitSummon(action: ExtraSummonAction) {
     clearSelection()
   } finally { actionSubmitting.value = false }
 }
+const drawRequired = computed(() => isStandard.value && props.state.global_state?.draw_required === 1)
+const canDraw = computed(() => drawRequired.value && canControlTurn.value && props.state.phase === 'playing' && !botThinking.value && !botReplaying.value && !actionSubmitting.value)
+async function drawCard() {
+  if (!canDraw.value) return
+  cancelInteraction()
+  actionSubmitting.value = true
+  error.value = null
+  try {
+    const next = await api.submitAction(props.state.id, { type: 'draw', turn_number: props.state.turn_number })
+    emit('stateUpdate', next)
+  } catch (cause) { error.value = gameActionError(cause) }
+  finally { actionSubmitting.value = false }
+}
 const canControlTurn = computed(() => canControlCurrentTurn(controlContext.value))
 const controlTurnLabel = computed(() => turnControlLabel(controlContext.value))
 const isBotTurn = computed(() => Boolean(
@@ -631,7 +677,7 @@ const isBotTurn = computed(() => Boolean(
   && props.state.current_player === props.botPlayer
   && props.state.phase === 'playing',
 ))
-const canUseSummonControls = computed(() => canControlTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value && !actionSubmitting.value)
+const canUseSummonControls = computed(() => !drawRequired.value && canControlTurn.value && !botThinking.value && !botReplaying.value && !promotionRequest.value && !actionSubmitting.value)
 const canUsePlayerControls = computed(() => canUseSummonControls.value && !summonActive.value && props.state.phase === 'playing')
 const visibleSelectedPieceId = computed(() => (
   botReplaying.value ? botPreviewSelectedPieceId.value : selectedPieceId.value
@@ -696,7 +742,7 @@ function clockClasses(player: PlayerId): Record<string, boolean> {
     critical: countdown && remaining <= CLOCK_URGENCY_THRESHOLDS_MS.critical,
   }
 }
-const boardOrientation = computed(() => props.localPlayer ?? viewState.value.current_player)
+const boardOrientation = computed(() => isStandard.value && props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? viewState.value.current_player)
 const opponentPlayer = computed<PlayerId>(() => otherPlayer(props.localPlayer ?? props.state.current_player))
 const opponentAttackButtonLabel = computed(() => {
   if (opponentAttacksLoading.value) return '상대 공격 범위 불러오는 중…'
@@ -776,6 +822,7 @@ function sacrificeSquareLabel(pieceId: string): string {
 }
 
 function abilityUnavailableReason(ability: MoveOptionDefinition): string {
+  if (drawRequired.value) return '먼저 카드를 드로우해야 합니다.'
   if (!selectedPiece.value) return '선택한 기물이 없습니다.'
   if (selectedPieceAbilities.value.length === 0) return '선택한 기물은 특수 능력이 없습니다.'
   if (selectedPiece.value.owner !== props.state.current_player) return '현재 턴의 기물이 아닙니다.'
@@ -940,6 +987,7 @@ function clearBotReplay() {
 }
 
 function actionLabel(action: AiAction): string {
+  if (action.type === 'draw') return '카드 1장 드로우'
   if (action.type === 'extra_summon') {
     const piece = props.state.pieces[action.extra_piece_id]
     const name = props.state.piece_definitions[piece?.type_id ?? '']?.name ?? '기물'
@@ -1105,7 +1153,7 @@ function previewBotAction(action: AiAction) {
     botPreviewDropSquares.value = [action.to]
   } else if (action.type === 'extra_summon') {
     botPreviewDropSquares.value = [action.target_square]
-  } else if (action.to) {
+  } else if (action.type === 'ability' && action.to) {
     botPreviewSelectedPieceId.value = action.piece_id
     botPreviewMovableSquares.value = [action.to]
   }
@@ -1842,7 +1890,7 @@ async function onSquareClick(sq: Square) {
   error.value = null
   if (promotionRequest.value) return
   if (!canUsePlayerControls.value) {
-    error.value = blockedControlMessage(controlContext.value)
+    error.value = drawRequired.value ? '먼저 덱을 눌러 카드를 드로우하세요.' : blockedControlMessage(controlContext.value)
     clearSelection()
     return
   }
@@ -1893,7 +1941,7 @@ async function onPocketClick(pieceId: string) {
   if (isStandard.value) return
   error.value = null
   if (!canUsePlayerControls.value) {
-    error.value = blockedControlMessage(controlContext.value)
+    error.value = drawRequired.value ? '먼저 덱을 눌러 카드를 드로우하세요.' : blockedControlMessage(controlContext.value)
     clearSelection()
     return
   }
@@ -2000,6 +2048,12 @@ async function onResign() {
 </script>
 
 <style scoped>
+.board-waiting { opacity:.82; }
+.draw-turn-banner { display:flex; align-items:center; gap:14px; flex-wrap:wrap; border:1px solid #8fc9ff; border-radius:10px; background:#253247; color:#fff; padding:12px 16px; animation:turn-arrival .6s ease-out; }
+.draw-turn-banner strong { color:#f4cf72; font-size:19px; }
+@keyframes turn-arrival { from { opacity:.3; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .draw-turn-banner { animation:none; } }
+
 .game-screen { display: flex; flex-direction: column; gap: 12px; padding: 16px; position: relative; }
 
 .header { display: flex; align-items: center; gap: 16px; }
@@ -2424,5 +2478,53 @@ async function onResign() {
   .game-clock { gap: 2px 4px; padding: 5px; }
   .game-clock strong { font-size: 1rem; }
   .board-tools { flex-wrap: wrap; }
+}
+
+/* Standard: decks flank the board, timed hands sit above and below it. */
+.board-stage { display:contents; }
+.standard.game-screen { --deck-width:80px; --board-size:min(calc(100dvh - 432px), calc(100vw - 460px)); }
+.standard.with-bot { --board-size:min(calc(100dvh - 482px), calc(100vw - 460px)); }
+.standard .main-layout { grid-template-columns:max(440px, calc(var(--board-size) + 2 * var(--deck-width) + 16px)) 240px; gap:8px 12px; }
+.standard .board-column { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-column:1; grid-row:2; align-items:center; }
+.standard .board-stage, .standard .abandonment-warning { grid-column:1 / -1; }
+.standard .board-tools { grid-column:2; }
+.standard .draw-turn-banner { padding:7px 10px; gap:8px; }
+.standard .board-stage { display:grid; grid-template-columns:var(--deck-width) minmax(0,1fr) var(--deck-width); align-items:start; gap:8px; width:calc(var(--board-size) + 2 * var(--deck-width) + 16px); max-width:100%; margin:auto; }
+.standard .board-stage :deep(.board-wrapper) { grid-column:2; grid-row:1; }
+.standard .opponent-deck { grid-column:1; grid-row:1; }
+.standard .own-deck { grid-column:3; grid-row:1; align-self:end; }
+.standard .own-deck :deep(details[open]) { right:0; bottom:0; }
+.standard .opponent-hand { grid-column:1; grid-row:1; min-width:0; }
+.standard .hand-column { grid-column:1; grid-row:3; overflow:visible; max-height:none; gap:6px; }
+.standard .game-sidebar { grid-column:2; grid-row:1 / span 3; max-height:calc(100dvh - 190px); }
+.standard .interaction-status { font-size:12px; }
+.standard .board-tools { margin:0; }
+.standard .threat-toggle { padding:5px 8px; font-size:12px; }
+.hand-clock { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; font-size:12px; }
+.hand-clock b { flex-basis:100%; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hand-clock strong { font:700 20px/1.1 ui-monospace,monospace; color:#eef2f7; }
+.hand-clock.active strong { color:#f4cf72; }
+.hand-clock.low strong { color:#ffb56b; }
+.hand-clock.critical strong { color:#ff7d7d; }
+.hand-clock small { color:#b6c2d2; font-size:11px; }
+@media (max-width:800px) {
+  .standard.game-screen { --deck-width:64px; --board-size:min(calc(100dvh - 570px), calc(100vw - 156px)); }
+  .standard.with-bot { --board-size:min(calc(100dvh - 620px), calc(100vw - 156px)); }
+  .standard .main-layout { grid-template-columns:minmax(0,1fr); width:100%; gap:6px; }
+  .standard .board-stage { width:calc(var(--board-size) + 2 * var(--deck-width) + 16px); max-width:100%; margin:auto; }
+  .standard .game-sidebar { grid-column:1; grid-row:4; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:4px 10px; max-height:200px; padding:6px; }
+  .standard .game-sidebar > :deep(.extra-panel) { grid-column:1; grid-row:1 / span 3; }
+  .standard .game-sidebar h3 { grid-column:2; margin:0; font-size:13px; }
+  .standard .live-notation { grid-column:2; max-height:54px; font-size:11px; }
+  .standard .sidebar-game-info { display:none; }
+  .hand-clock { gap:5px; }
+  .hand-clock strong { font-size:17px; }
+  .hand-clock b { max-width:85px; }
+  .standard .draw-turn-banner { padding:7px 10px; gap:6px; font-size:12px; }
+  .standard .draw-turn-banner strong { font-size:15px; }
+}
+@media (max-height:700px) and (min-width:801px) {
+  .standard.game-screen { --board-size:min(calc(100dvh - 435px), calc(100vw - 460px)); }
+  .standard.with-bot { --board-size:min(calc(100dvh - 485px), calc(100vw - 460px)); }
 }
 </style>

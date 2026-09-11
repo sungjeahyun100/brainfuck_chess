@@ -932,10 +932,19 @@ pub struct Player {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnAction {
+    Draw(DrawAction),
     Move(MoveAction),
     Drop(DropAction),
     Ability(AbilityAction),
     ExtraSummon(ExtraSummonAction),
+}
+
+/// Draw intent contains no client-selected outcome. Turn number rejects stale retries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DrawAction {
+    pub player_id: PlayerId,
+    pub turn_number: u32,
 }
 
 /// Exact player intent; capture outcomes are derived from authoritative target state.

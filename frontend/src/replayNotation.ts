@@ -7,6 +7,7 @@ export function squareName(square: { file: number; rank: number } | null | undef
 }
 
 export function formatNotation(notation: RecordedNotationAction): string {
+  if (notation.kind === 'draw') return '카드 1장 드로우'
   const name = notation.actor.piece_name
   if (notation.kind === 'extra_summon') return `${name} - 특수 소환 - ${squareName(notation.to)}`
   if (notation.kind === 'drop') return `${name} - 착수 - ${squareName(notation.to)}`
@@ -33,6 +34,7 @@ export function fullMoveNumber(engineTurnNumber: number): number {
 }
 
 export function formatLiveAction(action: TurnAction, state: GameState, engineTurnNumber: number): string {
+  if (action.type === 'draw') return '카드 1장 드로우'
   if (action.type === 'extra_summon') {
     const piece = state.pieces[action.extra_piece_id]
     const name = state.piece_definitions[piece?.type_id ?? '']?.name ?? action.extra_piece_id

@@ -32,7 +32,11 @@ fn game(bot: &str, winning_summon: bool) -> StoredGame {
         }
     }
     let mut game = StoredGame::new(state, TimeControlId::Unlimited, false, now_ms());
-    game.initialize_draws().unwrap();
+    // Retain v1 bot/timeline replay regression coverage.
+    game.record.initial_draws =
+        super::tests::initialize_automatic(&mut game.state, &mut |_| Ok(0)).unwrap();
+    game.record.initial_state = game.state.clone();
+    game.record.ruleset_version = "deck-chess-standard-1".into();
     game.access = GameAccess::Local {
         client: "g8a-controller".into(),
         human: Some(opponent_player(bot)),

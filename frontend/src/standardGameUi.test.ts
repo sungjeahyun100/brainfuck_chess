@@ -178,3 +178,73 @@ test('G8-A bot ExtraSummon label and preview preserve public target without hidd
   ui.previewBotAction(action)
   assert.deepEqual(ui.botPreviewDropSquares.value,[{file:4,rank:6}])
 })
+
+test('manual Draw blocks ordinary controls and rapid clicks commit exactly one server intent', async t => {
+  const state = fixture()
+  state.global_state = { manual_draw_v1: 1, draw_required: 1 }
+  let commits = 0, resolve!: (state: GameState) => void
+  const { ui, props, updates } = setup(t, {
+    getLegalDrops: async () => { throw new Error('must not query before draw') },
+    submitAction: async (_id: string, action: unknown) => {
+      commits++
+      assert.deepEqual(action, { type: 'draw', turn_number: 1 })
+      return new Promise<GameState>(r => { resolve = r })
+    },
+  }, state)
+  assert.equal(ui.canDraw.value, true)
+  assert.equal(ui.canUsePlayerControls.value, false)
+  assert.equal(ui.canUseSummonControls.value, false)
+  await ui.onHandClick('w1')
+  assert.equal(ui.selectedPocketPieceId.value, null)
+  const pending = ui.drawCard()
+  await ui.drawCard()
+  assert.equal(commits, 1)
+  assert.equal(updates.length, 0)
+  const after = structuredClone(state)
+  after.global_state!.draw_required = 0
+  after.players.white.deck.hand_pieces!.push('wpocket')
+  after.players.white.deck.pocket_pieces = []
+  resolve(after)
+  await pending
+  props.state = updates[0]
+  await vue.nextTick()
+  assert.equal(ui.canDraw.value, false)
+  assert.equal(ui.canUsePlayerControls.value, true)
+  assert.equal(ui.canUseSummonControls.value, true)
+  await ui.drawCard()
+  assert.equal(commits, 1)
+  props.playMode = 'multiplayer'
+  props.localPlayer = 'black'
+  props.state.global_state!.draw_required = 1
+  assert.equal(ui.canDraw.value, false)
+  assert.equal(ui.canUsePlayerControls.value, false)
+})
+
+test('draw reserve DOM exposes a highlighted deck, disabled cards and safe opponent count', async () => {
+  const component = compile('StandardReservePanel', modules, true)
+  const state = fixture()
+  state.deck_counts = {white:17,black:12}
+  const own = await renderToString(vue.createSSRApp(component,{state,side:'white',reveal:true,enabled:false,drawRequired:true,drawEnabled:true,disabledReason:'먼저 카드를 드로우해야 합니다.'}))
+  assert.match(own,/덱 17장/)
+  assert.match(own,/deck-card required/)
+  assert.match(own,/1장 뽑기/)
+  assert.match(own,/먼저 카드를 드로우해야 합니다/)
+  const opponent = await renderToString(vue.createSSRApp(component,{state,side:'black',reveal:false}))
+  assert.match(opponent,/덱 12장/)
+  assert.doesNotMatch(opponent,/bpocket|b1/)
+})
+
+test('opponent hand renders count-only card backs without private piece metadata', async () => {
+  const state = fixture()
+  state.piece_definitions.knight.name = 'SECRET_KNIGHT'
+  const component = compile('StandardReservePanel', modules, true)
+  const render = () => renderToString(vue.createSSRApp(component, { state, side: 'black', reveal: false, presentation: 'hand' }))
+  let html = await render()
+  assert.equal((html.match(/class="card-back"/g) ?? []).length, 3)
+  assert.match(html, /상대 손패 3장 · 비공개/)
+  assert.doesNotMatch(html, /SECRET_KNIGHT|b1|bpocket|<img|<button/)
+  state.hand_counts!.black = 0
+  html = await render()
+  assert.doesNotMatch(html, /class="card-back"/)
+  assert.match(html, /손패가 비어 있습니다/)
+})

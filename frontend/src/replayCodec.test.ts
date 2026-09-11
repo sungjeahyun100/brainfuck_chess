@@ -152,7 +152,7 @@ test('G5 canonical ExtraSummon preserves exact ordered sacrifices and rejects ma
 test('G7 replay code preserves semantic versions and explicitly rejects development, mismatched and future records', async () => {
   for (const [ruleset, version, expected] of [
     ['standard', LEGACY_RULES_VERSION, 'unsupported_development_standard_record'],
-    ['standard', 'deck-chess-standard-2', 'unsupported_rules_version'],
+    ['standard', 'deck-chess-standard-3', 'unsupported_rules_version'],
     ['legacy', STANDARD_RULES_VERSION, 'unsupported_rules_version'],
     ['legacy', 'future', 'unsupported_rules_version'],
   ] as const) {
@@ -161,5 +161,31 @@ test('G7 replay code preserves semantic versions and explicitly rejects developm
     value.ruleset_version = version
     assert.deepEqual(await decodeReplayCode(await encodeReplayCode(value)), { ok: false, error: expected })
     assert.equal(value.ruleset_version, version)
+  }
+})
+
+test('manual Draw replay code preserves canonical intent and exact resolution', async () => {
+  const value = structuredClone(record)
+  value.initial_state.ruleset = 'standard'
+  value.initial_state.global_state = { manual_draw_v1: 1, draw_required: 1 }
+  value.ruleset_version = STANDARD_RULES_VERSION
+  value.actions = [{
+    ply: 1, player_id: 'white', elapsed_ms: 10, clock_before_ms: null, clock_after_ms: null, clock, state_delta: [],
+    action: { type: 'draw', player_id: 'white', turn_number: 1 },
+    notation: { turn_number: 1, move_number: 1, side: 'white', kind: 'draw', actor: { piece_id: 'deck', piece_type_id: 'deck', piece_name: '덱', layer: 'ground', state: {} }, ability_events: [] },
+    draws: [{ player_id: 'white', timing: 'turn_start', piece_ids: ['confirmed-card'] }],
+  }]
+  const decoded = await decodeReplayCode(await encodeReplayCode(value))
+  assert.equal(decoded.ok, true)
+  if (decoded.ok) assert.deepEqual(decoded.value.actions, value.actions)
+  for (const patch of [{ turn_number: 0 }, { turn_number: 1.5 }, { piece_id: 'forged' }, { player_id: 'black' }]) {
+    const bad = structuredClone(value)
+    Object.assign(bad.actions[0].action, patch)
+    assert.deepEqual(await decodeReplayCode(await encodeReplayCode(bad)), { ok: false, error: 'invalid_schema' })
+  }
+  for (const draws of [[], [{ player_id: 'black', timing: 'turn_start', piece_ids: ['confirmed-card'] }]]) {
+    const bad = structuredClone(value)
+    bad.actions[0].draws = draws as typeof bad.actions[0]['draws']
+    assert.deepEqual(await decodeReplayCode(await encodeReplayCode(bad)), { ok: false, error: 'invalid_schema' })
   }
 })

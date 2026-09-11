@@ -34,11 +34,14 @@
         </section>
       </section>
       <aside class="replay-sidebar">
-        <ExtraSummonPanel ref="summonPanel" :state="state" :viewer="state.current_player" reveal-all :enabled="canManage && !committing" :load-options="loadSummonOptions" :submit="playAnalysisAction" @selection="summonSelection = $event" @targets="summonSquares = $event" @active="summonActive = $event; clearSelection()" />
+        <ExtraSummonPanel ref="summonPanel" :state="state" :viewer="state.current_player" reveal-all :enabled="canManage && !committing && !state.global_state?.draw_required" :load-options="loadSummonOptions" :submit="playAnalysisAction" @selection="summonSelection = $event" @targets="summonSquares = $event" @active="summonActive = $event; clearSelection()" />
         <p v-if="currentSummonDetail">{{ currentSummonDetail }}</p>
         <section v-if="isStandard && record.ended_at_ms != null" aria-label="완료 대국 손패와 드로우">
           <StandardReservePanel v-for="side in replaySides" :key="side" :state="state" :side="side" :reveal="true" reveal-pocket
-            :enabled="canManage && !committing && side === state.current_player" :selected-id="selectedPieceId"
+            :enabled="canManage && !committing && !state.global_state?.draw_required && side === state.current_player"
+            :draw-required="state.global_state?.draw_required === 1 && side === state.current_player"
+            :draw-enabled="canManage && !committing && state.global_state?.draw_required === 1 && side === state.current_player"
+            @draw="playAnalysisAction({ type: 'draw', player_id: state.current_player, turn_number: state.turn_number })" :selected-id="selectedPieceId"
             :summoning="summonActive" :candidates="summonSelection.candidates" :selected-sacrifices="summonSelection.selected"
             @select="id => summonActive ? summonPanel?.toggle(id) : selectPiece(id)" />
           <h3>현재 시점 드로우</h3>
@@ -191,7 +194,7 @@ async function selectPiece(pieceId: string) {
 function sameSquare(a:Square|undefined,b:Square){return !!a&&a.file===b.file&&a.rank===b.rank}
 function actionChoiceLabel(action:TurnAction){if(action.type==='move')return action.promotion?`승격: ${action.promotion}`:`이동: ${action.move_option_id}`;if(action.type==='ability')return `능력: ${action.ability_id}`;return isStandard.value ? '손패 배치' : '포켓 배치'}
 function chooseAction(actions:TurnAction[]){if(actions.length<=1)return actions[0];const answer=window.prompt(actions.map((action,index)=>`${index+1}. ${actionChoiceLabel(action)}`).join('\n'));const index=Number(answer)-1;return Number.isInteger(index)?actions[index]:undefined}
-async function onSquareClick(square: Square) { if (summonActive.value) { summonPanel.value?.chooseBoardSquare(square); return } if (!state.value) return; const pieceId=state.value.board.squares[`${square.file}_${square.rank}`]; if (!selectedPieceId.value) { if(pieceId) await selectPiece(pieceId); return } const actorSquare=state.value.pieces[selectedPieceId.value]?.current_square;const action=chooseAction(legalActions.value.filter(candidate=>sameSquare(candidate.type === 'extra_summon' ? candidate.target_square : candidate.to,square)||(candidate.type==='ability'&&abilityActionTargetsSquare(candidate,actorSquare,square)))); if(!action){if(pieceId) await selectPiece(pieceId);else clearSelection();return} await playAnalysisAction(action) }
+async function onSquareClick(square: Square) { if (summonActive.value) { summonPanel.value?.chooseBoardSquare(square); return } if (!state.value) return; const pieceId=state.value.board.squares[`${square.file}_${square.rank}`]; if (!selectedPieceId.value) { if(pieceId) await selectPiece(pieceId); return } const actorSquare=state.value.pieces[selectedPieceId.value]?.current_square;const action=chooseAction(legalActions.value.filter(candidate=>sameSquare(candidate.type === 'extra_summon' ? candidate.target_square : candidate.type === 'draw' ? undefined : candidate.to,square)||(candidate.type==='ability'&&abilityActionTargetsSquare(candidate,actorSquare,square)))); if(!action){if(pieceId) await selectPiece(pieceId);else clearSelection();return} await playAnalysisAction(action) }
 async function onBoardPieceClick(pieceId:string){if(summonActive.value){summonPanel.value?.chooseBoardPiece(pieceId);return}const piece=state.value?.pieces[pieceId];if(selectedPieceId.value&&piece?.current_square){await onSquareClick(piece.current_square);return}await selectPiece(pieceId)}
 async function onSquareDrop(square: Square|null,pieceId:string){if(!square)return;await selectPiece(pieceId);await onSquareClick(square)}
 function sameAction(left:TurnAction,right:TurnAction){return actionIdentity(left)===actionIdentity(right)}

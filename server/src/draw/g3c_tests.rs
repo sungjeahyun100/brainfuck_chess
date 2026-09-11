@@ -15,7 +15,8 @@ fn completed(white: usize, black: usize) -> game_record::GameRecord {
         false,
         now_ms(),
     );
-    game.record.initial_draws = initialize(&mut game.state, &mut |_| Ok(0)).unwrap();
+    game.record.initial_draws =
+        super::tests::initialize_automatic(&mut game.state, &mut |_| Ok(0)).unwrap();
     game.record.initial_state = game.state.clone();
     game.record.ended_at_ms = Some(now_ms());
     game.record.ownership = GameRecordOwnership {
@@ -958,7 +959,7 @@ async fn g7_semantic_versions_gate_replay_and_all_analysis_before_execution() {
         ),
         (
             DeckRuleset::Standard,
-            "deck-chess-standard-2",
+            "deck-chess-standard-3",
             "unsupported_rules_version",
         ),
         (

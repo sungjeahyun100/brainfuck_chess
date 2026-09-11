@@ -134,6 +134,7 @@ pub fn apply_ai_action(state: GameState, action: &AiAction) -> Result<GameState,
 
 fn to_turn_action(action: &AiAction) -> TurnAction {
     match action {
+        AiAction::Draw(action) => TurnAction::Draw(action.clone()),
         AiAction::Move(action) => TurnAction::Move(action.clone()),
         AiAction::Drop(action) => TurnAction::Drop(action.clone()),
         AiAction::Ability(action) => TurnAction::Ability(action.clone()),
@@ -1711,6 +1712,7 @@ mod tests {
 
         let actions = generate_quiescence_actions(&state);
         assert!(actions.iter().all(|action| match action {
+            AiAction::Draw(_) => false,
             AiAction::ExtraSummon(_) => false,
             AiAction::Move(action) => is_noisy_move(action),
             AiAction::Drop(action) => is_noisy_drop(action),

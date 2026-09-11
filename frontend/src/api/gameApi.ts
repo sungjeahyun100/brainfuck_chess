@@ -106,6 +106,7 @@ interface GameSyncCatalog {
 }
 
 interface GameDynamicView {
+  deck_counts?: GameState['deck_counts']
   hand_counts?: GameState['hand_counts']
   ruleset?: DeckRuleset
   id: string
@@ -264,6 +265,7 @@ async function request<T>(url: string, options?: RequestInit, profileName?: stri
 }
 
 export function withTurnActionType(action: import('../types/game').TurnAction): import('../types/game').TurnAction {
+  if (action.type === 'draw' || action.type === 'extra_summon') return action
   const type = 'ability_id' in action ? 'ability' : 'from' in action ? 'move' : 'drop'
   return { ...action, type } as import('../types/game').TurnAction
 }

@@ -58,8 +58,14 @@ pub(crate) fn resolve_node(
 ) -> Result<(), &'static str> {
     if let Some(parent) = parent {
         let mut next = node.state_after.clone();
-        let draws =
-            crate::draw::turn_start(parent, &mut next, choose).map_err(|_| "draw_failed")?;
+        let draws = if let TurnAction::Draw(action) = &node.action {
+            let (resolved, draw) = crate::draw::submit(parent.clone(), action.clone(), choose)
+                .map_err(|_| "draw_failed")?;
+            next = resolved;
+            vec![draw]
+        } else {
+            crate::draw::turn_start(parent, &mut next, choose).map_err(|_| "draw_failed")?
+        };
         node.state_hash = state_hash(&next)?;
         node.state_after = normalized_state(next);
         node.draws = draws;

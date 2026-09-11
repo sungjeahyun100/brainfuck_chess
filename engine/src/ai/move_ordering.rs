@@ -9,6 +9,7 @@ use crate::types::{
 
 fn action_priority(state: &GameState, action: &AiAction) -> (u8, u32, i32) {
     match action {
+        AiAction::Draw(_) => (0, 0, 0),
         AiAction::Move(action) => {
             let Some(captured) = action
                 .captured_piece_id
@@ -158,6 +159,7 @@ fn quiescence_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
             .map_or(0, |definition| definition.score)
     };
     match action {
+        AiAction::Draw(_) => (0, 0),
         AiAction::Move(action) => {
             let captured = action
                 .captured_piece_id
@@ -205,6 +207,12 @@ fn quiescence_priority(state: &GameState, action: &AiAction) -> (u8, u32) {
 
 fn canonical_action_cmp(left: &AiAction, right: &AiAction) -> Ordering {
     match (left, right) {
+        (AiAction::Draw(left), AiAction::Draw(right)) => left
+            .player_id
+            .cmp(&right.player_id)
+            .then(left.turn_number.cmp(&right.turn_number)),
+        (AiAction::Draw(_), _) => Ordering::Less,
+        (_, AiAction::Draw(_)) => Ordering::Greater,
         (AiAction::Move(left), AiAction::Move(right)) => left
             .piece_id
             .cmp(&right.piece_id)

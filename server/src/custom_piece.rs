@@ -1540,6 +1540,12 @@ pub(crate) async fn test_action(
     let package = resolve_test_package(&app, &owner, input.definition).await?;
     let state = build_test_state(input.board, &package)?;
     let selected = match &input.action {
+        TurnAction::Draw(_) => {
+            return Err(validation(
+                "illegal_test_action",
+                "테스트 보드에서는 드로우할 수 없습니다.",
+            ))
+        }
         TurnAction::Move(action) => action.piece_id.clone(),
         TurnAction::Drop(action) => action.piece_id.clone(),
         TurnAction::Ability(action) => action.piece_id.clone(),

@@ -311,6 +311,7 @@ function loadOptions(pieceId: string): Promise<boolean> {
 }
 
 async function applyAction(action: TurnAction) {
+  if (action.type === 'draw') return
   if (action.type === 'extra_summon') return
   const revision = requestRevision
   status.value = '서버에서 행동을 적용하는 중…'

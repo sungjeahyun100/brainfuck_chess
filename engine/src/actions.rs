@@ -5,14 +5,43 @@ use crate::legal_moves::{
 };
 use crate::types::{GamePhase, GameState, TurnAction};
 
+pub const MANUAL_DRAW: &str = "manual_draw_v1";
+pub const DRAW_REQUIRED: &str = "draw_required";
+pub fn draw_required(state: &GameState) -> bool {
+    state.ruleset == crate::types::DeckRuleset::Standard
+        && state.global_state.get(DRAW_REQUIRED) == Some(&1)
+}
+pub fn prepare_draw(state: &mut GameState) {
+    if state.global_state.get(MANUAL_DRAW) == Some(&1) {
+        let required = state.phase != GamePhase::Ended
+            && state.result.is_none()
+            && state
+                .players
+                .get(&state.current_player)
+                .is_some_and(|p| !p.deck.pocket_pieces.is_empty());
+        state
+            .global_state
+            .insert(DRAW_REQUIRED.into(), i32::from(required));
+    }
+}
+
 /// Validate and apply every public gameplay action through one boundary.
 pub fn submit_action(state: GameState, action: TurnAction) -> Result<GameState, String> {
     if state.phase == GamePhase::Ended || state.result.is_some() {
         return Err("게임이 이미 종료되었습니다.".into());
     }
 
+    if draw_required(&state) && !matches!(&action, TurnAction::Draw(_)) {
+        return Err("DRAW_REQUIRED".into());
+    }
     crate::hand::validate_hand_zones(&state)?;
     let legal = match &action {
+        TurnAction::Draw(action) => {
+            if !draw_required(&state) {
+                return Err("DRAW_NOT_REQUIRED".into());
+            }
+            action.player_id == state.current_player && action.turn_number == state.turn_number
+        }
         TurnAction::Move(action) => {
             action.player_id == state.current_player
                 && generate_piece_legal_move_actions_with_options(

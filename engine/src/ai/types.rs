@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::types::{AbilityAction, DropAction, ExtraSummonAction, MoveAction, TurnAction};
+use crate::types::{
+    AbilityAction, DrawAction, DropAction, ExtraSummonAction, MoveAction, TurnAction,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AiAction {
+    Draw(DrawAction),
     Move(MoveAction),
     Drop(DropAction),
     Ability(AbilityAction),
@@ -171,6 +174,7 @@ mod tests {
 impl From<AiAction> for TurnAction {
     fn from(action: AiAction) -> Self {
         match action {
+            AiAction::Draw(a) => Self::Draw(a),
             AiAction::Move(a) => Self::Move(a),
             AiAction::Drop(a) => Self::Drop(a),
             AiAction::Ability(a) => Self::Ability(a),
@@ -181,6 +185,7 @@ impl From<AiAction> for TurnAction {
 impl From<TurnAction> for AiAction {
     fn from(action: TurnAction) -> Self {
         match action {
+            TurnAction::Draw(a) => Self::Draw(a),
             TurnAction::Move(a) => Self::Move(a),
             TurnAction::Drop(a) => Self::Drop(a),
             TurnAction::Ability(a) => Self::Ability(a),

@@ -204,8 +204,20 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
 /// completed turns: an OwnerTurns cooldown set to N is not decremented on the
 /// action that creates it, then decreases after each later action by its owner.
 pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> GameState {
+    if let TurnAction::Draw(draw) = &action {
+        game_state
+            .global_state
+            .insert(crate::actions::DRAW_REQUIRED.into(), 0);
+        game_state.history.push(ActionRecord {
+            turn_number: game_state.turn_number,
+            player_id: draw.player_id.clone(),
+            action,
+        });
+        return game_state;
+    }
     let turn_number = game_state.turn_number;
     let player_id = match &action {
+        TurnAction::Draw(action) => action.player_id.clone(),
         TurnAction::Move(action) => action.player_id.clone(),
         TurnAction::Drop(action) => action.player_id.clone(),
         TurnAction::Ability(action) => action.player_id.clone(),
@@ -240,15 +252,37 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         TurnAction::Ability(action) => {
             std::iter::once((action.piece_id.clone(), action.ability_id.clone())).collect()
         }
-        TurnAction::Drop(_) | TurnAction::ExtraSummon(_) => Default::default(),
+        TurnAction::Draw(_) | TurnAction::Drop(_) | TurnAction::ExtraSummon(_) => {
+            Default::default()
+        }
     };
 
+    // These versioned lifecycle values belong to the engine, not to a piece's
+    // generic Chessembly state effects. Preserve them before advancing the turn.
+    let draw_control =
+        (game_state.global_state.get(crate::actions::MANUAL_DRAW) == Some(&1)).then(|| {
+            game_state
+                .global_state
+                .get(crate::actions::DRAW_REQUIRED)
+                .copied()
+                .unwrap_or(0)
+        });
     game_state = match action.clone() {
+        TurnAction::Draw(_) => unreachable!("draw returns before turn advancement"),
         TurnAction::Move(action) => apply_move_action(game_state, action),
         TurnAction::Drop(action) => apply_drop_action(game_state, action),
         TurnAction::Ability(action) => apply_ability_action(game_state, action),
         TurnAction::ExtraSummon(action) => crate::summon::apply_extra_summon(game_state, action),
     };
+
+    if let Some(required) = draw_control {
+        game_state
+            .global_state
+            .insert(crate::actions::MANUAL_DRAW.into(), 1);
+        game_state
+            .global_state
+            .insert(crate::actions::DRAW_REQUIRED.into(), required);
+    }
 
     game_state.history.push(ActionRecord {
         turn_number,
@@ -274,6 +308,7 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
             "white".into()
         };
         game_state.turn_number += 1;
+        crate::actions::prepare_draw(&mut game_state);
     }
     game_state
 }

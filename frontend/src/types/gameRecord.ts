@@ -12,7 +12,7 @@ export interface DeckSnapshot {
   extra?: DeckSnapshot['pocket']
   pocket: Array<{ piece_type_id?: string; piece_name: string; custom_piece?: { custom_piece_id: string; version: number; content_hash: string; exposed_piece_key: string } | null; count: number }>
 }
-export type NotationActionKind = 'move' | 'move_with_ability' | 'ability' | 'drop' | 'extra_summon'
+export type NotationActionKind = 'draw' | 'move' | 'move_with_ability' | 'ability' | 'drop' | 'extra_summon'
 export interface ActorSnapshot { piece_id: string; piece_type_id: string; piece_name: string; from?: Square | null; layer: 'ground' | 'air'; current_ammo?: number | null; state: Record<string, PieceStateValue> }
 export interface AbilityEventSnapshot { ability_id: string; ability_name: string; target?: Square | null }
 export interface RecordedNotationAction {
