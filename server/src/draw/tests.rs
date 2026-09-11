@@ -35,6 +35,24 @@ pub(super) fn state_with_pockets(white: usize, black: usize) -> GameState {
     .unwrap()
 }
 
+// Historical v1 fixture: preserve automatic-draw replay coverage.
+pub(super) fn initialize_automatic(
+    state: &mut GameState,
+    choose: &mut impl FnMut(usize) -> Result<usize, String>,
+) -> Result<Vec<DrawResolution>, String> {
+    let mut next = state.clone();
+    let mut draws = super::initialize(&mut next, choose)?;
+    if next.ruleset == DeckRuleset::Standard {
+        next.global_state
+            .remove(brainfuck_chess_engine::actions::MANUAL_DRAW);
+        next.global_state
+            .remove(brainfuck_chess_engine::actions::DRAW_REQUIRED);
+        draws.push(resolve(&mut next, "white", DrawTiming::TurnStart, choose)?);
+    }
+    *state = next;
+    Ok(draws)
+}
+
 fn value(state: &GameState) -> Value {
     serde_json::to_value(state).unwrap()
 }
@@ -66,6 +84,7 @@ pub(super) fn add_board(
 
 fn request(action: TurnAction) -> SubmitActionRequest {
     let action = match action {
+        TurnAction::Draw(a) => json!({"type":"draw","turn_number":a.turn_number}),
         TurnAction::Move(a) => {
             json!({"type":"move","piece_id":a.piece_id,"to":a.to,"move_option_id":a.move_option_id,"promotion":a.promotion})
         }
@@ -103,7 +122,7 @@ fn initial_order_counts_instances_and_short_pockets() {
         let mut state = state_with_pockets(count, count);
         let before = state.clone();
         let mut bounds = Vec::new();
-        let draws = initialize(&mut state, &mut |n| {
+        let draws = initialize_automatic(&mut state, &mut |n| {
             bounds.push(n);
             Ok(n - 1)
         })
@@ -149,7 +168,7 @@ fn initial_order_counts_instances_and_short_pockets() {
         hand::validate_hand_zones(&state).unwrap();
         let mut repeated = before.clone();
         assert_eq!(
-            initialize(&mut repeated, &mut |n| Ok(n - 1)).unwrap(),
+            initialize_automatic(&mut repeated, &mut |n| Ok(n - 1)).unwrap(),
             draws
         );
         assert_eq!(value(&repeated), value(&state));
@@ -170,7 +189,7 @@ fn rng_and_transition_failures_roll_back_entire_initial_and_multi_draw() {
         let mut state = state_with_pockets(8, 8);
         let before = value(&state);
         let mut call = 0;
-        assert!(initialize(&mut state, &mut |n| {
+        assert!(initialize_automatic(&mut state, &mut |n| {
             call += 1;
             if call - 1 == fail_at {
                 Ok(n)
@@ -180,27 +199,27 @@ fn rng_and_transition_failures_roll_back_entire_initial_and_multi_draw() {
         })
         .is_err());
         assert_eq!(value(&state), before);
-        assert!(initialize(&mut state, &mut |_| Err("OS unavailable".into())).is_err());
+        assert!(initialize_automatic(&mut state, &mut |_| Err("OS unavailable".into())).is_err());
         assert_eq!(value(&state), before);
     }
     let mut state = state_with_pockets(3, 3);
     let bad = state.players["white"].deck.pocket_pieces[1].clone();
     state.pieces.get_mut(&bad).unwrap().captured = true;
     let before = value(&state);
-    assert!(initialize(&mut state, &mut |n| Ok(n - 1)).is_err());
+    assert!(initialize_automatic(&mut state, &mut |n| Ok(n - 1)).is_err());
     assert_eq!(value(&state), before);
     let mut state = state_with_pockets(3, 3);
     let id = state.players["white"].deck.pocket_pieces[0].clone();
     state.players.get_mut("white").unwrap().deck.pocket_pieces[1] = id;
     let before = value(&state);
-    assert!(initialize(&mut state, &mut first).is_err());
+    assert!(initialize_automatic(&mut state, &mut first).is_err());
     assert_eq!(value(&state), before);
 }
 
 #[test]
 fn actual_turn_draws_and_exact_replay_require_valid_resolution() {
     let mut state = state_with_pockets(8, 8);
-    initialize(&mut state, &mut first).unwrap();
+    initialize_automatic(&mut state, &mut first).unwrap();
     for turn in 0..5 {
         let before = state.clone();
         let action = TurnAction::Move(generate_legal_move_actions(&state)[0].clone());
@@ -248,7 +267,9 @@ fn legacy_and_hypothetical_search_never_consume_draw_rng() {
     let mut legacy = state_with_pockets(8, 8);
     legacy.ruleset = DeckRuleset::Legacy;
     let before = legacy.clone();
-    assert!(initialize(&mut legacy, &mut no_rng).unwrap().is_empty());
+    assert!(initialize_automatic(&mut legacy, &mut no_rng)
+        .unwrap()
+        .is_empty());
     assert_eq!(value(&legacy), value(&before));
     let drop = generate_legal_drop_actions(&legacy)[0].clone();
     let mut after = submit_engine_action(legacy, TurnAction::Drop(drop)).unwrap();
@@ -261,7 +282,7 @@ fn legacy_and_hypothetical_search_never_consume_draw_rng() {
         .all(|p| p.deck.hand_pieces.is_empty()));
 
     let mut state = state_with_pockets(8, 8);
-    initialize(&mut state, &mut first).unwrap();
+    initialize_automatic(&mut state, &mut first).unwrap();
     let original = value(&state);
     let result =
         play_bot_turn_detailed(state.clone(), &"white".into(), BotDifficulty::Easy).unwrap();
@@ -295,13 +316,13 @@ fn frozen_decks_and_playable_initial_state_are_distinct_and_sparse_for_legacy() 
         8
     );
     assert_eq!(game.record.decks["black"].extra[0].piece_type_id, "bomber");
-    assert_eq!(game.record.initial_draws.len(), 3);
+    assert_eq!(game.record.initial_draws.len(), 2);
     assert_eq!(
         game.record.initial_state.players["white"]
             .deck
             .hand_pieces
             .len(),
-        4
+        3
     );
     assert_eq!(value(&game.record.initial_state), value(&game.state));
     let before = value(&game.state);
@@ -337,7 +358,9 @@ async fn committed_actions_include_draw_in_record_and_reject_retry_invalid_and_u
         false,
         now_ms(),
     );
-    game.initialize_draws().unwrap();
+    game.record.initial_draws = initialize_automatic(&mut game.state, &mut first).unwrap();
+    game.record.initial_state = game.state.clone();
+    game.record.ruleset_version = "deck-chess-standard-1".into();
     game.access = GameAccess::Local {
         client: "controller".into(),
         human: None,
@@ -467,7 +490,7 @@ async fn timeout_and_king_capture_do_not_start_draw() {
 #[tokio::test]
 async fn forced_landing_defers_draw_until_actual_player_change() {
     let mut state = state_with_pockets(8, 8);
-    initialize(&mut state, &mut first).unwrap();
+    initialize_automatic(&mut state, &mut first).unwrap();
     add_board(&mut state, "bomber", "white", "bomber", Square::new(0, 5));
     state.board.squares.insert(Square::new(0, 5).to_id(), None);
     state
@@ -610,7 +633,9 @@ async fn standard_analysis_endpoints_commit_and_reject_unresolved_pending_action
         false,
         now_ms(),
     );
-    game.initialize_draws().unwrap();
+    game.record.initial_draws = initialize_automatic(&mut game.state, &mut first).unwrap();
+    game.record.initial_state = game.state.clone();
+    game.record.ruleset_version = "deck-chess-standard-1".into();
     game.record.ownership = GameRecordOwnership {
         white_user_id: Some("analysis-owner".into()),
         black_user_id: None,

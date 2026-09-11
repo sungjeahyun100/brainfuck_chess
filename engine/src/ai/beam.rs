@@ -94,7 +94,7 @@ enum OptionalCategory {
 
 fn optional_category(state: &GameState, action: &AiAction) -> OptionalCategory {
     match action {
-        AiAction::Move(_) => OptionalCategory::Board,
+        AiAction::Draw(_) | AiAction::Move(_) => OptionalCategory::Board,
         AiAction::Drop(_) | AiAction::ExtraSummon(_) => OptionalCategory::QuietDrop,
         AiAction::Ability(ability) => {
             let source_is_in_pocket = state
@@ -196,7 +196,7 @@ pub(crate) fn canonicalize_actions(state: &GameState, actions: Vec<AiAction>) ->
     let mut unique = Vec::with_capacity(actions.len());
     for action in actions {
         let key = match &action {
-            AiAction::Move(_) | AiAction::ExtraSummon(_) => {
+            AiAction::Draw(_) | AiAction::Move(_) | AiAction::ExtraSummon(_) => {
                 unique.push(action);
                 continue;
             }
@@ -292,6 +292,7 @@ pub(crate) fn tactical_impact(state: &GameState, action: &AiAction) -> TacticalI
     }
 
     match action {
+        AiAction::Draw(_) => TacticalImpact::default(),
         AiAction::Move(action) => {
             let captured = action
                 .captured_piece_id
@@ -412,6 +413,7 @@ pub(crate) fn select_beam_actions(
     for action in actions {
         let forced_defense = must_answer_king_threat && {
             let turn_action = match &action {
+                AiAction::Draw(action) => TurnAction::Draw(action.clone()),
                 AiAction::Move(action) => TurnAction::Move(action.clone()),
                 AiAction::Drop(action) => TurnAction::Drop(action.clone()),
                 AiAction::Ability(action) => TurnAction::Ability(action.clone()),

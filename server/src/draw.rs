@@ -1,4 +1,4 @@
-//! Server-only automatic Draw policy. Search and player actions never own RNG.
+//! Server-only Draw policy. Search and player actions never own RNG.
 use brainfuck_chess_engine::{hand, types::*};
 use serde::{Deserialize, Serialize};
 
@@ -117,10 +117,12 @@ pub(crate) fn initialize(
     for (owner, timing) in [
         ("white", DrawTiming::Initial),
         ("black", DrawTiming::Initial),
-        ("white", DrawTiming::TurnStart),
     ] {
         draws.push(resolve(&mut next, owner, timing, choose)?);
     }
+    next.global_state
+        .insert(brainfuck_chess_engine::actions::MANUAL_DRAW.into(), 1);
+    brainfuck_chess_engine::actions::prepare_draw(&mut next);
     hand::validate_hand_zones(&next)?;
     *state = next;
     Ok(draws)
@@ -143,8 +145,27 @@ pub(crate) fn turn_start(
     if !starts_turn(before, after) {
         return Ok(Vec::new());
     }
+    if after
+        .global_state
+        .get(brainfuck_chess_engine::actions::MANUAL_DRAW)
+        == Some(&1)
+    {
+        brainfuck_chess_engine::actions::prepare_draw(after);
+        return Ok(Vec::new());
+    }
     let owner = after.current_player.clone();
     Ok(vec![resolve(after, &owner, DrawTiming::TurnStart, choose)?])
+}
+
+pub(crate) fn submit(
+    state: GameState,
+    action: DrawAction,
+    choose: &mut impl FnMut(usize) -> Result<usize, String>,
+) -> Result<(GameState, DrawResolution), String> {
+    let owner = action.player_id.clone();
+    let mut next = brainfuck_chess_engine::actions::submit_action(state, TurnAction::Draw(action))?;
+    let draw = resolve(&mut next, &owner, DrawTiming::TurnStart, choose)?;
+    Ok((next, draw))
 }
 
 /// Reapply an exact recorded automatic transition; never samples randomness.
@@ -153,6 +174,31 @@ pub(crate) fn replay_turn(
     after: &mut GameState,
     draws: &[DrawResolution],
 ) -> Result<(), String> {
+    if before
+        .global_state
+        .get(brainfuck_chess_engine::actions::MANUAL_DRAW)
+        == Some(&1)
+    {
+        if after.history.len() == before.history.len() + 1
+            && matches!(
+                after.history.last().map(|r| &r.action),
+                Some(TurnAction::Draw(_))
+            )
+        {
+            let [draw] = draws else {
+                return Err("Draw resolution이 필요합니다.".into());
+            };
+            if draw.player_id != before.current_player || draw.timing != DrawTiming::TurnStart {
+                return Err("Invalid Draw owner/timing".into());
+            }
+            return apply_resolution(after, draw);
+        }
+        return if draws.is_empty() {
+            Ok(())
+        } else {
+            Err("Unexpected Draw resolution".into())
+        };
+    }
     if !starts_turn(before, after) {
         return if draws.is_empty() {
             Ok(())
@@ -194,7 +240,16 @@ pub(crate) fn validate_initial(state: &GameState, draws: &[DrawResolution]) -> R
         || before.turn_number != 1
         || before.phase != GamePhase::Playing
         || before.result.is_some()
-        || draws.len() != 3
+        || draws.len()
+            != if state
+                .global_state
+                .get(brainfuck_chess_engine::actions::MANUAL_DRAW)
+                == Some(&1)
+            {
+                2
+            } else {
+                3
+            }
     {
         return Err("Invalid initial Draw state".into());
     }
@@ -225,3 +280,6 @@ mod g5_tests;
 
 #[cfg(test)]
 mod g8a_tests;
+
+#[cfg(test)]
+mod manual_tests;

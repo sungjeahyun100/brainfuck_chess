@@ -110,7 +110,7 @@ function validDelta(value: unknown): boolean {
 
 function validNotation(value: unknown, size: number): boolean {
   if (!isRecord(value) || !Number.isInteger(value.turn_number) || (value.turn_number as number) < 1 || !Number.isInteger(value.move_number) || value.move_number !== Math.floor(((value.turn_number as number) + 1) / 2) || !['white', 'black'].includes(String(value.side))) return false
-  if (!['move', 'move_with_ability', 'ability', 'drop', 'extra_summon'].includes(String(value.kind)) || !isRecord(value.actor)) return false
+  if (!['draw', 'move', 'move_with_ability', 'ability', 'drop', 'extra_summon'].includes(String(value.kind)) || !isRecord(value.actor)) return false
   if (!validText(value.actor.piece_id, 256) || !validText(value.actor.piece_type_id, 256) || !validText(value.actor.piece_name, 160)) return false
   if (value.from != null && !validSquare(value.from, size) || value.to != null && !validSquare(value.to, size) || value.target != null && !validSquare(value.target, size)) return false
   if (!Array.isArray(value.ability_events) || value.ability_events.length > 16) return false
@@ -132,6 +132,16 @@ function validAction(value: unknown, index: number, size: number): boolean {
   if (!['white', 'black'].includes(String(value.player_id)) || !Number.isFinite(value.elapsed_ms) || !validNotation(value.notation, size) || !validDelta(value.state_delta)) return false
   if (!validDraws(value.draws, false)) return false
   const type = value.action.type
+  if (type === 'draw') {
+    const action = value.action
+    return action.player_id === value.player_id && Number.isInteger(action.turn_number) && (action.turn_number as number) > 0
+      && (action.turn_number as number) <= 4294967295
+      && Object.keys(action).every(key => ['type', 'player_id', 'turn_number'].includes(key))
+      && (value.notation as Record<string, unknown>).kind === 'draw'
+      && (value.notation as Record<string, unknown>).side === value.player_id
+      && Array.isArray(value.draws) && value.draws.length === 1 && value.draws[0].piece_ids.length === 1
+      && value.draws[0].player_id === value.player_id && value.draws[0].timing === 'turn_start'
+  }
   if (type === 'extra_summon') {
     const action = value.action
     return action.player_id === value.player_id && (value.notation as Record<string, unknown>).side === value.player_id

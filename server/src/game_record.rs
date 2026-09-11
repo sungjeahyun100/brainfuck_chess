@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use brainfuck_chess_engine::types::{
-    DeckRuleset, GameResult, GameState, MoveOptionKind, Piece, PieceId, PieceLayer, PlayerId,
-    Square, TurnAction,
+    DeckRuleset, GameResult, GameState, MoveOptionKind, Piece, PieceLayer, PlayerId, Square,
+    TurnAction,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -14,13 +14,14 @@ use crate::time_control::{ClockSnapshot, TimeControlId};
 
 pub(crate) const GAME_RECORD_FORMAT_VERSION: u32 = 2;
 pub(crate) const LEGACY_RULES_VERSION: &str = "deck-chess-1";
-pub(crate) const STANDARD_RULES_VERSION: &str = "deck-chess-standard-1";
+pub(crate) const STANDARD_RULES_VERSION: &str = "deck-chess-standard-2";
 
 /// Semantic engine dispatch, independent of JSON/snapshot/deck/account versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GameRulesVersion {
     LegacyV1,
     StandardV1,
+    StandardV2,
 }
 
 pub(crate) fn current_rules_version_for(ruleset: DeckRuleset) -> &'static str {
@@ -36,7 +37,8 @@ pub(crate) fn supported_record_rules_version(
 ) -> Result<GameRulesVersion, &'static str> {
     match (ruleset, version) {
         (DeckRuleset::Legacy, LEGACY_RULES_VERSION) => Ok(GameRulesVersion::LegacyV1),
-        (DeckRuleset::Standard, STANDARD_RULES_VERSION) => Ok(GameRulesVersion::StandardV1),
+        (DeckRuleset::Standard, STANDARD_RULES_VERSION) => Ok(GameRulesVersion::StandardV2),
+        (DeckRuleset::Standard, "deck-chess-standard-1") => Ok(GameRulesVersion::StandardV1),
         (DeckRuleset::Standard, LEGACY_RULES_VERSION) => {
             Err("unsupported_development_standard_record")
         }
@@ -116,6 +118,7 @@ pub(crate) struct DeckSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum NotationActionKind {
+    Draw,
     Move,
     MoveWithAbility,
     Ability,
@@ -409,7 +412,10 @@ impl GameRecord {
             if version == GameRulesVersion::LegacyV1 && !recorded.draws.is_empty() {
                 return Err("invalid_record");
             }
-            let resolved = if version == GameRulesVersion::StandardV1 {
+            let resolved = if matches!(
+                version,
+                GameRulesVersion::StandardV1 | GameRulesVersion::StandardV2
+            ) {
                 let before: GameState =
                     serde_json::from_value(value.clone()).map_err(|_| "invalid_record")?;
                 let mut after = brainfuck_chess_engine::actions::submit_action(
@@ -583,17 +589,19 @@ fn build_deck_snapshots(
         .collect()
 }
 
-fn actor_piece_id(action: &TurnAction) -> &PieceId {
+fn actor_piece_id(action: &TurnAction) -> &str {
     match action {
-        TurnAction::Move(action) => &action.piece_id,
-        TurnAction::Drop(action) => &action.piece_id,
-        TurnAction::Ability(action) => &action.piece_id,
-        TurnAction::ExtraSummon(action) => &action.extra_piece_id,
+        TurnAction::Draw(_) => "deck",
+        TurnAction::Move(action) => action.piece_id.as_str(),
+        TurnAction::Drop(action) => action.piece_id.as_str(),
+        TurnAction::Ability(action) => action.piece_id.as_str(),
+        TurnAction::ExtraSummon(action) => action.extra_piece_id.as_str(),
     }
 }
 
 fn action_player_id(action: &TurnAction) -> &PlayerId {
     match action {
+        TurnAction::Draw(action) => &action.player_id,
         TurnAction::Move(action) => &action.player_id,
         TurnAction::Drop(action) => &action.player_id,
         TurnAction::Ability(action) => &action.player_id,
@@ -635,8 +643,18 @@ fn build_notation(action: &TurnAction, state_before: &GameState) -> RecordedNota
         })
         .unwrap_or_else(|| ActorSnapshot {
             piece_id: actor_piece_id(action).to_string(),
-            piece_type_id: "unknown".into(),
-            piece_name: "unknown".into(),
+            piece_type_id: if matches!(action, TurnAction::Draw(_)) {
+                "deck"
+            } else {
+                "unknown"
+            }
+            .into(),
+            piece_name: if matches!(action, TurnAction::Draw(_)) {
+                "덱"
+            } else {
+                "unknown"
+            }
+            .into(),
             from: None,
             layer: PieceLayer::Ground,
             current_ammo: None,
@@ -644,6 +662,7 @@ fn build_notation(action: &TurnAction, state_before: &GameState) -> RecordedNota
         });
 
     let (kind, ability_id, ability_name_value, to, target) = match action {
+        TurnAction::Draw(_) => (NotationActionKind::Draw, None, None, None, None),
         TurnAction::Move(move_action) => {
             let is_ability = piece
                 .and_then(|piece| state_before.piece_definitions.get(&piece.type_id))

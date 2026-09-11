@@ -133,7 +133,7 @@ async fn multiplayer_hand_privacy_covers_full_sync_legal_submit_rejoin_and_publi
     let id = created["id"].as_str().unwrap();
     let (hands, state) = {
         let game = app.games.get(id).unwrap();
-        assert_eq!(game.players["white"].deck.hand_pieces.len(), 4);
+        assert_eq!(game.players["white"].deck.hand_pieces.len(), 3);
         assert_eq!(game.players["black"].deck.hand_pieces.len(), 3);
         let hands: HashMap<_, _> = game
             .players
@@ -170,7 +170,7 @@ async fn multiplayer_hand_privacy_covers_full_sync_legal_submit_rejoin_and_publi
             let (status, sync) = http(&app, "POST", &format!("/rooms/{room_id}/heartbeat"), None, json!({"client_id":client, "player_id":own, "latest_ply":0, "catalog_revision":revision})).await;
             assert_eq!(status, StatusCode::OK, "{sync}");
             assert_private(&sync, &state, Some(own));
-            assert_eq!(sync["dynamic"]["hand_counts"]["white"], 4);
+            assert_eq!(sync["dynamic"]["hand_counts"]["white"], 3);
             assert_eq!(
                 sync["dynamic"]["players"][own]["deck"]["hand_pieces"],
                 json!(hands[own])
@@ -254,6 +254,16 @@ async fn multiplayer_hand_privacy_covers_full_sync_legal_submit_rejoin_and_publi
     )
     .await;
     assert_private(&bot, &state, None);
+    let (status, _) = http(
+        &app,
+        "POST",
+        &format!("/games/{id}/actions"),
+        Some("host-token"),
+        json!({"action":{"type":"draw","turn_number":1}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let state = app.games.get(id).unwrap().state.clone();
     let before = serde_json::to_value(&state).unwrap();
     let destination = legal["drops"][0]["to"].clone();
     for piece_id in [
@@ -286,7 +296,7 @@ async fn multiplayer_hand_privacy_covers_full_sync_legal_submit_rejoin_and_publi
     assert_eq!(status, StatusCode::OK, "{after}");
     assert_private(&after, &state, Some("white"));
     assert_eq!(after["hand_counts"]["white"], 3);
-    assert_eq!(after["hand_counts"]["black"], 4);
+    assert_eq!(after["hand_counts"]["black"], 3);
     let after_white = app.games.get(id).unwrap().state.clone();
     for (client, own) in [("host-token", "white"), ("guest-token", "black")] {
         let (status, sync) = http(
@@ -299,19 +309,28 @@ async fn multiplayer_hand_privacy_covers_full_sync_legal_submit_rejoin_and_publi
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_private(&sync, &after_white, Some(own));
-        assert_eq!(sync["dynamic"]["hand_counts"]["black"], 4);
+        assert_eq!(sync["dynamic"]["hand_counts"]["black"], 3);
         assert_eq!(
             sync["dynamic"]["players"][own]["deck"]["hand_pieces"],
             json!(after_white.players[own].deck.hand_pieces)
         );
     }
+    let (status, _) = http(
+        &app,
+        "POST",
+        &format!("/games/{id}/actions"),
+        Some("guest-token"),
+        json!({"action":{"type":"draw","turn_number":2}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     let black_action = generate_legal_move_actions(&after_white)[0].clone();
     let (status, after_black) = http(&app, "POST", &format!("/games/{id}/actions"), Some("guest-token"),
         json!({"action":{"type":"move","piece_id":black_action.piece_id,"to":black_action.to,"move_option_id":black_action.move_option_id}})).await;
     assert_eq!(status, StatusCode::OK, "{after_black}");
     let authority = app.games.get(id).unwrap().state.clone();
     assert_eq!(authority.current_player, "white");
-    assert_eq!(authority.players["white"].deck.hand_pieces.len(), 4);
+    assert_eq!(authority.players["white"].deck.hand_pieces.len(), 3);
     assert_eq!(authority.players["black"].deck.hand_pieces.len(), 4);
     assert_private(&after_black, &authority, Some("black"));
 }
@@ -333,7 +352,7 @@ async fn local_and_bot_creation_bind_distinct_view_capabilities_and_bot_frames_a
         let id = response["id"].as_str().unwrap();
         let state = {
             let game = app.games.get(id).unwrap();
-            assert_eq!(game.players["white"].deck.hand_pieces.len(), 4);
+            assert_eq!(game.players["white"].deck.hand_pieces.len(), 3);
             assert_eq!(game.players["black"].deck.hand_pieces.len(), 3);
             game.state.clone()
         };
@@ -367,6 +386,15 @@ async fn local_and_bot_creation_bind_distinct_view_capabilities_and_bot_frames_a
             assert_private(&own_view, &state, Some(human));
             let bot = opponent_player(human);
             if bot == "black" {
+                let (status, _) = http(
+                    &app,
+                    "POST",
+                    &format!("/games/{id}/actions"),
+                    Some("controller"),
+                    json!({"action":{"type":"draw","turn_number":1}}),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK);
                 let action = generate_legal_move_actions(&state)[0].clone();
                 let (status, moved) = http(&app, "POST", &format!("/games/{id}/actions"), Some("controller"),
                     json!({"action":{"type":"move", "piece_id":action.piece_id, "to":action.to, "move_option_id":action.move_option_id}})).await;
@@ -374,7 +402,7 @@ async fn local_and_bot_creation_bind_distinct_view_capabilities_and_bot_frames_a
             }
             let before_bot = app.games.get(id).unwrap().state.clone();
             assert_eq!(before_bot.current_player, bot);
-            assert_eq!(before_bot.players[&bot].deck.hand_pieces.len(), 4);
+            assert_eq!(before_bot.players[&bot].deck.hand_pieces.len(), 3);
             let body = json!({"bot_player_id":bot, "difficulty":"easy"});
             let (status, _) = http(
                 &app,
@@ -401,7 +429,7 @@ async fn local_and_bot_creation_bind_distinct_view_capabilities_and_bot_frames_a
             assert_eq!(after.current_player, human);
             assert_eq!(
                 after.players[human].deck.hand_pieces.len(),
-                before_bot.players[human].deck.hand_pieces.len() + 1
+                before_bot.players[human].deck.hand_pieces.len()
             );
             let last_frame = response["timeline"].as_array().unwrap().last().unwrap();
             assert_eq!(

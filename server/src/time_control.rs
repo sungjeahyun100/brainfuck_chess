@@ -255,6 +255,7 @@ pub(crate) struct GameView {
     pub(crate) state: GameState,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub(crate) hand_counts: HashMap<PlayerId, usize>,
+    pub(crate) deck_counts: HashMap<PlayerId, usize>,
     pub(crate) clock: ClockSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) presence: Option<PresenceSnapshot>,
@@ -290,6 +291,7 @@ pub(crate) struct GameStaticData {
 pub(crate) struct GameDynamicView {
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub(crate) hand_counts: HashMap<PlayerId, usize>,
+    pub(crate) deck_counts: HashMap<PlayerId, usize>,
     pub(crate) ruleset: brainfuck_chess_engine::types::DeckRuleset,
     pub(crate) id: String,
     pub(crate) board: Board,
@@ -460,6 +462,7 @@ impl StoredGame {
         GameView {
             state,
             hand_counts: game_view::hand_counts(&self.state),
+            deck_counts: game_view::deck_counts(&self.state),
             clock: self.clock.snapshot(now_ms, running),
             presence: self.presence.as_ref().map(|presence| PresenceSnapshot {
                 white: presence_for(presence, "white", now_ms),
@@ -522,6 +525,7 @@ impl StoredGame {
             catalog,
             dynamic: GameDynamicView {
                 hand_counts: game_view::hand_counts(&self.state),
+                deck_counts: game_view::deck_counts(&self.state),
                 ruleset: self.state.ruleset,
                 id: self.state.id.clone(),
                 board: self.state.board.clone(),

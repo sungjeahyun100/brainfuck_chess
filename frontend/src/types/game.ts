@@ -240,7 +240,9 @@ export interface SummonOptions {
   cost: number
   actions: Omit<ExtraSummonAction, 'type'>[]
 }
-export type SubmitAction = SubmitMoveAction | SubmitDropAction | SubmitAbilityAction | Omit<ExtraSummonAction, 'player_id'>
+export interface DrawAction { type: 'draw'; player_id: PlayerId; turn_number: number }
+
+export type SubmitAction = Omit<DrawAction, 'player_id'> | SubmitMoveAction | SubmitDropAction | SubmitAbilityAction | Omit<ExtraSummonAction, 'player_id'>
 
 export interface GlobalStateUpdate {
     key: string
@@ -255,11 +257,11 @@ export interface DropAction {
   captured_piece_id?: PieceId
 }
 
-export type TurnAction = MoveAction | DropAction | AbilityAction | ExtraSummonAction
+export type TurnAction = DrawAction | MoveAction | DropAction | AbilityAction | ExtraSummonAction
 
 export type BotDifficulty = 'easy' | 'normal' | 'hard'
 
-export type AiAction = MoveAction | DropAction | AbilityAction | ExtraSummonAction
+export type AiAction = DrawAction | MoveAction | DropAction | AbilityAction | ExtraSummonAction
 
 export interface ActionTimelineFrame {
   action: AiAction
@@ -367,6 +369,7 @@ export interface ChallengeGameMetadata {
 
 export interface GameState {
   /** Live Standard projection: counts for both sides; identities only in authorized decks. */
+  deck_counts?: Record<PlayerId, number>
   hand_counts?: Record<PlayerId, number>
   /** Omitted Legacy on historical serialized states to preserve analysis hashes. */
   ruleset?: DeckRuleset

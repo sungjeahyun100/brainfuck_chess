@@ -250,7 +250,7 @@ async fn standard_production_creation_bot_summon_draw_privacy_and_exact_replay()
         let stored = app.games.get(&id).unwrap();
         assert_eq!(stored.record.game_mode, game_record::GameMode::Challenge);
         assert_eq!(stored.record.challenge_id.as_deref(), Some(def.id));
-        assert_eq!(stored.record.ruleset_version, "deck-chess-standard-1");
+        assert_eq!(stored.record.ruleset_version, "deck-chess-standard-2");
         assert_eq!(
             stored
                 .record
@@ -258,9 +258,9 @@ async fn standard_production_creation_bot_summon_draw_privacy_and_exact_replay()
                 .iter()
                 .map(|d| d.piece_ids.len())
                 .collect::<Vec<_>>(),
-            [3, 3, 1]
+            [3, 3]
         );
-        assert_eq!(stored.state.players["white"].deck.hand_pieces.len(), 4);
+        assert_eq!(stored.state.players["white"].deck.hand_pieces.len(), 3);
         assert_eq!(stored.state.players["black"].deck.hand_pieces.len(), 3);
         let wire = serde_json::to_value(&response.state).unwrap().to_string();
         for hidden in stored.state.players["black"]
@@ -278,6 +278,14 @@ async fn standard_production_creation_bot_summon_draw_privacy_and_exact_replay()
         }
         assert_eq!(stored.record.decks["black"].extra.len(), 3);
     }
+    submit_action(
+        State(app.clone()),
+        headers(),
+        Path(id.clone()),
+        Json(serde_json::from_value(json!({"action":{"type":"draw","turn_number":1}})).unwrap()),
+    )
+    .await
+    .unwrap();
     let action = generate_ai_actions(&app.games.get(&id).unwrap().state)
         .into_iter()
         .find(|a| matches!(a, AiAction::Drop(_)))
@@ -292,7 +300,7 @@ async fn standard_production_creation_bot_summon_draw_privacy_and_exact_replay()
     .unwrap();
     {
         let state = app.games.get(&id).unwrap().state.clone();
-        assert_eq!(state.players["black"].deck.hand_pieces.len(), 4);
+        assert_eq!(state.players["black"].deck.hand_pieces.len(), 3);
         let mut hidden = state.clone();
         for id in hidden.players["white"]
             .deck
@@ -384,7 +392,16 @@ async fn standard_production_creation_bot_summon_draw_privacy_and_exact_replay()
         analysis::state_hash(&analyzed),
         analysis::state_hash(&replay.state_at_ply(ply).unwrap())
     );
-    assert_eq!(stored.record.actions.last().unwrap().draws.len(), 1);
+    assert!(stored.record.actions.last().unwrap().draws.is_empty());
+    assert_eq!(
+        stored
+            .record
+            .actions
+            .iter()
+            .filter(|a| matches!(a.action, TurnAction::Draw(_)))
+            .count(),
+        2
+    );
     assert_eq!(
         analysis::state_hash(
             &stored
@@ -528,6 +545,14 @@ async fn standard_challenge_bot_can_drop_from_hand() {
     let app = AppState::in_memory();
     let response = create(&app, &def, player(&def)).await.unwrap().0;
     let id = response.id;
+    submit_action(
+        State(app.clone()),
+        headers(),
+        Path(id.clone()),
+        Json(serde_json::from_value(json!({"action":{"type":"draw","turn_number":1}})).unwrap()),
+    )
+    .await
+    .unwrap();
     let action = generate_ai_actions(&app.games.get(&id).unwrap().state)
         .into_iter()
         .find(|a| matches!(a, AiAction::Drop(_)))
@@ -553,7 +578,16 @@ async fn standard_challenge_bot_can_drop_from_hand() {
     .await
     .unwrap()
     .0;
-    assert!(bot.actions.iter().any(|a|matches!(a,AiAction::Drop(drop) if before.players["black"].deck.hand_pieces.contains(&drop.piece_id))));
+    let stored = app.games.get(&id).unwrap();
+    let drawn = &stored
+        .record
+        .actions
+        .iter()
+        .find(|a| matches!(&a.action, TurnAction::Draw(d) if d.player_id == "black"))
+        .unwrap()
+        .draws[0]
+        .piece_ids;
+    assert!(bot.actions.iter().any(|a| matches!(a, AiAction::Drop(drop) if before.players["black"].deck.hand_pieces.contains(&drop.piece_id) || drawn.contains(&drop.piece_id))));
 }
 
 #[tokio::test]

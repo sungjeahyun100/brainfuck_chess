@@ -23,7 +23,8 @@ fn game() -> StoredGame {
         }
     }
     let mut game = StoredGame::new(state, TimeControlId::Unlimited, false, now_ms());
-    game.record.initial_draws = initialize(&mut game.state, &mut |_| Ok(0)).unwrap();
+    game.record.initial_draws =
+        super::tests::initialize_automatic(&mut game.state, &mut |_| Ok(0)).unwrap();
     game.record.initial_state = game.state.clone();
     game.access = GameAccess::Multiplayer {
         clients: [

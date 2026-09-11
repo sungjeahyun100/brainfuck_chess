@@ -59,6 +59,14 @@ impl GameAccess {
     }
 }
 
+pub(crate) fn deck_counts(state: &GameState) -> HashMap<PlayerId, usize> {
+    state
+        .players
+        .iter()
+        .map(|(id, p)| (id.clone(), p.deck.pocket_pieces.len()))
+        .collect()
+}
+
 pub(crate) fn hand_counts(state: &GameState) -> HashMap<PlayerId, usize> {
     if state.ruleset == DeckRuleset::Legacy {
         return HashMap::new();

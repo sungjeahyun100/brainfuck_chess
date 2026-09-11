@@ -932,6 +932,7 @@ function legalActionsForTarget(pieceId: string, to: Square): MoveAction[] {
 }
 
 async function applyCanonicalLabAction(action: TurnAction): Promise<boolean> {
+  if (action.type === 'draw') return false
   if (action.type === 'extra_summon') return false
   optionsLoading.value = true
   optionsError.value = null

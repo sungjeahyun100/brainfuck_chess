@@ -322,10 +322,17 @@ struct SubmitActionRequest {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum SubmitAction {
+    Draw(SubmitDrawRequest),
     Move(SubmitMoveRequest),
     Drop(SubmitDropRequest),
     Ability(SubmitAbilityRequest),
     ExtraSummon(SubmitExtraSummonRequest),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SubmitDrawRequest {
+    turn_number: u32,
 }
 
 #[derive(Deserialize)]
@@ -3183,6 +3190,14 @@ fn analysis_state(
         .iter()
         .cloned()
         .try_fold(state, |state, action| {
+            if matches!(action, TurnAction::Draw(_)) {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: "Draw는 먼저 기록에 확정해야 합니다.".into(),
+                    }),
+                ));
+            }
             submit_engine_action(state, action)
                 .map(analysis::normalized_state)
                 .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))
@@ -3570,7 +3585,29 @@ async fn submit_action(
     let moving_player = game.current_player.clone();
     let clock_before = game.clock.snapshot(now, true);
     let state_before = game.state.clone();
+    if brainfuck_chess_engine::actions::draw_required(&game.state)
+        && !matches!(&req.action, SubmitAction::Draw(_))
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "DRAW_REQUIRED".into(),
+            }),
+        ));
+    }
+    let mut resolved_draws = Vec::new();
     let (mut next_state, recorded_action) = match req.action {
+        SubmitAction::Draw(request) => {
+            let action = DrawAction {
+                player_id: moving_player.clone(),
+                turn_number: request.turn_number,
+            };
+            let (state, resolution) =
+                draw::submit(game.state.clone(), action.clone(), &mut draw::random_index)
+                    .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+            resolved_draws.push(resolution);
+            (state, TurnAction::Draw(action))
+        }
         SubmitAction::Move(request) => {
             let piece = game.pieces.get(&request.piece_id).ok_or_else(|| {
                 (
@@ -3683,8 +3720,11 @@ async fn submit_action(
             }),
         ));
     }
-    let draws = draw::turn_start(&state_before, &mut next_state, &mut draw::random_index)
-        .map_err(draw_error)?;
+    resolved_draws.extend(
+        draw::turn_start(&state_before, &mut next_state, &mut draw::random_index)
+            .map_err(draw_error)?,
+    );
+    let draws = resolved_draws;
     game.state = next_state;
     let next_player = game.current_player.clone();
     let ended = game.phase == GamePhase::Ended;
@@ -3821,7 +3861,21 @@ async fn run_bot_turn(
     let moving_player = entry.current_player.clone();
     let clock_before = entry.clock.snapshot(started_at, true);
     let replay_initial_state = entry.state.clone();
-    let mut result = play_bot_turn_detailed(entry.state.clone(), &req.bot_player_id, difficulty)
+    let mut search_state = entry.state.clone();
+    let bot_draw = if brainfuck_chess_engine::actions::draw_required(&search_state) {
+        let action = DrawAction {
+            player_id: moving_player.clone(),
+            turn_number: search_state.turn_number,
+        };
+        let (next, resolution) =
+            draw::submit(search_state, action.clone(), &mut draw::random_index)
+                .map_err(draw_error)?;
+        search_state = next;
+        Some((action, resolution, search_state.clone()))
+    } else {
+        None
+    };
+    let mut result = play_bot_turn_detailed(search_state, &req.bot_player_id, difficulty)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let finished_at = now_ms();
     entry.adjudicate(finished_at);
@@ -3852,6 +3906,22 @@ async fn run_bot_turn(
         .finish_turn(&moving_player, &next_player, finished_at, ended);
     let clock_after = entry.clock.snapshot(finished_at, !ended);
     let mut frame_before = replay_initial_state;
+    if let Some((action, resolution, state)) = bot_draw.clone() {
+        entry
+            .record
+            .push_action(
+                moving_player.clone(),
+                TurnAction::Draw(action),
+                0,
+                player_clock_value(&clock_before, &moving_player),
+                player_clock_value(&clock_before, &moving_player),
+                clock_before.clone(),
+                &frame_before,
+                state.clone(),
+            )
+            .draws = vec![resolution];
+        frame_before = state;
+    }
     for (index, frame) in result.timeline.iter().enumerate() {
         entry
             .record
@@ -3885,6 +3955,16 @@ async fn run_bot_turn(
             .finalize(&final_state, final_clock, finished_at);
     }
 
+    if let Some((action, _, state)) = bot_draw {
+        result.actions.insert(0, AiAction::Draw(action.clone()));
+        result.timeline.insert(
+            0,
+            brainfuck_chess_engine::ai::ActionTimelineFrame {
+                action: AiAction::Draw(action),
+                state,
+            },
+        );
+    }
     Ok(Json(BotTurnResponse {
         ok: true,
         game_state: entry.view_for(finished_at, entry.audience(game_client(&headers))),
@@ -3953,6 +4033,7 @@ async fn run_bot_turn(
 
 fn ai_action_to_turn_action(action: AiAction) -> TurnAction {
     match action {
+        AiAction::Draw(action) => TurnAction::Draw(action),
         AiAction::Move(action) => TurnAction::Move(action),
         AiAction::Drop(action) => TurnAction::Drop(action),
         AiAction::Ability(action) => TurnAction::Ability(action),
