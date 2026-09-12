@@ -399,11 +399,17 @@ fn summon_forced_landing_game_end_and_later_pocket_draw_contracts() {
     assert_eq!(draws[0].piece_ids, vec![extra.clone()]);
     assert!(returned.players["white"].deck.hand_pieces.contains(&extra));
     assert!(returned.players["white"].deck.extra_deck_pieces.is_empty());
+    // Once drawn into Hand it follows ordinary body-count costs, not Extra score costs.
     assert!(
         brainfuck_chess_engine::legal_moves::generate_piece_legal_drop_actions(&returned, &extra)
-            .len()
-            > 0
+            .is_empty()
     );
+    add_board(&mut returned, "body1", "white", "knight", Square::new(0, 0));
+    add_board(&mut returned, "body2", "white", "knight", Square::new(1, 0));
+    let drops =
+        brainfuck_chess_engine::legal_moves::generate_piece_legal_drop_actions(&returned, &extra);
+    assert!(!drops.is_empty());
+    assert!(drops.iter().all(|a| a.sacrifice_piece_ids.len() == 2));
     // A normal enemy capture also never replenishes Extra membership.
     parent.current_player = "white".into();
     let mut action = canonical(&parent);

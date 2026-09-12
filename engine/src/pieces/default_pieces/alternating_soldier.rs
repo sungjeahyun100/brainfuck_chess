@@ -53,7 +53,9 @@ take-move(-1, -1);"
             MoveOptionDefinition {
                 id: "relieve".into(),
                 name: "교대".into(),
-                description: "주변 8칸의 기물 하나와 자신의 포켓 기물 하나를 교대합니다.".into(),
+                description:
+                    "주변 8칸의 킹이 아닌 아군 기물 하나와 자신의 포켓 기물 하나를 교대합니다."
+                        .into(),
                 kind: MoveOptionKind::Ability,
                 layer_ids: Vec::new(),
                 execution_mode: MoveOptionExecutionMode::StandaloneAction,

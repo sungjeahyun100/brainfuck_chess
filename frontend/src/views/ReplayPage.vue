@@ -26,6 +26,9 @@
         <section v-if="canManage" class="analysis-tools" aria-label="분석 착수">
           <p>기물을 고르고 표시된 칸에 두면 현재 수순에서 분기합니다. {{ isStandard ? '저장이 완료되면 다음 수를 둘 수 있습니다.' : '저장 중에도 계속 둘 수 있습니다.' }}</p>
           <div v-if="!isStandard && pocketPieces.length" class="analysis-pocket"><small>{{ state.current_player === 'white' ? '백' : '흑' }} {{ isStandard ? '손패' : '포켓' }}</small><button v-for="piece in pocketPieces" :key="piece.id" :class="{ active: selectedPieceId === piece.id }" @click="selectPiece(piece.id)">{{ state.piece_definitions[piece.type_id]?.name ?? piece.type_id }}</button></div>
+          <DropSacrificePicker v-if="dropRequired > 0" :state="state" :required="dropRequired"
+            :candidates="dropCandidates" :selected="dropSacrifices" :enabled="!committing"
+            @change="dropSacrifices = $event" @cancel="clearSelection" />
           <div v-if="immediateAbilities.length" class="analysis-pocket"><small>즉시 능력</small><button v-for="action in immediateAbilities" :key="`${action.piece_id}:${action.ability_id}`" @click="playAnalysisAction(action)">{{ action.ability_id }}</button></div>
           <p v-if="actionPreviews.some(preview => preview.draw_pending)">드로우가 필요한 후보는 이 수 이후 무작위 드로우가 발생합니다. Pocket이 비어 있으면 0기이며, 분기를 저장할 때 결과가 확정됩니다.</p>
           <button v-if="selectedPieceId && !committing" @click="clearSelection">선택 취소</button>
@@ -94,6 +97,8 @@ import { abilityActionTargetsSquare, abilitySelectionSquares, isImmediateAbility
 import { timeControlLabel } from '../timeControls'
 import ExtraSummonPanel from '../components/ExtraSummonPanel.vue'
 import StandardReservePanel from '../components/StandardReservePanel.vue'
+import DropSacrificePicker from '../components/DropSacrificePicker.vue'
+import { requiredDropSacrifices, matchesDropSacrifices, dropSacrificeCandidates } from '../dropSacrifices'
 import { summonDetail } from '../replayNotation'
 import type { PlayerId, Square, TurnAction } from '../types/game'
 import type { AnalysisActionPreview, AnalysisNode, AnalysisTree, DrawResolution, GameRecord } from '../types/gameRecord'
@@ -132,7 +137,7 @@ const abilitySelfTargets = computed(() => abilitySelectionSquares(
 ))
 const movableSquares = computed(() => [...targetGroups.value.movable, ...abilitySelfTargets.value])
 const attackSquares = computed(() => targetGroups.value.captures)
-const dropSquares = computed(() => legalActions.value.filter(action => action.type === 'drop').map(action => action.to))
+const dropSquares = computed(() => legalActions.value.filter(action => action.type === 'drop').filter(action => matchesDropSacrifices(action, dropSacrifices.value)).map(action => action.to))
 const pocketPieces = computed(() => {
   if (!state.value) return []
   const deck = state.value.players[state.value.current_player]?.deck
@@ -160,10 +165,13 @@ async function copyDeck(side: PlayerId) {
 }
 function clockText(player: PlayerId) { const clock = activeClock.value; const ms = clock.mode === 'countdown' ? (player === 'white' ? clock.white_remaining_ms ?? 0 : clock.black_remaining_ms ?? 0) : (player === 'white' ? clock.white_elapsed_ms : clock.black_elapsed_ms); const seconds = Math.ceil(ms / 1000); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}` }
 function stop() { playing.value = false; if (timer !== null) window.clearInterval(timer); timer = null }
-function clearSelection() { selectedPieceId.value = null; legalActions.value = []; actionPreviews.value = [] }
+function clearSelection() { dropSacrifices.value = []; selectedPieceId.value = null; legalActions.value = []; actionPreviews.value = [] }
 function go(next: number) { activeTree.value = null; activeNode.value = null; clearSelection(); ply.value = Math.max(0, Math.min(actionCount.value, next)); if (ply.value === actionCount.value) stop() }
 function toggleAutoplay() { if (!replayResult.value.ok) return; if (playing.value) { stop(); return } playing.value = true; timer = window.setInterval(() => go(ply.value + 1), 900) }
 async function copyCode() { try { await navigator.clipboard.writeText(await encodeReplayCode(props.record)); copyStatus.value = '복사 완료' } catch { copyStatus.value = '복사 실패' } window.setTimeout(() => { copyStatus.value = '기보 복사' }, 1800) }
+const dropSacrifices = ref<string[]>([])
+const dropRequired = computed(() => state.value && state.value.players[state.value.current_player]?.deck.hand_pieces?.includes(selectedPieceId.value ?? '') ? requiredDropSacrifices(state.value, selectedPieceId.value) : 0)
+const dropCandidates = computed(() => dropSacrificeCandidates(legalActions.value.filter(action => action.type === 'drop')))
 const summonSquares = ref<Square[]>([])
 const summonPanel = ref<InstanceType<typeof ExtraSummonPanel> | null>(null)
 const summonActive = ref(false)
@@ -182,7 +190,7 @@ async function selectPiece(pieceId: string) {
   if(!canManage.value || committing.value || summonActive.value)return
   const piece=state.value?.pieces[pieceId]
   if (!piece || piece.owner !== state.value?.current_player) { clearSelection(); return }
-  const started=performance.now();analysisError.value=null; selectedPieceId.value=pieceId; legalActions.value=[]; actionPreviews.value=[]
+  const started=performance.now();analysisError.value=null; selectedPieceId.value=pieceId; dropSacrifices.value=[]; legalActions.value=[]; actionPreviews.value=[]
   try {
     const options=await api.getAnalysisOptions(props.record.game_id,position(),pieceId)
     if (selectedPieceId.value !== pieceId) return
@@ -194,7 +202,7 @@ async function selectPiece(pieceId: string) {
 function sameSquare(a:Square|undefined,b:Square){return !!a&&a.file===b.file&&a.rank===b.rank}
 function actionChoiceLabel(action:TurnAction){if(action.type==='move')return action.promotion?`승격: ${action.promotion}`:`이동: ${action.move_option_id}`;if(action.type==='ability')return `능력: ${action.ability_id}`;return isStandard.value ? '손패 배치' : '포켓 배치'}
 function chooseAction(actions:TurnAction[]){if(actions.length<=1)return actions[0];const answer=window.prompt(actions.map((action,index)=>`${index+1}. ${actionChoiceLabel(action)}`).join('\n'));const index=Number(answer)-1;return Number.isInteger(index)?actions[index]:undefined}
-async function onSquareClick(square: Square) { if (summonActive.value) { summonPanel.value?.chooseBoardSquare(square); return } if (!state.value) return; const pieceId=state.value.board.squares[`${square.file}_${square.rank}`]; if (!selectedPieceId.value) { if(pieceId) await selectPiece(pieceId); return } const actorSquare=state.value.pieces[selectedPieceId.value]?.current_square;const action=chooseAction(legalActions.value.filter(candidate=>sameSquare(candidate.type === 'extra_summon' ? candidate.target_square : candidate.type === 'draw' ? undefined : candidate.to,square)||(candidate.type==='ability'&&abilityActionTargetsSquare(candidate,actorSquare,square)))); if(!action){if(pieceId) await selectPiece(pieceId);else clearSelection();return} await playAnalysisAction(action) }
+async function onSquareClick(square: Square) { if (summonActive.value) { summonPanel.value?.chooseBoardSquare(square); return } if (!state.value) return; const pieceId=state.value.board.squares[`${square.file}_${square.rank}`]; if (!selectedPieceId.value) { if(pieceId) await selectPiece(pieceId); return } const actorSquare=state.value.pieces[selectedPieceId.value]?.current_square;const action=chooseAction(legalActions.value.filter(candidate=>(candidate.type !== 'drop' || matchesDropSacrifices(candidate, dropSacrifices.value)) && (sameSquare(candidate.type === 'extra_summon' ? candidate.target_square : candidate.type === 'draw' ? undefined : candidate.to,square)||(candidate.type==='ability'&&abilityActionTargetsSquare(candidate,actorSquare,square))))); if(!action){if(pieceId) await selectPiece(pieceId);else clearSelection();return} await playAnalysisAction(action) }
 async function onBoardPieceClick(pieceId:string){if(summonActive.value){summonPanel.value?.chooseBoardPiece(pieceId);return}const piece=state.value?.pieces[pieceId];if(selectedPieceId.value&&piece?.current_square){await onSquareClick(piece.current_square);return}await selectPiece(pieceId)}
 async function onSquareDrop(square: Square|null,pieceId:string){if(!square)return;await selectPiece(pieceId);await onSquareClick(square)}
 function sameAction(left:TurnAction,right:TurnAction){return actionIdentity(left)===actionIdentity(right)}

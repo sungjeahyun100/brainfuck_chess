@@ -719,7 +719,64 @@ pub fn generate_piece_legal_drop_actions(
     if !crate::hand::is_ordinary_drop_source(game_state, player_id, piece_id) {
         return Vec::new();
     }
-    generate_piece_drop_targets(game_state, piece_id)
+    let count = crate::placement::drop_sacrifice_count(game_state, piece_id);
+    if count == 0 {
+        return generate_selected_drop_actions(game_state, piece_id, &[]);
+    }
+    let ids = crate::placement::drop_sacrifice_candidates(game_state);
+    let mut actions = Vec::new();
+    for (i, id) in ids.iter().enumerate() {
+        if count == 1 {
+            actions.extend(generate_selected_drop_actions(
+                game_state,
+                piece_id,
+                std::slice::from_ref(id),
+            ));
+        } else {
+            for other in &ids[i + 1..] {
+                actions.extend(generate_selected_drop_actions(
+                    game_state,
+                    piece_id,
+                    &[id.clone(), other.clone()],
+                ));
+            }
+        }
+    }
+    actions
+}
+
+/// Validate the selected bodies before calculating placement on the post-sacrifice board.
+pub fn generate_selected_drop_actions(
+    state: &GameState,
+    piece_id: &PieceId,
+    ids: &[PieceId],
+) -> Vec<DropAction> {
+    if pending_landing_piece_id(state).is_some()
+        || !crate::hand::is_ordinary_drop_source(state, &state.current_player, piece_id)
+        || ids.len() != crate::placement::drop_sacrifice_count(state, piece_id)
+    {
+        return Vec::new();
+    }
+    if ids.is_empty() {
+        return generate_piece_drop_targets(state, piece_id);
+    }
+    let candidates = crate::placement::drop_sacrifice_candidates(state);
+    if ids
+        .iter()
+        .enumerate()
+        .any(|(i, id)| !candidates.contains(id) || ids[..i].contains(id))
+    {
+        return Vec::new();
+    }
+    let mut after = state.clone();
+    crate::summon::remove_sacrifices(&mut after, ids);
+    generate_piece_drop_targets(&after, piece_id)
+        .into_iter()
+        .map(|mut action| {
+            action.sacrifice_piece_ids = ids.to_vec();
+            action
+        })
+        .collect()
 }
 
 /// Target-only contract shared by ordinary Drop and ExtraSummon. No reserve impersonation.
@@ -746,6 +803,7 @@ pub fn generate_piece_drop_targets(game_state: &GameState, piece_id: &PieceId) -
                 .is_none_or(|victim| can_capture_piece(game_state, piece, victim))
         })
         .map(|sq| DropAction {
+            sacrifice_piece_ids: Vec::new(),
             player_id: player_id.clone(),
             piece_id: piece_id.clone(),
             to: sq,
@@ -969,7 +1027,13 @@ pub fn generate_piece_legal_ability_actions(
             let Some(player) = game_state.players.get(&actor.owner) else {
                 return Vec::new();
             };
-            for target in adjacent.iter().filter(|target| target.owner == actor.owner) {
+            for target in adjacent.iter().filter(|target| {
+                target.owner == actor.owner
+                    && game_state
+                        .piece_definitions
+                        .get(&target.type_id)
+                        .is_some_and(|definition| !definition.is_king)
+            }) {
                 for pocket_id in &player.deck.pocket_pieces {
                     let Some(pocket) = game_state.pieces.get(pocket_id) else {
                         continue;
@@ -1694,7 +1758,12 @@ pub fn generate_drop_candidates_by_type(
                 .filter_map(|id| game_state.pieces.get(id))
                 .find(|piece| piece.type_id == piece_type_id)
                 .map(|piece| {
-                    crate::placement::get_piece_placement_squares(game_state, player_id, piece)
+                    generate_piece_legal_drop_actions(game_state, &piece.id)
+                        .into_iter()
+                        .map(|action| action.to)
+                        .collect::<std::collections::HashSet<_>>()
+                        .into_iter()
+                        .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
             squares.into_iter().map(move |square| DropCandidateByType {

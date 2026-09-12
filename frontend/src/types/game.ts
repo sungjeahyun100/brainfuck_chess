@@ -194,6 +194,7 @@ export interface SubmitMoveAction {
 }
 
 export interface SubmitDropAction {
+  sacrifice_piece_ids?: PieceId[]
   type: 'drop'
   piece_id: PieceId
   to: Square
@@ -250,6 +251,7 @@ export interface GlobalStateUpdate {
 }
 
 export interface DropAction {
+  sacrifice_piece_ids?: PieceId[]
   type: 'drop'
   player_id: PlayerId
   piece_id: PieceId

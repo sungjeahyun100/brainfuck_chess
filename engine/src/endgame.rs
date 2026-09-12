@@ -852,6 +852,7 @@ fn replenish_depleted_ammo_at_home(game_state: &mut GameState, piece_id: &PieceI
 
 /// Apply a canonical DropAction from the ruleset-specific runtime reserve.
 pub fn apply_drop_action(mut game_state: GameState, action: DropAction) -> GameState {
+    crate::summon::remove_sacrifices(&mut game_state, &action.sacrifice_piece_ids);
     let removal = action
         .captured_piece_id
         .as_ref()

@@ -599,6 +599,7 @@ mod tests {
         });
         let drops = (0..drop_count).map(|index| {
             AiAction::Drop(DropAction {
+                sacrifice_piece_ids: Vec::new(),
                 player_id: "white".into(),
                 piece_id: format!("drop-{index}").into(),
                 to: Square::new((index % 12) as i32, ((index / 12) % 12) as i32),
@@ -703,6 +704,7 @@ mod tests {
         add_piece(&mut state, "bk", "black", "king", Some(Square::new(11, 11)));
         let mut tactical_actions = quiet_actions(50, 500);
         let tactical_drop = AiAction::Drop(DropAction {
+            sacrifice_piece_ids: Vec::new(),
             player_id: "white".into(),
             piece_id: "tactical-drop".into(),
             to: Square::new(11, 11),

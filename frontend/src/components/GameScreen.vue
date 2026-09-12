@@ -36,6 +36,10 @@
       <span v-else-if="canControlTurn">기물을 이동하거나 손패 카드를 선택하세요.</span>
     </div>
 
+    <DropSacrificePicker v-if="selectedPocketPieceId && dropRequired > 0"
+      :state="state" :required="dropRequired" :candidates="dropCandidates" :selected="dropSacrifices"
+      :enabled="canUsePlayerControls" @change="setDropSacrifices" @cancel="clearSelection" />
+
     <!-- Promotion picker overlay -->
     <div v-if="promotionRequest" class="promotion-overlay">
       <div class="promotion-box">
@@ -473,6 +477,8 @@ import { api } from '../api/gameApi'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import ExtraSummonPanel from './ExtraSummonPanel.vue'
 import StandardReservePanel from './StandardReservePanel.vue'
+import DropSacrificePicker from './DropSacrificePicker.vue'
+import { requiredDropSacrifices, matchesDropSacrifices, dropSacrificeCandidates } from '../dropSacrifices'
 import { gameplayKey, gameActionError } from '../standardGameUi'
 import { summonDetail } from '../replayNotation'
 import type { ExtraSummonAction } from '../types/game'
@@ -518,6 +524,15 @@ const opponentAttackSquares = ref<Square[]>([])
 const opponentAttacksVisible = ref(false)
 const opponentAttacksLoading = ref(false)
 const dropSquares = ref<Square[]>([])
+const selectedDropActions = ref<DropAction[]>([])
+const dropSacrifices = ref<string[]>([])
+const dropRequired = computed(() => requiredDropSacrifices(props.state, selectedPocketPieceId.value))
+const dropCandidates = computed(() => dropSacrificeCandidates(selectedDropActions.value))
+function setDropSacrifices(ids: string[]) {
+  if (!canUsePlayerControls.value || ids.length > dropRequired.value || ids.some(id => !dropCandidates.value.includes(id))) return
+  dropSacrifices.value = ids
+  dropSquares.value = selectedDropActions.value.filter(action => matchesDropSacrifices(action, ids)).map(action => action.to)
+}
 const error = ref<string | null>(null)
 const botError = ref<string | null>(null)
 const botThinking = ref(false)
@@ -1404,6 +1419,8 @@ function cancelPromotion() {
 }
 
 function clearSelection() {
+  dropSacrifices.value = []
+  selectedDropActions.value = []
   selectionGeneration++
   overlapSelectionPieceIds.value = []
   selectedPieceId.value = null
@@ -1698,6 +1715,8 @@ async function selectPocketPiece(pieceId: string): Promise<Square[]> {
 
   selectedPieceId.value = null
   selectedPocketPieceId.value = pieceId
+  dropSacrifices.value = []
+  selectedDropActions.value = []
   abilityMode.value = false
   activeAbilityId.value = null
   legalTargetSquares.value = []
@@ -1707,8 +1726,10 @@ async function selectPocketPiece(pieceId: string): Promise<Square[]> {
 
   try {
     const drops = await loadDropOptions()
-    const targets = drops.filter(drop => drop.piece_id === pieceId).map(drop => drop.to)
+    const actions = drops.filter(drop => drop.piece_id === pieceId)
+    const targets = actions.filter(action => matchesDropSacrifices(action, [])).map(drop => drop.to)
     if (ticket === selectionGeneration && selectedPocketPieceId.value === pieceId) {
+      selectedDropActions.value = actions
       dropSquares.value = targets
     }
     return ticket === selectionGeneration ? targets : []
@@ -1858,6 +1879,7 @@ async function confirmSacrifice() {
 
 async function submitDrop(pieceId: string, to: Square) {
   if (!canUsePlayerControls.value) return
+  if (dropRequired.value > 0 && dropSacrifices.value.length !== dropRequired.value) return
   const position = positionKey.value
   const targets = selectedPocketPieceId.value === pieceId && dropSquares.value.length > 0
     ? dropSquares.value
@@ -1874,6 +1896,7 @@ async function submitDrop(pieceId: string, to: Square) {
       type: 'drop',
       piece_id: pieceId,
       to,
+      ...(dropSacrifices.value.length ? { sacrifice_piece_ids: [...dropSacrifices.value] } : {}),
     }
     const newState = await api.submitAction(props.state.id, action)
     emit('stateUpdate', newState)
@@ -1964,6 +1987,11 @@ function onBoardPieceDragStart(pieceId: string) {
 
 function onBoardPieceClick(pieceId: string) {
   if (summonActive.value) { summonPanel.value?.chooseBoardPiece(pieceId); return }
+  if (selectedPocketPieceId.value) {
+    const square = props.state.pieces[pieceId]?.current_square
+    if (square) void onSquareClick(square)
+    return
+  }
   error.value = null
   if (!canUsePlayerControls.value) {
     clearSelection()

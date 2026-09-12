@@ -184,7 +184,7 @@ fn wall_blocks_ordinary_capture_but_special_explosion_removes_it() {
 }
 
 #[test]
-fn shell_can_drop_on_an_enemy_and_explodes_immediately() {
+fn shell_rejects_occupied_drops_and_explodes_immediately_on_empty_square() {
     let mut state = make_state();
     add_piece(
         &mut state,
@@ -199,7 +199,7 @@ fn shell_can_drop_on_an_enemy_and_explodes_immediately() {
         "enemy",
         "black",
         "bishop",
-        Some(Square::new(1, 0)),
+        Some(Square::new(1, 1)),
         PieceLayer::Ground,
     );
     add_piece(
@@ -210,15 +210,29 @@ fn shell_can_drop_on_an_enemy_and_explodes_immediately() {
         None,
         PieceLayer::Ground,
     );
-    let drop = generate_piece_legal_drop_actions(&state, &"shell".into())
+    let drops = generate_piece_legal_drop_actions(&state, &"shell".into());
+    for (to, occupant) in [(Square::new(0, 0), "rook"), (Square::new(1, 1), "enemy")] {
+        assert!(!drops.iter().any(|action| action.to == to));
+        for captured_piece_id in [None, Some(occupant.into())] {
+            let request = DropAction {
+                sacrifice_piece_ids: Vec::new(),
+                player_id: "white".into(),
+                piece_id: "shell".into(),
+                to,
+                captured_piece_id,
+            };
+            assert!(submit_action(state.clone(), TurnAction::Drop(request)).is_err());
+        }
+    }
+    let drop = drops
         .into_iter()
-        .find(|action| action.to == Square::new(1, 0))
+        .find(|action| action.to == Square::new(0, 1))
         .unwrap();
     let next = submit_action(state, TurnAction::Drop(drop)).unwrap();
     assert!(next.pieces["enemy"].captured);
     assert!(next.pieces["shell"].captured);
     assert!(next.pieces["rook"].captured);
-    assert!(next.board.is_empty(&Square::new(1, 0)));
+    assert!(next.board.is_empty(&Square::new(1, 1)));
 }
 
 #[test]

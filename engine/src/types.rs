@@ -1051,6 +1051,8 @@ pub struct MoveAction {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DropAction {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sacrifice_piece_ids: Vec<PieceId>,
     pub player_id: PlayerId,
     pub piece_id: PieceId,
     pub to: Square,
