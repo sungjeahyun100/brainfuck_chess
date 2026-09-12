@@ -436,6 +436,8 @@ struct SubmitMoveRequest {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SubmitDropRequest {
+    #[serde(default)]
+    sacrifice_piece_ids: Vec<PieceId>,
     piece_id: PieceId,
     to: Square,
 }
@@ -3664,9 +3666,13 @@ async fn submit_action(
             (state, action)
         }
         SubmitAction::Drop(request) => {
-            let legal_action = generate_piece_legal_drop_actions(&game.state, &request.piece_id)
-                .into_iter()
-                .find(|action| action.to == request.to);
+            let legal_action = brainfuck_chess_engine::legal_moves::generate_selected_drop_actions(
+                &game.state,
+                &request.piece_id,
+                &request.sacrifice_piece_ids,
+            )
+            .into_iter()
+            .find(|action| action.to == request.to);
             let Some(legal_action) = legal_action else {
                 return Err((
                     StatusCode::BAD_REQUEST,
@@ -6990,6 +6996,7 @@ mod tests {
                     assert!(generate_piece_legal_drop_actions(&active, id).is_empty());
                     assert!(generate_piece_legal_ability_actions(&active, id, "takeoff").is_empty());
                     let action = TurnAction::Drop(brainfuck_chess_engine::types::DropAction {
+                        sacrifice_piece_ids: Vec::new(),
                         player_id: side.into(),
                         piece_id: id.clone(),
                         to: Square::new(3, 0),

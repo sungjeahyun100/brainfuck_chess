@@ -8,6 +8,15 @@ export interface UpdateLogEntry {
 // Add releases at the beginning and give each release a new, stable ID.
 export const updateLog: readonly UpdateLogEntry[] = [
   {
+    id: '2026-09-12.3',
+    date: '2026-09-12',
+    title: '고점수 손패 소환에 필드 제물 추가',
+    changes: [
+      'Standard 일반 손패 소환은 기존 제물 0체에서 5~9점 기물은 1체, 10점 이상 기물은 2체의 아군 필드 기물을 희생하도록 변경했습니다. 킹은 제물로 선택할 수 없습니다.',
+      '제물을 직접 선택한 뒤 희생 후의 배치 가능 칸에 소환합니다. 5점 미만 기물, Legacy 포켓 착수와 Extra 특수 소환의 기존 규칙은 유지됩니다.',
+    ],
+  },
+  {
     id: '2026-09-12.2',
     date: '2026-09-12',
     title: '교대병의 킹 포켓 이동 오류 수정',

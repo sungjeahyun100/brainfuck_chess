@@ -1,7 +1,6 @@
 use crate::endgame::apply_and_advance_turn;
 use crate::legal_moves::{
-    generate_piece_legal_drop_actions, generate_piece_legal_move_actions_with_options,
-    is_legal_ability_action, MoveGenerationOptions,
+    generate_piece_legal_move_actions_with_options, is_legal_ability_action, MoveGenerationOptions,
 };
 use crate::types::{GamePhase, GameState, TurnAction};
 
@@ -56,9 +55,13 @@ pub fn submit_action(state: GameState, action: TurnAction) -> Result<GameState, 
         }
         TurnAction::Drop(action) => {
             action.player_id == state.current_player
-                && generate_piece_legal_drop_actions(&state, &action.piece_id)
-                    .into_iter()
-                    .any(|candidate| candidate == *action)
+                && crate::legal_moves::generate_selected_drop_actions(
+                    &state,
+                    &action.piece_id,
+                    &action.sacrifice_piece_ids,
+                )
+                .into_iter()
+                .any(|candidate| candidate == *action)
         }
         TurnAction::Ability(action) => is_legal_ability_action(&state, action),
         TurnAction::ExtraSummon(action) => {

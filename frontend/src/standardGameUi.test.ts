@@ -1,3 +1,4 @@
+import * as dropHelpers from './dropSacrifices.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
@@ -32,7 +33,7 @@ const modules: Record<string, unknown> = {
   vue: {...vue,onUnmounted(){},onMounted(){}}, '../standardGameUi':helpers, '../replayNotation':notation,
   '../pieceAssets':{renderedPieceAsset:()=>undefined,pieceAsset:()=>undefined}, '../gameControlPolicy':policy,
   '../moveOptionUi':{pendingForcedLandingPieceId:()=>null,moveOptionTargets:()=>({legalTargets:[],movable:[],captures:[]})},
-  '../composables/useActionTimeline':{},'../timeControls':{timeControlLabel:()=>'',CLOCK_URGENCY_THRESHOLDS_MS:{}},'../replayCodec':{},'../botDebugMetrics':{}, './Board.vue':{},'./ExtraSummonPanel.vue':{},'./StandardReservePanel.vue':{},
+  '../composables/useActionTimeline':{},'../timeControls':{timeControlLabel:()=>'',CLOCK_URGENCY_THRESHOLDS_MS:{}},'../replayCodec':{},'../botDebugMetrics':{}, './Board.vue':{},'./ExtraSummonPanel.vue':{},'./StandardReservePanel.vue':{}, '../dropSacrifices': dropHelpers, './DropSacrificePicker.vue': {},
 }
 function setup(t: any, api: Record<string, unknown> = {}, state=fixture()) {
   const scope=vue.effectScope();t.after(()=>scope.stop())
@@ -247,4 +248,31 @@ test('opponent hand renders count-only card backs without private piece metadata
   html = await render()
   assert.doesNotMatch(html, /class="card-back"/)
   assert.match(html, /손패가 비어 있습니다/)
+})
+
+test('hand sacrifice selection gates targets, sends exact bodies and cancels with position changes', async t => {
+  const state=fixture();state.piece_definitions.knight.score=10
+  const drops=[{type:'drop',player_id:'white',piece_id:'w1',sacrifice_piece_ids:['wq','body'],to:{file:4,rank:0}}]
+  let intent: any
+  const {ui,props}=setup(t,{getLegalDrops:async()=>({drops}),submitAction:async(_id:string,a:unknown)=>{intent=a;return state}},state)
+  await ui.onHandClick('w1')
+  assert.equal(ui.dropRequired.value,2);assert.deepEqual(ui.dropSquares.value,[])
+  ui.setDropSacrifices(['wk']);assert.deepEqual(ui.dropSacrifices.value,[])
+  ui.setDropSacrifices(['wq']);await ui.onSquareClick({file:4,rank:0});assert.equal(intent,undefined)
+  ui.setDropSacrifices(['body','wq']);assert.deepEqual(ui.dropSquares.value,[{file:4,rank:0}])
+  await ui.onSquareClick({file:4,rank:0})
+  assert.deepEqual(intent.sacrifice_piece_ids,['body','wq'])
+  assert.deepEqual(ui.dropSacrifices.value,[])
+  await ui.onHandClick('w1');ui.setDropSacrifices(['wq'])
+  props.state={...state,turn_number:2};await vue.nextTick()
+  assert.deepEqual(ui.dropSacrifices.value,[])
+})
+
+test('hand sacrifice thresholds preserve Legacy and lower score drops',()=>{
+  const state=fixture()
+  for(const [score,count] of [[0,0],[4,0],[5,1],[9,1],[10,2],[20,2]]){
+    state.piece_definitions.knight.score=score
+    assert.equal(dropHelpers.requiredDropSacrifices(state,'w1'),count)
+  }
+  state.ruleset='legacy';assert.equal(dropHelpers.requiredDropSacrifices(state,'w1'),0)
 })

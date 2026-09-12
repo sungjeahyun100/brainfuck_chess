@@ -507,6 +507,7 @@ mod tests {
             turn_number: 1,
             player_id: "white".into(),
             action: TurnAction::Drop(DropAction {
+                sacrifice_piece_ids: Vec::new(),
                 player_id: "white".into(),
                 piece_id: "reserve".into(),
                 to: Square::new(0, 0),

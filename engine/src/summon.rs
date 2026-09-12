@@ -195,7 +195,7 @@ fn validate_selection(state: &GameState, extra: &PieceId, ids: &[PieceId]) -> Re
 }
 
 /// Sacrifice is removal, not enemy capture: no capture list, rewards or death cascade.
-fn remove_sacrifices(state: &mut GameState, ids: &[PieceId]) {
+pub(crate) fn remove_sacrifices(state: &mut GameState, ids: &[PieceId]) {
     for id in ids {
         let p = state.pieces.get_mut(id).expect("validated sacrifice");
         if let Some(square) = p.current_square {
@@ -262,6 +262,7 @@ pub(crate) fn apply_extra_summon(mut state: GameState, action: ExtraSummonAction
     crate::endgame::apply_extra_placement(
         state,
         DropAction {
+            sacrifice_piece_ids: Vec::new(),
             player_id: action.player_id,
             piece_id: action.extra_piece_id,
             to: action.target_square,

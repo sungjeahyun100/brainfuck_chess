@@ -95,14 +95,52 @@ pub fn validate_drop_action(game_state: &GameState, action: &DropAction) -> Resu
         }
     }
 
-    // Target square must be in bounds and legal for this piece's drop capability.
-    if !game_state.board.is_in_bounds(&action.to) {
-        return Err("보드 밖에는 착수할 수 없습니다.".into());
+    if !crate::legal_moves::generate_selected_drop_actions(
+        game_state,
+        &action.piece_id,
+        &action.sacrifice_piece_ids,
+    )
+    .iter()
+    .any(|candidate| candidate == action)
+    {
+        return Err("착수 가능한 제물 또는 칸이 아닙니다.".into());
     }
-    let placement_squares = get_piece_placement_squares(game_state, &action.player_id, piece);
-    if !placement_squares.contains(&action.to) {
-        return Err("착수 가능한 칸이 아닙니다.".into());
-    }
-
     Ok(())
+}
+
+/// Ordinary Standard hand drops pay by body count; Legacy and Extra keep their rules.
+pub fn drop_sacrifice_count(state: &GameState, piece_id: &PieceId) -> usize {
+    if state.ruleset != DeckRuleset::Standard {
+        return 0;
+    }
+    match state
+        .pieces
+        .get(piece_id)
+        .and_then(|p| state.piece_definitions.get(&p.type_id))
+        .map(|d| d.score)
+    {
+        Some(10..) => 2,
+        Some(5..=9) => 1,
+        _ => 0,
+    }
+}
+
+pub fn drop_sacrifice_candidates(state: &GameState) -> Vec<PieceId> {
+    let mut ids: Vec<_> = state
+        .pieces
+        .values()
+        .filter(|p| {
+            p.owner == state.current_player
+                && p.is_on_board()
+                && p.current_square
+                    .is_some_and(|sq| state.board.get_piece_at_layer(&sq, p.layer) == Some(&p.id))
+                && state
+                    .piece_definitions
+                    .get(&p.type_id)
+                    .is_some_and(|d| !d.is_king)
+        })
+        .map(|p| p.id.clone())
+        .collect();
+    ids.sort();
+    ids
 }

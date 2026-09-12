@@ -593,6 +593,7 @@ fn illegal_paratrooper_drop_is_atomic_and_regular_piece_cannot_capture_on_drop()
     add_piece(&mut state, "enemy", "black", "bishop", 3, 0);
     let before = serde_json::to_value(&state).unwrap();
     let illegal = DropAction {
+        sacrifice_piece_ids: Vec::new(),
         player_id: "white".into(),
         piece_id: "para".into(),
         to: Square::new(2, 0),
@@ -2647,6 +2648,7 @@ fn runtime_drop_uses_full_home_union_attack_map_for_both_rulesets_and_maps() {
                         assert!(submit_action(
                             state.clone(),
                             TurnAction::Drop(DropAction {
+                                sacrifice_piece_ids: Vec::new(),
                                 player_id: side.into(),
                                 piece_id: "reserve".into(),
                                 to: outside,
@@ -2929,6 +2931,7 @@ fn hand_runtime_sparse_serialization_and_disjoint_zone_invariants() {
         corrupt(&mut bad);
         assert!(validate_hand_zones(&bad).is_err(), "{label}");
         let request = TurnAction::Drop(DropAction {
+            sacrifice_piece_ids: Vec::new(),
             player_id: "white".into(),
             piece_id: "hand-a".into(),
             to: Square::new(3, 0),
@@ -2982,6 +2985,7 @@ fn standard_drop_uses_only_hand_and_preserves_canonical_history_and_atomicity() 
         ("own-hand", Square::new(-1, 0)),
     ] {
         let request = DropAction {
+            sacrifice_piece_ids: Vec::new(),
             player_id: "white".into(),
             piece_id: id.into(),
             to,
@@ -3033,6 +3037,7 @@ fn standard_hand_drop_respects_paratrooper_capture_and_shell_empty_square_rules(
             assert!(!drops.iter().any(|a| a.to == Square::new(3, 0)));
             for captured_piece_id in [None, Some("victim".into())] {
                 let request = DropAction {
+                    sacrifice_piece_ids: Vec::new(),
                     player_id: "white".into(),
                     piece_id: "dropper".into(),
                     to: Square::new(3, 0),
@@ -3592,4 +3597,95 @@ fn standard_score_limit_increases_by_twenty_and_enforces_boundary() {
         add_pocket_piece(&mut state, "overflow", "white", "pawn-white");
         assert!(!validate(&state).valid);
     }
+}
+
+#[test]
+fn standard_hand_sacrifice_uses_post_removal_board_and_preserves_legacy() {
+    use brainfuck_chess_engine::legal_moves::generate_selected_drop_actions;
+    let mut state = make_game_state(8);
+    add_piece(&mut state, "wk", "white", "king", 3, 0);
+    add_piece(&mut state, "bk", "black", "king", 7, 7);
+    add_piece(&mut state, "body", "white", "rook", 0, 4);
+    add_pocket_piece(&mut state, "hand", "white", "queen");
+    let old = generate_piece_legal_drop_actions(&state, &"hand".into());
+    assert!(!old.is_empty());
+    assert!(old.iter().all(|a| a.sacrifice_piece_ids.is_empty()));
+    assert!(generate_selected_drop_actions(&state, &"hand".into(), &["body".into()]).is_empty());
+    let legacy_wire =
+        serde_json::json!({"player_id":"white","piece_id":"hand","to":{"file":0,"rank":0}});
+    assert!(serde_json::from_value::<DropAction>(legacy_wire)
+        .unwrap()
+        .sacrifice_piece_ids
+        .is_empty());
+
+    state.ruleset = DeckRuleset::Standard;
+    state
+        .players
+        .get_mut("white")
+        .unwrap()
+        .deck
+        .pocket_pieces
+        .clear();
+    state
+        .players
+        .get_mut("white")
+        .unwrap()
+        .deck
+        .hand_pieces
+        .push("hand".into());
+    state
+        .pieces
+        .get_mut(&PieceId::from("hand"))
+        .unwrap()
+        .in_pocket = false;
+    assert!(generate_selected_drop_actions(&state, &"hand".into(), &[]).is_empty());
+    assert!(generate_selected_drop_actions(&state, &"hand".into(), &["wk".into()]).is_empty());
+    let actions = generate_selected_drop_actions(&state, &"hand".into(), &["body".into()]);
+    assert!(!actions.is_empty());
+    assert!(old.iter().any(|a| a.to == Square::new(0, 6)));
+    assert!(
+        !actions.iter().any(|a| a.to == Square::new(0, 6)),
+        "sacrificed rook cannot grant deployment range"
+    );
+    let mut forged = actions[0].clone();
+    forged.sacrifice_piece_ids.clear();
+    assert!(submit_action(state.clone(), TurnAction::Drop(forged)).is_err());
+
+    // A sacrificed body frees its own square, and air-layer bodies are eligible too.
+    state
+        .board
+        .set_piece_at_layer(Square::new(0, 4), PieceLayer::Ground, None);
+    state
+        .board
+        .set_piece_at_layer(Square::new(2, 0), PieceLayer::Ground, Some("body".into()));
+    state
+        .pieces
+        .get_mut(&PieceId::from("body"))
+        .unwrap()
+        .current_square = Some(Square::new(2, 0));
+    let actions = generate_selected_drop_actions(&state, &"hand".into(), &["body".into()]);
+    let action = actions
+        .into_iter()
+        .find(|a| a.to == Square::new(2, 0))
+        .unwrap();
+    let next = submit_action(state.clone(), TurnAction::Drop(action)).unwrap();
+    assert!(next.pieces["body"].captured);
+    assert_eq!(
+        next.board.get_piece_at(&Square::new(2, 0)),
+        Some(&"hand".into())
+    );
+    state
+        .board
+        .set_piece_at_layer(Square::new(2, 0), PieceLayer::Ground, None);
+    state
+        .board
+        .set_piece_at_layer(Square::new(2, 0), PieceLayer::Air, Some("body".into()));
+    state.pieces.get_mut(&PieceId::from("body")).unwrap().layer = PieceLayer::Air;
+    let action =
+        generate_selected_drop_actions(&state, &"hand".into(), &["body".into()])[0].clone();
+    let next = submit_action(state, TurnAction::Drop(action)).unwrap();
+    assert!(next
+        .board
+        .get_piece_at_layer(&Square::new(2, 0), PieceLayer::Air)
+        .is_none());
 }

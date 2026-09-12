@@ -215,6 +215,7 @@ fn shell_rejects_occupied_drops_and_explodes_immediately_on_empty_square() {
         assert!(!drops.iter().any(|action| action.to == to));
         for captured_piece_id in [None, Some(occupant.into())] {
             let request = DropAction {
+                sacrifice_piece_ids: Vec::new(),
                 player_id: "white".into(),
                 piece_id: "shell".into(),
                 to,

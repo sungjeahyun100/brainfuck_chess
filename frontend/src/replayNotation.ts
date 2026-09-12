@@ -62,6 +62,10 @@ export function formatDraw(draw: { player_id: string; piece_ids: readonly string
 
 /** Committed sacrifices remain public removed pieces; selected IDs retain their order. */
 export function summonDetail(action: TurnAction | null | undefined, state: GameState): string {
+  if (action?.type === 'drop' && action.sacrifice_piece_ids?.length) {
+    const label = (id: string) => state.piece_definitions[state.pieces[id]?.type_id]?.name ?? id
+    return `${label(action.piece_id)} → ${squareName(action.to)} · 제물 ${action.sacrifice_piece_ids.length}체: ${action.sacrifice_piece_ids.map(label).join(', ')}`
+  }
   if (action?.type !== 'extra_summon') return ''
   const label = (id: string) => { const piece = state.pieces[id]; const def = state.piece_definitions[piece?.type_id ?? '']; return `${def?.name ?? id} [${def?.score ?? 0}]` }
   const total = action.sacrifice_piece_ids.reduce((sum, id) => sum + (state.piece_definitions[state.pieces[id]?.type_id ?? '']?.score ?? 0), 0)

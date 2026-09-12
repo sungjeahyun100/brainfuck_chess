@@ -227,7 +227,8 @@ fn canonical_action_cmp(left: &AiAction, right: &AiAction) -> Ordering {
             .piece_id
             .cmp(&right.piece_id)
             .then_with(|| square_cmp(left.to, right.to))
-            .then_with(|| left.captured_piece_id.cmp(&right.captured_piece_id)),
+            .then_with(|| left.captured_piece_id.cmp(&right.captured_piece_id))
+            .then_with(|| left.sacrifice_piece_ids.cmp(&right.sacrifice_piece_ids)),
         (AiAction::Ability(left), AiAction::Ability(right)) => left
             .piece_id
             .cmp(&right.piece_id)

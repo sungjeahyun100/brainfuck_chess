@@ -1,3 +1,4 @@
+import * as dropHelpers from './dropSacrifices.ts'
 import { STANDARD_RULES_VERSION } from './gameRulesVersions.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -90,7 +91,7 @@ test('Standard Replay shows exact initial hands and waits for committed Draw bef
   let save!: (tree: AnalysisTree) => void
   let writes = 0, previews = 0
   const modules: Record<string, unknown> = {
-    vue: { ...vue, onMounted() {}, onUnmounted() {} }, '../components/Board.vue': {}, '../components/ExtraSummonPanel.vue': {}, '../components/StandardReservePanel.vue': {}, '../replayCodec': {},
+    vue: { ...vue, onMounted() {}, onUnmounted() {} }, '../components/Board.vue': {}, '../components/ExtraSummonPanel.vue': {}, '../components/StandardReservePanel.vue': {}, '../dropSacrifices': dropHelpers, '../components/DropSacrificePicker.vue': {}, '../replayCodec': {},
     '../replayNotation': replayNotation, '../replayState': replayState, '../replayAnalysis': replayAnalysis,
     '../moveOptionUi': {}, '../timeControls': {}, '../composables/useDeckCodeCodec': {}, '../replayDeckCode': {},
     '../api/gameApi': { api: {

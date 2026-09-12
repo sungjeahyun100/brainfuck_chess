@@ -277,3 +277,104 @@ fn manual_draw_lifecycle_cannot_be_overwritten_by_piece_effects() {
         "DRAW_REQUIRED"
     );
 }
+
+#[tokio::test]
+async fn hand_drop_sacrifices_are_atomic_authorized_and_replayable() {
+    use brainfuck_chess_engine::legal_moves::generate_selected_drop_actions;
+    use brainfuck_chess_engine::placement::drop_sacrifice_count;
+    for (score, count) in [(4, 0), (5, 1), (9, 1), (10, 2), (15, 2)] {
+        let app = AppState::in_memory();
+        let mut game = game();
+        game.state
+            .global_state
+            .insert(brainfuck_chess_engine::actions::DRAW_REQUIRED.into(), 0);
+        let id = game.players["white"].deck.hand_pieces[0].clone();
+        game.state
+            .piece_definitions
+            .get_mut("knight")
+            .unwrap()
+            .score = score;
+        super::tests::add_board(
+            &mut game.state,
+            "body1",
+            "white",
+            "knight",
+            Square::new(0, 0),
+        );
+        super::tests::add_board(
+            &mut game.state,
+            "body2",
+            "white",
+            "knight",
+            Square::new(1, 0),
+        );
+        super::tests::add_board(
+            &mut game.state,
+            "enemy",
+            "black",
+            "knight",
+            Square::new(0, 6),
+        );
+        game.record.initial_state = game.state.clone();
+        let king = game
+            .state
+            .pieces
+            .values()
+            .find(|p| p.owner == "white" && p.type_id == "king")
+            .unwrap()
+            .id
+            .clone();
+        assert_eq!(drop_sacrifice_count(&game.state, &id), count);
+        let ids: Vec<PieceId> = ["body1", "body2"][..count]
+            .iter()
+            .map(|s| (*s).into())
+            .collect();
+        let actions = generate_selected_drop_actions(&game.state, &id, &ids);
+        assert!(!actions.is_empty());
+        let action = actions
+            .iter()
+            .find(|a| a.to == Square::new(0, 0))
+            .unwrap_or(&actions[0])
+            .clone();
+        let before = serde_json::to_value(&game.state).unwrap();
+        app.games.insert(game.id.clone(), game);
+        for bad in [
+            vec![king],
+            vec!["enemy".into()],
+            vec![id.clone()],
+            vec!["body1".into(), "body1".into()],
+            vec!["missing".into()],
+        ] {
+            let intent =
+                json!({"type":"drop","piece_id":id,"to":action.to,"sacrifice_piece_ids":bad});
+            assert!(send(&app, "white", intent).await.is_err());
+            assert_eq!(
+                serde_json::to_value(&app.games.get("draw-test").unwrap().state).unwrap(),
+                before
+            );
+        }
+        if count > 0 {
+            assert!(send(
+                &app,
+                "white",
+                json!({"type":"drop","piece_id":id,"to":action.to})
+            )
+            .await
+            .is_err());
+        }
+        let intent = json!({"type":"drop","piece_id":id,"to":action.to,"sacrifice_piece_ids":ids});
+        assert!(send(&app, "black", intent.clone()).await.is_err());
+        let _ = send(&app, "white", intent).await.unwrap();
+        let game = app.games.get("draw-test").unwrap();
+        for body in &ids {
+            assert!(game.state.pieces[body].captured);
+            assert!(game.state.pieces[body].current_square.is_none());
+            assert!(!game.players["black"].captured_pieces.contains(body));
+        }
+        assert_eq!(game.state.pieces[&id].current_square, Some(action.to));
+        assert_eq!(
+            analysis::state_hash(&game.record.state_at_ply(1).unwrap()),
+            analysis::state_hash(&game.state)
+        );
+    }
+}

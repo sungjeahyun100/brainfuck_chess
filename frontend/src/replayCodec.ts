@@ -153,7 +153,11 @@ function validAction(value: unknown, index: number, size: number): boolean {
   if (!['move', 'drop', 'ability'].includes(String(type))) return false
   if (!validText(value.action.piece_id, 256) || value.action.player_id !== value.player_id || (value.notation as Record<string, unknown>).side !== value.player_id) return false
   if (type === 'move') return validSquare(value.action.from, size) && validSquare(value.action.to, size) && validText(value.action.move_option_id, 128)
-  if (type === 'drop') return validSquare(value.action.to, size)
+  if (type === 'drop') {
+    const ids = value.action.sacrifice_piece_ids
+    return validSquare(value.action.to, size) && (ids === undefined || (Array.isArray(ids)
+      && ids.length <= 2 && ids.every(validPieceId) && new Set(ids).size === ids.length))
+  }
   return validText(value.action.ability_id, 128) && (value.action.to == null || validSquare(value.action.to, size))
 }
 
