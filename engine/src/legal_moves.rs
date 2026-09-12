@@ -969,7 +969,13 @@ pub fn generate_piece_legal_ability_actions(
             let Some(player) = game_state.players.get(&actor.owner) else {
                 return Vec::new();
             };
-            for target in adjacent.iter().filter(|target| target.owner == actor.owner) {
+            for target in adjacent.iter().filter(|target| {
+                target.owner == actor.owner
+                    && game_state
+                        .piece_definitions
+                        .get(&target.type_id)
+                        .is_some_and(|definition| !definition.is_king)
+            }) {
                 for pocket_id in &player.deck.pocket_pieces {
                     let Some(pocket) = game_state.pieces.get(pocket_id) else {
                         continue;

@@ -8,6 +8,24 @@ export interface UpdateLogEntry {
 // Add releases at the beginning and give each release a new, stable ID.
 export const updateLog: readonly UpdateLogEntry[] = [
   {
+    id: '2026-09-12.2',
+    date: '2026-09-12',
+    title: '교대병의 킹 포켓 이동 오류 수정',
+    changes: [
+      'Legacy와 Standard에서 교대병이 아군 킹을 포켓으로 보내던 오류를 수정했습니다. 이제 킹은 교대 대상으로 선택할 수 없습니다.',
+      '킹이 아닌 인접 아군 기물과 자신의 포켓 기물을 교대하는 동작은 유지됩니다.',
+    ],
+  },
+  {
+    id: '2026-09-12.1',
+    date: '2026-09-12',
+    title: '포탄 착수 범위 변경',
+    changes: [
+      'Legacy 포켓과 Standard 손패에서 포탄을 착수할 때 적 기물이 있는 칸에는 놓을 수 없도록 변경했습니다. 기존에는 적 지상 기물 위에도 착수할 수 있었지만, 이제 빈칸에만 착수할 수 있습니다.',
+      '착수 직후 자신과 상하좌우 한 칸의 모든 지상 기물을 제거하는 폭발 효과는 유지됩니다.',
+    ],
+  },
+  {
     id: '2026-09-11.4',
     date: '2026-09-11',
     title: '상대 손패 위치와 카드 뒷면 표시',

@@ -2,7 +2,7 @@ use crate::types::*;
 
 pub const DETONATE_ABILITY_ID: &str = "detonate";
 
-/// Shell: immobile explosive that may capture on drop and immediately explodes.
+/// Shell: immobile explosive that drops on empty squares and immediately explodes.
 pub fn shell_definition() -> PieceDefinition {
     PieceDefinition {
         id: "shell".into(),
@@ -17,7 +17,7 @@ pub fn shell_definition() -> PieceDefinition {
         dialect: None,
         extensions: None,
         is_king: false,
-        can_capture_on_drop: true,
+        can_capture_on_drop: false,
         promotion: None,
         promotion_pool: Vec::new(),
         state_schema: Vec::new(),
