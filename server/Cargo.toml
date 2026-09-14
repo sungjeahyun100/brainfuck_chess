@@ -13,7 +13,7 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "fs"] }
+tower-http = { version = "0.5", features = ["cors", "fs", "compression-gzip", "compression-br"] }
 uuid = { version = "1", features = ["v4"] }
 getrandom = "0.4.2"
 dashmap = "6"
@@ -24,3 +24,7 @@ sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "json", "migrate", "macros", "uuid"] }
 jsonwebtoken = "9"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[dev-dependencies]
+async-compression = { version = "0.4", features = ["tokio", "gzip", "brotli"] }
+tower = { version = "0.4", features = ["util"] }

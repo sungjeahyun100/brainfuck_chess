@@ -1,10 +1,14 @@
 use axum::routing::{delete, get, patch, post};
 use axum::Router;
+use tower_http::compression::CompressionLayer;
 
 use crate::app_state::AppState;
 use crate::*;
 
 mod custom_piece_image;
+
+#[cfg(test)]
+mod compression_tests;
 
 /// HTTP-only routing table. Request parsing remains in handlers while game
 /// rules are delegated to engine services/boundaries.
@@ -121,5 +125,7 @@ pub(crate) fn api(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(
             crate::game_view::prevent_live_caching,
         ))
+        // Keep the default size/content-type predicate; static files live outside this router.
+        .layer(CompressionLayer::new())
         .with_state(state)
 }

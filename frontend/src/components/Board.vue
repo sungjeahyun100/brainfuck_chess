@@ -15,7 +15,8 @@
         :class="squareClasses(sq)"
         :data-file="sq.file"
         :data-rank="sq.rank"
-        role="button" tabindex="0"
+        role="button" :tabindex="interactionDisabled ? -1 : 0"
+        :aria-disabled="interactionDisabled"
         :aria-label="`${fileLabel(sq.file)}${sq.rank + 1}${sacrificeMarker(sq) ? ' · ' + sacrificeMarker(sq) : ''}`"
         @keydown.enter.prevent="onSquareClick(sq)" @keydown.space.prevent="onSquareClick(sq)"
         @click="onSquareClick(sq)"
@@ -187,6 +188,7 @@ const props = defineProps<{
   orientation?: PlayerId
   abilityMode?: boolean
   showCoordinates?: boolean
+  interactionDisabled?: boolean
   annotationMode?: boolean
 }>()
 
@@ -350,6 +352,7 @@ function squareClasses(sq: SquareInfo) {
 }
 
 function onPieceClick(pieceId: string) {
+  if (props.interactionDisabled) return
   emit('pieceClick', pieceId)
 }
 
@@ -365,11 +368,12 @@ function onSquareClick(sq: SquareInfo) {
     suppressNextClick = false
     return
   }
+  if (props.interactionDisabled) return
   emit('squareClick', { file: sq.file, rank: sq.rank })
 }
 
 function onSquarePointerDown(event: PointerEvent, sq: SquareInfo) {
-  if (props.annotationMode) return
+  if (props.interactionDisabled || props.annotationMode) return
   if (event.button !== 0 || !sq.piece) return
 
   pointerDrag.value = {
@@ -420,6 +424,10 @@ function startAnnotationDrag(event: PointerEvent) {
 }
 
 function onWindowPointerMove(event: PointerEvent) {
+  if (props.interactionDisabled) {
+    cleanupPointerDrag()
+    return
+  }
   const drag = pointerDrag.value
   if (!drag || drag.pointerId !== event.pointerId) return
 
@@ -442,7 +450,7 @@ function onWindowPointerUp(event: PointerEvent) {
   const targetSquareId = squareIdFromPoint(event.clientX, event.clientY)
   cleanupPointerDrag()
 
-  if (!drag.active) return
+  if (!drag.active || props.interactionDisabled) return
 
   suppressNextClick = true
   emit('squareDrop', squareFromId(targetSquareId), drag.pieceId)
@@ -455,7 +463,7 @@ function onWindowPointerCancel(event: PointerEvent) {
   const pieceId = drag.pieceId
   const wasActive = drag.active
   cleanupPointerDrag()
-  if (wasActive) emit('squareDrop', null, pieceId)
+  if (wasActive && !props.interactionDisabled) emit('squareDrop', null, pieceId)
 }
 
 function onWindowRightPointerMove(event: PointerEvent) {
@@ -639,6 +647,7 @@ function squareCenterFromId(id: string): { x: number; y: number } | null {
 }
 
 function onNativeDrop(event: DragEvent, sq: SquareInfo) {
+  if (props.interactionDisabled) return
   const pieceId = event.dataTransfer?.getData('application/x-brainfuck-chess-pocket-piece')
     || event.dataTransfer?.getData('text/plain')
     || null

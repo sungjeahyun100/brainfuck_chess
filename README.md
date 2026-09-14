@@ -164,6 +164,15 @@ Standard: scoreLimit = n × n - 5
 
 ## 개발 문서
 
+### API HTTP 압축 확인
+
+- `server/src/routes.rs`의 API 라우터(`/api/*`)에 tower-http 0.5의 `CompressionLayer`를 적용합니다. `compression-gzip`, `compression-br` feature로 요청의 `Accept-Encoding`에 따라 gzip/Brotli를 협상합니다. 헤더가 없으면 기존 JSON을 그대로 반환합니다. 프론트엔드는 기존 `response.json()`을 사용합니다.
+- 기본 predicate를 유지합니다. 크기를 알 수 있는 32바이트 미만 응답은 압축하지 않으며 PNG/JPEG 등 이미지(SVG 제외), gRPC, SSE도 제외합니다. 크기를 알 수 없는 응답은 압축 대상이 될 수 있습니다. 정적 파일과 SPA fallback은 API 라우터 밖에 있어 이 압축 계층을 거치지 않습니다.
+- 배포 후 Chrome DevTools → Network에서 **Disable cache**를 켜고 Piece Lab에서 동작을 수행한 다음 `/api/lab/piece-options` 요청을 선택합니다. Request Headers의 `accept-encoding`과 Response Headers의 **`content-encoding: br` 또는 `gzip`**을 확인합니다.
+- **Size** 열에 마우스를 올려 원본 **Resource size**와 실제 **Transferred size**를 비교합니다. 원본 JSON 크기는 유지되고 전송량은 줄어야 합니다. 캐시에서 제공된 요청은 제외하고 실제 측정값을 기록합니다. Transferred에는 HTTP 헤더 등도 포함되므로 압축 본문 바이트 수와 정확히 같지는 않습니다. 고정된 압축 후 크기를 목표로 삼지 않습니다.
+- Timing의 **Content Download**는 이번 개선 대상입니다. **Waiting for server response(TTFB)**, 엔진 계산, Cloud Run CPU 처리 시간과 네트워크 왕복 지연은 별도 병목입니다. TTFB가 계속 길면 별도 프로파일링이 필요합니다. `piece_definitions` 재전송과 JSON 스키마는 변경하지 않습니다.
+- 자동 검증: `cargo test -p brainfuck-chess-server compression_ -- --nocapture`로 실제 Piece Lab 응답의 압축 협상·내용 동일성 및 테스트 입력의 본문 크기를 확인합니다. 출력 크기는 로컬 테스트 입력의 측정값이며 Cloud Run 실측값이 아닙니다.
+
 ### 업데이트 로그 관리
 
 - `frontend/src/updateLog.ts`의 `updateLog` 배열 맨 앞에 새 항목을 추가합니다. 날짜, 제목, 사용자에게 보여줄 변경 내용과 이전에 사용하지 않은 고유 `id`(예: `2026-09-10.1`)를 지정합니다.
