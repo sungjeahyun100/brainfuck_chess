@@ -202,8 +202,7 @@
           <StandardReservePanel v-if="isStandard" class="opponent-deck" presentation="deck" deck-label="상대 덱"
             :state="viewState" :side="reserveOtherSide" :reveal="false" />
         <Board
-          :inert="!canUseSummonControls"
-          :aria-disabled="!canUseSummonControls"
+          :interaction-disabled="!canUseSummonControls"
           :class="{ 'board-waiting': !canUseSummonControls }"
           :board="viewState.board"
           :pieces="viewState.pieces"
@@ -2169,6 +2168,7 @@ async function onResign() {
 
 .main-layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; justify-content: center; }
 .main-layout.locked { pointer-events: none; opacity: 0.78; }
+.main-layout.locked .board-waiting { pointer-events: auto; }
 
 .board-column {
   display: flex;

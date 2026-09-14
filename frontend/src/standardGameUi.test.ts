@@ -276,3 +276,34 @@ test('hand sacrifice thresholds preserve Legacy and lower score drops',()=>{
   }
   state.ruleset='legacy';assert.equal(dropHelpers.requiredDropSacrifices(state,'w1'),0)
 })
+
+test('waiting board accepts annotation gestures while suppressing piece interactions', t => {
+  const old = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {} } })
+  t.after(() => { if (old) Object.defineProperty(globalThis, 'window', old); else Reflect.deleteProperty(globalThis, 'window') })
+  const state = fixture()
+  const props = vue.reactive({ board: state.board, pieces: state.pieces, definitions: state.piece_definitions, selectedPieceId: null, movableSquares: [], attackSquares: [], dropSquares: [], interactionDisabled: true })
+  const events: unknown[][] = []
+  const component = compile('Board', { ...modules, vue: { ...vue, onMounted() {}, onBeforeUnmount() {} } })
+  const ui = component.setup(props, { expose() {}, emit(...args: unknown[]) { events.push(args) } })
+  ui.boardElement.value = { clientLeft: 0, clientTop: 0, clientWidth: 800, clientHeight: 800, getBoundingClientRect: () => ({ left: 0, top: 0 }) }
+  const pointer = (x: number, y: number, button = 2) => ({ clientX: x, clientY: y, button, pointerId: 1, preventDefault() {} })
+  ui.onBoardPointerDown(pointer(50, 50))
+  ui.onWindowRightPointerMove(pointer(250, 250))
+  assert.equal(ui.renderedArrows.value.length, 1, 'preview is visible while waiting')
+  ui.onWindowRightPointerUp(pointer(250, 250))
+  assert.deepEqual(ui.arrows.value, [{ from: '0_7', to: '2_5' }])
+  ui.onBoardPointerDown(pointer(50, 50))
+  ui.onWindowRightPointerUp(pointer(50, 50))
+  assert.deepEqual(ui.highlightedSquares.value, ['0_7'])
+  const sq = { id: '4_0', file: 4, rank: 0, piece: state.pieces.wq }
+  ui.onSquareClick(sq)
+  ui.onPieceClick('wq')
+  ui.onSquarePointerDown(pointer(450, 750, 0), sq)
+  ui.onNativeDrop({ dataTransfer: { getData: () => 'w1' } }, sq)
+  assert.equal(ui.pointerDrag.value, null)
+  assert.deepEqual(events, [])
+  props.interactionDisabled = false
+  ui.onSquareClick(sq)
+  assert.deepEqual(events, [['squareClick', { file: 4, rank: 0 }]])
+})

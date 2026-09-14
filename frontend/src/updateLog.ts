@@ -8,6 +8,23 @@ export interface UpdateLogEntry {
 // Add releases at the beginning and give each release a new, stable ID.
 export const updateLog: readonly UpdateLogEntry[] = [
   {
+    id: '2026-09-14.2',
+    date: '2026-09-14',
+    title: '최적화 마이너 업데이트',
+    changes: [
+      '더 쾌적한 이용을 위한 최적화 마이너 업데이트를 진행했습니다.',
+    ],
+  },
+  {
+    id: '2026-09-14.1',
+    date: '2026-09-14',
+    title: '상대 턴에도 보드 화살표 표시',
+    changes: [
+      '상대 플레이어나 봇의 턴에도 보드에서 오른쪽 버튼을 드래그해 화살표를 그리고, 오른쪽 클릭으로 칸을 강조할 수 있습니다.',
+      '기물 이동과 착수는 기존처럼 자신의 조작 가능한 턴에만 허용됩니다.',
+    ],
+  },
+  {
     id: '2026-09-12.3',
     date: '2026-09-12',
     title: '고점수 손패 소환에 필드 제물 추가',
