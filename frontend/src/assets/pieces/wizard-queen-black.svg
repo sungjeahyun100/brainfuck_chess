@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" fill="none">
+  <title>마법사 퀸 — 흑</title>
+  <g stroke="#111" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round" fill="#171717">
+    <path d="M65 66C79 76 79 95 66 107C53 119 33 112 23 94L31 86C42 96 61 96 65 82C67 76 66 70 65 66Z"/>
+    <path d="M24 62L16 29L35 43L50 16L65 43L84 29L76 62Z"/>
+    <circle cx="16" cy="24" r="5"/>
+    <circle cx="50" cy="10" r="5"/>
+    <circle cx="84" cy="24" r="5"/>
+    <path d="M23 61Q50 55 77 61L74 72Q50 65 26 72Z"/>
+  </g>
+  <g fill="#fff"><path d="M50 37L53 44L60 47L53 50L50 57L47 50L40 47L47 44Z"/></g>
+</svg>

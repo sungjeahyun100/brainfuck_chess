@@ -30,6 +30,9 @@ pub fn neighboring_pieces<'a>(game_state: &'a GameState, piece: &Piece) -> Vec<&
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InteractionTag {
     Bouncing,
+    Wizard,
+    WizardCadet,
+    WizardRook,
 }
 
 /// Geometry owned by the moving piece. The obstacle only says that it blocks a
@@ -42,6 +45,7 @@ pub enum BounceGeometry {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InteractionProfile {
+    pub categories: Vec<InteractionTag>,
     pub movement_tags: Vec<InteractionTag>,
     pub blocks: Vec<InteractionTag>,
     pub bounce_geometries: Vec<BounceGeometry>,
@@ -69,6 +73,18 @@ impl InteractionProfile {
 /// same profiles later without changing the resolver.
 pub fn profile_for_piece_type(type_id: &str) -> InteractionProfile {
     match type_id {
+        "wizard-rook" => InteractionProfile {
+            categories: vec![InteractionTag::Wizard, InteractionTag::WizardRook],
+            ..InteractionProfile::default()
+        },
+        "wizard-king" | "wizard-queen" => InteractionProfile {
+            categories: vec![InteractionTag::Wizard],
+            ..InteractionProfile::default()
+        },
+        "wizard-cadet" | "wizard-cadet-black" => InteractionProfile {
+            categories: vec![InteractionTag::Wizard, InteractionTag::WizardCadet],
+            ..InteractionProfile::default()
+        },
         "bouncing-pawn-white" | "bouncing-pawn-black" => InteractionProfile {
             blocks: vec![InteractionTag::Bouncing],
             ..InteractionProfile::default()
@@ -298,4 +314,123 @@ mod tests {
             [(-1, 1), (1, -1)]
         );
     }
+}
+
+
+/// Semantic membership lives in the existing interaction registry, never names.
+pub fn has_category(piece: &Piece, category: InteractionTag) -> bool {
+    profile_for_piece_type(&piece.type_id)
+        .categories
+        .contains(&category)
+}
+
+pub fn friendly_wizards<'a>(state: &'a GameState, actor: &Piece) -> Vec<&'a Piece> {
+    state
+        .pieces
+        .values()
+        .filter(|target| {
+            target.owner == actor.owner
+                && target.is_on_board()
+                && target.current_square.is_some_and(|square| {
+                    state.board.is_in_bounds(&square)
+                        && state.board.get_piece_at_layer(&square, target.layer) == Some(&target.id)
+                })
+                && has_category(target, InteractionTag::Wizard)
+        })
+        .collect()
+}
+
+pub fn surrounded_by_cadets(state: &GameState, actor: &Piece) -> bool {
+    let Some(origin) = actor.current_square else {
+        return false;
+    };
+    [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().all(|(dx, dy)| {
+        let square = Square::new(origin.file + dx, origin.rank + dy);
+        state.board.is_in_bounds(&square)
+            && state
+                .board
+                .get_piece_at(&square)
+                .and_then(|id| state.pieces.get(id))
+                .is_some_and(|piece| {
+                    piece.is_on_board()
+                        && piece.current_square == Some(square)
+                        && piece.owner == actor.owner
+                        && has_category(piece, InteractionTag::WizardCadet)
+                })
+    })
+}
+
+
+/// The first two occupied cells on each orthogonal ray must each contain one
+/// friendly wizard rook. Both physical layers count as obstacles.
+pub fn alekhines_gun_targets<'a>(state: &'a GameState, actor: &Piece) -> Vec<&'a Piece> {
+    let Some(origin) = actor.current_square else { return Vec::new() };
+    if !state.board.is_in_bounds(&origin)
+        || state.board.get_piece_at_layer(&origin, actor.layer) != Some(&actor.id) {
+        return Vec::new();
+    }
+    let mut targets = Vec::new();
+    for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        let mut square = Square::new(origin.file + dx, origin.rank + dy);
+        let mut rooks = 0;
+        while state.board.is_in_bounds(&square) {
+            let occupants: Vec<_> = [crate::types::PieceLayer::Ground, crate::types::PieceLayer::Air]
+                .into_iter().filter_map(|layer| state.board.get_piece_at_layer(&square, layer)).collect();
+            if !occupants.is_empty() {
+                if occupants.len() != 1 { break; }
+                let Some(piece) = state.pieces.get(occupants[0]) else { break; };
+                if !piece.is_on_board() || piece.current_square != Some(square)
+                    || state.board.get_piece_at_layer(&square, piece.layer) != Some(&piece.id)
+                    || piece.owner != actor.owner || !has_category(piece, InteractionTag::WizardRook) {
+                    break;
+                }
+                rooks += 1;
+                if rooks == 2 { targets.push(piece); break; }
+            }
+            square = Square::new(square.file + dx, square.rank + dy);
+        }
+    }
+    targets
+}
+
+
+/// Side cadets are adjacent on the caster's physical layer. The passenger is
+/// immediately behind the caster, relative to its owner's forward direction.
+pub fn transfer_circle_passengers<'a>(state: &'a GameState, actor: &Piece) -> Vec<&'a Piece> {
+    let Some(origin) = actor.current_square else {
+        return Vec::new();
+    };
+    let occupant = |square: Square, layer| {
+        state
+            .board
+            .is_in_bounds(&square)
+            .then(|| state.board.get_piece_at_layer(&square, layer))
+            .flatten()
+            .and_then(|id| state.pieces.get(id))
+            .filter(|piece| {
+                piece.is_on_board()
+                    && piece.current_square == Some(square)
+                    && piece.layer == layer
+                    && piece.owner == actor.owner
+            })
+    };
+    if occupant(origin, actor.layer).map(|piece| &piece.id) != Some(&actor.id)
+        || ![-1, 1].into_iter().all(|dx| {
+            occupant(Square::new(origin.file + dx, origin.rank), actor.layer)
+                .is_some_and(|piece| has_category(piece, InteractionTag::WizardCadet))
+        })
+    {
+        return Vec::new();
+    }
+    let behind = Square::new(
+        origin.file,
+        origin.rank - crate::rules::player_forward_direction(&actor.owner),
+    );
+    [
+        crate::types::PieceLayer::Ground,
+        crate::types::PieceLayer::Air,
+    ]
+    .into_iter()
+    .filter_map(|layer| occupant(behind, layer))
+    .collect()
 }

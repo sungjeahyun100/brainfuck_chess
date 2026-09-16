@@ -59,3 +59,12 @@ test('visual resolver falls back to default and then type id', () => {
   assert.equal(resolvePieceAssetKey(windmill('unknown'), definition), 'windmill-bishop')
   assert.equal(resolvePieceAssetKey(windmill('rook'), undefined), 'windmill')
 })
+
+test('wizard designs replace former placeholder assets in saved games', () => {
+  for (const [type, previous] of [['wizard-queen', 'queen'], ['wizard-rook', 'rook'], ['wizard-king', 'king'], ['wizard-cadet', 'pawn-white'], ['wizard-cadet-black', 'pawn-white']]) {
+    const piece = { ...windmill('unknown'), type_id: type }
+    const saved = { ...definition, visual: { default_asset_key: previous, variants: [] } }
+    assert.equal(resolvePieceAssetKey(piece, saved), type)
+    assert.equal(resolvePieceAssetKey(piece, { ...saved, visual: { default_asset_key: 'custom-art', variants: [] } }), 'custom-art')
+  }
+})

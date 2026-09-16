@@ -259,6 +259,24 @@ mod tests {
         GameState, Piece, Player, Square, TurnAction,
     };
 
+    #[test]
+    fn acceleration_changes_position_key() {
+        let mut position = state();
+        let before = PositionKey::from_state(&position);
+        position.pieces.get_mut("windmill").unwrap().state.insert(
+            crate::pieces::default_pieces::EXTRA_MOVE.into(),
+            PieceStateValue::Integer(1),
+        );
+        assert_ne!(before, PositionKey::from_state(&position));
+        position
+            .pieces
+            .get_mut("windmill")
+            .unwrap()
+            .state
+            .remove(crate::pieces::default_pieces::EXTRA_MOVE);
+        assert_eq!(before, PositionKey::from_state(&position));
+    }
+
     fn state() -> GameState {
         let mut players = HashMap::new();
         for id in ["white", "black"] {

@@ -49,6 +49,7 @@
             draggable="false"
           />
           <span v-else>{{ pieceSymbol(sq.piece.type_id) }}</span>
+          <span v-if="sq.piece.state?.extra_move_remaining === 1" class="piece-flight-badge" title="가속: 이번 턴 일반 이동 1회는 턴을 사용하지 않습니다">⚡</span>
           <span
             v-if="activeCooldownRemaining(sq.piece.move_option_cooldowns) > 0"
             class="piece-cooldown-badge"
@@ -80,6 +81,7 @@
             draggable="false"
           />
           <span v-else>{{ pieceSymbol(sq.airPiece.type_id) }}</span>
+          <span v-if="sq.airPiece.state?.extra_move_remaining === 1" class="piece-cooldown-badge" title="가속: 이번 턴 추가 이동 1회">⚡</span>
           <span class="piece-flight-badge" :title="`남은 비행 ${sq.airPiece.remaining_flight_turns}턴`">
             ✈ {{ sq.airPiece.remaining_flight_turns }}
           </span>

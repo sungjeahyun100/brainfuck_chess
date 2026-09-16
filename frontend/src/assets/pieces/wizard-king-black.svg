@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" fill="none">
+  <title>마법사 킹 — 흑</title>
+  <g stroke="#111" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M65 61C79 71 82 91 69 106C56 121 33 113 23 94L31 86C42 96 62 97 66 81C68 74 66 68 65 61Z" fill="#171717"/>
+    <path d="M44 10L50 4L56 10V17H63V24H56V32H44V24H37V17H44Z" fill="#111"/>
+    <path d="M25 66C11 62 7 48 16 39C20 30 32 28 41 33C45 29 55 29 59 33C69 28 80 30 84 39C93 48 89 62 75 66L72 73Q50 64 28 73Z" fill="#171717"/>
+  </g>
+  <g stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M50 60C49 48 32 35 23 43C13 52 24 60 30 64M50 60C51 48 68 35 77 43C87 52 76 60 70 64"/>
+    <path d="M28 65Q50 57 72 65"/>
+  </g>
+</svg>

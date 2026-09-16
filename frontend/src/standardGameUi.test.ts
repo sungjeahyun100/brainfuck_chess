@@ -1,3 +1,4 @@
+import * as moveUi from './moveOptionUi.ts'
 import * as dropHelpers from './dropSacrifices.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -306,4 +307,53 @@ test('waiting board accepts annotation gestures while suppressing piece interact
   props.interactionDisabled = false
   ui.onSquareClick(sq)
   assert.deepEqual(events, [['squareClick', { file: 4, rank: 0 }]])
+})
+
+test('encouragement button uses server candidates without client formation checks', async t => {
+  for (const available of [false, true]) {
+    const state = fixture()
+    state.piece_definitions.king.move_options = [{ id: 'encourage', name: '격려', kind: 'ability', execution_mode: 'standalone_action', enabled_when: [] }] as any
+    const { ui } = setup(t, { getPieceOptions: async (_game: string, _piece: string, ability: string) => ({
+      moves: [], ability_actions: ability && available ? [{ piece_id: 'wk', ability_id: 'encourage', target_piece_id: 'wk', to: { file: 3, rank: 0 }, deployments: [] }] : [],
+    }) }, state)
+    await ui.selectBoardPiece('wk')
+    assert.equal(ui.selectedPieceAbilities.value.length, available ? 1 : 0)
+  }
+})
+test('alekhines gun button uses server candidates without client formation checks', async t => {
+  for (const available of [false, true]) {
+    const state = fixture()
+    state.piece_definitions.king.move_options = [{ id: 'alekhines-gun', name: '알레킨의 총', kind: 'ability', execution_mode: 'standalone_action', enabled_when: [] }] as any
+    const { ui } = setup(t, { getPieceOptions: async (_game: string, _piece: string, ability: string) => ({
+      moves: [], ability_actions: ability && available ? [{ piece_id: 'wk', ability_id: 'alekhines-gun', target_piece_id: 'wk', to: { file: 3, rank: 0 }, deployments: [] }] : [],
+    }) }, state)
+    await ui.selectBoardPiece('wk')
+    assert.equal(ui.selectedPieceAbilities.value.length, available ? 1 : 0)
+  }
+})
+
+
+test('transfer circle uses server destinations and submits the rear passenger as one ability', async t => {
+  const previous = modules['../moveOptionUi']
+  modules['../moveOptionUi'] = moveUi
+  t.after(() => { modules['../moveOptionUi'] = previous })
+  for (const available of [false, true]) {
+    const state = fixture()
+    state.piece_definitions.king.move_options = [{ id: 'transfer-circle', name: '전이 마법진', kind: 'ability', execution_mode: 'standalone_action', enabled_when: [] }] as any
+    const destination = { file: 7, rank: 7 }
+    const actions: unknown[] = []
+    const { ui } = setup(t, {
+      getPieceOptions: async (_game: string, _piece: string, ability: string) => ({ moves: [], ability_actions: ability && available ? [{ player_id: 'white', piece_id: 'wk', ability_id: 'transfer-circle', target_piece_id: 'wq', to: destination, deployments: [] }] : [] }),
+      submitAction: async (_game: string, action: unknown) => { actions.push(action); return state },
+    }, state)
+    await ui.selectBoardPiece('wk')
+    assert.equal(ui.selectedPieceAbilities.value.length, available ? 1 : 0)
+    if (available) {
+      await ui.toggleAbilityMode('transfer-circle')
+      assert.ok(ui.movableSquares.value.some((square: any) => square.file === 7 && square.rank === 7))
+      await ui.submitAbility('wk', destination)
+      assert.equal(actions.length, 1)
+      assert.deepEqual(actions[0], { type: 'ability', piece_id: 'wk', ability_id: 'transfer-circle', target_piece_id: 'wq', pocket_piece_id: undefined, to: destination })
+    }
+  }
 })

@@ -857,6 +857,60 @@ pub fn generate_piece_legal_ability_actions(
     let mut actions = Vec::new();
     let adjacent = neighboring_pieces(game_state, actor);
     match (actor.type_id.as_str(), ability_id) {
+        ("wizard-rook", crate::pieces::default_pieces::TRANSFER_CIRCLE) => {
+            for passenger in crate::interaction::transfer_circle_passengers(game_state, actor) {
+                for rank in 0..game_state.board.size {
+                    for file in 0..game_state.board.size {
+                        let to = Square::new(file, rank);
+                        if !game_state.board.is_empty_at_layer(&to, PieceLayer::Ground)
+                            || !game_state.board.is_empty_at_layer(&to, PieceLayer::Air) {
+                            continue;
+                        }
+                        let mut action = simple_ability_action(actor, piece_id, ability_id, Some(to));
+                        action.target_piece_id = Some(passenger.id.clone());
+                        actions.push(action);
+                    }
+                }
+            }
+        }
+
+        ("wizard-queen", crate::pieces::default_pieces::ALEKHINES_GUN) => {
+            for target in crate::interaction::alekhines_gun_targets(game_state, actor) {
+                let mut action = simple_ability_action(actor, piece_id, ability_id, target.current_square);
+                action.target_piece_id = Some(target.id.clone());
+                actions.push(action);
+            }
+        }
+
+        ("wizard-king", crate::pieces::default_pieces::ENCOURAGE)
+        | ("wizard-cadet" | "wizard-cadet-black", crate::pieces::default_pieces::LINKED_TELEPORT) =>
+        {
+            let encourage = ability_id == crate::pieces::default_pieces::ENCOURAGE;
+            if !game_state.board.is_in_bounds(&origin)
+                || game_state.board.get_piece_at_layer(&origin, actor.layer) != Some(piece_id)
+                || (encourage && !crate::interaction::surrounded_by_cadets(game_state, actor))
+            {
+                return Vec::new();
+            }
+            for target in crate::interaction::friendly_wizards(game_state, actor) {
+                if !encourage
+                    && (target.id == actor.id
+                        || (target.layer != actor.layer
+                            && (!game_state.board.is_empty_at_layer(&origin, target.layer)
+                                || !game_state.board.is_empty_at_layer(
+                                    &target.current_square.unwrap(),
+                                    actor.layer,
+                                ))))
+                {
+                    continue;
+                }
+                let mut action =
+                    simple_ability_action(actor, piece_id, ability_id, target.current_square);
+                action.target_piece_id = Some(target.id.clone());
+                actions.push(action);
+            }
+        }
+
         ("mortar", MORTAR_BARRAGE_ABILITY_ID) => {
             let opponent_id = if actor.owner == "white" {
                 "black".into()

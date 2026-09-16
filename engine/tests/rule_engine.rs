@@ -1079,6 +1079,8 @@ fn deployment_zone_classifies_every_builtin_and_both_player_orientations() {
         .map(|definition| (definition.id.clone(), definition))
         .collect::<HashMap<_, _>>();
     let front_types = [
+        "wizard-cadet",
+        "wizard-cadet-black",
         "pawn-white",
         "pawn-black",
         "tempest-pawn-white",

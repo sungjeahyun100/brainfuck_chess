@@ -66,6 +66,12 @@ mod tempest_queen;
 mod tempest_rook;
 mod wall;
 mod windmill;
+mod wizard;
+pub use wizard::{
+    wizard_cadet_black_definition, wizard_cadet_definition, wizard_king_definition, wizard_queen_definition, wizard_rook_definition,
+    WIZARD_PROMOTION_POOL,
+};
+pub(crate) use wizard::{TRANSFER_CIRCLE, ALEKHINES_GUN, ENCOURAGE, EXTRA_MOVE, LINKED_TELEPORT};
 
 pub use airborne::airborne_definition;
 pub use alternating_soldier::alternating_soldier_definition;
@@ -125,6 +131,11 @@ pub use windmill::windmill_definition;
 pub fn all_default_definitions() -> Vec<PieceDefinition> {
     vec![
         king_definition(),
+        wizard_king_definition(),
+        wizard_queen_definition(),
+        wizard_rook_definition(),
+        wizard_cadet_definition(),
+        wizard_cadet_black_definition(),
         queen_definition(),
         rook_definition(),
         bishop_definition(),

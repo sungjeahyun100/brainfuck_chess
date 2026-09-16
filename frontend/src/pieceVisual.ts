@@ -16,5 +16,14 @@ export function resolvePieceAssetKey(
     .sort((left, right) => right.priority - left.priority)
     .find(candidate => candidate.enabled_when.every(predicate => predicateMatches(piece, predicate)))
 
-  return variant?.asset_key || definition.visual.default_asset_key || piece.type_id
+  const assetKey = variant?.asset_key || definition.visual.default_asset_key || piece.type_id
+  // Older saved games used ordinary assets for these wizard types.
+  const previousWizardAssets: Record<string, string> = {
+    'wizard-king': 'king',
+    'wizard-queen': 'queen',
+    'wizard-rook': 'rook',
+    'wizard-cadet': 'pawn-white',
+    'wizard-cadet-black': 'pawn-white',
+  }
+  return previousWizardAssets[piece.type_id] === assetKey ? piece.type_id : assetKey
 }

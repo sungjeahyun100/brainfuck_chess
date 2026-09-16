@@ -1216,6 +1216,240 @@ mod tests {
         assert!(record.actions.is_empty());
     }
 
+    #[test]
+    fn wizard_actions_record_restore_and_hash_every_ply() {
+        use brainfuck_chess_engine::{
+            actions::submit_action,
+            legal_moves::{
+                generate_piece_legal_ability_actions, generate_piece_legal_move_actions,
+            },
+            pieces::default_pieces::all_default_definitions,
+            rules::create_board,
+            types::*,
+        };
+        let mut record = postgres_test_record("wizard-replay".into(), "w".into(), "b".into());
+        let mut state = record.initial_state.clone();
+        state.board = create_board(8);
+        state.piece_definitions = all_default_definitions()
+            .into_iter()
+            .map(|d| (d.id.clone(), d))
+            .collect();
+        state.chessembly_program_cache =
+            ChessemblyProgramCache::from_definitions(&state.piece_definitions);
+        for owner in ["white", "black"] {
+            state.players.insert(
+                owner.into(),
+                Player {
+                    id: owner.into(),
+                    deck: Deck {
+                        player_id: owner.into(),
+                        starting_pieces: vec![],
+                        pocket_pieces: vec![],
+                        hand_pieces: vec![],
+                        extra_deck_pieces: vec![],
+                        score_limit: 39,
+                        total_score: 0,
+                    },
+                    captured_pieces: vec![],
+                },
+            );
+        }
+        for (id, kind, x, y) in [
+            ("k", "wizard-king", 3, 3),
+            ("n", "wizard-cadet", 3, 4),
+            ("s", "wizard-cadet", 3, 2),
+            ("e", "wizard-cadet", 4, 3),
+            ("w", "wizard-cadet", 2, 3),
+        ] {
+            let square = Square::new(x, y);
+            state
+                .board
+                .set_piece_at_layer(square, PieceLayer::Ground, Some(id.into()));
+            state.pieces.insert(
+                id.into(),
+                Piece {
+                    id: id.into(),
+                    type_id: kind.into(),
+                    owner: "white".into(),
+                    current_square: Some(square),
+                    in_pocket: false,
+                    captured: false,
+                    has_moved: false,
+                    current_ammo: 0,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                },
+            );
+            state
+                .players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .starting_pieces
+                .push(id.into());
+        }
+        record.initial_state = state.clone();
+        for step in 0..3 {
+            let action = if step == 1 {
+                TurnAction::Move(
+                    generate_piece_legal_move_actions(&state, &"n".into())
+                        .into_iter()
+                        .find(|a| a.to == Square::new(3, 5))
+                        .unwrap(),
+                )
+            } else {
+                let (actor, ability) = if step == 0 {
+                    ("k", "encourage")
+                } else {
+                    ("s", "linked-teleport")
+                };
+                TurnAction::Ability(
+                    generate_piece_legal_ability_actions(&state, &actor.into(), ability)
+                        .into_iter()
+                        .find(|a| a.target_piece_id == Some("n".into()))
+                        .unwrap(),
+                )
+            };
+            let after = submit_action(state.clone(), action.clone()).unwrap();
+            if step == 0 {
+                let mut without = after.clone();
+                without
+                    .pieces
+                    .get_mut("n")
+                    .unwrap()
+                    .state
+                    .remove("extra_move_remaining");
+                assert_ne!(
+                    crate::analysis::state_hash(&after).unwrap(),
+                    crate::analysis::state_hash(&without).unwrap()
+                );
+            }
+            record.push_action(
+                "white".into(),
+                action,
+                0,
+                None,
+                None,
+                record.initial_clock.clone(),
+                &state,
+                after.clone(),
+            );
+            let restored: GameRecord =
+                serde_json::from_value(serde_json::to_value(&record).unwrap()).unwrap();
+            assert_eq!(
+                crate::analysis::state_hash(&restored.state_at_ply(step + 1).unwrap()).unwrap(),
+                crate::analysis::state_hash(&after).unwrap()
+            );
+            state = after;
+        }
+        assert_eq!(record.actions.len(), 3);
+        assert!(matches!(record.actions[2].action, TurnAction::Ability(_)));
+    }
+
+    #[test]
+    fn wizard_gun_record_restore_and_hash() {
+        use brainfuck_chess_engine::{
+            actions::submit_action,
+            legal_moves::{
+                generate_piece_legal_ability_actions,
+            },
+            pieces::default_pieces::all_default_definitions,
+            rules::create_board,
+            types::*,
+        };
+        let mut record = postgres_test_record("wizard-gun-replay".into(), "w".into(), "b".into());
+        let mut state = record.initial_state.clone();
+        state.board = create_board(8);
+        state.piece_definitions = all_default_definitions()
+            .into_iter()
+            .map(|d| (d.id.clone(), d))
+            .collect();
+        state.chessembly_program_cache =
+            ChessemblyProgramCache::from_definitions(&state.piece_definitions);
+        for owner in ["white", "black"] {
+            state.players.insert(
+                owner.into(),
+                Player {
+                    id: owner.into(),
+                    deck: Deck {
+                        player_id: owner.into(),
+                        starting_pieces: vec![],
+                        pocket_pieces: vec![],
+                        hand_pieces: vec![],
+                        extra_deck_pieces: vec![],
+                        score_limit: 39,
+                        total_score: 0,
+                    },
+                    captured_pieces: vec![],
+                },
+            );
+        }
+        for (id, kind, x, y) in [
+            ("q", "wizard-queen", 0, 0),
+            ("r1", "wizard-rook", 2, 0),
+            ("r2", "wizard-rook", 4, 0),
+            ("victim", "wizard-king", 7, 0),
+        ] {
+            let square = Square::new(x, y);
+            state
+                .board
+                .set_piece_at_layer(square, PieceLayer::Ground, Some(id.into()));
+            state.pieces.insert(
+                id.into(),
+                Piece {
+                    id: id.into(),
+                    type_id: kind.into(),
+                    owner: "white".into(),
+                    current_square: Some(square),
+                    in_pocket: false,
+                    captured: false,
+                    has_moved: false,
+                    current_ammo: 0,
+                    layer: PieceLayer::Ground,
+                    remaining_flight_turns: 0,
+                    state: HashMap::new(),
+                    move_option_cooldowns: HashMap::new(),
+                },
+            );
+            state
+                .players
+                .get_mut("white")
+                .unwrap()
+                .deck
+                .starting_pieces
+                .push(id.into());
+        }
+        record.initial_state = state.clone();
+        for step in 0..1 {
+            let action = TurnAction::Ability(generate_piece_legal_ability_actions(&state, &"q".into(), "alekhines-gun").remove(0));
+            let after = submit_action(state.clone(), action.clone()).unwrap();
+            assert!(after.pieces["victim"].captured);
+            assert!(after.result.is_some());
+            assert_ne!(crate::analysis::state_hash(&state).unwrap(), crate::analysis::state_hash(&after).unwrap());
+            record.push_action(
+                "white".into(),
+                action,
+                0,
+                None,
+                None,
+                record.initial_clock.clone(),
+                &state,
+                after.clone(),
+            );
+            let restored: GameRecord =
+                serde_json::from_value(serde_json::to_value(&record).unwrap()).unwrap();
+            assert_eq!(
+                crate::analysis::state_hash(&restored.state_at_ply(step + 1).unwrap()).unwrap(),
+                crate::analysis::state_hash(&after).unwrap()
+            );
+            state = after;
+        }
+        assert_eq!(record.actions.len(), 1);
+        assert!(matches!(record.actions[0].action, TurnAction::Ability(_)));
+    }
+
     fn postgres_test_record(
         game_id: String,
         white_user_id: String,

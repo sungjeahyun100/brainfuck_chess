@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" fill="none">
+  <title>마법사 생도 — 흑</title>
+  <g stroke="#111" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round" fill="#171717">
+    <path d="M63 65C78 76 78 93 66 105C53 117 34 110 25 94L32 87C43 97 61 94 65 81C66 75 64 69 63 65Z"/>
+    <path d="M27 58L39 28L59 11L74 25L58 23L59 35L71 58Z"/>
+    <path d="M20 58Q50 49 80 58L76 67Q50 59 24 67Z"/>
+  </g>
+  <path d="M48 33L50.5 39L57 41L50.5 43.5L48 50L45.5 43.5L39 41L45.5 39Z" fill="#fff"/>
+</svg>

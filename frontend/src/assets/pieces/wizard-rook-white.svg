@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" fill="none">
+  <title>마법사 룩 — 백</title>
+  <g stroke="#111" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round" fill="#fff">
+    <path d="M65 66C79 76 79 95 66 107C53 119 33 112 23 94L31 86C42 96 61 96 65 82C67 76 66 70 65 66Z"/>
+    <path d="M29 49H71L68 64H32Z"/>
+    <path d="M17 19H31V30H42V19H58V30H69V19H83V43L73 51H27L17 43Z"/>
+    <path d="M25 63Q50 59 75 63L73 73Q50 68 27 73Z"/>
+  </g>
+  <g fill="#171717"><path d="M50 35L53 40L59 43L53 46L50 51L47 46L41 43L47 40Z"/></g>
+</svg>

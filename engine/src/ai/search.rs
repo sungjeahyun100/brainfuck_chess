@@ -962,19 +962,30 @@ pub fn play_bot_turn_detailed(
         action,
         state: state.clone(),
     }];
-    while &state.current_player == bot_player_id
-        && state.phase != GamePhase::Ended
-        && pending_landing_piece_id(&state).is_some()
-    {
-        let landing = generate_legal_ability_actions(&state)
-            .into_iter()
-            .next()
-            .ok_or_else(|| "봇이 강제 착륙 방향을 선택할 수 없습니다.".to_string())?;
-        let landing_action = AiAction::Ability(landing);
-        state = apply_ai_action(state, &landing_action)?;
-        actions.push(landing_action.clone());
+    while &state.current_player == bot_player_id && state.phase != GamePhase::Ended {
+        let continuation = if pending_landing_piece_id(&state).is_some() {
+            let landing = generate_legal_ability_actions(&state)
+                .into_iter()
+                .next()
+                .ok_or_else(|| "봇이 강제 착륙 방향을 선택할 수 없습니다.".to_string())?;
+            AiAction::Ability(landing)
+        } else {
+            // Finish the free-action turn using the existing tactical ordering.
+            // Recasting encouragement is legal for humans, but this bot policy
+            // avoids an unbounded sequence of refreshing the same free status.
+            let mut candidates = generate_ai_actions(&state);
+            candidates.retain(|action| !matches!(action,
+                AiAction::Ability(ability) if ability.ability_id == crate::pieces::default_pieces::ENCOURAGE));
+            crate::ai::move_ordering::order_ai_actions(&state, &mut candidates, bot_player_id);
+            candidates
+                .into_iter()
+                .next()
+                .ok_or_else(|| "봇이 추가 행동을 수행할 수 없습니다.".to_string())?
+        };
+        state = apply_ai_action(state, &continuation)?;
+        actions.push(continuation.clone());
         timeline.push(ActionTimelineFrame {
-            action: landing_action,
+            action: continuation,
             state: state.clone(),
         });
     }

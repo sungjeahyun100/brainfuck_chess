@@ -19,6 +19,10 @@ import {
 
 const scores: Record<string, number> = {
   king: 0,
+  'wizard-king': 0,
+  'wizard-cadet': 1,
+  'wizard-queen': 9,
+  'wizard-rook': 5,
   queen: 9,
   rook: 5,
   bishop: 3,
@@ -29,7 +33,7 @@ const scores: Record<string, number> = {
   'bouncing-pawn': 2,
   'tempest-pawn': 2,
 }
-const frontPieces = new Set(['pawn', 'dozer', 'bouncing-pawn', 'tempest-pawn'])
+const frontPieces = new Set(['wizard-cadet', 'pawn', 'dozer', 'bouncing-pawn', 'tempest-pawn'])
 applyPieceMetadata(Object.fromEntries(pieceCatalog.map(piece => [piece.id, {
   score: scores[piece.id] ?? 1,
   deployment_zone: frontPieces.has(piece.id) ? 'front' : 'back',
@@ -355,4 +359,44 @@ test('G7 Legacy DC3 bytes remain frozen, including ordering and empty Extra', ()
   const wire = '{"v":3,"name":"Old","mapId":"standard-8x8","boardSize":8,"starting":[{"pieceId":"king","file":4,"rank":0}],"pocket":[{"pieceId":"knight","count":2}],"customPieces":[]}'
   assert.equal(encodeDeckCode(source), `DC3.${base64Url(wire)}`)
   assert.deepEqual(decodeDeckCode(`DC3.${base64Url(wire.replace('"v":3', '"v":4'))}`), { ok: false, error: 'invalid_schema' })
+})
+
+
+test('wizard royal replacement and cadet deck code preserve server catalog metadata', () => {
+  const deck = savedDeck()
+  deck.starting = deck.starting.map(piece => ({ ...piece,
+    pieceType: piece.pieceType === 'king' ? 'wizard-king' : piece.pieceType === 'pawn' ? 'wizard-cadet' : piece.pieceType,
+  }))
+  assert.equal(validateSavedDeck(deck).valid, true)
+  const restored = decodeDeckCode(encodeDeckCode(deck))
+  assert.equal(restored.ok, true)
+  if (restored.ok) assert.deepEqual(restored.value.starting.map(piece => ({ pieceType: piece.pieceId, square: { file: piece.file, rank: piece.rank } })), deck.starting)
+  deck.starting.push({ pieceType: 'king', square: { file: 0, rank: 0 } })
+  assert.equal(validateSavedDeck(deck).valid, false)
+  assert.equal(pieceCatalog.find(piece => piece.id === 'wizard-cadet')?.deploymentZone, 'front')
+})
+
+
+test('wizard queen and rook retain engine metadata and round-trip through deck import', () => {
+  for (const [id, name, score] of [['wizard-queen', '마법사 퀸', 9], ['wizard-rook', '마법사 룩', 5]] as const) {
+    const piece = pieceCatalog.find(piece => piece.id === id)
+    assert.equal(piece?.name, name)
+    assert.equal(piece?.score, score)
+    assert.equal(piece?.deploymentZone, 'back')
+    assert.equal(piece?.canPocket, true)
+  }
+  const deck = savedDeck()
+  deck.starting = [
+    { pieceType: 'wizard-queen', square: { file: 3, rank: 0 } },
+    { pieceType: 'king', square: { file: 4, rank: 0 } },
+    ...Array.from({ length: 8 }, (_, file) => ({ pieceType: 'pawn', square: { file, rank: 1 } })),
+  ]
+  deck.pocket = { 'wizard-rook': 2 }
+  assert.equal(validateSavedDeck(deck).valid, true)
+  const imported = importDeckCode(encodeDeckCode(deck), savedDeck())
+  assert.equal(imported.ok, true)
+  if (imported.ok) {
+    assert.deepEqual(imported.deck.starting, deck.starting)
+    assert.deepEqual(Object.fromEntries(Object.entries(imported.deck.pocket).filter(([, count]) => count > 0)), deck.pocket)
+  }
 })

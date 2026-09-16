@@ -22,10 +22,6 @@ fn is_pawn_type(type_id: &str) -> bool {
     )
 }
 
-fn is_king_type(type_id: &str) -> bool {
-    type_id == "king"
-}
-
 fn is_rook_type(type_id: &str) -> bool {
     type_id == "rook"
 }
@@ -200,7 +196,8 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
     game_state
 }
 
-/// Applies one canonical action and advances exactly one turn. Cooldowns count
+/// Applies one canonical action and advances the turn only when it is consumed.
+/// Cooldowns count
 /// completed turns: an OwnerTurns cooldown set to N is not decremented on the
 /// action that creates it, then decreases after each later action by its owner.
 pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> GameState {
@@ -214,6 +211,35 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
             action,
         });
         return game_state;
+    }
+    let accelerated_move = match &action {
+        TurnAction::Move(movement) => {
+            game_state
+                .pieces
+                .get(&movement.piece_id)
+                .is_some_and(|piece| {
+                    piece.state.get(crate::pieces::default_pieces::EXTRA_MOVE)
+                        == Some(&PieceStateValue::Integer(1))
+                        && crate::interaction::has_category(
+                            piece,
+                            crate::interaction::InteractionTag::Wizard,
+                        )
+                })
+        }
+        _ => false,
+    };
+    let keeps_turn = accelerated_move
+        || matches!(&action,
+        TurnAction::Ability(ability) if ability.ability_id == crate::pieces::default_pieces::ENCOURAGE);
+    if accelerated_move {
+        if let TurnAction::Move(movement) = &action {
+            game_state
+                .pieces
+                .get_mut(&movement.piece_id)
+                .unwrap()
+                .state
+                .remove(crate::pieces::default_pieces::EXTRA_MOVE);
+        }
     }
     let turn_number = game_state.turn_number;
     let player_id = match &action {
@@ -290,6 +316,10 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         action,
     });
 
+    if keeps_turn && game_state.phase != GamePhase::Ended && game_state.result.is_none() {
+        return game_state;
+    }
+
     if !is_forced_landing {
         tick_move_option_cooldowns(&mut game_state, &player_id, &newly_set_cooldowns);
         for piece_id in airborne_before {
@@ -301,6 +331,22 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
     }
 
     let landing_pending = pending_landing_piece_id(&game_state).is_some();
+    if !landing_pending || game_state.phase == GamePhase::Ended || game_state.result.is_some() {
+        for piece in game_state.pieces.values_mut() {
+            if piece
+                .state
+                .contains_key(crate::pieces::default_pieces::EXTRA_MOVE)
+                && crate::interaction::has_category(
+                    piece,
+                    crate::interaction::InteractionTag::Wizard,
+                )
+            {
+                piece
+                    .state
+                    .remove(crate::pieces::default_pieces::EXTRA_MOVE);
+            }
+        }
+    }
     if game_state.phase != GamePhase::Ended && game_state.result.is_none() && !landing_pending {
         game_state.current_player = if player_id == "white" {
             "black".into()
@@ -336,6 +382,82 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
     consume_option_ammo(&mut state, &action.piece_id, &action.ability_id);
 
     match action.ability_id.as_str() {
+        crate::pieces::default_pieces::TRANSFER_CIRCLE => {
+            let id = action.target_piece_id.as_ref().expect("canonical passenger");
+            let passenger = &state.pieces[id];
+            let from = passenger.current_square.expect("canonical passenger square");
+            let layer = passenger.layer;
+            let to = action.to.expect("canonical transfer destination");
+            state.board.set_piece_at_layer(from, layer, None);
+            state.board.set_piece_at_layer(to, layer, Some(id.clone()));
+            let passenger = state.pieces.get_mut(id).unwrap();
+            passenger.current_square = Some(to);
+            passenger.has_moved = true;
+        }
+
+        crate::pieces::default_pieces::ALEKHINES_GUN => {
+            let origin = state.pieces[&action.piece_id].current_square.expect("canonical caster");
+            let front = state.pieces[action.target_piece_id.as_ref().expect("canonical front rook")]
+                .current_square.expect("canonical front square");
+            let (dx, dy) = ((front.file - origin.file).signum(), (front.rank - origin.rank).signum());
+            let mut square = Square::new(front.file + dx, front.rank + dy);
+            let mut targets = Vec::new();
+            while state.board.is_in_bounds(&square) {
+                for layer in [PieceLayer::Ground, PieceLayer::Air] {
+                    if let Some(id) = state.board.get_piece_at_layer(&square, layer) {
+                        targets.push(id.clone());
+                    }
+                }
+                square = Square::new(square.file + dx, square.rank + dy);
+            }
+            let mut removal = RemovalOutcome::default();
+            for target in targets {
+                removal.merge(remove_captured_piece(&mut state, &target, &action.player_id));
+            }
+            apply_removal_result(&mut state, &removal, &action.player_id);
+        }
+
+        crate::pieces::default_pieces::ENCOURAGE => {
+            if let Some(target) = action
+                .target_piece_id
+                .as_ref()
+                .and_then(|id| state.pieces.get_mut(id))
+            {
+                target.state.insert(
+                    crate::pieces::default_pieces::EXTRA_MOVE.into(),
+                    PieceStateValue::Integer(1),
+                );
+            }
+        }
+        crate::pieces::default_pieces::LINKED_TELEPORT => {
+            // Canonical validation has checked both occupants. No Move action,
+            // capture, or intermediate movement trigger participates in this swap.
+            let target_id = action
+                .target_piece_id
+                .as_ref()
+                .expect("canonical swap target");
+            let actor = &state.pieces[&action.piece_id];
+            let target = &state.pieces[target_id];
+            let from = actor.current_square.expect("canonical actor on board");
+            let to = target.current_square.expect("canonical target on board");
+            let actor_layer = actor.layer;
+            let target_layer = target.layer;
+            state.board.set_piece_at_layer(from, actor_layer, None);
+            state.board.set_piece_at_layer(to, target_layer, None);
+            state
+                .board
+                .set_piece_at_layer(from, target_layer, Some(target_id.clone()));
+            state
+                .board
+                .set_piece_at_layer(to, actor_layer, Some(action.piece_id.clone()));
+            state
+                .pieces
+                .get_mut(&action.piece_id)
+                .unwrap()
+                .current_square = Some(to);
+            state.pieces.get_mut(target_id).unwrap().current_square = Some(from);
+        }
+
         TANK_FIRE_ABILITY_ID => {
             if let Some(impact) = action.to {
                 apply_ground_blast(&mut state, impact, &action.player_id);
@@ -945,8 +1067,8 @@ fn move_piece_on_board(
     let is_castling = moved_layer == PieceLayer::Ground
         && moved_piece
             .as_ref()
-            .map(|(type_id, _)| type_id.as_str())
-            .map(is_king_type)
+            .and_then(|(type_id, _)| game_state.piece_definitions.get(type_id))
+            .map(is_royal_piece)
             .unwrap_or(false)
         && (action.to.file - action.from.file).abs() == 2
         && action.to.rank == action.from.rank;

@@ -768,9 +768,15 @@ const selectedPiece = computed(() => (
 const selectedPieceDefinition = computed(() => (
   selectedPiece.value ? props.state.piece_definitions[selectedPiece.value.type_id] ?? null : null
 ))
+const encouragementAvailable = ref(false)
+const alekhinesGunAvailable = ref(false)
+const transferCircleAvailable = ref(false)
 const selectedPieceAbilities = computed<MoveOptionDefinition[]>(() => (
   selectedPieceDefinition.value?.move_options?.filter(option => (
     option.kind === 'ability'
+      && (option.id !== 'encourage' || encouragementAvailable.value)
+      && (option.id !== 'alekhines-gun' || alekhinesGunAvailable.value)
+      && (option.id !== 'transfer-circle' || transferCircleAvailable.value)
       && selectedPiece.value
       && (option.enabled_when ?? []).every(predicate => pieceStatePredicateMatches(selectedPiece.value!, predicate))
       && ((selectedPiece.value.layer === 'air' && (selectedPiece.value.remaining_flight_turns ?? 0) === 0)
@@ -1515,6 +1521,9 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
 
   const ticket = ++selectionGeneration
   selectedPieceId.value = pieceId
+  encouragementAvailable.value = false
+  alekhinesGunAvailable.value = false
+  transferCircleAvailable.value = false
   selectedPocketPieceId.value = null
   abilityMode.value = false
   activeAbilityId.value = null
@@ -1524,9 +1533,20 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
   dropSquares.value = []
 
   try {
-    const options = await loadPieceOptions(pieceId)
+    const [options, encouragement, alekhinesGun, transferCircle] = await Promise.all([
+      loadPieceOptions(pieceId),
+      props.state.piece_definitions[piece.type_id]?.move_options?.some(option => option.id === 'encourage')
+        ? loadPieceOptions(pieceId, 'encourage') : Promise.resolve(null),
+      props.state.piece_definitions[piece.type_id]?.move_options?.some(option => option.id === 'alekhines-gun')
+        ? loadPieceOptions(pieceId, 'alekhines-gun') : Promise.resolve(null),
+      props.state.piece_definitions[piece.type_id]?.move_options?.some(option => option.id === 'transfer-circle')
+        ? loadPieceOptions(pieceId, 'transfer-circle') : Promise.resolve(null),
+    ])
     if (ticket !== selectionGeneration || selectedPieceId.value !== pieceId || abilityMode.value) return null
 
+    encouragementAvailable.value = Boolean(encouragement?.abilityActions.length)
+    alekhinesGunAvailable.value = Boolean(alekhinesGun?.abilityActions.length)
+    transferCircleAvailable.value = Boolean(transferCircle?.abilityActions.length)
     const stateUpdateStarted = profileStarted !== null ? performance.now() : null
     legalTargetSquares.value = options.legalTargets
     movableSquares.value = options.movable
@@ -1814,11 +1834,12 @@ async function submitAbility(pieceId: string, to: Square) {
   let chosen = candidates[0]
   if (candidates.length > 1) {
     const labels = candidates.map((candidate, index) => {
-      const pocket = candidate.pocket_piece_id ? props.state.pieces[candidate.pocket_piece_id] : undefined
+      const targetId = candidate.pocket_piece_id ?? candidate.target_piece_id
+      const pocket = targetId ? props.state.pieces[targetId] : undefined
       const name = pocket ? props.state.piece_definitions[pocket.type_id]?.name ?? pocket.type_id : '대상'
       return `${index + 1}: ${name}`
     })
-    const answer = window.prompt(`교대/소환할 포켓 기물을 고르세요.\n${labels.join('\n')}`, '1')
+    const answer = window.prompt(`능력을 적용할 기물을 고르세요.\n${labels.join('\n')}`, '1')
     const index = Number(answer) - 1
     if (!Number.isInteger(index) || !candidates[index]) return
     chosen = candidates[index]
@@ -2003,8 +2024,8 @@ function onBoardPieceClick(pieceId: string) {
     return
   }
   if (piece.owner !== props.state.current_player) return
-  if (abilityMode.value && selectedPieceId.value === pieceId && piece.current_square) {
-    void submitAbility(pieceId, piece.current_square)
+  if (abilityMode.value && selectedPieceId.value && piece.current_square) {
+    void submitAbility(selectedPieceId.value, piece.current_square)
     return
   }
   if (!abilityMode.value && piece.current_square && openOverlapSelection(piece.current_square)) return

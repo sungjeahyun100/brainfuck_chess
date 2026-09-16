@@ -86,6 +86,10 @@ export function backZoneSquares(
 }
 
 const builtInPieceCatalog: Omit<PieceCatalogItem, 'deploymentZone'>[] = [
+  { id: 'wizard-queen', name: '마법사 퀸', score: 0, category: 'variant', canPocket: true },
+  { id: 'wizard-rook', name: '마법사 룩', score: 0, category: 'variant', canPocket: true },
+  { id: 'wizard-king', name: '마법사 킹', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
+  { id: 'wizard-cadet', name: '마법사 생도', score: 0, category: 'pawn', canPocket: true },
   { id: 'king', name: 'King', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
   { id: 'queen', name: 'Queen', score: 0, category: 'major', canPocket: true },
   { id: 'cannon-rook', name: 'Cannon Rook', score: 0, category: 'variant', canPocket: true, aliases: ['cannon', 'po rook', '포 룩'] },
@@ -565,12 +569,12 @@ export function validateLobbyDeck(deck: LobbyDeck, boardSize: number, name = '�
     if (!canUseInExtra(pieceType, ruleset)) errors.push(`${pieceLabel(pieceType)}은 Extra Deck에 넣을 수 없습니다.`)
   }
 
-  const kingCount = deck.starting.filter(piece => piece.pieceType === 'king').length
+  const kingCount = deck.starting.filter(piece => findPieceCatalogItem(piece.pieceType)?.category === 'royal').length
   if (kingCount !== 1) {
     errors.push('King은 시작 기물에 정확히 1개 있어야 합니다.')
   }
 
-  if ((deck.pocket.king ?? 0) > 0) {
+  if (Object.entries(deck.pocket).some(([id, count]) => count > 0 && findPieceCatalogItem(id)?.category === 'royal')) {
     errors.push('King은 포켓에 들어갈 수 없습니다.')
   }
 

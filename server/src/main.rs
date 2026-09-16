@@ -620,6 +620,9 @@ struct ErrorResponse {
 fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
     match raw_piece_type {
         "king"
+        | "wizard-queen"
+        | "wizard-rook"
+        | "wizard-king"
         | "queen"
         | "rook"
         | "bishop"
@@ -662,6 +665,11 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
             "surface-to-air-missile-white".into()
         } else {
             "surface-to-air-missile-black".into()
+        }),
+        "wizard-cadet" | "wizard-cadet-black" => Some(if player_id == "white" {
+            "wizard-cadet".into()
+        } else {
+            "wizard-cadet-black".into()
         }),
         "pawn" | "pawn-white" | "pawn-black" => Some(if player_id == "white" {
             "pawn-white".into()
@@ -5549,6 +5557,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn wizard_deck_ids_and_catalog_are_available_for_both_players() {
+        let catalog = default_piece_catalog();
+        for player in ["white", "black"] {
+            assert_eq!(resolve_piece_type(player, "wizard-king").as_deref(), Some("wizard-king"));
+            for kind in ["wizard-queen", "wizard-rook"] {
+                assert_eq!(resolve_piece_type(player, kind).as_deref(), Some(kind));
+                assert!(catalog.contains_key(kind));
+            }
+            let cadet = resolve_piece_type(player, "wizard-cadet").unwrap();
+            assert_eq!(catalog[&cadet].score, 1);
+            assert_eq!(catalog[&cadet].deployment_zone, DeploymentZone::Front);
+            assert_eq!(cadet, if player == "white" { "wizard-cadet" } else { "wizard-cadet-black" });
+        }
+        assert_eq!(catalog["wizard-king"].deployment_zone, DeploymentZone::Back);
+    }
+
     #[tokio::test]
     async fn piece_catalog_serves_deployment_zones_from_engine_definitions() {
         let Json(catalog) = get_piece_catalog().await;
@@ -5965,6 +5990,190 @@ mod tests {
             response.legal_ability_actions[0].to,
             Some(Square::new(5, 4))
         );
+    }
+
+    #[tokio::test]
+    async fn lab_wizard_transfer_circle_validates_and_moves_passenger() {
+        for owner in ["white", "black"] {
+            let app = AppState::in_memory();
+            let payload = serde_json::json!({
+                "board_size": 8, "selected_piece_id": "r", "move_option_id": "transfer-circle",
+                "pieces": [
+                    {"id":"r", "piece_type":"wizard-rook", "owner":owner, "square":{"file":3,"rank":3}},
+                    {"id":"left", "piece_type":"wizard-cadet", "owner":owner, "square":{"file":2,"rank":3}},
+                    {"id":"right", "piece_type":"wizard-cadet", "owner":owner, "square":{"file":4,"rank":3}},
+                    {"id":"passenger", "piece_type":"king", "owner":owner, "square":{"file":3,"rank":if owner == "white" {2} else {4}}}
+                ]
+            });
+            let options = get_lab_piece_options(State(app.clone()), HeaderMap::new(),
+                Json(serde_json::from_value(payload.clone()).unwrap())).await.unwrap().0;
+            assert_eq!(options.legal_ability_actions.len(), 60);
+            let action = options.legal_ability_actions.into_iter().find(|a| a.to == Some(Square::new(7,7))).unwrap();
+            assert_eq!(action.target_piece_id, Some("passenger".into()));
+            let mut blocked = payload.clone();
+            blocked["pieces"][1]["owner"] = serde_json::json!(if owner == "white" {"black"} else {"white"});
+            assert!(apply_lab_action(State(app.clone()), HeaderMap::new(), Json(LabApplyActionRequest {
+                lab: serde_json::from_value(blocked).unwrap(), action: TurnAction::Ability(action.clone()),
+            })).await.is_err());
+            let after = apply_lab_action(State(app), HeaderMap::new(), Json(LabApplyActionRequest {
+                lab: serde_json::from_value(payload).unwrap(), action: TurnAction::Ability(action),
+            })).await.unwrap().0;
+            assert_eq!(after.pieces["passenger"].current_square, Some(Square::new(7,7)));
+            assert_ne!(after.current_player, owner);
+            assert!(after.result.is_none());
+            assert_eq!(after.history.len(), 1);
+            let restored: GameState = serde_json::from_value(serde_json::to_value(&after).unwrap()).unwrap();
+            assert_eq!(crate::analysis::state_hash(&after).unwrap(), crate::analysis::state_hash(&restored).unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn lab_wizard_acceleration_survives_followup_requests() {
+        fn request(state: &GameState, selected: &str, option: Option<&str>) -> LabPieceOptionsRequest {
+            LabPieceOptionsRequest {
+                board_size: state.board.size,
+                selected_piece_id: selected.into(),
+                move_option_id: option.map(str::to_owned),
+                global_state: state.global_state.clone(),
+                custom_pieces: vec![],
+                pocket_pieces: vec![],
+                pieces: state
+                    .pieces
+                    .values()
+                    .filter(|piece| piece.is_on_board())
+                    .map(|piece| LabPieceSpec {
+                        id: piece.id.to_string(),
+                        piece_type: piece.type_id.clone(),
+                        owner: piece.owner.clone(),
+                        square: piece.current_square.unwrap(),
+                        state: piece.state.clone(),
+                        move_option_cooldowns: piece.move_option_cooldowns.clone(),
+                        current_ammo: Some(piece.current_ammo),
+                        layer: piece.layer,
+                        remaining_flight_turns: piece.remaining_flight_turns,
+                    })
+                    .collect(),
+            }
+        }
+        for owner in ["white", "black"] {
+            for target in ["k", if owner == "white" { "n" } else { "s" }] {
+                let app = AppState::in_memory();
+                let initial: LabPieceOptionsRequest = serde_json::from_value(serde_json::json!({
+                    "board_size": 8, "selected_piece_id": "k", "move_option_id": "encourage",
+                    "pieces": [
+                        {"id":"k", "piece_type":"wizard-king", "owner":owner, "square":{"file":3,"rank":3}},
+                        {"id":"n", "piece_type":"wizard-cadet", "owner":owner, "square":{"file":3,"rank":4}},
+                        {"id":"s", "piece_type":"wizard-cadet", "owner":owner, "square":{"file":3,"rank":2}},
+                        {"id":"e", "piece_type":"wizard-cadet", "owner":owner, "square":{"file":4,"rank":3}},
+                        {"id":"w", "piece_type":"wizard-cadet", "owner":owner, "square":{"file":2,"rank":3}}
+                    ]
+                })).unwrap();
+                let state = build_lab_game_state(&initial, &[]).unwrap();
+                let action = generate_piece_legal_ability_actions(&state, &"k".into(), "encourage")
+                    .into_iter()
+                    .find(|action| action.target_piece_id == Some(target.into()))
+                    .unwrap();
+                let accelerated = apply_lab_action(
+                    State(app.clone()),
+                    HeaderMap::new(),
+                    Json(LabApplyActionRequest {
+                        lab: initial,
+                        action: TurnAction::Ability(action),
+                    }),
+                )
+                .await
+                .unwrap()
+                .0;
+                assert_eq!(
+                    accelerated.pieces[target].state.get("extra_move_remaining"),
+                    Some(&PieceStateValue::Integer(1))
+                );
+                // The UI sends the returned per-piece state back to both endpoints.
+                let options = get_lab_piece_options(
+                    State(app.clone()),
+                    HeaderMap::new(),
+                    Json(request(&accelerated, target, None)),
+                )
+                .await
+                .unwrap()
+                .0;
+                let movement = options.legal_moves.into_iter().next().unwrap();
+                let moved = apply_lab_action(
+                    State(app.clone()),
+                    HeaderMap::new(),
+                    Json(LabApplyActionRequest {
+                        lab: request(&accelerated, target, None),
+                        action: TurnAction::Move(movement),
+                    }),
+                )
+                .await
+                .unwrap()
+                .0;
+                assert_eq!(moved.current_player, owner);
+                assert_ne!(
+                    moved.pieces[target].state.get("extra_move_remaining"),
+                    Some(&PieceStateValue::Integer(1))
+                );
+                let _ = get_lab_piece_options(
+                    State(app.clone()),
+                    HeaderMap::new(),
+                    Json(request(&moved, target, None)),
+                )
+                .await
+                .unwrap();
+
+                let swap_options = get_lab_piece_options(
+                    State(app.clone()),
+                    HeaderMap::new(),
+                    Json(request(&accelerated, "e", Some("linked-teleport"))),
+                )
+                .await
+                .unwrap()
+                .0;
+                let swap = swap_options
+                    .legal_ability_actions
+                    .into_iter()
+                    .find(|action| action.target_piece_id == Some(target.into()))
+                    .unwrap();
+                let swapped = apply_lab_action(
+                    State(app),
+                    HeaderMap::new(),
+                    Json(LabApplyActionRequest {
+                        lab: request(&accelerated, "e", Some("linked-teleport")),
+                        action: TurnAction::Ability(swap),
+                    }),
+                )
+                .await
+                .unwrap()
+                .0;
+                assert_ne!(swapped.current_player, owner);
+                assert_ne!(
+                    swapped.pieces[target].state.get("extra_move_remaining"),
+                    Some(&PieceStateValue::Integer(1))
+                );
+
+                let mut malformed = request(&accelerated, target, None);
+                malformed
+                    .pieces
+                    .iter_mut()
+                    .find(|piece| piece.id == target)
+                    .unwrap()
+                    .state
+                    .insert(
+                        "extra_move_remaining".into(),
+                        PieceStateValue::Boolean(true),
+                    );
+                assert!(build_lab_game_state(&malformed, &[]).is_err());
+                malformed
+                    .pieces
+                    .iter_mut()
+                    .find(|piece| piece.id == target)
+                    .unwrap()
+                    .state =
+                    HashMap::from([("unregistered_state".into(), PieceStateValue::Integer(1))]);
+                assert!(build_lab_game_state(&malformed, &[]).is_err());
+            }
+        }
     }
 
     #[tokio::test]
