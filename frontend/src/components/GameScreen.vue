@@ -10,7 +10,7 @@
         <span class="player-badge" :class="`player-${viewState.current_player}`">
           {{ viewState.current_player === 'white' ? '⬜ White' : '⬛ Black' }}
         </span>
-        <span v-if="localPlayer" class="local-badge" :class="{ waiting: !canControlTurn }">
+        <span v-if="localPlayer || playMode === 'multiplayer'" class="local-badge" :class="{ waiting: !canControlTurn }">
           {{ controlTurnLabel }}
         </span>
         <span v-if="botPlayer" class="bot-badge">🤖 {{ botDifficultyLabel }}</span>
@@ -31,7 +31,7 @@
     </div>
 
     <div v-if="isStandard && viewState.phase === 'playing'" :key="viewState.current_player + ':' + viewState.turn_number" class="draw-turn-banner" role="status" aria-live="polite">
-      <strong>{{ canControlTurn ? '당신의 턴' : '상대의 턴' }}</strong>
+      <strong>{{ !localPlayer && playMode === 'multiplayer' ? '관전 중' : canControlTurn ? '당신의 턴' : '상대의 턴' }}</strong>
       <span v-if="drawRequired && canControlTurn">덱을 눌러 카드를 드로우하세요.</span>
       <span v-else-if="canControlTurn">기물을 이동하거나 손패 카드를 선택하세요.</span>
     </div>
@@ -2090,7 +2090,7 @@ function onPocketDragEnd() {
 
 async function onResign() {
   error.value = null
-  if (props.state.phase === 'ended') return
+  if (props.state.phase === 'ended' || (props.playMode === 'multiplayer' && !props.localPlayer)) return
 
   const resigningSide = resigningPlayer(controlContext.value)
   if (!window.confirm('정말 기권하시겠습니까?')) return

@@ -52,6 +52,13 @@ test('multiplayer permits only the local side', () => {
   assert.equal(turnControlLabel(context('multiplayer', 'white', 'black')), '상대 턴')
 })
 
+test('multiplayer spectator has read-only labels and no turn control', () => {
+  const spectator = { ...context('multiplayer', 'white'), localPlayer: null }
+  assert.equal(canControlCurrentTurn(spectator), false)
+  assert.equal(turnControlLabel(spectator), '관전 중')
+  assert.equal(blockedControlMessage(spectator), '관전 중에는 기물을 조작할 수 없습니다.')
+})
+
 test('resignation follows the active side in single and the human side otherwise', () => {
   assert.equal(resigningPlayer(context('single', 'black', 'white')), 'black')
   assert.equal(resigningPlayer(context('bot', 'black', 'white', 'black')), 'white')

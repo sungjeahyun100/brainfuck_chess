@@ -11,9 +11,23 @@
       <button class="btn-secondary" :disabled="!currentRoom" @click="refreshRoom">새로고침</button>
     </div>
 
+    <section class="card spectator-panel">
+      <div>
+        <span class="limit-label">방 관전</span>
+        <p>시작된 방의 방 번호를 입력하면 양쪽 플레이어의 대국을 읽기 전용으로 볼 수 있습니다.</p>
+      </div>
+      <div class="room-code-row">
+        <input v-model.trim="roomCodeInput" class="room-code-input" maxlength="6" placeholder="관전할 방 번호" @keyup.enter="spectateRoom" />
+        <button class="btn-secondary" :disabled="!roomCodeInput.trim()" @click="spectateRoom">관전하기</button>
+      </div>
+    </section>
+
+    <p v-if="status" class="room-status">{{ status }}</p>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+
     <section v-if="!decksLoading && !decksError && decks.length === 0" class="card empty-state">
       <h2>먼저 덱을 만들어 주세요.</h2>
-      <p>멀티플레이는 방에 들어가기 전에 저장된 덱 하나를 선택해야 합니다.</p>
+      <p>멀티플레이에 참가하려면 저장된 덱 하나를 선택해야 합니다. 관전은 덱 없이도 가능합니다.</p>
       <button class="btn-start" @click="$emit('deck-building')">덱 빌딩으로 이동</button>
     </section>
 
@@ -42,9 +56,6 @@
                 <option v-for="option in TIME_CONTROLS" :key="option.id" :value="option.id">{{ option.label }}</option>
               </select>
             </label>
-            <div class="room-code-row">
-              <input v-model.trim="roomCodeInput" class="room-code-input" maxlength="6" placeholder="입장할 방 번호" />
-            </div>
             <div class="room-buttons">
               <button class="btn-secondary" :disabled="!selectedDeck" @click="createRoom">방 만들기</button>
               <button class="btn-secondary" :disabled="!selectedDeck || !roomCodeInput.trim()" @click="joinRoom">입장하고 시작</button>
@@ -72,9 +83,6 @@
           </div>
         </div>
       </section>
-
-      <p v-if="status" class="room-status">{{ status }}</p>
-      <p v-if="error" class="error">{{ error }}</p>
     </template>
   </main>
 </template>
@@ -95,7 +103,7 @@ import type { TimeControlId } from '../types/game'
 const emit = defineEmits<{
   back: []
   'deck-building': []
-  'game-started': [payload: { state: GameState; room: MultiplayerRoom; localPlayer: LobbyPlayer }]
+  'game-started': [payload: { state: GameState; room: MultiplayerRoom; localPlayer: LobbyPlayer | null }]
 }>()
 
 const savedDecks = useSavedDecks()
@@ -249,6 +257,23 @@ async function joinRoom() {
     stopPolling()
     emit('game-started', { state, room: joinedRoom, localPlayer: room.guest_side })
   } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function spectateRoom() {
+  const roomId = roomCodeInput.value.trim().toUpperCase()
+  if (!roomId) return
+  error.value = null
+  status.value = '관전할 방을 확인하는 중입니다…'
+  try {
+    const { room, state } = await api.spectateRoom(roomId)
+    stopPolling()
+    currentRoom.value = room
+    localPlayer.value = null
+    emit('game-started', { state, room, localPlayer: null })
+  } catch (e: unknown) {
+    status.value = null
     error.value = e instanceof Error ? e.message : String(e)
   }
 }

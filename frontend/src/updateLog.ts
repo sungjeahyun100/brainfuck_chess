@@ -8,6 +8,15 @@ export interface UpdateLogEntry {
 // Add releases at the beginning and give each release a new, stable ID.
 export const updateLog: readonly UpdateLogEntry[] = [
   {
+    id: '2026-09-20.3',
+    date: '2026-09-20',
+    title: '멀티플레이 방 관전 추가',
+    changes: [
+      '멀티플레이 화면에서 방 번호를 입력하고 「관전하기」를 누르면 시작된 대국을 덱 없이도 볼 수 있습니다.',
+      '관전자는 기물 조작과 기권을 할 수 없고, 양쪽 플레이어의 비공개 손패나 덱 내용은 보이지 않습니다.',
+    ],
+  },
+  {
     id: '2026-09-20.2',
     date: '2026-09-20',
     title: '마법사 나이트·비숍 전용 디자인 적용',

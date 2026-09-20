@@ -244,6 +244,34 @@ test('game and room payloads carry deck and top-level ruleset independently of m
   }
 })
 
+test('spectating resolves a room code to its public game without a join request', async t => {
+  const calls: string[] = []
+  const headers: Headers[] = []
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input)
+    calls.push(url)
+    headers.push(new Headers(init?.headers))
+    return url.includes('/api/rooms/')
+      ? Response.json({ id: 'WATCH1', game_id: 'game-1' })
+      : Response.json({ id: 'game-1', phase: 'playing' })
+  })
+  const result = await api.spectateRoom('WATCH1')
+  assert.equal(result.state.id, 'game-1')
+  assert.deepEqual(calls, ['/api/rooms/WATCH1', '/api/games/game-1'])
+  assert.equal(headers[0]?.has('x-game-client-id'), true)
+  assert.equal(headers[1]?.has('x-game-client-id'), false)
+})
+
+test('spectating rejects a waiting room before requesting a game', async t => {
+  const calls: string[] = []
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    calls.push(String(input))
+    return Response.json({ id: 'WAIT01', game_id: null })
+  })
+  await assert.rejects(() => api.spectateRoom('WAIT01'), /아직 게임이 시작되지 않은 방/)
+  assert.deepEqual(calls, ['/api/rooms/WAIT01'])
+})
+
 test('Standard sync replaces reserve identities and keeps own hand plus opponent counts without catalog', () => {
   const own = { id: 'white', deck: { player_id: 'white', starting_pieces: [], pocket_pieces: [], hand_pieces: ['own-hand'], score_limit: 39, total_score: 1 }, captured_pieces: [] }
   const opponent = { id: 'black', deck: { player_id: 'black', starting_pieces: [], pocket_pieces: [], score_limit: 39, total_score: 1 }, captured_pieces: [] }

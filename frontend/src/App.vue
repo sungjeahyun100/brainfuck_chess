@@ -305,7 +305,7 @@ function startChallengeGame(payload: { state: GameState }) {
   gameState.value = payload.state
 }
 
-function startMultiplayerGame(payload: { state: GameState; room: MultiplayerRoom; localPlayer: LobbyPlayer }) {
+function startMultiplayerGame(payload: { state: GameState; room: MultiplayerRoom; localPlayer: LobbyPlayer | null }) {
   playMode.value = 'multiplayer'
   botDebugMode.value = false
   localPlayer.value = payload.localPlayer
@@ -350,7 +350,9 @@ function startGamePolling(gameId: string) {
     try {
       const syncedState = currentRoom.value && localPlayer.value
         ? await api.heartbeatRoom(currentRoom.value.id, localPlayer.value, gameState.value)
-        : await api.getGame(gameId)
+        : currentRoom.value
+          ? await api.getPublicGame(gameId)
+          : await api.getGame(gameId)
       const updateStarted = import.meta.env.DEV ? performance.now() : null
       if (gameState.value) Object.assign(gameState.value, syncedState)
       else gameState.value = syncedState
@@ -382,11 +384,13 @@ onMounted(async () => {
   const raw = sessionStorage.getItem(ACTIVE_MATCH_KEY)
   if (!raw) return
   try {
-    const saved = JSON.parse(raw) as { roomId?: string; player?: LobbyPlayer }
-    if (!saved.roomId || (saved.player !== 'white' && saved.player !== 'black')) throw new Error('invalid active match')
+    const saved = JSON.parse(raw) as { roomId?: string; player?: LobbyPlayer | null }
+    if (!saved.roomId || (saved.player !== null && saved.player !== 'white' && saved.player !== 'black')) throw new Error('invalid active match')
     const room = await api.getRoom(saved.roomId)
     if (!room.game_id) throw new Error('game not started')
-    const state = await api.heartbeatRoom(room.id, saved.player)
+    const state = saved.player === null
+      ? await api.getPublicGame(room.game_id)
+      : await api.heartbeatRoom(room.id, saved.player)
     if (state.phase === 'ended') throw new Error('game ended')
     startMultiplayerGame({ state, room, localPlayer: saved.player })
   } catch {
@@ -799,9 +803,32 @@ select {
 .board-panel,
 .pocket-panel,
 .multiplayer-panel,
+.spectator-panel,
 .bot-panel,
 .summary-card {
   padding: 18px;
+}
+
+.spectator-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+  align-items: end;
+  gap: 18px;
+}
+
+.spectator-panel > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spectator-panel .room-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.spectator-panel .room-code-input {
+  min-width: 0;
 }
 
 .section-header,
@@ -1334,6 +1361,7 @@ select {
   .builder-grid,
   .summary-grid,
   .room-grid,
+  .spectator-panel,
   .bot-options,
   .editor-topbar {
     grid-template-columns: 1fr;

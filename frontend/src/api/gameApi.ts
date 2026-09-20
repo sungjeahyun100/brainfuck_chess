@@ -264,6 +264,12 @@ async function request<T>(url: string, options?: RequestInit, profileName?: stri
   return parsed
 }
 
+function requestPublicGame(id: string): Promise<GameState> {
+  return request(`${BASE}/${encodeURIComponent(id)}`, {
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 export function withTurnActionType(action: import('../types/game').TurnAction): import('../types/game').TurnAction {
   if (action.type === 'draw' || action.type === 'extra_summon') return action
   const type = 'ability_id' in action ? 'ability' : 'from' in action ? 'move' : 'drop'
@@ -328,6 +334,10 @@ export const api = {
 
   getGame(id: string): Promise<GameState> {
     return request(`${BASE}/${id}`)
+  },
+
+  getPublicGame(id: string): Promise<GameState> {
+    return requestPublicGame(id)
   },
 
   getGameRecord(id: string): Promise<GameRecord> {
@@ -480,6 +490,15 @@ export const api = {
 
   getRoom(id: string): Promise<MultiplayerRoom> {
     return request(`${ROOM_BASE}/${encodeURIComponent(id)}`)
+  },
+
+  async spectateRoom(id: string): Promise<{ room: MultiplayerRoom; state: GameState }> {
+    const room = await request<MultiplayerRoom>(`${ROOM_BASE}/${encodeURIComponent(id)}`)
+    if (!room.game_id) {
+      throw new Error('아직 게임이 시작되지 않은 방입니다.')
+    }
+    const state = await requestPublicGame(room.game_id)
+    return { room, state }
   },
 
   joinRoom(id: string, deck: PlayerDeckRequest): Promise<{ id: string; state: GameState }> {
