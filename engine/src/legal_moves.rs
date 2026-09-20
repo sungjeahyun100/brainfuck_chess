@@ -6,6 +6,7 @@ use crate::attack_map::generate_attack_map;
 use crate::chessembly::run_chessembly_layer_for_piece;
 use crate::interaction::{
     destination_is_blocked_by_interaction, neighboring_pieces, resolve_piece_interactions,
+    QUEEN_DIRECTIONS,
 };
 use crate::pieces::default_pieces::{
     BOMBER_BOMB_ABILITY_ID, BOMBER_LANDING_DISTANCE, BOMBER_LAND_ABILITY_ID,
@@ -882,6 +883,34 @@ pub fn generate_piece_legal_ability_actions(
             }
         }
 
+        ("wizard-knight", crate::pieces::default_pieces::WIZARD_KNIGHT_CATCH) => {
+            if !crate::interaction::knight_destinations_are_wizards(game_state, actor) {
+                return Vec::new();
+            }
+            for target in crate::interaction::wizard_knight_catch_targets(game_state, actor) {
+                if can_capture_piece(game_state, actor, target) {
+                    let mut action =
+                        simple_ability_action(actor, piece_id, ability_id, target.current_square);
+                    action.target_piece_id = Some(target.id.clone());
+                    actions.push(action);
+                }
+            }
+        }
+
+        ("wizard-bishop", crate::pieces::default_pieces::WIZARD_BISHOP_JUMP_CATCH) => {
+            if !crate::interaction::surrounded_by_any_cadets(game_state, actor) {
+                return Vec::new();
+            }
+            for target in crate::interaction::wizard_bishop_jump_targets(game_state, actor) {
+                if can_capture_piece(game_state, actor, target) {
+                    let mut action =
+                        simple_ability_action(actor, piece_id, ability_id, target.current_square);
+                    action.target_piece_id = Some(target.id.clone());
+                    actions.push(action);
+                }
+            }
+        }
+
         ("wizard-king", crate::pieces::default_pieces::ENCOURAGE)
         | ("wizard-cadet" | "wizard-cadet-black", crate::pieces::default_pieces::LINKED_TELEPORT) =>
         {
@@ -1168,17 +1197,6 @@ pub fn generate_piece_legal_ability_actions(
     }
     actions
 }
-
-const QUEEN_DIRECTIONS: [(i32, i32); 8] = [
-    (1, 0),
-    (-1, 0),
-    (0, 1),
-    (0, -1),
-    (1, 1),
-    (1, -1),
-    (-1, 1),
-    (-1, -1),
-];
 
 fn clear_path_on_layer(
     game_state: &GameState,

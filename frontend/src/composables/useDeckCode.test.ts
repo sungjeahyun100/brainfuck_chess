@@ -23,6 +23,8 @@ const scores: Record<string, number> = {
   'wizard-cadet': 1,
   'wizard-queen': 9,
   'wizard-rook': 5,
+  'wizard-knight': 3,
+  'wizard-bishop': 3,
   queen: 9,
   rook: 5,
   bishop: 3,
@@ -377,8 +379,13 @@ test('wizard royal replacement and cadet deck code preserve server catalog metad
 })
 
 
-test('wizard queen and rook retain engine metadata and round-trip through deck import', () => {
-  for (const [id, name, score] of [['wizard-queen', '마법사 퀸', 9], ['wizard-rook', '마법사 룩', 5]] as const) {
+test('wizard back-rank pieces retain engine metadata and round-trip through deck import', () => {
+  for (const [id, name, score] of [
+    ['wizard-queen', '마법사 퀸', 9],
+    ['wizard-rook', '마법사 룩', 5],
+    ['wizard-knight', '마법사 나이트', 3],
+    ['wizard-bishop', '마법사 비숍', 3],
+  ] as const) {
     const piece = pieceCatalog.find(piece => piece.id === id)
     assert.equal(piece?.name, name)
     assert.equal(piece?.score, score)
@@ -391,7 +398,7 @@ test('wizard queen and rook retain engine metadata and round-trip through deck i
     { pieceType: 'king', square: { file: 4, rank: 0 } },
     ...Array.from({ length: 8 }, (_, file) => ({ pieceType: 'pawn', square: { file, rank: 1 } })),
   ]
-  deck.pocket = { 'wizard-rook': 2 }
+  deck.pocket = { 'wizard-rook': 2, 'wizard-knight': 1, 'wizard-bishop': 1 }
   assert.equal(validateSavedDeck(deck).valid, true)
   const imported = importDeckCode(encodeDeckCode(deck), savedDeck())
   assert.equal(imported.ok, true)

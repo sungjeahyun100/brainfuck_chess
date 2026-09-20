@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" fill="none">
+  <title>마법사 나이트 — 백</title>
+  <g stroke="#111" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round" fill="#fff">
+    <path d="M65 66C79 76 79 95 66 107C53 119 33 112 23 94L31 86C42 96 61 96 65 82C67 76 66 70 65 66Z"/>
+    <path d="M28 71L23 60L34 55C34 47 38 39 45 33L41 19L54 27C64 26 72 31 80 40L67 41L73 49L62 53C59 58 61 64 69 69L65 76Q48 68 28 71Z"/>
+    <path d="M28 70Q48 63 67 70L65 78Q48 72 30 78Z"/>
+  </g>
+  <path d="M55 33L58 38L64 40L58 43L55 48L52 43L46 40L52 38Z" fill="#171717"/>
+  <path d="M66 46L71 47" stroke="#171717" stroke-width="3" stroke-linecap="round"/>
+</svg>

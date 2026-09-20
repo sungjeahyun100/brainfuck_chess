@@ -417,6 +417,16 @@ pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> Game
             apply_removal_result(&mut state, &removal, &action.player_id);
         }
 
+        crate::pieces::default_pieces::WIZARD_KNIGHT_CATCH
+        | crate::pieces::default_pieces::WIZARD_BISHOP_JUMP_CATCH => {
+            let target = action
+                .target_piece_id
+                .as_ref()
+                .expect("canonical wizard catch target");
+            let removal = remove_captured_piece(&mut state, target, &action.player_id);
+            apply_removal_result(&mut state, &removal, &action.player_id);
+        }
+
         crate::pieces::default_pieces::ENCOURAGE => {
             if let Some(target) = action
                 .target_piece_id

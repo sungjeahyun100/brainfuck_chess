@@ -622,6 +622,8 @@ fn resolve_piece_type(player_id: &str, raw_piece_type: &str) -> Option<String> {
         "king"
         | "wizard-queen"
         | "wizard-rook"
+        | "wizard-knight"
+        | "wizard-bishop"
         | "wizard-king"
         | "queen"
         | "rook"
@@ -5562,7 +5564,12 @@ mod tests {
         let catalog = default_piece_catalog();
         for player in ["white", "black"] {
             assert_eq!(resolve_piece_type(player, "wizard-king").as_deref(), Some("wizard-king"));
-            for kind in ["wizard-queen", "wizard-rook"] {
+            for kind in [
+                "wizard-queen",
+                "wizard-rook",
+                "wizard-knight",
+                "wizard-bishop",
+            ] {
                 assert_eq!(resolve_piece_type(player, kind).as_deref(), Some(kind));
                 assert!(catalog.contains_key(kind));
             }
@@ -5572,6 +5579,10 @@ mod tests {
             assert_eq!(cadet, if player == "white" { "wizard-cadet" } else { "wizard-cadet-black" });
         }
         assert_eq!(catalog["wizard-king"].deployment_zone, DeploymentZone::Back);
+        for kind in ["wizard-knight", "wizard-bishop"] {
+            assert_eq!(catalog[kind].score, 3);
+            assert_eq!(catalog[kind].deployment_zone, DeploymentZone::Back);
+        }
     }
 
     #[tokio::test]

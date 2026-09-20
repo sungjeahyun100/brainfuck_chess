@@ -77,9 +77,11 @@ pub fn profile_for_piece_type(type_id: &str) -> InteractionProfile {
             categories: vec![InteractionTag::Wizard, InteractionTag::WizardRook],
             ..InteractionProfile::default()
         },
-        "wizard-king" | "wizard-queen" => InteractionProfile {
-            categories: vec![InteractionTag::Wizard],
-            ..InteractionProfile::default()
+        "wizard-king" | "wizard-queen" | "wizard-knight" | "wizard-bishop" => {
+            InteractionProfile {
+                categories: vec![InteractionTag::Wizard],
+                ..InteractionProfile::default()
+            }
         },
         "wizard-cadet" | "wizard-cadet-black" => InteractionProfile {
             categories: vec![InteractionTag::Wizard, InteractionTag::WizardCadet],
@@ -316,7 +318,6 @@ mod tests {
     }
 }
 
-
 /// Semantic membership lives in the existing interaction registry, never names.
 pub fn has_category(piece: &Piece, category: InteractionTag) -> bool {
     profile_for_piece_type(&piece.type_id)
@@ -358,6 +359,127 @@ pub fn surrounded_by_cadets(state: &GameState, actor: &Piece) -> bool {
                         && has_category(piece, InteractionTag::WizardCadet)
                 })
     })
+}
+
+pub const KNIGHT_OFFSETS: [(i32, i32); 8] = [
+    (1, 2),
+    (2, 1),
+    (2, -1),
+    (1, -2),
+    (-1, -2),
+    (-2, -1),
+    (-2, 1),
+    (-1, 2),
+];
+
+pub const QUEEN_DIRECTIONS: [(i32, i32); 8] = [
+    (1, 0),
+    (-1, 0),
+    (0, 1),
+    (0, -1),
+    (1, 1),
+    (1, -1),
+    (-1, 1),
+    (-1, -1),
+];
+
+const DIAGONAL_DIRECTIONS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+
+/// Every in-bounds ordinary Knight destination must contain a Wizard.
+/// Ownership is intentionally irrelevant to this formation condition.
+pub fn knight_destinations_are_wizards(state: &GameState, actor: &Piece) -> bool {
+    let Some(origin) = actor.current_square else {
+        return false;
+    };
+    KNIGHT_OFFSETS
+        .into_iter()
+        .map(|(dx, dy)| Square::new(origin.file + dx, origin.rank + dy))
+        .filter(|square| state.board.is_in_bounds(square))
+        .all(|square| {
+            state
+                .board
+                .get_piece_at_layer(&square, actor.layer)
+                .and_then(|id| state.pieces.get(id))
+                .is_some_and(|piece| has_category(piece, InteractionTag::Wizard))
+        })
+}
+
+/// First occupied square on each Queen ray, restricted to enemy pieces.
+pub fn wizard_knight_catch_targets<'a>(state: &'a GameState, actor: &Piece) -> Vec<&'a Piece> {
+    let Some(origin) = actor.current_square else {
+        return Vec::new();
+    };
+    let mut targets = Vec::new();
+    for (dx, dy) in QUEEN_DIRECTIONS {
+        let mut square = Square::new(origin.file + dx, origin.rank + dy);
+        while state.board.is_in_bounds(&square) {
+            if let Some(target) = state
+                .board
+                .get_piece_at_layer(&square, actor.layer)
+                .and_then(|id| state.pieces.get(id))
+            {
+                if target.owner != actor.owner {
+                    targets.push(target);
+                }
+                break;
+            }
+            square = Square::new(square.file + dx, square.rank + dy);
+        }
+    }
+    targets
+}
+
+/// All four orthogonal neighbors must be cadets. Ownership is irrelevant;
+/// the requirement is the exact semantic piece category.
+pub fn surrounded_by_any_cadets(state: &GameState, actor: &Piece) -> bool {
+    let Some(origin) = actor.current_square else {
+        return false;
+    };
+    [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .all(|(dx, dy)| {
+            let square = Square::new(origin.file + dx, origin.rank + dy);
+            state.board.is_in_bounds(&square)
+                && state
+                    .board
+                    .get_piece_at_layer(&square, actor.layer)
+                    .and_then(|id| state.pieces.get(id))
+                    .is_some_and(|piece| has_category(piece, InteractionTag::WizardCadet))
+        })
+}
+
+/// On each diagonal, jump the first occupied square and inspect only the
+/// immediately following square for an enemy capture.
+pub fn wizard_bishop_jump_targets<'a>(state: &'a GameState, actor: &Piece) -> Vec<&'a Piece> {
+    let Some(origin) = actor.current_square else {
+        return Vec::new();
+    };
+    let mut targets = Vec::new();
+    for (dx, dy) in DIAGONAL_DIRECTIONS {
+        let mut square = Square::new(origin.file + dx, origin.rank + dy);
+        while state.board.is_in_bounds(&square)
+            && state.board.is_empty_at_layer(&square, actor.layer)
+        {
+            square = Square::new(square.file + dx, square.rank + dy);
+        }
+        if !state.board.is_in_bounds(&square) {
+            continue;
+        }
+        let behind = Square::new(square.file + dx, square.rank + dy);
+        let Some(target) = state
+            .board
+            .is_in_bounds(&behind)
+            .then(|| state.board.get_piece_at_layer(&behind, actor.layer))
+            .flatten()
+            .and_then(|id| state.pieces.get(id))
+        else {
+            continue;
+        };
+        if target.owner != actor.owner {
+            targets.push(target);
+        }
+    }
+    targets
 }
 
 

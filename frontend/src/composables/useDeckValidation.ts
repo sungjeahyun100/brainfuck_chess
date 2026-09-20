@@ -88,6 +88,8 @@ export function backZoneSquares(
 const builtInPieceCatalog: Omit<PieceCatalogItem, 'deploymentZone'>[] = [
   { id: 'wizard-queen', name: '마법사 퀸', score: 0, category: 'variant', canPocket: true },
   { id: 'wizard-rook', name: '마법사 룩', score: 0, category: 'variant', canPocket: true },
+  { id: 'wizard-knight', name: '마법사 나이트', score: 0, category: 'variant', canPocket: true },
+  { id: 'wizard-bishop', name: '마법사 비숍', score: 0, category: 'variant', canPocket: true },
   { id: 'wizard-king', name: '마법사 킹', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },
   { id: 'wizard-cadet', name: '마법사 생도', score: 0, category: 'pawn', canPocket: true },
   { id: 'king', name: 'King', score: 0, category: 'royal', canPocket: false, uniqueStarting: true },

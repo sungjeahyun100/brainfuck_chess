@@ -2,10 +2,12 @@ use crate::types::*;
 
 pub const TRANSFER_CIRCLE: &str = "transfer-circle";
 pub const ALEKHINES_GUN: &str = "alekhines-gun";
+pub const WIZARD_KNIGHT_CATCH: &str = "wizard-knight-catch";
+pub const WIZARD_BISHOP_JUMP_CATCH: &str = "wizard-bishop-jump-catch";
 pub const ENCOURAGE: &str = "encourage";
 pub const LINKED_TELEPORT: &str = "linked-teleport";
 pub const EXTRA_MOVE: &str = "extra_move_remaining";
-// Planned IDs; only implemented definitions enter the cadet promotion pool.
+// Stable promotion order for every implemented Wizard back-rank piece.
 pub const WIZARD_PROMOTION_POOL: &[&str] = &[
     "wizard-queen",
     "wizard-knight",
@@ -49,7 +51,7 @@ pub fn wizard_cadet_definition() -> PieceDefinition {
         chessembly_code: "take-move(0, 1);".into(), chessembly_version: "1.0".into(),
         dialect: None, extensions: None, is_king: false,
         promotion: Some(PromotionRule { condition: PromotionCondition::LastRank }),
-        promotion_pool: WIZARD_PROMOTION_POOL.iter().filter(|id| matches!(**id, "wizard-queen" | "wizard-rook")).map(|id| (*id).into()).collect(),
+        promotion_pool: WIZARD_PROMOTION_POOL.iter().map(|id| (*id).into()).collect(),
     };
     definition.state_schema.push(PieceStateDefinition {
         key: EXTRA_MOVE.into(),
@@ -103,5 +105,39 @@ pub fn wizard_rook_definition() -> PieceDefinition {
     });
     definition.move_options.push(ability(TRANSFER_CIRCLE, "전이 마법진",
         "바로 좌우에 아군 마법사 생도가 있으면 바로 뒤의 아군 기물을 보드 전체의 빈칸으로 순간이동시키고 턴을 마칩니다."));
+    definition
+}
+
+pub fn wizard_knight_definition() -> PieceDefinition {
+    let mut definition = super::knight_definition();
+    definition.id = "wizard-knight".into();
+    definition.name = "마법사 나이트".into();
+    definition.visual.default_asset_key = "wizard-knight".into();
+    definition.state_schema.push(PieceStateDefinition {
+        key: EXTRA_MOVE.into(),
+        default_value: PieceStateValue::Integer(0),
+    });
+    definition.move_options.push(ability(
+        WIZARD_KNIGHT_CATCH,
+        "퀸형 포획",
+        "보드 내부의 모든 나이트 목적지가 마법사로 채워지면 8방향에서 처음 만나는 적을 포획합니다.",
+    ));
+    definition
+}
+
+pub fn wizard_bishop_definition() -> PieceDefinition {
+    let mut definition = super::bishop_definition();
+    definition.id = "wizard-bishop".into();
+    definition.name = "마법사 비숍".into();
+    definition.visual.default_asset_key = "wizard-bishop".into();
+    definition.state_schema.push(PieceStateDefinition {
+        key: EXTRA_MOVE.into(),
+        default_value: PieceStateValue::Integer(0),
+    });
+    definition.move_options.push(ability(
+        WIZARD_BISHOP_JUMP_CATCH,
+        "도약 포획",
+        "상하좌우가 마법사 생도로 채워지면 대각선의 첫 기물을 넘어 바로 뒤의 적을 포획합니다.",
+    ));
     definition
 }

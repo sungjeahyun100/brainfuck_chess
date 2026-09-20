@@ -367,11 +367,16 @@ test('Standard score caps gain twenty points on every board and reject one point
   assert.match(descriptor.template!.content, /scoreLimit\(map.boardSize, deck.ruleset\)/)
 })
 
-test('wizard queen and rook can be found, placed, and added to the pocket', async t => {
+test('wizard back-rank pieces can be found, placed, and added to the pocket', async t => {
   const { state } = await editor(t, async deck => deck)
   for (const ruleset of ['legacy', 'standard']) {
     state.deck.value.ruleset = ruleset
-    for (const [id, name] of [['wizard-queen', '마법사 퀸'], ['wizard-rook', '마법사 룩']]) {
+    for (const [id, name] of [
+      ['wizard-queen', '마법사 퀸'],
+      ['wizard-rook', '마법사 룩'],
+      ['wizard-knight', '마법사 나이트'],
+      ['wizard-bishop', '마법사 비숍'],
+    ]) {
       state.arsenalPieceSearch.value = name
       const entries = state.arsenalCatalogSections.value.flatMap((section: any) => section.pieces)
       assert.deepEqual(entries.map((piece: any) => piece.id), [id])

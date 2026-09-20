@@ -63,13 +63,23 @@ export function moveOptionTargets(moves: MoveAction[], abilityActions: AbilityAc
   movable: Square[]
   captures: Square[]
 } {
+  const captureAbilityIds = new Set(['wizard-knight-catch', 'wizard-bishop-jump-catch'])
   const abilityTargets = abilityActions.flatMap(action => action.to ? [action.to] : [])
+  const abilityCaptureTargets = abilityActions.flatMap(action => (
+    action.to && captureAbilityIds.has(action.ability_id) ? [action.to] : []
+  ))
+  const abilityMoveTargets = abilityActions.flatMap(action => (
+    action.to && !captureAbilityIds.has(action.ability_id) ? [action.to] : []
+  ))
   return {
     legalTargets: [...moves.map(move => move.to), ...abilityTargets],
     movable: [
       ...moves.filter(move => !move.captured_piece_id).map(move => move.to),
-      ...abilityTargets,
+      ...abilityMoveTargets,
     ],
-    captures: moves.filter(move => Boolean(move.captured_piece_id)).map(move => move.to),
+    captures: [
+      ...moves.filter(move => Boolean(move.captured_piece_id)).map(move => move.to),
+      ...abilityCaptureTargets,
+    ],
   }
 }

@@ -6,6 +6,10 @@ import wizardKingWhite from './assets/pieces/wizard-king-white.svg'
 import wizardKingBlack from './assets/pieces/wizard-king-black.svg'
 import wizardCadetWhite from './assets/pieces/wizard-cadet-white.svg'
 import wizardCadetBlack from './assets/pieces/wizard-cadet-black.svg'
+import wizardKnightWhite from './assets/pieces/wizard-knight-white.svg'
+import wizardKnightBlack from './assets/pieces/wizard-knight-black.svg'
+import wizardBishopWhite from './assets/pieces/wizard-bishop-white.svg'
+import wizardBishopBlack from './assets/pieces/wizard-bishop-black.svg'
 import amazonBlack from './assets/pieces/amazon-black.svg'
 import amazonWhite from './assets/pieces/amazon-white.svg'
 import bishopBlack from './assets/pieces/bishop-black.svg'
@@ -99,6 +103,8 @@ const PIECE_ASSETS: Record<string, Record<PlayerId, string>> = {
   king: { white: kingWhite, black: kingBlack },
   'wizard-queen': { white: wizardQueenWhite, black: wizardQueenBlack },
   'wizard-rook': { white: wizardRookWhite, black: wizardRookBlack },
+  'wizard-knight': { white: wizardKnightWhite, black: wizardKnightBlack },
+  'wizard-bishop': { white: wizardBishopWhite, black: wizardBishopBlack },
   'wizard-king': { white: wizardKingWhite, black: wizardKingBlack },
   'wizard-cadet': { white: wizardCadetWhite, black: wizardCadetBlack },
   'wizard-cadet-black': { white: wizardCadetWhite, black: wizardCadetBlack },

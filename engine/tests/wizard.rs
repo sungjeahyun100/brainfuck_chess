@@ -89,6 +89,35 @@ fn add_piece(state: &mut GameState, id: &str, owner: &str, type_id: &str, square
 }
 
 const EXTRA: &str = "extra_move_remaining";
+const KNIGHT_CATCH: &str = "wizard-knight-catch";
+const BISHOP_CATCH: &str = "wizard-bishop-jump-catch";
+
+fn fill_knight_destinations_with_wizards(s: &mut GameState, origin: Square) {
+    for (index, (dx, dy)) in [
+        (1, 2),
+        (2, 1),
+        (2, -1),
+        (1, -2),
+        (-1, -2),
+        (-2, -1),
+        (-2, 1),
+        (-1, 2),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let square = Square::new(origin.file + dx, origin.rank + dy);
+        if s.board.is_in_bounds(&square) {
+            let kind = if index % 2 == 0 {
+                "wizard-cadet"
+            } else {
+                "wizard-rook"
+            };
+            let owner = if index % 3 == 0 { "black" } else { "white" };
+            add_piece(s, &format!("formation-{index}"), owner, kind, square);
+        }
+    }
+}
 
 fn formation() -> GameState {
     let mut s = state();
@@ -328,21 +357,26 @@ fn serialization_and_canonical_replay_reproduce_every_intermediate_state() {
 }
 
 #[test]
-fn cadet_has_exact_movement_and_only_implemented_wizard_promotions() {
+fn cadet_has_exact_movement_and_all_implemented_wizard_promotions() {
     let mut s = state();
     add_piece(&mut s, "c", "white", "wizard-cadet", Square::new(3, 6));
     let actions = generate_piece_legal_move_actions(&s, &"c".into());
-    assert_eq!(actions.len(), 2);
+    assert_eq!(actions.len(), 4);
     assert_eq!(actions[0].to, Square::new(3, 7));
     assert_eq!(
         actions
             .iter()
             .map(|a| a.promotion.as_deref().unwrap())
             .collect::<Vec<_>>(),
-        vec!["wizard-queen", "wizard-rook"]
+        vec![
+            "wizard-queen",
+            "wizard-knight",
+            "wizard-bishop",
+            "wizard-rook"
+        ]
     );
     assert_eq!(s.piece_definitions["wizard-cadet"].score, 1);
-    assert_eq!(s.piece_definitions["wizard-cadet"].promotion_pool.len(), 2);
+    assert_eq!(s.piece_definitions["wizard-cadet"].promotion_pool.len(), 4);
     add_piece(&mut s, "victim", "black", "rook", Square::new(3, 7));
     assert_eq!(
         movement(&s, "c", 3, 7).captured_piece_id,
@@ -392,14 +426,19 @@ fn black_cadet_uses_existing_mirrored_pawn_convention() {
     );
     add_piece(&mut s, "k", "black", "wizard-king", Square::new(5, 5));
     let actions = generate_piece_legal_move_actions(&s, &"c".into());
-    assert_eq!(actions.len(), 2);
+    assert_eq!(actions.len(), 4);
     assert_eq!(actions[0].to, Square::new(3, 0));
     assert_eq!(
         actions
             .iter()
             .map(|a| a.promotion.as_deref().unwrap())
             .collect::<Vec<_>>(),
-        vec!["wizard-queen", "wizard-rook"]
+        vec![
+            "wizard-queen",
+            "wizard-knight",
+            "wizard-bishop",
+            "wizard-rook"
+        ]
     );
     assert_eq!(
         generate_piece_legal_ability_actions(&s, &"c".into(), "linked-teleport").len(),
@@ -591,14 +630,192 @@ fn gun_royal_removal_uses_existing_winner_rules() {
 }
 
 #[test]
-fn wizard_queen_and_rook_reuse_base_movement() {
-    for (base, wizard) in [("queen", "wizard-queen"), ("rook", "wizard-rook")] {
+fn wizard_variants_reuse_base_movement() {
+    for (base, wizard) in [
+        ("queen", "wizard-queen"),
+        ("rook", "wizard-rook"),
+        ("knight", "wizard-knight"),
+        ("bishop", "wizard-bishop"),
+    ] {
         let mut s = state();
         add_piece(&mut s, "p", "white", base, Square::new(3, 3));
         let before = generate_piece_legal_move_actions(&s, &"p".into());
         s.pieces.get_mut("p").unwrap().type_id = wizard.into();
         assert_eq!(before, generate_piece_legal_move_actions(&s, &"p".into()));
     }
+}
+
+#[test]
+fn wizard_knight_requires_every_in_bounds_destination_to_be_a_wizard() {
+    let origin = Square::new(3, 3);
+    let mut s = state();
+    add_piece(&mut s, "n", "white", "wizard-knight", origin);
+    add_piece(&mut s, "target", "black", "rook", Square::new(3, 7));
+    assert!(generate_piece_legal_ability_actions(&s, &"n".into(), KNIGHT_CATCH).is_empty());
+
+    fill_knight_destinations_with_wizards(&mut s, origin);
+    let actions = generate_piece_legal_ability_actions(&s, &"n".into(), KNIGHT_CATCH);
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].target_piece_id, Some("target".into()));
+
+    s.board
+        .set_piece_at_layer(Square::new(4, 5), PieceLayer::Ground, None);
+    assert!(generate_piece_legal_ability_actions(&s, &"n".into(), KNIGHT_CATCH).is_empty());
+    assert!(submit_action(s.clone(), TurnAction::Ability(actions[0].clone())).is_err());
+
+    let mut non_wizard = state();
+    add_piece(&mut non_wizard, "n", "white", "wizard-knight", origin);
+    fill_knight_destinations_with_wizards(&mut non_wizard, origin);
+    non_wizard.pieces.get_mut("formation-0").unwrap().type_id = "rook".into();
+    add_piece(
+        &mut non_wizard,
+        "target",
+        "black",
+        "rook",
+        Square::new(3, 7),
+    );
+    assert!(
+        generate_piece_legal_ability_actions(&non_wizard, &"n".into(), KNIGHT_CATCH).is_empty()
+    );
+}
+
+#[test]
+fn wizard_knight_corner_uses_only_in_bounds_destinations() {
+    let origin = Square::new(0, 0);
+    let mut s = state();
+    add_piece(&mut s, "n", "white", "wizard-knight", origin);
+    fill_knight_destinations_with_wizards(&mut s, origin);
+    add_piece(&mut s, "target", "black", "rook", Square::new(0, 4));
+    let actions = generate_piece_legal_ability_actions(&s, &"n".into(), KNIGHT_CATCH);
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].target_piece_id, Some("target".into()));
+}
+
+#[test]
+fn wizard_knight_catches_only_first_visible_enemy_and_stays_put() {
+    let origin = Square::new(3, 3);
+    let mut s = state();
+    add_piece(&mut s, "n", "white", "wizard-knight", origin);
+    fill_knight_destinations_with_wizards(&mut s, origin);
+    add_piece(&mut s, "first", "black", "rook", Square::new(3, 5));
+    add_piece(&mut s, "second", "black", "rook", Square::new(3, 6));
+    add_piece(&mut s, "ally", "white", "rook", Square::new(4, 3));
+    add_piece(&mut s, "behind-ally", "black", "rook", Square::new(5, 3));
+
+    let actions = generate_piece_legal_ability_actions(&s, &"n".into(), KNIGHT_CATCH);
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].target_piece_id, Some("first".into()));
+    assert!(!actions
+        .iter()
+        .any(|action| action.to == Some(Square::new(3, 4))));
+    assert!(!actions
+        .iter()
+        .any(|action| action.target_piece_id == Some("second".into())));
+    assert!(!actions
+        .iter()
+        .any(|action| action.target_piece_id == Some("behind-ally".into())));
+
+    let after = submit_action(s, TurnAction::Ability(actions[0].clone())).unwrap();
+    assert_eq!(after.pieces["n"].current_square, Some(origin));
+    assert!(after.pieces["first"].captured);
+    assert!(!after.pieces["second"].captured);
+    assert_eq!(after.current_player, "black");
+}
+
+fn bishop_formation() -> GameState {
+    let mut s = state();
+    add_piece(&mut s, "b", "white", "wizard-bishop", Square::new(3, 3));
+    for (id, owner, square) in [
+        ("north", "white", Square::new(3, 4)),
+        ("south", "black", Square::new(3, 2)),
+        ("east", "white", Square::new(4, 3)),
+        ("west", "black", Square::new(2, 3)),
+    ] {
+        add_piece(&mut s, id, owner, "wizard-cadet", square);
+    }
+    s
+}
+
+#[test]
+fn wizard_bishop_requires_exactly_four_orthogonal_cadets() {
+    let mut s = bishop_formation();
+    assert!(generate_piece_legal_ability_actions(&s, &"b".into(), BISHOP_CATCH).is_empty());
+    add_piece(&mut s, "screen", "white", "rook", Square::new(5, 5));
+    add_piece(&mut s, "target", "black", "rook", Square::new(6, 6));
+    assert_eq!(
+        generate_piece_legal_ability_actions(&s, &"b".into(), BISHOP_CATCH).len(),
+        1
+    );
+
+    s.board
+        .set_piece_at_layer(Square::new(3, 4), PieceLayer::Ground, None);
+    assert!(generate_piece_legal_ability_actions(&s, &"b".into(), BISHOP_CATCH).is_empty());
+    s.board
+        .set_piece_at_layer(Square::new(3, 4), PieceLayer::Ground, Some("north".into()));
+    s.pieces.get_mut("north").unwrap().type_id = "wizard-queen".into();
+    assert!(generate_piece_legal_ability_actions(&s, &"b".into(), BISHOP_CATCH).is_empty());
+
+    let mut edge = state();
+    add_piece(&mut edge, "b", "white", "wizard-bishop", Square::new(0, 3));
+    assert!(generate_piece_legal_ability_actions(&edge, &"b".into(), BISHOP_CATCH).is_empty());
+
+    let mut no_cadets = state();
+    add_piece(
+        &mut no_cadets,
+        "b",
+        "white",
+        "wizard-bishop",
+        Square::new(3, 3),
+    );
+    add_piece(&mut no_cadets, "screen", "white", "rook", Square::new(5, 5));
+    add_piece(&mut no_cadets, "target", "black", "rook", Square::new(6, 6));
+    assert!(generate_piece_legal_ability_actions(&no_cadets, &"b".into(), BISHOP_CATCH).is_empty());
+}
+
+#[test]
+fn wizard_bishop_jumps_either_side_but_only_catches_immediately_behind() {
+    let mut s = bishop_formation();
+    add_piece(
+        &mut s,
+        "friendly-screen",
+        "white",
+        "rook",
+        Square::new(5, 5),
+    );
+    add_piece(
+        &mut s,
+        "friendly-target",
+        "black",
+        "rook",
+        Square::new(6, 6),
+    );
+    add_piece(&mut s, "enemy-screen", "black", "rook", Square::new(2, 4));
+    add_piece(&mut s, "enemy-target", "black", "rook", Square::new(1, 5));
+    add_piece(&mut s, "empty-screen", "white", "rook", Square::new(4, 2));
+    add_piece(&mut s, "too-far", "black", "rook", Square::new(6, 0));
+    add_piece(&mut s, "ally-screen", "black", "rook", Square::new(2, 2));
+    add_piece(&mut s, "ally-behind", "white", "rook", Square::new(1, 1));
+
+    let actions = generate_piece_legal_ability_actions(&s, &"b".into(), BISHOP_CATCH);
+    let targets = actions
+        .iter()
+        .filter_map(|action| action.target_piece_id.as_ref().map(PieceId::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(targets.len(), 2);
+    assert!(targets.contains(&"friendly-target"));
+    assert!(targets.contains(&"enemy-target"));
+    assert!(!targets.contains(&"enemy-screen"));
+    assert!(!targets.contains(&"too-far"));
+    assert!(!targets.contains(&"ally-behind"));
+
+    let enemy_jump = actions
+        .into_iter()
+        .find(|action| action.target_piece_id == Some("enemy-target".into()))
+        .unwrap();
+    let after = submit_action(s, TurnAction::Ability(enemy_jump)).unwrap();
+    assert!(after.pieces["enemy-target"].captured);
+    assert!(!after.pieces["enemy-screen"].captured);
+    assert_eq!(after.pieces["b"].current_square, Some(Square::new(3, 3)));
 }
 
 #[test]

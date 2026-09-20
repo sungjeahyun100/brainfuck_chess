@@ -72,6 +72,24 @@ test('standalone ability targets remain selectable', () => {
   })
 })
 
+test('wizard catch ability targets use capture highlights', () => {
+  const actions = ['wizard-knight-catch', 'wizard-bishop-jump-catch'].map((ability_id, file) => ({
+    type: 'ability' as const,
+    player_id: 'white',
+    piece_id: 'actor',
+    ability_id,
+    target_piece_id: `enemy-${file}`,
+    to: { file, rank: 7 },
+    deployments: [],
+  })) satisfies AbilityAction[]
+
+  assert.deepEqual(moveOptionTargets([], actions), {
+    legalTargets: [{ file: 0, rank: 7 }, { file: 1, rank: 7 }],
+    movable: [],
+    captures: [{ file: 0, rank: 7 }, { file: 1, rank: 7 }],
+  })
+})
+
 test('targetless standalone abilities are recognized as immediate actions', () => {
   const action = {
     type: 'ability',

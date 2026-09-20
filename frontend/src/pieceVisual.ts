@@ -22,6 +22,8 @@ export function resolvePieceAssetKey(
     'wizard-king': 'king',
     'wizard-queen': 'queen',
     'wizard-rook': 'rook',
+    'wizard-knight': 'knight',
+    'wizard-bishop': 'bishop',
     'wizard-cadet': 'pawn-white',
     'wizard-cadet-black': 'pawn-white',
   }

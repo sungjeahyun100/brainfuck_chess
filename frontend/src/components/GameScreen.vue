@@ -771,12 +771,16 @@ const selectedPieceDefinition = computed(() => (
 const encouragementAvailable = ref(false)
 const alekhinesGunAvailable = ref(false)
 const transferCircleAvailable = ref(false)
+const wizardKnightCatchAvailable = ref(false)
+const wizardBishopJumpCatchAvailable = ref(false)
 const selectedPieceAbilities = computed<MoveOptionDefinition[]>(() => (
   selectedPieceDefinition.value?.move_options?.filter(option => (
     option.kind === 'ability'
       && (option.id !== 'encourage' || encouragementAvailable.value)
       && (option.id !== 'alekhines-gun' || alekhinesGunAvailable.value)
       && (option.id !== 'transfer-circle' || transferCircleAvailable.value)
+      && (option.id !== 'wizard-knight-catch' || wizardKnightCatchAvailable.value)
+      && (option.id !== 'wizard-bishop-jump-catch' || wizardBishopJumpCatchAvailable.value)
       && selectedPiece.value
       && (option.enabled_when ?? []).every(predicate => pieceStatePredicateMatches(selectedPiece.value!, predicate))
       && ((selectedPiece.value.layer === 'air' && (selectedPiece.value.remaining_flight_turns ?? 0) === 0)
@@ -1524,6 +1528,8 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
   encouragementAvailable.value = false
   alekhinesGunAvailable.value = false
   transferCircleAvailable.value = false
+  wizardKnightCatchAvailable.value = false
+  wizardBishopJumpCatchAvailable.value = false
   selectedPocketPieceId.value = null
   abilityMode.value = false
   activeAbilityId.value = null
@@ -1533,7 +1539,7 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
   dropSquares.value = []
 
   try {
-    const [options, encouragement, alekhinesGun, transferCircle] = await Promise.all([
+    const [options, encouragement, alekhinesGun, transferCircle, knightCatch, bishopCatch] = await Promise.all([
       loadPieceOptions(pieceId),
       props.state.piece_definitions[piece.type_id]?.move_options?.some(option => option.id === 'encourage')
         ? loadPieceOptions(pieceId, 'encourage') : Promise.resolve(null),
@@ -1541,12 +1547,18 @@ async function selectBoardPiece(pieceId: string): Promise<LegalPieceOptions | nu
         ? loadPieceOptions(pieceId, 'alekhines-gun') : Promise.resolve(null),
       props.state.piece_definitions[piece.type_id]?.move_options?.some(option => option.id === 'transfer-circle')
         ? loadPieceOptions(pieceId, 'transfer-circle') : Promise.resolve(null),
+      props.state.piece_definitions[piece.type_id]?.move_options?.some(option => option.id === 'wizard-knight-catch')
+        ? loadPieceOptions(pieceId, 'wizard-knight-catch') : Promise.resolve(null),
+      props.state.piece_definitions[piece.type_id]?.move_options?.some(option => option.id === 'wizard-bishop-jump-catch')
+        ? loadPieceOptions(pieceId, 'wizard-bishop-jump-catch') : Promise.resolve(null),
     ])
     if (ticket !== selectionGeneration || selectedPieceId.value !== pieceId || abilityMode.value) return null
 
     encouragementAvailable.value = Boolean(encouragement?.abilityActions.length)
     alekhinesGunAvailable.value = Boolean(alekhinesGun?.abilityActions.length)
     transferCircleAvailable.value = Boolean(transferCircle?.abilityActions.length)
+    wizardKnightCatchAvailable.value = Boolean(knightCatch?.abilityActions.length)
+    wizardBishopJumpCatchAvailable.value = Boolean(bishopCatch?.abilityActions.length)
     const stateUpdateStarted = profileStarted !== null ? performance.now() : null
     legalTargetSquares.value = options.legalTargets
     movableSquares.value = options.movable
