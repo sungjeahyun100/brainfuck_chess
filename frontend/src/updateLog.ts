@@ -8,6 +8,14 @@ export interface UpdateLogEntry {
 // Add releases at the beginning and give each release a new, stable ID.
 export const updateLog: readonly UpdateLogEntry[] = [
   {
+    id: '2026-09-28.1',
+    date: '2026-09-28',
+    title: '마법사 기물 모양 구분 개선',
+    changes: [
+      '마법사 퀸·비숍·나이트·룩의 백·흑 그림에서 왕관, 뾰족한 모자, 말머리, 성탑의 윤곽을 크게 키워 작은 보드에서도 종류를 구분하기 쉽게 했습니다.',
+    ],
+  },
+  {
     id: '2026-09-20.3',
     date: '2026-09-20',
     title: '멀티플레이 방 관전 추가',
