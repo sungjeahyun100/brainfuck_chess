@@ -448,8 +448,8 @@ pub fn surrounded_by_any_cadets(state: &GameState, actor: &Piece) -> bool {
         })
 }
 
-/// On each diagonal, jump the first occupied square and inspect only the
-/// immediately following square for an enemy capture.
+/// On each diagonal, jump the first occupied square and capture the next
+/// occupied piece if it is an enemy. Empty squares after the jump are allowed.
 pub fn wizard_bishop_jump_targets<'a>(state: &'a GameState, actor: &Piece) -> Vec<&'a Piece> {
     let Some(origin) = actor.current_square else {
         return Vec::new();
@@ -465,7 +465,12 @@ pub fn wizard_bishop_jump_targets<'a>(state: &'a GameState, actor: &Piece) -> Ve
         if !state.board.is_in_bounds(&square) {
             continue;
         }
-        let behind = Square::new(square.file + dx, square.rank + dy);
+        let mut behind = Square::new(square.file + dx, square.rank + dy);
+        while state.board.is_in_bounds(&behind)
+            && state.board.is_empty_at_layer(&behind, actor.layer)
+        {
+            behind = Square::new(behind.file + dx, behind.rank + dy);
+        }
         let Some(target) = state
             .board
             .is_in_bounds(&behind)

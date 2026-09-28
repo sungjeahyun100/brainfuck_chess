@@ -8,6 +8,14 @@ export interface UpdateLogEntry {
 // Add releases at the beginning and give each release a new, stable ID.
 export const updateLog: readonly UpdateLogEntry[] = [
   {
+    id: '2026-09-28.2',
+    date: '2026-09-28',
+    title: '마법사 비숍 도약 포획 거리 수정',
+    changes: [
+      '마법사 비숍의 도약 포획이 첫 대각선 기물을 넘은 바로 다음 칸의 적만 포획하던 규칙에서, 그 뒤의 빈칸을 지나 다음에 만나는 적도 포획하도록 바뀌었습니다. 중간에 아군 기물이 있으면 포획할 수 없습니다.',
+    ],
+  },
+  {
     id: '2026-09-28.1',
     date: '2026-09-28',
     title: '마법사 기물 모양 구분 개선',

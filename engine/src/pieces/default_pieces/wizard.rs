@@ -137,7 +137,7 @@ pub fn wizard_bishop_definition() -> PieceDefinition {
     definition.move_options.push(ability(
         WIZARD_BISHOP_JUMP_CATCH,
         "도약 포획",
-        "상하좌우가 마법사 생도로 채워지면 대각선의 첫 기물을 넘어 바로 뒤의 적을 포획합니다.",
+        "상하좌우가 마법사 생도로 채워지면 대각선의 첫 기물을 넘어 빈칸을 지나 다음에 만나는 적을 포획합니다. 중간에 아군 기물이 있으면 막힙니다.",
     ));
     definition
 }
