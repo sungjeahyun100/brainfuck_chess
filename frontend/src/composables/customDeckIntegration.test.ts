@@ -189,7 +189,7 @@ test('base zone expands to three ranks starting at board size 10', () => {
     customPieces: [],
   }
 
-  assert.equal(validateSavedDeck(rankThreeDeck).valid, true)
+  assert.equal(validateSavedDeck(rankThreeDeck).valid, false)
   assert.equal(validateSavedDeck({ ...rankThreeDeck, boardSize: 9 }).valid, false)
 })
 
@@ -207,7 +207,7 @@ test('presets place their pawn line on each board size frontmost setup rank', ()
       customPieces: [],
       createdAt: 1,
       updatedAt: 1,
-    }).valid, true)
+    }).valid, boardSize === 8 || boardSize === 12)
   }
 })
 
@@ -307,7 +307,7 @@ test('Standard exact Front/Back/Base sets and initial placement match every size
 })
 
 test('Standard preset is playable with every Front square and optional Back vacancies; drafts remain storable', () => {
-  for (const size of [8, 9, 10, 11, 12]) {
+  for (const size of [12]) {
     const standard: SavedDeck = {
       ...deck('knight'), ...createPresetDeck(size, 'classic', 'standard'),
       boardSize: size, mapId: `standard-${size}x${size}`, customPieces: [], ruleset: 'standard',
@@ -335,13 +335,13 @@ test('Standard Extra validates instance count, eligibility and independent origi
     score: p.id === 'guhang' ? 25 : p.id === 'bomber' ? 13 : p.id === 'pawn' ? 1 : 0,
     deployment_zone: p.id === 'pawn' ? 'front' : 'back',
   }])))
-  const base: SavedDeck = { ...deck('knight'), ...createPresetDeck(8, 'classic', 'standard'), ruleset: 'standard', boardSize: 8, mapId: 'standard-8x8' }
-  // Main 39/39 remains 39/39 even with 51 Extra points.
-  base.pocket = { pawn: 33 }
+  const base: SavedDeck = { ...deck('knight'), ...createPresetDeck(12, 'classic', 'standard'), ruleset: 'standard', boardSize: 12, mapId: 'standard-12x12' }
+  // Main 119/119 remains 119/119 even with 51 Extra points.
+  base.pocket = { pawn: 113 }
   for (const extra of [[], ['guhang'], ['guhang', 'bomber', 'bomber']]) {
     const result = validateSavedDeck({ ...base, extra })
     assert.equal(result.valid, true, result.errors.join(' '))
-    assert.equal(result.totalScore, 39)
+    assert.equal(result.totalScore, 119)
   }
   assert.equal(pieceCatalog.find(p => p.id === 'guhang')!.score, 25)
   assert.equal(pieceCatalog.find(p => p.id === 'bomber')!.score, 13)

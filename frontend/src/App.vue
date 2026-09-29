@@ -155,6 +155,7 @@ const ACTIVE_MATCH_KEY = 'deck_chess_active_match'
 const botPlayer = computed<LobbyPlayer>(() => localPlayer.value === 'white' ? 'black' : 'white')
 
 function navigate(nextView: AppView) {
+  if (nextView === 'custom-piece-workshop') nextView = 'home'
   stopGamePolling()
   lobbyError.value = null
   replayRecord.value = null

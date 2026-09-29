@@ -269,8 +269,8 @@ function v4Payload() {
 }
 function dc4(value: unknown) { return `DC4.${base64Url(JSON.stringify(value))}` }
 
-test('G7 DC4 preserves Standard 8–12 and terrain maps, duplicate Extra, name and canonical content', () => {
-  for (const size of [8, 9, 10, 11, 12]) {
+test('G7 DC4 preserves Standard 12 and terrain maps, duplicate Extra, name and canonical content', () => {
+  for (const size of [12]) {
     for (const mapId of size === 12 ? ['standard-12x12', 'central-high-ground-12x12'] : [`standard-${size}x${size}`]) {
       const source = { ...savedDeck(), ...createPresetDeck(size, 'classic', 'standard'), ruleset: 'standard', boardSize: size, mapId,
         name: '왕복 이름 ♞', pocket: { rook: 1, knight: 2 }, extra: ['guhang', 'guhang', 'bomber'] } as SavedDeck
@@ -323,7 +323,7 @@ test('G7 DC4 strict bounds/schema reject malformed imports atomically', () => {
 
 test('G7 DC4 draft import keeps the separate storage/game limit and Legacy Extra contract', () => {
   for (const ruleset of ['standard', 'legacy'] as const) {
-    const payload = { ...v4Payload(), ruleset, extra: Array(4).fill('bomber') }
+    const payload = { ...v4Payload(), ruleset, mapId: 'standard-12x12', boardSize: 12, extra: Array(4).fill('bomber') }
     const imported = importDeckCode(dc4(payload), savedDeck())
     assert.ok(imported.ok)
     assert.equal(imported.deck.ruleset, ruleset)
@@ -342,7 +342,7 @@ test('G7 custom references used only by Extra round-trip without catalog substit
   pieceCatalog.push({ id, name: 'Custom', score: 3, category: 'custom', canPocket: true, deploymentZone: 'back',
     custom: { ...ref, active: false, image: { kind: 'built_in', asset_key: 'knight' } } })
   t.after(() => pieceCatalog.splice(pieceCatalog.findIndex(piece => piece.id === id), 1))
-  const source: SavedDeck = { ...savedDeck(), ruleset: 'standard', extra: [id, id], customPieces: [ref] }
+  const source: SavedDeck = { ...savedDeck(), ruleset: 'standard', boardSize: 12, mapId: 'standard-12x12', extra: [id, id], customPieces: [ref] }
   const result = importDeckCode(encodeDeckCode(source), savedDeck())
   assert.ok(result.ok)
   assert.deepEqual(result.deck.extra, source.extra)

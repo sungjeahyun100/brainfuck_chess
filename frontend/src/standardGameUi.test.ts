@@ -10,6 +10,7 @@ import { renderToString } from '@vue/server-renderer'
 import * as helpers from './standardGameUi.ts'
 import * as policy from './gameControlPolicy.ts'
 import * as notation from './replayNotation.ts'
+import * as wizardHelp from './wizardPieceHelp.ts'
 import type { GameState, Piece, SummonOptions } from './types/game.ts'
 
 function fixture(): GameState {
@@ -33,6 +34,7 @@ function compile(name: string, modules: Record<string, unknown>, inlineTemplate 
 const modules: Record<string, unknown> = {
   vue: {...vue,onUnmounted(){},onMounted(){}}, '../standardGameUi':helpers, '../replayNotation':notation,
   '../pieceAssets':{renderedPieceAsset:()=>undefined,pieceAsset:()=>undefined}, '../gameControlPolicy':policy,
+  '../wizardPieceHelp': wizardHelp,
   '../moveOptionUi':{pendingForcedLandingPieceId:()=>null,moveOptionTargets:()=>({legalTargets:[],movable:[],captures:[]})},
   '../composables/useActionTimeline':{},'../timeControls':{timeControlLabel:()=>'',CLOCK_URGENCY_THRESHOLDS_MS:{}},'../replayCodec':{},'../botDebugMetrics':{}, './Board.vue':{},'./ExtraSummonPanel.vue':{},'./StandardReservePanel.vue':{}, '../dropSacrifices': dropHelpers, './DropSacrificePicker.vue': {},
 }

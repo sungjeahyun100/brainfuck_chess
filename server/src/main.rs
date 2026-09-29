@@ -213,6 +213,14 @@ fn ensure_ruleset(expected: DeckRuleset, actual: DeckRuleset) -> Result<(), Stri
     Ok(())
 }
 
+fn ensure_new_board_size(ruleset: DeckRuleset, size: i32) -> Result<(), String> {
+    if brainfuck_chess_engine::rules::supported_board_size(ruleset, size) {
+        Ok(())
+    } else {
+        Err("Standard는 12×12, Legacy는 8×8 또는 12×12 보드만 사용할 수 있습니다.".into())
+    }
+}
+
 fn resolve_board_map(
     map_id: Option<&str>,
     board_size: i32,
@@ -1849,6 +1857,7 @@ async fn create_challenge_game_from_definition(
     let bad_request = |error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error }));
     challenge::validate_registry(std::slice::from_ref(definition)).map_err(bad_request)?;
     ensure_ruleset(definition.ruleset, req.player_deck.deck.ruleset).map_err(bad_request)?;
+    ensure_new_board_size(definition.ruleset, definition.board_size).map_err(bad_request)?;
     let legacy = definition.ruleset == DeckRuleset::Legacy;
     if req
         .player_deck
@@ -1993,6 +2002,8 @@ async fn create_game(
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     ensure_ruleset(req.ruleset, req.black_deck.ruleset)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    ensure_new_board_size(req.ruleset, req.board_size)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let owner = custom_piece::authenticated_owner(&app, &headers).unwrap_or_default();
     let packages = resolve_custom_packages(
         &app,
@@ -2087,6 +2098,8 @@ async fn create_room(
     Json(req): Json<CreateRoomRequest>,
 ) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
     ensure_ruleset(req.ruleset, req.deck.ruleset)
+        .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    ensure_new_board_size(req.ruleset, req.board_size)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     validate_spec_deck_zones(&req.deck)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
@@ -6860,7 +6873,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ruleset_game_creation_is_independent_of_map_and_preserved_in_views() {
+    async fn ruleset_game_creation_enforces_format_sizes_and_preserves_valid_views() {
         let app = AppState::in_memory();
         for (size, map) in [
             (8, "standard-8x8"),
@@ -6873,6 +6886,10 @@ mod tests {
             for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
                 let (status, response) =
                     ruleset_http(&app, "/games", ruleset_game_request(size, ruleset, map)).await;
+                if !brainfuck_chess_engine::rules::supported_board_size(ruleset, size) {
+                    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+                    continue;
+                }
                 assert_eq!(status, StatusCode::OK, "{response}");
                 assert_eq!(
                     response["state"]["ruleset"],
@@ -6998,14 +7015,15 @@ mod tests {
     async fn ruleset_room_create_reselect_ready_join_and_heartbeat_are_authoritative() {
         for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
             let app = AppState::in_memory();
-            let spec = valid_player_deck_with_ruleset(8, ruleset);
+            let size = if ruleset == DeckRuleset::Standard { 12 } else { 8 };
+            let spec = valid_player_deck_with_ruleset(size, ruleset);
             let mut other = spec.clone();
             other.ruleset = if ruleset == DeckRuleset::Legacy {
                 DeckRuleset::Standard
             } else {
                 DeckRuleset::Legacy
             };
-            let payload = serde_json::json!({"board_size":8,"map_id":"standard-8x8", "ruleset":ruleset,
+            let payload = serde_json::json!({"board_size":size,"map_id":format!("standard-{size}x{size}"), "ruleset":ruleset,
                 "host_side":"black","client_id":"host","deck":spec,"time_control":"unlimited"});
             let mut bad = payload.clone();
             bad["deck"] = serde_json::to_value(&other).unwrap();
@@ -7090,7 +7108,7 @@ mod tests {
                 revision = sync["catalog_revision"].clone();
             }
             // The immediate join/start path also retains the room format.
-            let (_, second) = ruleset_http(&app, "/rooms", serde_json::json!({"board_size":8,"ruleset":ruleset,"host_side":"white","client_id":"host2","deck":spec,"time_control":"unlimited"})).await;
+            let (_, second) = ruleset_http(&app, "/rooms", serde_json::json!({"board_size":size,"ruleset":ruleset,"host_side":"white","client_id":"host2","deck":spec,"time_control":"unlimited"})).await;
             let second_id = second["id"].as_str().unwrap();
             let (status, joined) = ruleset_http(
                 &app,
@@ -7320,9 +7338,9 @@ mod tests {
     #[tokio::test]
     async fn extra_room_validation_reselection_game_and_sync() {
         let app = AppState::in_memory();
-        let mut spec = valid_player_deck_with_ruleset(8, DeckRuleset::Standard);
+        let mut spec = valid_player_deck_with_ruleset(12, DeckRuleset::Standard);
         spec.extra = vec![built_in("guhang"), built_in("bomber"), built_in("bomber")];
-        let (status, room) = ruleset_http(&app, "/rooms", serde_json::json!({"board_size":8,"ruleset":"standard","host_side":"black","client_id":"host","deck":spec,"time_control":"unlimited"})).await;
+        let (status, room) = ruleset_http(&app, "/rooms", serde_json::json!({"board_size":12,"ruleset":"standard","host_side":"black","client_id":"host","deck":spec,"time_control":"unlimited"})).await;
         assert_eq!(status, StatusCode::OK, "{room}");
         let id = room["id"].as_str().unwrap();
         for client in ["host", "guest"] {

@@ -5,12 +5,12 @@ use brainfuck_chess_engine::rules::get_front_zone_squares_with_ruleset;
 use serde_json::json;
 
 fn fixture() -> ChallengeDefinition {
-    let mut starting = vec![placement("king", 4, 0)];
+    let mut starting = vec![placement("king", 5, 0)];
     // Official placement changes classification only; every square is in Base.
     starting.extend(
-        get_base_zone_squares_with_ruleset(&"white".into(), 9, DeckRuleset::Standard)
+        get_base_zone_squares_with_ruleset(&"white".into(), 12, DeckRuleset::Standard)
             .into_iter()
-            .filter(|sq| *sq != Square::new(4, 0))
+            .filter(|sq| *sq != Square::new(5, 0))
             .map(|sq| nonstandard_placement("paratrooper", sq.file, sq.rank)),
     );
     ChallengeDefinition {
@@ -18,8 +18,8 @@ fn fixture() -> ChallengeDefinition {
         name: "Test fixture",
         description: "Test only",
         ruleset: DeckRuleset::Standard,
-        map_id: "standard-9x9",
-        board_size: 9,
+        map_id: "standard-12x12",
+        board_size: 12,
         opponent_starting: starting,
         opponent_pocket: vec![OfficialPocket {
             piece_type: "knight",
@@ -96,8 +96,8 @@ fn public_legacy_content_golden() {
         ),
         (
             "템페스트 셋",
-            10,
-            "standard-10x10",
+            12,
+            "standard-12x12",
             BotDifficulty::Hard,
             vec![
                 ("tempest-rook", 1, 0, false),
@@ -155,7 +155,7 @@ fn registry_rejects_invalid_format_zones_and_official_placement() {
         let mut d = valid.clone();
         match change {
             0 => d.map_id = "missing",
-            1 => d.board_size = 12,
+            1 => d.board_size = 8,
             2 => d.id = "",
             3 => d.opponent_starting[1].square = d.opponent_starting[0].square,
             4 => d.opponent_starting[1].square = Square::new(0, 0),
@@ -182,8 +182,8 @@ async fn player_format_validation_summary_and_legacy_initial_state() {
         let mut deck = player(&def);
         deck[field] = match field {
             "ruleset" => json!("legacy"),
-            "map_id" => json!("standard-12x12"),
-            "board_size" => json!(12),
+            "map_id" => json!("standard-8x8"),
+            "board_size" => json!(8),
             _ => json!([]),
         };
         assert!(create(&app, &def, deck).await.is_err());
@@ -536,9 +536,9 @@ async fn explicit_high_ground_map_materializes_in_standard_challenge() {
 #[tokio::test]
 async fn standard_challenge_bot_can_drop_from_hand() {
     let mut def = fixture();
-    def.opponent_starting = vec![placement("king", 4, 0)];
+    def.opponent_starting = vec![placement("king", 5, 0)];
     def.opponent_starting.extend(
-        get_front_zone_squares_with_ruleset(&"white".into(), 9, DeckRuleset::Standard)
+        get_front_zone_squares_with_ruleset(&"white".into(), 12, DeckRuleset::Standard)
             .into_iter()
             .map(|sq| placement("pawn", sq.file, sq.rank)),
     );

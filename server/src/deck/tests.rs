@@ -385,6 +385,8 @@ async fn custom_references_preserve_pinned_version_and_reject_foreign_package() 
     extra_only_draft.deck_data.pocket.remove(&custom_key);
     extra_only_draft.deck_data.extra = vec![custom_key.clone(), custom_key];
     extra_only_draft.deck_data.ruleset = DeckRuleset::Standard;
+    extra_only_draft.deck_data.board_size = 12;
+    extra_only_draft.deck_data.map_id = "standard-12x12".into();
     let spec = extra_only_draft.spec().unwrap();
     assert_eq!(spec.extra.len(), 2);
     assert!(matches!(
@@ -914,7 +916,7 @@ fn ruleset_preserves_old_account_json_and_import_fingerprint() {
     assert_eq!(fingerprint(&explicit), fingerprint(&old));
     explicit.deck_data.ruleset = DeckRuleset::Standard;
     assert_ne!(fingerprint(&explicit), fingerprint(&old));
-    assert_eq!(explicit.spec().unwrap().ruleset, DeckRuleset::Standard);
+    assert!(explicit.spec().is_err());
 }
 
 #[tokio::test]
@@ -924,6 +926,10 @@ async fn ruleset_account_api_roundtrip_update_import_and_unknown_rejection() {
     for ruleset in [DeckRuleset::Legacy, DeckRuleset::Standard] {
         let mut payload = create_input();
         payload["deckData"]["ruleset"] = serde_json::to_value(ruleset).unwrap();
+        if ruleset == DeckRuleset::Standard {
+            payload["deckData"]["boardSize"] = 12.into();
+            payload["deckData"]["mapId"] = "standard-12x12".into();
+        }
         let (status, created) = request(&app, "alice", "POST", "/decks", payload).await;
         assert_eq!(status, StatusCode::CREATED, "{created}");
         let created: SavedDeck = serde_json::from_value(created).unwrap();
@@ -953,6 +959,8 @@ async fn ruleset_account_api_roundtrip_update_import_and_unknown_rejection() {
     let mut payload = serde_json::to_value(input()).unwrap();
     let (_, legacy) = request(&app, "alice", "POST", "/decks/import", payload.clone()).await;
     payload["deckData"]["ruleset"] = serde_json::json!("standard");
+    payload["deckData"]["boardSize"] = 12.into();
+    payload["deckData"]["mapId"] = "standard-12x12".into();
     let (_, standard) = request(&app, "alice", "POST", "/decks/import", payload.clone()).await;
     let (_, repeated) = request(&app, "alice", "POST", "/decks/import", payload).await;
     assert!(legacy["id"].is_string() && standard["id"].is_string());
@@ -974,6 +982,27 @@ async fn ruleset_account_api_roundtrip_update_import_and_unknown_rejection() {
 }
 
 #[tokio::test]
+async fn new_account_decks_follow_format_board_sizes() {
+    let app = AppState::in_memory();
+    account(&app, "alice").await;
+    for (ruleset, size, allowed) in [
+        (DeckRuleset::Standard, 12, true),
+        (DeckRuleset::Standard, 8, false),
+        (DeckRuleset::Legacy, 8, true),
+        (DeckRuleset::Legacy, 12, true),
+        (DeckRuleset::Legacy, 9, false),
+    ] {
+        let mut payload = create_input();
+        payload["deckData"]["ruleset"] = serde_json::to_value(ruleset).unwrap();
+        payload["deckData"]["boardSize"] = size.into();
+        payload["deckData"]["mapId"] = format!("standard-{size}x{size}").into();
+        payload["deckData"]["starting"] = serde_json::json!([]);
+        let (status, response) = request(&app, "alice", "POST", "/decks", payload).await;
+        assert_eq!(status == StatusCode::CREATED, allowed, "{ruleset:?} {size}: {response}");
+    }
+}
+
+#[tokio::test]
 async fn extra_account_roundtrip_import_identity_removal_and_draft_compatibility() {
     let app = AppState::in_memory();
     account(&app, "alice").await;
@@ -990,6 +1019,8 @@ async fn extra_account_roundtrip_import_identity_removal_and_draft_compatibility
     }
     let mut source = input();
     source.deck_data.ruleset = DeckRuleset::Standard;
+    source.deck_data.board_size = 12;
+    source.deck_data.map_id = "standard-12x12".into();
     let (_, empty) = request(
         &app,
         "alice",
@@ -1066,7 +1097,7 @@ async fn g7_account_json_roundtrip_all_maps_and_fingerprint_multiplicity() {
     let multiple = fingerprint(&source);
     source.deck_data.extra.reverse();
     assert_eq!(multiple, fingerprint(&source));
-    for size in 8..=12 {
+    for size in [12] {
         let mut maps = vec![format!("standard-{size}x{size}")];
         if size == 12 {
             maps.push("central-high-ground-12x12".into());

@@ -348,6 +348,12 @@
             <small v-else-if="selectedPieceAbilities.length">특수 능력 사용 가능</small>
             <small v-else>일반 이동 모드</small>
           </div>
+          <div v-if="selectedWizardMovement" class="ability-help">
+            <p>{{ selectedWizardMovement }}</p>
+            <p v-for="option in selectedPieceDefinition.move_options.filter(option => option.kind === 'ability')" :key="option.id">
+              <strong>{{ option.name }}</strong> · {{ option.description }}
+            </p>
+          </div>
           <div v-if="selectedPieceAbilities.length" class="ability-actions">
             <button
               v-for="ability in selectedPieceAbilities"
@@ -473,6 +479,7 @@ import type {
 } from '../types/game'
 import { abilityActionTargetsSquare, abilitySelectionSquares, isImmediateAbilityAction, moveOptionTargets, pendingForcedLandingPieceId, usesMoveSubmission } from '../moveOptionUi'
 import { api } from '../api/gameApi'
+import { wizardMovementDescriptions } from '../wizardPieceHelp'
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import ExtraSummonPanel from './ExtraSummonPanel.vue'
 import StandardReservePanel from './StandardReservePanel.vue'
@@ -768,6 +775,7 @@ const selectedPiece = computed(() => (
 const selectedPieceDefinition = computed(() => (
   selectedPiece.value ? props.state.piece_definitions[selectedPiece.value.type_id] ?? null : null
 ))
+const selectedWizardMovement = computed(() => selectedPieceDefinition.value && wizardMovementDescriptions[selectedPieceDefinition.value.id])
 const encouragementAvailable = ref(false)
 const alekhinesGunAvailable = ref(false)
 const transferCircleAvailable = ref(false)

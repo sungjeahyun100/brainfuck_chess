@@ -17,8 +17,8 @@
         <p>시작된 방의 방 번호를 입력하면 양쪽 플레이어의 대국을 읽기 전용으로 볼 수 있습니다.</p>
       </div>
       <div class="room-code-row">
-        <input v-model.trim="roomCodeInput" class="room-code-input" maxlength="6" placeholder="관전할 방 번호" @keyup.enter="spectateRoom" />
-        <button class="btn-secondary" :disabled="!roomCodeInput.trim()" @click="spectateRoom">관전하기</button>
+        <input v-model.trim="roomCodeInput" class="room-code-input" maxlength="6" aria-label="관전할 6자리 방 번호" placeholder="6자리 방 번호" @keyup.enter="spectateRoom" />
+        <button class="btn-secondary" :disabled="!roomCodeInput.trim() || status === '관전할 방을 확인하는 중입니다…'" @click="spectateRoom">관전하기</button>
       </div>
     </section>
 
@@ -264,6 +264,11 @@ async function joinRoom() {
 async function spectateRoom() {
   const roomId = roomCodeInput.value.trim().toUpperCase()
   if (!roomId) return
+  if (!/^[0-9A-F]{6}$/.test(roomId)) {
+    error.value = '방 번호는 영문 A–F와 숫자로 된 6자리입니다.'
+    status.value = null
+    return
+  }
   error.value = null
   status.value = '관전할 방을 확인하는 중입니다…'
   try {

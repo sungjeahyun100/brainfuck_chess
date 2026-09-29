@@ -1,4 +1,4 @@
-import { isDeckRuleset, parseDeckRuleset, type DeckRuleset } from '../deckRulesets.ts'
+import { isDeckRuleset, parseDeckRuleset, supportsBoardSize, type DeckRuleset } from '../deckRulesets.ts'
 import { reactive } from 'vue'
 import type {
   DeckPreset,
@@ -506,6 +506,8 @@ function validateDeckStructure(deck: LobbyDeck, boardSize: number, name: string)
 
   if (!(boardSizes as readonly number[]).includes(boardSize)) {
     errors.push('지원하지 않는 보드 크기입니다.')
+  } else if (isDeckRuleset(deck.ruleset ?? 'legacy') && !supportsBoardSize(deck.ruleset ?? 'legacy', boardSize)) {
+    errors.push('Standard는 12×12, Legacy는 8×8 또는 12×12 보드만 사용할 수 있습니다.')
   }
 
   let extra: string[] = []

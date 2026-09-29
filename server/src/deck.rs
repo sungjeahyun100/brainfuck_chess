@@ -397,7 +397,7 @@ impl DeckInput {
             ));
         }
         let data = &self.deck_data;
-        if !(8..=12).contains(&data.board_size)
+        if !brainfuck_chess_engine::rules::supported_board_size(data.ruleset, data.board_size)
             || data.starting.len() > 144
             || data.extra.len() > 4096
             || data.pocket.len() > 256

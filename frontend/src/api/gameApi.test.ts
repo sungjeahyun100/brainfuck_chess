@@ -272,6 +272,16 @@ test('spectating rejects a waiting room before requesting a game', async t => {
   assert.deepEqual(calls, ['/api/rooms/WAIT01'])
 })
 
+test('spectating reports an unknown room without requesting a game', async t => {
+  const calls: string[] = []
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    calls.push(String(input))
+    return Response.json({ error: '방을 찾을 수 없습니다.' }, { status: 404 })
+  })
+  await assert.rejects(() => api.spectateRoom('ABC123'), /방을 찾을 수 없습니다/)
+  assert.deepEqual(calls, ['/api/rooms/ABC123'])
+})
+
 test('Standard sync replaces reserve identities and keeps own hand plus opponent counts without catalog', () => {
   const own = { id: 'white', deck: { player_id: 'white', starting_pieces: [], pocket_pieces: [], hand_pieces: ['own-hand'], score_limit: 39, total_score: 1 }, captured_pieces: [] }
   const opponent = { id: 'black', deck: { player_id: 'black', starting_pieces: [], pocket_pieces: [], score_limit: 39, total_score: 1 }, captured_pieces: [] }

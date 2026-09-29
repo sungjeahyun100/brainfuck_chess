@@ -6,6 +6,15 @@ export const deckRulesets: readonly { id: DeckRuleset; label: string }[] = [
   { id: 'standard', label: 'Standard' },
 ]
 
+export const allowedBoardSizes: Readonly<Record<DeckRuleset, readonly number[]>> = {
+  legacy: [8, 12],
+  standard: [12],
+}
+
+export function supportsBoardSize(ruleset: DeckRuleset, size: number): boolean {
+  return allowedBoardSizes[ruleset].includes(size)
+}
+
 export function isDeckRuleset(value: unknown): value is DeckRuleset {
   return value === 'legacy' || value === 'standard'
 }

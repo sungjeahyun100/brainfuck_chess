@@ -10,12 +10,12 @@ fn spec() -> PlayerDeckSpec {
         piece: DeckPieceRef::BuiltIn {
             piece_type: "king".into(),
         },
-        square: Square::new(3, 0),
+        square: Square::new(5, 0),
     }];
     starting.extend(
         brainfuck_chess_engine::rules::get_front_zone_squares_with_ruleset(
             &"white".into(),
-            8,
+            12,
             DeckRuleset::Standard,
         )
         .into_iter()
@@ -116,7 +116,7 @@ fn assert_private(value: &Value, state: &GameState, own: Option<&str>) {
 async fn multiplayer_hand_privacy_covers_full_sync_legal_submit_rejoin_and_public_routes() {
     let app = AppState::in_memory();
     let deck = spec();
-    let (status, room) = http(&app, "POST", "/rooms", Some("host-token"), json!({"ruleset":"standard", "board_size":8, "host_side":"white", "client_id":"host-token", "deck":deck})).await;
+    let (status, room) = http(&app, "POST", "/rooms", Some("host-token"), json!({"ruleset":"standard", "board_size":12, "host_side":"white", "client_id":"host-token", "deck":deck})).await;
     assert_eq!(status, StatusCode::OK, "{room}");
     assert!(room["host_deck"].is_null());
     assert_eq!(room["host_has_deck"], true);
@@ -265,7 +265,10 @@ async fn multiplayer_hand_privacy_covers_full_sync_legal_submit_rejoin_and_publi
     assert_eq!(status, StatusCode::OK);
     let state = app.games.get(id).unwrap().state.clone();
     let before = serde_json::to_value(&state).unwrap();
-    let destination = legal["drops"][0]["to"].clone();
+    let (_, fresh_legal) = http(&app, "GET", &format!("/games/{id}/legal-drops"), Some("host-token"), Value::Null).await;
+    let destination = fresh_legal["drops"].as_array().unwrap().iter()
+        .find(|drop| drop["piece_id"] == hands["white"][0].as_str())
+        .expect("white hand piece has a legal drop")["to"].clone();
     for piece_id in [
         &state.players["white"].deck.pocket_pieces[0],
         &state.players["white"].deck.extra_deck_pieces[0],
@@ -340,9 +343,9 @@ async fn local_and_bot_creation_bind_distinct_view_capabilities_and_bot_frames_a
     for human in [None, Some("white"), Some("black")] {
         let app = AppState::in_memory();
         let white = spec();
-        let black = materialize_neutral_deck(&white, "black", 8);
+        let black = materialize_neutral_deck(&white, "black", 12);
         let mut request =
-            json!({"ruleset":"standard", "board_size":8, "white_deck":white, "black_deck":black});
+            json!({"ruleset":"standard", "board_size":12, "white_deck":white, "black_deck":black});
         if let Some(human) = human {
             request["local_side"] = human.into();
             request["bot_player_id"] = opponent_player(human).into();
@@ -467,8 +470,8 @@ async fn local_and_bot_creation_bind_distinct_view_capabilities_and_bot_frames_a
 #[test]
 fn hand_hash_and_custom_catalog_projection_follow_membership_without_mutating_authority() {
     let deck = spec();
-    let black = materialize_neutral_deck(&deck, "black", 8);
-    let mut state = build_game_state("hand-hash".into(), 8, &deck, &black, vec![]).unwrap();
+    let black = materialize_neutral_deck(&deck, "black", 12);
+    let mut state = build_game_state("hand-hash".into(), 12, &deck, &black, vec![]).unwrap();
     let initial_hash = analysis::state_hash(&state).unwrap();
     let hands = add_hands(&mut state);
     assert_ne!(initial_hash, analysis::state_hash(&state).unwrap());
@@ -524,8 +527,8 @@ fn hand_hash_and_custom_catalog_projection_follow_membership_without_mutating_au
 #[test]
 fn opponent_pocket_to_hand_transfer_exposes_only_count_not_membership_by_subtraction() {
     let deck = spec();
-    let black = materialize_neutral_deck(&deck, "black", 8);
-    let mut state = build_game_state("future-transfer".into(), 8, &deck, &black, vec![]).unwrap();
+    let black = materialize_neutral_deck(&deck, "black", 12);
+    let mut state = build_game_state("future-transfer".into(), 12, &deck, &black, vec![]).unwrap();
     let before = project_state(&state, Audience::Player("white"));
     let id = state.players["black"].deck.pocket_pieces[0].clone();
     assert_eq!(hand_counts(&state)["black"], 0);
@@ -555,7 +558,7 @@ async fn g5_room_both_players_summon_and_rejoin_heartbeat_preserve_private_extra
     deck.extra = vec![DeckPieceRef::BuiltIn {
         piece_type: "guhang".into(),
     }];
-    let (status,room)=http(&app,"POST","/rooms",Some("g5-host"),json!({"ruleset":"standard","board_size":8,"host_side":"white","client_id":"g5-host","deck":deck})).await;
+    let (status,room)=http(&app,"POST","/rooms",Some("g5-host"),json!({"ruleset":"standard","board_size":12,"host_side":"white","client_id":"g5-host","deck":deck})).await;
     assert_eq!(status, StatusCode::OK, "{room}");
     let room_id = room["id"].as_str().unwrap();
     let (status, created) = http(

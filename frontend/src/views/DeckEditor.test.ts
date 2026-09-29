@@ -169,7 +169,7 @@ test('saving does not overwrite edits made while the request is pending', async 
 })
 
 
-test('ruleset editor selection is independent of size/map and is preserved by clone and save', async t => {
+test('ruleset editor selects only permitted sizes and is preserved by clone and save', async t => {
   const persisted: SavedDeck[] = []
   const { state } = await editor(t, async deck => { persisted.push(deck); return { ...deck, version: 2 } })
   for (const ruleset of ['legacy', 'standard'] as const) {
@@ -178,7 +178,7 @@ test('ruleset editor selection is independent of size/map and is preserved by cl
     await vue.nextTick()
     assert.deepEqual(JSON.parse(JSON.stringify(state.deck.value)), { ...before, ruleset })
     assert.equal(state.cloneSavedDeck(state.deck.value).ruleset, ruleset)
-    for (const mapId of ['central-high-ground-12x12', 'standard-12x12', 'standard-8x8', 'standard-10x10']) {
+    for (const mapId of ruleset === 'standard' ? ['central-high-ground-12x12', 'standard-12x12'] : ['standard-8x8', 'standard-12x12']) {
       state.deck.value.mapId = mapId
       state.changeMap()
       assert.equal(state.deck.value.ruleset, ruleset)
@@ -188,6 +188,13 @@ test('ruleset editor selection is independent of size/map and is preserved by cl
     assert.equal(state.saveError.value, null)
     assert.equal(persisted.at(-1)!.ruleset, ruleset)
   }
+  state.deck.value.mapId = 'standard-8x8'
+  state.changeMap()
+  state.deck.value.ruleset = 'standard'
+  state.changeRuleset()
+  assert.equal(state.deck.value.boardSize, 12)
+  assert.equal(state.deck.value.mapId, 'standard-12x12')
+  assert.deepEqual(state.availableBoardMaps.value.map((map: any) => map.boardSize), [12, 12])
   const { ruleset: _ruleset, ...old } = state.deck.value
   assert.equal(state.cloneSavedDeck(old).ruleset, 'legacy')
   assert.throws(() => state.cloneSavedDeck({ ...old, ruleset: 'future' }), /지원하지 않는 덱 룰/)
@@ -205,7 +212,7 @@ test('Standard editor displays actual coordinates, restricts clicks/drags, and r
     score: p.id === 'pawn' ? 1 : 0, deployment_zone: p.id === 'pawn' ? 'front' : 'back',
   }])))
   state.deck.value.ruleset = 'standard'
-  for (const size of [8, 9, 10, 11, 12]) {
+  for (const size of [12]) {
     state.deck.value.mapId = `standard-${size}x${size}`
     state.changeMap()
     state.applyPreset('classic')
@@ -360,7 +367,7 @@ test('Standard score caps gain twenty points on every board and reject one point
     const deck = { ...validation.createPresetDeck(size, 'classic', 'standard'), ruleset: 'standard' as const }
     deck.pocket.pawn += legacy + 20 - validation.calculateDeckScore(deck)
     assert.equal(validation.validateLobbyDeck(deck, size).scoreLimit, legacy + 20)
-    assert.equal(validation.validateLobbyDeck(deck, size).valid, true)
+    assert.equal(validation.validateLobbyDeck(deck, size).valid, size === 12)
     deck.pocket.pawn += 1
     assert.equal(validation.validateLobbyDeck(deck, size).valid, false)
   }

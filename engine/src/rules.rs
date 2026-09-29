@@ -1,4 +1,12 @@
 use crate::types::*;
+
+/// Allowed sizes for newly created games and edited decks. Historical maps remain readable.
+pub fn supported_board_size(ruleset: DeckRuleset, size: i32) -> bool {
+    match ruleset {
+        DeckRuleset::Standard => size == 12,
+        DeckRuleset::Legacy => size == 8 || size == 12,
+    }
+}
 use std::collections::HashMap;
 
 pub const HIGH_GROUND_TERRAIN_ID: &str = "high-ground";

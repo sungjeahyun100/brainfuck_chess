@@ -150,9 +150,9 @@ pub(crate) fn definitions() -> Vec<ChallengeDefinition> {
             name: "템페스트 셋",
             description: "표준 체스의 주요 기물을 실제 템페스트 계열 기물로 바꾼 테마 덱입니다.",
             ruleset: DeckRuleset::Legacy,
-            map_id: "standard-10x10",
+            map_id: "standard-12x12",
             opponent_extra: vec![],
-            board_size: 10,
+            board_size: 12,
             opponent_starting: tempest_set,
             opponent_pocket: vec![],
             bot_difficulty: BotDifficulty::Hard,
@@ -464,7 +464,7 @@ mod tests {
         assert_eq!(pawn_squares.len(), 10);
         assert_eq!(
             pawn_squares,
-            (0..10).map(|file| (file, 8)).collect::<HashSet<_>>()
+            (0..10).map(|file| (file, 10)).collect::<HashSet<_>>()
         );
     }
 

@@ -29,18 +29,22 @@
       <label>
         <span class="limit-label">전용 맵</span>
         <select v-model="deck.mapId" class="text-input" @change="changeMap">
-          <option v-for="map in boardMaps" :key="map.id" :value="map.id">
+          <option v-if="!supportsBoardSize(deck.ruleset, deck.boardSize)" :value="deck.mapId" disabled>
+            기존 {{ deck.boardSize }}×{{ deck.boardSize }} 보드 · 변경 필요
+          </option>
+          <option v-for="map in availableBoardMaps" :key="map.id" :value="map.id">
             {{ map.name }} (최대 {{ scoreLimit(map.boardSize, deck.ruleset) }}점)
           </option>
         </select>
       </label>
       <label>
         <span class="limit-label">룰</span>
-        <select v-model="deck.ruleset" class="text-input">
+        <select v-model="deck.ruleset" class="text-input" @change="changeRuleset">
           <option v-for="ruleset in deckRulesets" :key="ruleset.id" :value="ruleset.id">{{ ruleset.label }}</option>
         </select>
       </label>
     </section>
+    <p class="deck-code-notice">{{ !supportsBoardSize(deck.ruleset, deck.boardSize) ? `기존 ${deck.boardSize}×${deck.boardSize} 보드는 현재 포맷에서 저장할 수 없습니다. 허용되는 보드를 선택해 주세요.` : deck.ruleset === 'standard' ? 'Standard 보드는 12×12로 고정됩니다.' : 'Legacy 보드는 8×8 또는 12×12를 선택할 수 있습니다.' }}</p>
     <p v-if="deck.ruleset === 'standard'" class="deck-code-notice">
       Standard는 중앙 Back과 주변 Front를 기본 진영으로 사용합니다. Front의 모든 칸을 채워야 합니다. 룰 변경 시 기존 배치는 유지되며, 기본 배치는 아래 프리셋으로 적용할 수 있습니다.
     </p>
@@ -425,6 +429,7 @@ import { createNewSavedDeck, deckStorageIdentity, useSavedDecks } from '../compo
 import { encodeDeckCode } from '../composables/useDeckCodeCodec'
 import { importDeckCode, type DeckCodeImportResult } from '../composables/useDeckCode'
 import { boardMaps, findBoardMap } from '../boardMaps'
+import { supportsBoardSize } from '../deckRulesets'
 
 const props = defineProps<{
   deckId?: string | null
@@ -527,6 +532,14 @@ function changeMap() {
   if (!map || map.boardSize === deck.value.boardSize) return
   deck.value.boardSize = map.boardSize
   resetToClassic()
+}
+
+const availableBoardMaps = computed(() => boardMaps.filter(map => supportsBoardSize(deck.value.ruleset, map.boardSize)))
+
+function changeRuleset() {
+  if (supportsBoardSize(deck.value.ruleset, deck.value.boardSize)) return
+  deck.value.mapId = 'standard-12x12'
+  changeMap()
 }
 
 const deckSummary = computed(() => {

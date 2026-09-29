@@ -136,7 +136,7 @@
         <label>
           <span class="limit-label">보드 크기</span>
           <select v-model.number="boardSize" class="text-input" @change="resetLabPieces">
-            <option v-for="size in boardSizes" :key="size" :value="size">{{ size }} x {{ size }}</option>
+            <option v-for="size in labBoardSizes" :key="size" :value="size">{{ size }} x {{ size }}</option>
           </select>
         </label>
 
@@ -429,7 +429,9 @@ import { abilityActionTargetsSquare, abilitySelectionSquares, activeCooldownRema
 import { pieceAsset, renderedPieceAsset } from '../pieceAssets'
 import type { DeckPieceType } from '../types/deck'
 import type { AbilityAction, AbilityDeployment, DropAction, GameState, MoveAction, Piece, PieceDefinition, PieceStateValue, PlayerId, Square, TurnAction } from '../types/game'
-import { boardSizes, neutralPieceCatalogId, pieceCatalog, pieceLabel, pocketCatalog } from '../composables/useDeckValidation'
+import { neutralPieceCatalogId, pieceCatalog, pieceLabel, pocketCatalog } from '../composables/useDeckValidation'
+import { allowedBoardSizes } from '../deckRulesets'
+import { wizardAbilityHelp, wizardMovementDescriptions } from '../wizardPieceHelp'
 
 interface PieceLabPiece {
   id: string
@@ -479,7 +481,8 @@ defineEmits<{
 }>()
 
 const eraseTool = '__erase__'
-const boardSize = ref<number>(props.initialBoardSize ?? 8)
+const labBoardSizes = allowedBoardSizes.legacy
+const boardSize = ref<number>(props.initialBoardSize && labBoardSizes.includes(props.initialBoardSize) ? props.initialBoardSize : 8)
 const selectedOwner = ref<PlayerId>('white')
 const selectedTool = ref<string | null>(props.initialPieceType ?? 'king')
 const selectedPieceId = ref<string | null>(null)
@@ -623,8 +626,8 @@ const boardSquares = computed(() => {
 watch(
   () => [props.initialPieceType, props.initialBoardSize] as const,
   ([pieceType, nextBoardSize]) => {
-    if (nextBoardSize && boardSizes.includes(nextBoardSize as typeof boardSizes[number])) {
-      boardSize.value = nextBoardSize
+    if (nextBoardSize) {
+      boardSize.value = labBoardSizes.includes(nextBoardSize) ? nextBoardSize : 12
       resetLabPieces()
     }
     if (pieceType && pieceCatalog.some(piece => piece.id === pieceType)) {
@@ -740,6 +743,7 @@ function displayPieceSymbol(pieceType: string): string {
 }
 
 function movementDescription(pieceType: string): string {
+  if (wizardMovementDescriptions[pieceType]) return wizardMovementDescriptions[pieceType]
   const descriptions: Record<string, string> = {
     king: '8방향으로 한 칸 이동하고 공격합니다. 실제 게임에서는 캐슬링도 지원됩니다.',
     queen: '가로, 세로, 대각선으로 막히기 전까지 이동하고 공격합니다.',
@@ -783,6 +787,8 @@ function movementDescription(pieceType: string): string {
 }
 
 function staticAbilities(pieceType: string): PieceLabMoveOption[] {
+  const wizardAbility = wizardAbilityHelp[pieceType]
+  if (wizardAbility) return [{ ...wizardAbility, available: false, kind: 'ability', execution_mode: 'standalone_action', cooldown_remaining: 0 }]
   if (pieceType === 'surface-to-air-missile') {
     return [{
       id: 'intercept',
