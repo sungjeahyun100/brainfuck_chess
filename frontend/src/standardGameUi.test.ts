@@ -14,6 +14,8 @@ import * as wizardHelp from './wizardPieceHelp.ts'
 import * as presentation from './presentationEvents.ts'
 import type { GameState, Piece, SummonOptions } from './types/game.ts'
 
+const resultSounds: string[] = []
+
 function fixture(): GameState {
   const piece = (id: string, owner = 'white', type_id = 'knight', square: unknown = null): Piece => ({ id, owner, type_id, current_square: square, in_pocket: id.endsWith('pocket'), captured: false, layer: 'ground', state: {} }) as Piece
   return {
@@ -34,7 +36,7 @@ function compile(name: string, modules: Record<string, unknown>, inlineTemplate 
 }
 const modules: Record<string, unknown> = {
   vue: {...vue,onUnmounted(){},onMounted(){}}, '../standardGameUi':helpers, '../replayNotation':notation,
-  '../presentationSound': { presentationSound: { isMuted: false, play() {}, setMuted() {} } },
+  '../presentationSound': { presentationSound: { isMuted: false, play(sound: string) { resultSounds.push(sound) }, setMuted() {} } },
   '../presentationEvents': presentation,
   '../pieceAssets':{renderedPieceAsset:()=>undefined,pieceAsset:()=>undefined}, '../gameControlPolicy':policy,
   '../wizardPieceHelp': wizardHelp,
@@ -52,6 +54,45 @@ function setup(t: any, api: Record<string, unknown> = {}, state=fixture()) {
   const ui=scope.run(()=>component.setup(props,{expose(){},emit(name:string,value:GameState){if(name==='stateUpdate')updates.push(value)}}))
   return {props,ui,updates}
 }
+
+test('result presentation follows the actual player and stays neutral for spectators', async t => {
+  const { props, ui } = setup(t)
+  const end = async (winner: 'white' | 'black') => {
+    props.state = { ...props.state, phase: 'ended', result: { winner, reason: 'king_capture' } }
+    await vue.nextTick()
+  }
+  const restart = async () => {
+    props.state = { ...props.state, phase: 'playing', result: undefined }
+    await vue.nextTick()
+  }
+  props.playMode = 'multiplayer'
+  resultSounds.length = 0
+  props.localPlayer = 'white'
+  await end('white')
+  assert.equal(ui.resultPresentation.value, 'presentation-victory')
+  assert.deepEqual(resultSounds, ['victory'])
+  await restart()
+  await end('black')
+  assert.equal(ui.resultPresentation.value, 'presentation-defeat')
+  assert.deepEqual(resultSounds, ['victory', 'defeat'])
+  await restart()
+  props.localPlayer = 'black'
+  await end('black')
+  assert.equal(ui.resultPresentation.value, 'presentation-victory')
+  await restart()
+  await end('white')
+  assert.equal(ui.resultPresentation.value, 'presentation-defeat')
+  assert.deepEqual(resultSounds, ['victory', 'defeat', 'victory', 'defeat'])
+  await restart()
+  props.localPlayer = null
+  await end('white')
+  assert.equal(ui.resultPresentation.value, 'presentation-neutral')
+  assert.equal(resultSounds.length, 4)
+  await restart()
+  await end('black')
+  assert.equal(ui.resultPresentation.value, 'presentation-neutral')
+  assert.equal(resultSounds.length, 4)
+})
 
 test('G6 Hand Drop uses server targets and commit; Pocket cannot start Standard Drop',async t=>{
   let calls=0; const state=fixture();const after=structuredClone(state); after.players.white.deck.hand_pieces=['w2','w3','w4'];after.board.squares['2_0']='w1';after.pieces.w1.current_square={file:2,rank:0};after.current_player='black'
@@ -312,6 +353,45 @@ test('waiting board accepts annotation gestures while suppressing piece interact
   props.interactionDisabled = false
   ui.onSquareClick(sq)
   assert.deepEqual(events, [['squareClick', { file: 4, rank: 0 }]])
+})
+
+test('ability targeting leaves presentation dim off until an effect requests it', async () => {
+  const component = compile('Board', {
+    ...modules,
+    '../pieceAssets': { renderedPieceAsset: () => undefined, resolvePieceAssetKey: () => '' },
+  }, true)
+  const html = await renderToString(vue.createSSRApp(component, {
+    board: { size: 1, squares: { '0_0': null } }, pieces: {}, definitions: {},
+    selectedPieceId: null, movableSquares: [], attackSquares: [], dropSquares: [], abilityMode: true,
+  }))
+  assert.match(html, /presentation-layer/)
+  assert.doesNotMatch(html, /class="board[^\"]*presentation-dim/)
+})
+
+test('explicit screen dim restores on request and cancels its timeout on cleanup', t => {
+  const old = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const cleared: number[] = []
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    setTimeout: () => 7, clearTimeout: (id: number) => cleared.push(id),
+  } })
+  t.after(() => { if (old) Object.defineProperty(globalThis, 'window', old); else Reflect.deleteProperty(globalThis, 'window') })
+  const state = fixture()
+  const props = vue.reactive({ board: state.board, pieces: state.pieces, definitions: state.piece_definitions,
+    selectedPieceId: null, movableSquares: [], attackSquares: [], dropSquares: [], abilityMode: true })
+  const component = compile('Board', { ...modules, vue: { ...vue, onMounted() {}, onBeforeUnmount() {} } })
+  const ui = component.setup(props, { expose() {}, emit() {} })
+  ui.boardElement.value = {}
+  ui.presentationLayer.value = {}
+  assert.equal(ui.dimmed.value, false)
+  ui.playPresentation([{ type: 'screen_dim' }])
+  assert.equal(ui.dimmed.value, true)
+  ui.playPresentation([{ type: 'screen_restore' }])
+  assert.equal(ui.dimmed.value, false)
+  assert.deepEqual(cleared, [7])
+  ui.playPresentation([{ type: 'screen_dim' }])
+  ui.clearEffects()
+  assert.equal(ui.dimmed.value, false)
+  assert.deepEqual(cleared, [7, 7])
 })
 
 test('encouragement button uses server candidates without client formation checks', async t => {

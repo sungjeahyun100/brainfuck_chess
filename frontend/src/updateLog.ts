@@ -8,6 +8,15 @@ export interface UpdateLogEntry {
 // Add releases at the beginning and give each release a new, stable ID.
 export const updateLog: readonly UpdateLogEntry[] = [
   {
+    id: '2026-10-03.1',
+    date: '2026-10-03',
+    title: '대국 연출 중 보드 크기와 결과 표시 수정',
+    changes: [
+      '이동·포획·폭발 효과가 재생될 때 보드나 주변 화면 크기가 흔들리지 않도록 수정했습니다. 공중 기물이 지상으로 착륙하거나 다시 떠도 사망·재등장 대신 이동으로 표시합니다.',
+      '관전자는 어느 편이 이겨도 중립적인 결과 화면을 보며 승리·패배 효과음은 재생되지 않습니다. 일반 능력의 대상 선택만으로 보드가 어두워지지 않게 했습니다.',
+    ],
+  },
+  {
     id: '2026-10-02.1',
     date: '2026-10-02',
     title: '대국 이동·포획·등장·승패 연출 추가',

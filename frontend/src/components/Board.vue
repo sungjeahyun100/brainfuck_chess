@@ -3,7 +3,7 @@
     <div
       ref="boardElement"
       class="board"
-      :class="{ 'annotation-mode': annotationMode, 'presentation-dim': abilityMode || dimmed }"
+      :class="{ 'annotation-mode': annotationMode, 'presentation-dim': dimmed }"
       :style="{ '--size': board.size }"
       @contextmenu.prevent
       @pointerdown="onBoardPointerDown"
@@ -141,6 +141,7 @@
           :marker-end="`url(#${arrowMarkerId})`"
         />
       </svg>
+      <div ref="presentationLayer" class="presentation-layer" aria-hidden="true" />
     </div>
   </div>
 </template>
@@ -259,6 +260,7 @@ const lastMoveSquareIds = computed(() => {
   return new Set([squareIdFromSquare(props.lastMove.from), squareIdFromSquare(props.lastMove.to)])
 })
 const boardElement = ref<HTMLElement | null>(null)
+const presentationLayer = ref<HTMLElement | null>(null)
 const activeEffects = new Set<{ node: HTMLElement; animation: Animation }>()
 const pieceAnimations = new Set<Animation>()
 const soundTimers = new Set<number>()
@@ -271,22 +273,25 @@ function clearEffects() {
   pieceAnimations.clear()
   for (const timer of soundTimers) window.clearTimeout(timer)
   soundTimers.clear()
+  if (dimTimer !== null) window.clearTimeout(dimTimer)
+  dimTimer = null
+  dimmed.value = false
 }
 function squareElement(square: Square): HTMLElement | undefined {
   return Array.from(boardElement.value?.querySelectorAll<HTMLElement>('.square') ?? [])
     .find(node => Number(node.dataset.file) === square.file && Number(node.dataset.rank) === square.rank)
 }
 function animateNode(node: HTMLElement, frames: Keyframe[], duration: number, delay = 0) {
-  const board = boardElement.value
-  if (!board || activeEffects.size >= 12) return
-  board.append(node)
+  const layer = presentationLayer.value
+  if (!layer || activeEffects.size >= 12) return
+  layer.append(node)
   const animation = node.animate(frames, { duration, delay, easing: 'ease-out' })
   const effect = { node, animation }
   activeEffects.add(effect)
   void animation.finished.catch(() => {}).then(() => { node.remove(); activeEffects.delete(effect) })
 }
 function playPresentation(events: PresentationEvent[]) {
-  if (!boardElement.value) return
+  if (!boardElement.value || !presentationLayer.value) return
   clearEffects()
   const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
   for (const event of events.slice(0, 12)) {
@@ -303,7 +308,7 @@ function playPresentation(events: PresentationEvent[]) {
       const source = squareElement(event.from)?.getBoundingClientRect()
       const target = squareElement(event.to)?.getBoundingClientRect()
       if (!source || !target) continue
-      const bounds = boardElement.value.getBoundingClientRect()
+      const bounds = presentationLayer.value.getBoundingClientRect()
       const shot = document.createElement('span')
       shot.className = `presentation-projectile ${event.preset === 'bullet' ? 'bullet' : 'magic'}`
       shot.style.left = `${source.left - bounds.left + source.width / 2}px`
@@ -320,7 +325,7 @@ function playPresentation(events: PresentationEvent[]) {
       pieceAnimations.add(reveal)
       void reveal.finished.catch(() => {}).then(() => pieceAnimations.delete(reveal))
       const clone = piece.cloneNode(true) as HTMLElement
-      const bounds = boardElement.value.getBoundingClientRect()
+      const bounds = presentationLayer.value.getBoundingClientRect()
       const targetBounds = target.getBoundingClientRect()
       clone.classList.add('presentation-ghost')
       clone.style.left = `${targetBounds.left - bounds.left + targetBounds.width * .09}px`
@@ -345,7 +350,7 @@ function playPresentation(events: PresentationEvent[]) {
     if (event.type === 'death' || event.type === 'sacrifice' || event.type === 'capture' || event.type === 'explosion' || event.type === 'ability_hit') {
       const target = squareElement(at)?.getBoundingClientRect()
       if (!target) continue
-      const bounds = boardElement.value.getBoundingClientRect()
+      const bounds = presentationLayer.value.getBoundingClientRect()
       const flash = document.createElement('span')
       flash.className = `presentation-impact ${event.type === 'explosion' && event.preset === 'artillery' ? 'artillery' : 'small'}`
       flash.style.left = `${target.left - bounds.left}px`
@@ -770,8 +775,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearEffects()
-  if (dimTimer !== null) window.clearTimeout(dimTimer)
-  dimmed.value = false
   document.removeEventListener('pointerdown', onDocumentPointerDown)
   cleanupPointerDrag()
   cleanupRightDrag()
@@ -842,6 +845,7 @@ function pieceAlt(piece: Piece): string {
   aspect-ratio: 1;
 }
 .board.presentation-dim { filter: brightness(.78); cursor: crosshair; }
+.presentation-layer { position:absolute; inset:0; z-index:6; pointer-events:none; overflow:clip; contain:layout paint; }
 .presentation-ghost { position:absolute; z-index:12; pointer-events:none; margin:0; }
 :deep(.presentation-impact) { position:absolute; z-index:11; pointer-events:none; border-radius:50%; background:radial-gradient(circle, rgba(255,247,180,.95), rgba(235,91,49,.5) 48%, transparent 70%); }
 :deep(.presentation-impact.artillery) { background:radial-gradient(circle, #fff3b0, rgba(231,82,34,.85) 45%, transparent 80%); }

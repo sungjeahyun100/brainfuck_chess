@@ -606,12 +606,15 @@ const viewState = computed(() => botReplayState.value ?? props.state)
 const boardPresentation = ref<InstanceType<typeof Board> | null>(null)
 const sfxMuted = ref(presentationSound.isMuted)
 function toggleSfx() { sfxMuted.value = !sfxMuted.value; presentationSound.setMuted(sfxMuted.value) }
-const resultPresentation = computed(() => viewState.value.result?.winner
-  ? viewState.value.result.winner === (props.localPlayer ?? 'white') ? 'presentation-victory' : 'presentation-defeat'
-  : '')
+const resultEffect = computed<'victory' | 'defeat' | 'neutral'>(() => {
+  const winner = viewState.value.result?.winner
+  if (!winner || !props.localPlayer) return 'neutral'
+  return winner === props.localPlayer ? 'victory' : 'defeat'
+})
+const resultPresentation = computed(() => `presentation-${resultEffect.value}`)
 watch(() => [viewState.value.id, viewState.value.phase, viewState.value.result?.winner], (next, previous) => {
   if (next[0] !== previous[0] || next[1] !== 'ended' || previous[1] === 'ended' || !next[2]) return
-  presentationSound.play(next[2] === (props.localPlayer ?? 'white') ? 'victory' : 'defeat')
+  if (resultEffect.value !== 'neutral') presentationSound.play(resultEffect.value)
 }, { flush: 'post' })
 const isStandard = computed(() => props.state.ruleset === 'standard')
 const reserveActiveSide = computed<PlayerId>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? 'white')
@@ -2440,8 +2443,9 @@ async function onResign() {
 }
 .game-over-box.presentation-victory { border:3px solid #e9c45b; animation:result-arrive .35s ease-out; }
 .game-over-box.presentation-defeat { border:3px solid #8a9bb5; animation:result-arrive .35s ease-out; }
+.game-over-box.presentation-neutral { border:3px solid #a7abb2; animation:result-arrive .35s ease-out; }
 @keyframes result-arrive { from { opacity:0; transform:scale(.92); } to { opacity:1; transform:scale(1); } }
-@media (prefers-reduced-motion: reduce) { .game-over-box.presentation-victory, .game-over-box.presentation-defeat { animation:none; } }
+@media (prefers-reduced-motion: reduce) { .game-over-box.presentation-victory, .game-over-box.presentation-defeat, .game-over-box.presentation-neutral { animation:none; } }
 .game-over-box button { margin-top: 16px; padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
 
 .promotion-overlay {

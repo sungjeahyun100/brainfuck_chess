@@ -32,19 +32,26 @@ function parseSquare(id: string): Square | null {
 /** Derive visual hints from committed occupancy only; never changes game state. */
 export function presentationEvents(before: Occupancy, after: Occupancy): PresentationEvent[] {
   const events: PresentationEvent[] = []
-  const previousSquares = new Map(Object.entries(before).map(([key, value]) => [key.split(':')[0] + ':' + value, key]))
+  const pieceId = (key: string) => key.slice(key.indexOf(':') + 1)
+  const layer = (key: string) => key.slice(0, key.indexOf(':'))
+  const previousPieces = new Map(Object.entries(before).map(([key, square]) => [pieceId(key), { key, square }]))
+  const nextPieces = new Set(Object.keys(after).map(pieceId))
+  const previousSquares = new Map(Object.entries(before).map(([key, square]) => [`${layer(key)}:${square}`, key]))
+  const capturedIds = new Set<string>()
   for (const [key, destination] of Object.entries(after)) {
-    const fromId = before[key]
+    const previous = previousPieces.get(pieceId(key))
     const to = parseSquare(destination)
-    if (!to || fromId === destination) continue
-    if (!fromId) { events.push({ type: 'drop', pieceId: key.split(':').slice(1).join(':'), to }); continue }
-    const from = parseSquare(fromId)
+    if (!to || (previous?.key === key && previous.square === destination)) continue
+    if (!previous) { events.push({ type: 'drop', pieceId: pieceId(key), to }); continue }
+    const from = parseSquare(previous.square)
     if (!from) continue
-    const occupant = previousSquares.get(key.split(':')[0] + ':' + destination)
-    events.push({ type: occupant && occupant !== key && !after[occupant] ? 'capture' : 'move', pieceId: key.split(':').slice(1).join(':'), from, to })
+    const occupant = previousSquares.get(`${layer(key)}:${destination}`)
+    const captured = occupant && pieceId(occupant) !== pieceId(key) && !nextPieces.has(pieceId(occupant))
+    if (captured && occupant) capturedIds.add(pieceId(occupant))
+    events.push({ type: captured ? 'capture' : 'move', pieceId: pieceId(key), from, to })
   }
   for (const [key, location] of Object.entries(before)) {
-    if (!after[key] && !events.some(event => event.type === 'capture' && `${key.split(':')[0]}:${location}` === `${key.split(':')[0]}:${event.to.file}_${event.to.rank}`)) {
+    if (!nextPieces.has(pieceId(key)) && !capturedIds.has(pieceId(key))) {
       const at = parseSquare(location)
       if (at) events.push({ type: 'death', at })
     }
