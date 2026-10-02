@@ -156,7 +156,7 @@
 
     <!-- Game over overlay -->
     <div v-if="viewState.phase === 'ended'" class="game-over-overlay">
-      <div class="game-over-box">
+      <div class="game-over-box" :class="resultPresentation">
         <h2 v-if="state.challenge">
           {{ viewState.result?.winner === state.challenge.player_id ? 'Challenge 클리어' : 'Challenge 실패' }}
         </h2>
@@ -202,6 +202,8 @@
           <StandardReservePanel v-if="isStandard" class="opponent-deck" presentation="deck" deck-label="상대 덱"
             :state="viewState" :side="reserveOtherSide" :reveal="false" />
         <Board
+          :key="viewState.id"
+          ref="boardPresentation"
           :interaction-disabled="!canUseSummonControls"
           :class="{ 'board-waiting': !canUseSummonControls }"
           :board="viewState.board"
@@ -238,6 +240,9 @@
           <span>{{ interactionLabel }}</span><button v-if="interactionMode !== 'None'" type="button" @click="cancelInteraction">선택 취소</button>
         </div>
         <div class="board-tools">
+          <button type="button" class="threat-toggle" :aria-pressed="sfxMuted" @click="toggleSfx">
+            {{ sfxMuted ? '효과음 켜기' : '효과음 끄기' }}
+          </button>
           <button
             class="threat-toggle"
             :class="{ active: opponentAttacksVisible }"
@@ -461,6 +466,8 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onUnmounted, watch } from 'vue'
+import { presentationSound } from '../presentationSound'
+import type { PresentationEvent } from '../presentationEvents'
 import type {
   AbilityDeployment,
   AiAction,
@@ -596,6 +603,19 @@ const dropOptionsCache = new Map<string, DropAction[]>()
 const dropOptionsRequests = new Map<string, Promise<DropAction[]>>()
 
 const viewState = computed(() => botReplayState.value ?? props.state)
+const boardPresentation = ref<InstanceType<typeof Board> | null>(null)
+const sfxMuted = ref(presentationSound.isMuted)
+function toggleSfx() { sfxMuted.value = !sfxMuted.value; presentationSound.setMuted(sfxMuted.value) }
+const resultEffect = computed<'victory' | 'defeat' | 'neutral'>(() => {
+  const winner = viewState.value.result?.winner
+  if (!winner || !props.localPlayer) return 'neutral'
+  return winner === props.localPlayer ? 'victory' : 'defeat'
+})
+const resultPresentation = computed(() => `presentation-${resultEffect.value}`)
+watch(() => [viewState.value.id, viewState.value.phase, viewState.value.result?.winner], (next, previous) => {
+  if (next[0] !== previous[0] || next[1] !== 'ended' || previous[1] === 'ended' || !next[2]) return
+  if (resultEffect.value !== 'neutral') presentationSound.play(resultEffect.value)
+}, { flush: 'post' })
 const isStandard = computed(() => props.state.ruleset === 'standard')
 const reserveActiveSide = computed<PlayerId>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? 'white')
 const deckViewer = computed<PlayerId | null>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? null)
@@ -1872,6 +1892,15 @@ async function submitAbility(pieceId: string, to: Square) {
       pocket_piece_id: chosen.pocket_piece_id, to: chosen.to,
     })
     emit('stateUpdate', newState)
+    const from = props.state.pieces[pieceId]?.current_square
+    if (abilityId === 'wizard-knight-catch' && from && chosen.to) {
+      const events: PresentationEvent[] = [
+        { type: 'ability_start' }, { type: 'projectile', from, to: chosen.to },
+        { type: 'ability_hit', at: chosen.to },
+      ]
+      await nextTick()
+      boardPresentation.value?.playPresentation(events)
+    }
   } catch (e: unknown) { error.value = isStandard.value ? gameActionError(e) : e instanceof Error ? e.message : String(e) }
   finally { actionSubmitting.value = false; clearSelection() }
 }
@@ -2412,6 +2441,11 @@ async function onResign() {
   background: white; padding: 32px 48px; border-radius: 12px; text-align: center;
   color: #1f2933;
 }
+.game-over-box.presentation-victory { border:3px solid #e9c45b; animation:result-arrive .35s ease-out; }
+.game-over-box.presentation-defeat { border:3px solid #8a9bb5; animation:result-arrive .35s ease-out; }
+.game-over-box.presentation-neutral { border:3px solid #a7abb2; animation:result-arrive .35s ease-out; }
+@keyframes result-arrive { from { opacity:0; transform:scale(.92); } to { opacity:1; transform:scale(1); } }
+@media (prefers-reduced-motion: reduce) { .game-over-box.presentation-victory, .game-over-box.presentation-defeat, .game-over-box.presentation-neutral { animation:none; } }
 .game-over-box button { margin-top: 16px; padding: 10px 24px; background: #1976d2; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
 
 .promotion-overlay {

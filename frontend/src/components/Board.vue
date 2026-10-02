@@ -3,7 +3,7 @@
     <div
       ref="boardElement"
       class="board"
-      :class="{ 'annotation-mode': annotationMode }"
+      :class="{ 'annotation-mode': annotationMode, 'presentation-dim': dimmed }"
       :style="{ '--size': board.size }"
       @contextmenu.prevent
       @pointerdown="onBoardPointerDown"
@@ -39,7 +39,7 @@
         </span>
         <span v-if="sacrificeMarker(sq)" class="sacrifice-marker">{{ sacrificeMarker(sq) }}</span>
         <span v-if="legalMarker(sq)" class="legal-move-dot" :class="legalMarker(sq)" />
-        <span v-if="sq.piece" class="piece" :class="`owner-${sq.piece.owner}`">
+        <span v-if="sq.piece" class="piece" :data-piece-id="sq.piece.id" :class="`owner-${sq.piece.owner}`">
           <img
             v-if="pieceImage(sq.piece)"
             :key="pieceRenderKey(sq.piece)"
@@ -68,6 +68,7 @@
         <span
           v-if="sq.airPiece"
           class="piece air-piece"
+          :data-piece-id="sq.airPiece.id"
           :class="`owner-${sq.airPiece.owner}`"
           :title="`공중 · 남은 비행 ${sq.airPiece.remaining_flight_turns}턴`"
           @click.stop="onPieceClick(sq.airPiece.id)"
@@ -140,13 +141,16 @@
           :marker-end="`url(#${arrowMarkerId})`"
         />
       </svg>
+      <div ref="presentationLayer" class="presentation-layer" aria-hidden="true" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Board, Piece, PieceDefinition, PlayerId, Square, TerrainCell } from '../types/game'
+import { boardOccupancy, presentationEvents, type PresentationEvent } from '../presentationEvents'
+import { presentationSound } from '../presentationSound'
 import { activeCooldownRemaining } from '../moveOptionUi'
 import { renderedPieceAsset, resolvePieceAssetKey } from '../pieceAssets'
 
@@ -192,6 +196,7 @@ const props = defineProps<{
   showCoordinates?: boolean
   interactionDisabled?: boolean
   annotationMode?: boolean
+  presentationStep?: number
 }>()
 
 function pieceImage(piece: Piece): string | undefined {
@@ -255,6 +260,112 @@ const lastMoveSquareIds = computed(() => {
   return new Set([squareIdFromSquare(props.lastMove.from), squareIdFromSquare(props.lastMove.to)])
 })
 const boardElement = ref<HTMLElement | null>(null)
+const presentationLayer = ref<HTMLElement | null>(null)
+const activeEffects = new Set<{ node: HTMLElement; animation: Animation }>()
+const pieceAnimations = new Set<Animation>()
+const soundTimers = new Set<number>()
+const dimmed = ref(false)
+let dimTimer: number | null = null
+function clearEffects() {
+  for (const effect of activeEffects) { effect.animation.cancel(); effect.node.remove() }
+  activeEffects.clear()
+  for (const animation of pieceAnimations) animation.cancel()
+  pieceAnimations.clear()
+  for (const timer of soundTimers) window.clearTimeout(timer)
+  soundTimers.clear()
+  if (dimTimer !== null) window.clearTimeout(dimTimer)
+  dimTimer = null
+  dimmed.value = false
+}
+function squareElement(square: Square): HTMLElement | undefined {
+  return Array.from(boardElement.value?.querySelectorAll<HTMLElement>('.square') ?? [])
+    .find(node => Number(node.dataset.file) === square.file && Number(node.dataset.rank) === square.rank)
+}
+function animateNode(node: HTMLElement, frames: Keyframe[], duration: number, delay = 0) {
+  const layer = presentationLayer.value
+  if (!layer || activeEffects.size >= 12) return
+  layer.append(node)
+  const animation = node.animate(frames, { duration, delay, easing: 'ease-out' })
+  const effect = { node, animation }
+  activeEffects.add(effect)
+  void animation.finished.catch(() => {}).then(() => { node.remove(); activeEffects.delete(effect) })
+}
+function playPresentation(events: PresentationEvent[]) {
+  if (!boardElement.value || !presentationLayer.value) return
+  clearEffects()
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  for (const event of events.slice(0, 12)) {
+    if (event.type === 'screen_dim' || event.type === 'screen_restore') {
+      if (dimTimer !== null) window.clearTimeout(dimTimer)
+      dimmed.value = event.type === 'screen_dim' && !reduced
+      if (dimmed.value) dimTimer = window.setTimeout(() => { dimmed.value = false; dimTimer = null }, 1500)
+      continue
+    }
+    if (event.type === 'victory' || event.type === 'defeat') { presentationSound.play(event.type); continue }
+    if (event.type === 'ability_start') { presentationSound.play('ability'); continue }
+    if (event.type === 'projectile') {
+      if (reduced) continue
+      const source = squareElement(event.from)?.getBoundingClientRect()
+      const target = squareElement(event.to)?.getBoundingClientRect()
+      if (!source || !target) continue
+      const bounds = presentationLayer.value.getBoundingClientRect()
+      const shot = document.createElement('span')
+      shot.className = `presentation-projectile ${event.preset === 'bullet' ? 'bullet' : 'magic'}`
+      shot.style.left = `${source.left - bounds.left + source.width / 2}px`
+      shot.style.top = `${source.top - bounds.top + source.height / 2}px`
+      animateNode(shot, [{ transform: 'translate(0, 0) scale(.7)', opacity: 1 }, { transform: `translate(${target.left - source.left}px, ${target.top - source.top}px) scale(1.3)`, opacity: 0 }], 210)
+      continue
+    }
+    if (event.type === 'move' || event.type === 'capture' || event.type === 'drop' || event.type === 'summon') {
+      presentationSound.play(event.type === 'summon' ? 'drop' : event.type)
+      const target = squareElement(event.to)
+      const piece = Array.from(target?.querySelectorAll<HTMLElement>('.piece') ?? []).find(node => node.dataset.pieceId === event.pieceId)
+      if (!target || !piece || reduced) continue
+      const reveal = piece.animate([{ opacity: 0 }, { opacity: 0, offset: .88 }, { opacity: 1 }], { duration: event.type === 'move' || event.type === 'capture' ? 180 : 240 })
+      pieceAnimations.add(reveal)
+      void reveal.finished.catch(() => {}).then(() => pieceAnimations.delete(reveal))
+      const clone = piece.cloneNode(true) as HTMLElement
+      const bounds = presentationLayer.value.getBoundingClientRect()
+      const targetBounds = target.getBoundingClientRect()
+      clone.classList.add('presentation-ghost')
+      clone.style.left = `${targetBounds.left - bounds.left + targetBounds.width * .09}px`
+      clone.style.top = `${targetBounds.top - bounds.top + targetBounds.height * .09}px`
+      clone.style.width = `${targetBounds.width * .82}px`
+      clone.style.height = `${targetBounds.height * .82}px`
+      if (event.type === 'move' || event.type === 'capture') {
+        const source = squareElement(event.from)?.getBoundingClientRect()
+        if (source) animateNode(clone, [{ transform: `translate(${source.left - targetBounds.left}px, ${source.top - targetBounds.top}px)`, opacity: 1 }, { transform: 'translate(0, 0)', opacity: 0 }], 180)
+      } else animateNode(clone, [{ transform: 'scale(.45)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }, { opacity: 0 }], 240)
+      if (event.type !== 'capture') continue
+    }
+    if (event.type === 'explosion') {
+      const delay = Math.max(0, Math.min(2000, event.delayMs ?? 0))
+      if (delay) {
+        const timer = window.setTimeout(() => { soundTimers.delete(timer); presentationSound.play('explosion') }, delay)
+        soundTimers.add(timer)
+      } else presentationSound.play('explosion')
+    }
+    const at = 'at' in event ? event.at : 'to' in event ? event.to : null
+    if (!at || reduced) continue
+    if (event.type === 'death' || event.type === 'sacrifice' || event.type === 'capture' || event.type === 'explosion' || event.type === 'ability_hit') {
+      const target = squareElement(at)?.getBoundingClientRect()
+      if (!target) continue
+      const bounds = presentationLayer.value.getBoundingClientRect()
+      const flash = document.createElement('span')
+      flash.className = `presentation-impact ${event.type === 'explosion' && event.preset === 'artillery' ? 'artillery' : 'small'}`
+      flash.style.left = `${target.left - bounds.left}px`
+      flash.style.top = `${target.top - bounds.top}px`
+      flash.style.width = `${target.width}px`
+      flash.style.height = `${target.height}px`
+      animateNode(flash, [{ opacity: .8, transform: 'scale(.45)' }, { opacity: 0, transform: 'scale(1.3)' }], 220,
+        event.type === 'explosion' ? Math.max(0, Math.min(2000, event.delayMs ?? 0)) : 0)
+    }
+  }
+}
+watch(() => ({ occupancy: boardOccupancy(props.board), step: props.presentationStep }), (next, previous) => {
+  if (next.step !== undefined && previous.step !== undefined && next.step !== previous.step + 1) { clearEffects(); return }
+  playPresentation(presentationEvents(previous.occupancy, next.occupancy))
+}, { flush: 'post' })
 const arrows = ref<BoardArrow[]>([])
 const highlightedSquares = ref<string[]>([])
 const rightDrag = ref<{
@@ -533,7 +644,7 @@ function clearAnnotations() {
   highlightedSquares.value = []
 }
 
-defineExpose({ clearAnnotations })
+defineExpose({ clearAnnotations, playPresentation })
 
 function preventRightDragContextMenu(event: MouseEvent) {
   if (!rightDrag.value) return
@@ -663,6 +774,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearEffects()
   document.removeEventListener('pointerdown', onDocumentPointerDown)
   cleanupPointerDrag()
   cleanupRightDrag()
@@ -732,6 +844,14 @@ function pieceAlt(piece: Piece): string {
   width: min(80vw, 80vh);
   aspect-ratio: 1;
 }
+.board.presentation-dim { filter: brightness(.78); cursor: crosshair; }
+.presentation-layer { position:absolute; inset:0; z-index:6; pointer-events:none; overflow:clip; contain:layout paint; }
+.presentation-ghost { position:absolute; z-index:12; pointer-events:none; margin:0; }
+:deep(.presentation-impact) { position:absolute; z-index:11; pointer-events:none; border-radius:50%; background:radial-gradient(circle, rgba(255,247,180,.95), rgba(235,91,49,.5) 48%, transparent 70%); }
+:deep(.presentation-impact.artillery) { background:radial-gradient(circle, #fff3b0, rgba(231,82,34,.85) 45%, transparent 80%); }
+:deep(.presentation-projectile) { position:absolute; z-index:13; width:12px; height:12px; margin:-6px; border-radius:50%; pointer-events:none; background:#e7fbff; box-shadow:0 0 12px 4px #52caff; }
+:deep(.presentation-projectile.bullet) { width:7px; height:7px; margin:-3px; background:#fff4c6; box-shadow:0 0 7px 2px #e5a447; }
+@media (prefers-reduced-motion: reduce) { .board.presentation-dim { filter:none; } }
 
 .square {
   position: relative;
