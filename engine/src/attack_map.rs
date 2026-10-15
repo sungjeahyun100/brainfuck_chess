@@ -160,6 +160,7 @@ mod tests {
 
         GameState {
             ruleset: Default::default(),
+            occupation_zones: Vec::new(),
             id: "test".into(),
             board,
             pieces: HashMap::new(),

@@ -516,6 +516,7 @@ mod tests {
             .collect();
         GameState {
             ruleset: Default::default(),
+            occupation_zones: Vec::new(),
             id: "beam-test".into(),
             board: create_board(12),
             pieces: HashMap::new(),

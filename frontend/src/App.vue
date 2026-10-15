@@ -249,6 +249,7 @@ async function startSingleGame(selection: SingleDeckSelection) {
       localDeck.mapId,
       selection.timeControl,
       { localSide: resolvedSide, localNickname: selection.localNickname, guestNickname: selection.guestNickname },
+      selection.gameMode,
     )
     localPlayer.value = resolvedSide
     currentRoom.value = null
@@ -286,6 +287,7 @@ async function startConfiguredBotGame(selection: BotDeckSelection, debug: boolea
       humanDeck.mapId,
       selection.timeControl,
       { localSide: selection.humanSide, botPlayerId: selection.humanSide === 'white' ? 'black' : 'white', guestNickname: `${selection.difficulty} Bot${debug ? ' (Debug)' : ''}` },
+      selection.gameMode,
     )
     localPlayer.value = selection.humanSide
     currentRoom.value = null

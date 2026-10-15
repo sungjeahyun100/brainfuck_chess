@@ -43,6 +43,17 @@ test('builds one frame per same-player canonical action in exact recorded order'
   assert.deepEqual(frames[2].pieces.b.current_square, { file: 10, rank: 3 })
 })
 
+test('occupation replay restores owner and effect squares at each recorded move', () => {
+  const zone = { squares: [{ file: 1, rank: 7 }], effect_squares: [{ file: 2, rank: 6 }], owner: null }
+  const initial = { board: { size: 8, squares: {} }, pieces: {}, history: [], occupation_zones: [zone] } as unknown as GameState
+  const record = { ruleset_version: LEGACY_RULES_VERSION, initial_state: initial, actions: [
+    { state_delta: [{ op: 'set', path: ['occupation_zones'], value: [{ ...zone, owner: 'white' }] }] },
+  ] } as unknown as GameRecord
+  const frames = buildReplayFrames(record)
+  assert.deepEqual(frames[0].occupation_zones?.[0].effect_squares, zone.effect_squares)
+  assert.equal(frames[1].occupation_zones?.[0].owner, 'white')
+})
+
 test('reconstructs readonly Vue proxy records and nested reactive delta values', () => {
   const initial = reactive({
     board: { size: 8, squares: { e3: 'p1', e5: null } },

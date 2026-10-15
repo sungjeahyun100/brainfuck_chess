@@ -295,6 +295,14 @@ test('Standard sync replaces reserve identities and keeps own hand plus opponent
   assert.ok(!JSON.stringify(merged).includes('previously-visible'))
 })
 
+test('occupation sync replaces ownership and effect squares with the authoritative state', () => {
+  const zones = [{ squares: [{ file: 1, rank: 7 }], effect_squares: [{ file: 2, rank: 6 }], owner: 'white' as const }]
+  const previous = { ...syncCurrent, occupation_zones: [{ ...zones[0], effect_squares: [], owner: null }] } as GameState
+  const sync = syncResponse()
+  sync.dynamic = { ...sync.dynamic, occupation_zones: zones }
+  assert.deepEqual(mergeGameSync(previous, sync).occupation_zones, zones)
+})
+
 test('live requests carry the tab capability and Bot creation explicitly fixes the bot side', async (t) => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
   Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => 'private-tab-capability' } })

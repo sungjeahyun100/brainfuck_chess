@@ -888,7 +888,9 @@ pub fn generate_piece_legal_ability_actions(
                 return Vec::new();
             }
             for target in crate::interaction::wizard_knight_catch_targets(game_state, actor) {
-                if can_capture_piece(game_state, actor, target) {
+                if can_capture_piece(game_state, actor, target)
+                    && can_destroy_piece_with_ability(game_state, actor, target)
+                {
                     let mut action =
                         simple_ability_action(actor, piece_id, ability_id, target.current_square);
                     action.target_piece_id = Some(target.id.clone());
@@ -902,7 +904,9 @@ pub fn generate_piece_legal_ability_actions(
                 return Vec::new();
             }
             for target in crate::interaction::wizard_bishop_jump_targets(game_state, actor) {
-                if can_capture_piece(game_state, actor, target) {
+                if can_capture_piece(game_state, actor, target)
+                    && can_destroy_piece_with_ability(game_state, actor, target)
+                {
                     let mut action =
                         simple_ability_action(actor, piece_id, ability_id, target.current_square);
                     action.target_piece_id = Some(target.id.clone());
@@ -1054,7 +1058,10 @@ pub fn generate_piece_legal_ability_actions(
                     if game_state
                         .pieces
                         .get(target_id)
-                        .is_some_and(|target| target.owner != actor.owner)
+                        .is_some_and(|target| {
+                            target.owner != actor.owner
+                                && can_destroy_piece_with_ability(game_state, actor, target)
+                        })
                     {
                         actions.push(AbilityAction {
                             player_id: actor.owner.clone(),

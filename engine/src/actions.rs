@@ -124,6 +124,7 @@ mod tests {
             .collect();
         let mut state = GameState {
             ruleset: Default::default(),
+            occupation_zones: Vec::new(),
             id: "canonical-apply-parity".into(),
             board: create_board(8),
             pieces: HashMap::new(),

@@ -15,9 +15,10 @@
         :class="squareClasses(sq)"
         :data-file="sq.file"
         :data-rank="sq.rank"
+        :title="occupationLabel(sq)"
         role="button" :tabindex="interactionDisabled ? -1 : 0"
         :aria-disabled="interactionDisabled"
-        :aria-label="`${fileLabel(sq.file)}${sq.rank + 1}${sacrificeMarker(sq) ? ' · ' + sacrificeMarker(sq) : ''}`"
+        :aria-label="`${fileLabel(sq.file)}${sq.rank + 1}${occupationLabel(sq) ? ' · ' + occupationLabel(sq) : ''}${sacrificeMarker(sq) ? ' · ' + sacrificeMarker(sq) : ''}`"
         @keydown.enter.prevent="onSquareClick(sq)" @keydown.space.prevent="onSquareClick(sq)"
         @click="onSquareClick(sq)"
         @pointerdown="onSquarePointerDown($event, sq)"
@@ -38,6 +39,8 @@
           {{ sq.rank + 1 }}
         </span>
         <span v-if="sacrificeMarker(sq)" class="sacrifice-marker">{{ sacrificeMarker(sq) }}</span>
+        <span v-if="occupationEffectOwner(sq)" class="occupation-effect" :class="`occupation-${occupationEffectOwner(sq)}`" aria-hidden="true" />
+        <span v-if="occupationZone(sq)" class="occupation-ring" :class="`occupation-${occupationZone(sq)?.owner ?? 'neutral'}`" aria-hidden="true" />
         <span v-if="legalMarker(sq)" class="legal-move-dot" :class="legalMarker(sq)" />
         <span v-if="sq.piece" class="piece" :data-piece-id="sq.piece.id" :class="`owner-${sq.piece.owner}`">
           <img
@@ -182,6 +185,7 @@ const props = defineProps<{
   board: Board
   pieces: Record<string, Piece>
   definitions: Record<string, PieceDefinition>
+  occupationZones?: Array<{ squares: Square[]; effect_squares: Square[]; owner: PlayerId | null }>
   selectedPieceId: string | null
   movableSquares: Square[]
   attackSquares: Square[]
@@ -425,6 +429,34 @@ function isRankLabelSquare(square: SquareInfo) {
 
 function fileLabel(file: number) {
   return String.fromCharCode('a'.charCodeAt(0) + file)
+}
+
+function occupationZone(square: SquareInfo) {
+  return Array.isArray(props.occupationZones)
+    ? props.occupationZones.find(zone => Array.isArray(zone?.squares) && zone.squares.some(cell => cell?.file === square.file && cell?.rank === square.rank))
+    : undefined
+}
+
+const occupationEffectOwners = computed(() => {
+  const owners = new Map<string, PlayerId>()
+  for (const zone of Array.isArray(props.occupationZones) ? props.occupationZones : []) {
+    if (!Array.isArray(zone?.squares) || (zone.owner !== 'white' && zone.owner !== 'black')) continue
+    for (const square of zone.effect_squares ?? []) {
+      owners.set(squareId(square.file, square.rank), zone.owner)
+    }
+  }
+  return owners
+})
+
+function occupationEffectOwner(square: SquareInfo): PlayerId | undefined {
+  return occupationEffectOwners.value.get(square.id)
+}
+
+function occupationLabel(square: SquareInfo) {
+  const zone = occupationZone(square)
+  if (zone) return `점령 구역 · ${zone.owner === 'white' ? '백 소유' : zone.owner === 'black' ? '흑 소유' : '중립'}`
+  const owner = occupationEffectOwner(square)
+  return owner ? `${owner === 'white' ? '백' : '흑'} 점령 효과 영역` : ''
 }
 
 function terrainLabel(typeId: string) {
@@ -868,6 +900,32 @@ function pieceAlt(piece: Piece): string {
 .square.light { background: #f0d9b5; }
 .square.dark  { background: #b58863; }
 .square.last-move { background: #f2d34f; }
+.occupation-effect {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(circle, var(--occupation-core), var(--occupation-edge) 75%);
+  box-shadow: inset 0 0 0 2px var(--occupation-border), inset 0 0 16px var(--occupation-glow);
+  animation: occupation-pulse 2.8s ease-in-out infinite alternate;
+}
+.occupation-effect.occupation-white {
+  --occupation-core: rgba(55, 145, 255, .42);
+  --occupation-edge: rgba(55, 145, 255, .18);
+  --occupation-border: rgba(35, 115, 245, .75);
+  --occupation-glow: rgba(45, 155, 255, .8);
+}
+.occupation-effect.occupation-black {
+  --occupation-core: rgba(235, 60, 72, .44);
+  --occupation-edge: rgba(235, 60, 72, .2);
+  --occupation-border: rgba(205, 38, 55, .78);
+  --occupation-glow: rgba(245, 60, 75, .8);
+}
+@keyframes occupation-pulse { from { opacity: .72; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .occupation-effect { animation: none; opacity: 1; } }
+.occupation-ring { position:absolute; inset: 13%; border: 3px solid #27ba52; border-radius:50%; pointer-events:none; z-index:2; box-shadow:0 0 4px #135b2b; }
+.occupation-ring.occupation-white { border-color:#6dc7ff; box-shadow:0 0 0 2px #159447, 0 0 10px #238bff; }
+.occupation-ring.occupation-black { border-color:#ff707a; box-shadow:0 0 0 2px #159447, 0 0 10px #e83145; }
 
 .terrain-layer {
   position: absolute;

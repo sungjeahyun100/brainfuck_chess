@@ -52,6 +52,13 @@
 
       <section class="card bot-panel">
         <label class="difficulty-select">
+          <span class="limit-label">게임 모드</span>
+          <select v-model="gameMode">
+            <option value="standard">기본 대국</option>
+            <option value="occupation">점령전 (40라운드)</option>
+          </select>
+        </label>
+        <label class="difficulty-select">
           <span class="limit-label">타임 컨트롤</span>
           <select v-model="timeControl">
             <option v-for="option in TIME_CONTROLS" :key="option.id" :value="option.id">{{ option.label }}</option>
@@ -122,6 +129,7 @@ const secondaryDeckId = ref('')
 const humanSide = ref<LobbyPlayer>('white')
 const difficulty = ref<BotDifficulty>('normal')
 const timeControl = ref<TimeControlId>('ten_five')
+const gameMode = ref<'standard' | 'occupation'>('standard')
 const singleSide = ref<LobbyPlayer | 'random'>('random')
 const guestNickname = ref('Guest')
 const localNickname = ref('Player')
@@ -168,6 +176,7 @@ function start() {
       botDeckId: secondaryDeckId.value,
       difficulty: difficulty.value,
       timeControl: timeControl.value,
+      gameMode: gameMode.value,
     })
     return
   }
@@ -179,6 +188,7 @@ function start() {
     localNickname: localNickname.value.trim(),
     guestNickname: guestNickname.value.trim(),
     timeControl: timeControl.value,
+    gameMode: gameMode.value,
   }))
 }
 

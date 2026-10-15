@@ -45,6 +45,7 @@ fn empty_state(name: &str) -> GameState {
 
     GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: format!("ai-benchmark-{name}"),
         board: create_board(8),
         pieces: HashMap::new(),

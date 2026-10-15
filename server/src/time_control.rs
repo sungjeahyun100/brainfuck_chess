@@ -293,6 +293,8 @@ pub(crate) struct GameDynamicView {
     pub(crate) hand_counts: HashMap<PlayerId, usize>,
     pub(crate) deck_counts: HashMap<PlayerId, usize>,
     pub(crate) ruleset: brainfuck_chess_engine::types::DeckRuleset,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) occupation_zones: Vec<brainfuck_chess_engine::types::OccupationZone>,
     pub(crate) id: String,
     pub(crate) board: Board,
     pub(crate) pieces: HashMap<PieceId, Piece>,
@@ -527,6 +529,7 @@ impl StoredGame {
                 hand_counts: game_view::hand_counts(&self.state),
                 deck_counts: game_view::deck_counts(&self.state),
                 ruleset: self.state.ruleset,
+                occupation_zones: self.state.occupation_zones.clone(),
                 id: self.state.id.clone(),
                 board: self.state.board.clone(),
                 pieces: projected.pieces,
@@ -663,6 +666,7 @@ mod tests {
     fn empty_game() -> GameState {
         GameState {
             ruleset: Default::default(),
+            occupation_zones: Vec::new(),
             id: "clock-test".into(),
             board: Board {
                 size: 8,

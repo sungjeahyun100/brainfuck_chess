@@ -51,6 +51,13 @@
               <label><input v-model="hostSideMode" type="radio" value="random" :disabled="Boolean(currentRoom)" /> 랜덤</label>
             </div>
             <label>
+              <span class="limit-label">게임 모드</span>
+              <select v-model="gameMode" class="text-input" :disabled="Boolean(currentRoom)">
+                <option value="standard">기본 대국</option>
+                <option value="occupation">점령전 (40라운드)</option>
+              </select>
+            </label>
+            <label>
               <span class="limit-label">타임 컨트롤</span>
               <select v-model="timeControl" class="text-input" :disabled="Boolean(currentRoom)">
                 <option v-for="option in TIME_CONTROLS" :key="option.id" :value="option.id">{{ option.label }}</option>
@@ -73,7 +80,7 @@
             <strong>{{ currentRoom ? currentRoom.id : '없음' }}</strong>
             <p v-if="selectedDeck">선택 덱: {{ selectedDeck.name }} · {{ boardMapLabel(selectedDeck.mapId) }}</p>
             <p v-if="currentRoom">
-              방 맵: {{ boardMapLabel(currentRoom.map_id) }} · {{ currentRoom.ruleset === 'standard' ? 'Standard' : 'Legacy' }} · 방장 {{ playerLabel(currentRoom.host_side) }}
+              방 맵: {{ boardMapLabel(currentRoom.map_id) }} · {{ currentRoom.ruleset === 'standard' ? 'Standard' : 'Legacy' }} · {{ currentRoom.game_mode === 'occupation' ? '점령전' : '기본 대국' }} · 방장 {{ playerLabel(currentRoom.host_side) }}
             </p>
             <p v-if="currentRoom">타임 컨트롤: {{ timeControlLabel(currentRoom.time_control) }}</p>
             <p v-if="currentRoom">
@@ -117,6 +124,7 @@ const error = ref<string | null>(null)
 const pollTimer = ref<number | null>(null)
 const localPlayer = ref<LobbyPlayer | null>(null)
 const timeControl = ref<TimeControlId>('ten_five')
+const gameMode = ref<'standard' | 'occupation'>('standard')
 
 const validDecks = computed(() => decks.value.filter(deck => validateSavedDeck(deck).valid))
 const selectedDeck = computed(() => validDecks.value.find(deck => deck.id === selectedDeckId.value) ?? null)
@@ -170,6 +178,7 @@ async function createRoom() {
       savedDeckToPlayerDeckRequest(selectedDeck.value),
       selectedDeck.value.mapId,
       timeControl.value,
+      gameMode.value,
     )
     currentRoom.value = room
     localPlayer.value = hostSide

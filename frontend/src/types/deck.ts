@@ -92,6 +92,7 @@ export interface DeckPreset {
 export type DeckSelectMode = 'single' | 'bot'
 
 export interface SingleDeckSelection {
+  gameMode?: 'standard' | 'occupation'
   localDeckId: string
   opponentDeckId: string
   localSide: LobbyPlayer | 'random'
@@ -101,6 +102,7 @@ export interface SingleDeckSelection {
 }
 
 export interface BotDeckSelection {
+  gameMode?: 'standard' | 'occupation'
   humanSide: LobbyPlayer
   humanDeckId: string
   botDeckId: string

@@ -67,6 +67,7 @@ export interface ChallengeSummary {
 }
 
 export interface MultiplayerRoom {
+  game_mode?: 'standard' | 'occupation'
   ruleset?: DeckRuleset
   id: string
   board_size: number
@@ -106,6 +107,7 @@ interface GameSyncCatalog {
 }
 
 interface GameDynamicView {
+  occupation_zones?: GameState['occupation_zones']
   deck_counts?: GameState['deck_counts']
   hand_counts?: GameState['hand_counts']
   ruleset?: DeckRuleset
@@ -317,11 +319,13 @@ export const api = {
     mapId: BoardMapId,
     timeControl: TimeControlId,
     player?: { localSide: PlayerId; localNickname?: string; guestNickname: string; botPlayerId?: PlayerId },
+    gameMode: 'standard' | 'occupation' = 'standard',
   ): Promise<{ id: string; state: GameState }> {
     return request(`${BASE}`, {
       method: 'POST',
       body: JSON.stringify({
         ruleset: parseDeckRuleset(whiteDeck.ruleset),
+        game_mode: gameMode,
         board_size: boardSize,
         map_id: mapId,
         white_deck: whiteDeck,
@@ -460,11 +464,13 @@ export const api = {
     deck: PlayerDeckRequest,
     mapId: BoardMapId,
     timeControl: TimeControlId,
+    gameMode: 'standard' | 'occupation' = 'standard',
   ): Promise<MultiplayerRoom> {
     return request(`${ROOM_BASE}`, {
       method: 'POST',
       body: JSON.stringify({
         ruleset: parseDeckRuleset(deck.ruleset),
+        game_mode: gameMode,
         board_size: boardSize,
         map_id: mapId,
         host_side: hostSide,

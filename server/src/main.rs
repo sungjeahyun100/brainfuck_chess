@@ -101,6 +101,8 @@ fn require_control(
 #[derive(Deserialize)]
 struct CreateGameRequest {
     #[serde(default)]
+    game_mode: game_record::GameMode,
+    #[serde(default)]
     ruleset: DeckRuleset,
     board_size: i32,
     #[serde(default)]
@@ -143,6 +145,8 @@ struct ChallengePlayerDeckSpec {
 #[derive(Clone, Deserialize)]
 struct MultiplayerRoom {
     #[serde(default)]
+    game_mode: game_record::GameMode,
+    #[serde(default)]
     ruleset: DeckRuleset,
     id: String,
     board_size: i32,
@@ -167,7 +171,7 @@ struct MultiplayerRoom {
 impl Serialize for MultiplayerRoom {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut value = serde_json::json!({
-            "ruleset": self.ruleset, "id": self.id, "board_size": self.board_size,
+            "ruleset": self.ruleset, "game_mode": self.game_mode, "id": self.id, "board_size": self.board_size,
             "map_id": self.map_id, "board_variant": self.board_variant,
             "host_side": self.host_side, "guest_side": self.guest_side,
             "host_ready": self.host_ready, "guest_ready": self.guest_ready,
@@ -192,6 +196,8 @@ impl Serialize for MultiplayerRoom {
 
 #[derive(Deserialize)]
 struct CreateRoomRequest {
+    #[serde(default)]
+    game_mode: game_record::GameMode,
     #[serde(default)]
     ruleset: DeckRuleset,
     board_size: i32,
@@ -971,6 +977,7 @@ fn build_game_state_with_variant(
 
     let mut state = GameState {
         ruleset: white_spec.ruleset,
+        occupation_zones: Vec::new(),
         id,
         board,
         pieces,
@@ -1052,6 +1059,7 @@ fn build_lab_game_state(
     let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&defs);
     let mut catalog_state = GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: "piece-lab-catalog".into(),
         board,
         pieces: HashMap::new(),
@@ -1264,6 +1272,7 @@ fn build_lab_game_state(
 
     Ok(GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: "piece-lab".into(),
         board,
         pieces,
@@ -1435,7 +1444,7 @@ async fn start_room_game(
         .ok_or_else(|| "참가자 인증 정보가 없습니다.".to_string())?;
     let packages =
         resolve_custom_packages(app, &[(host_owner, host_spec), (guest_owner, guest_spec)]).await?;
-    let state = build_game_state_with_variant(
+    let mut state = build_game_state_with_variant(
         game_id.clone(),
         room.board_size,
         room.board_variant,
@@ -1445,6 +1454,10 @@ async fn start_room_game(
         true,
         true,
     )?;
+    if room.game_mode == game_record::GameMode::Occupation {
+        state.occupation_zones = brainfuck_chess_engine::occupation::zones_for_board(room.board_size)
+            .ok_or_else(|| "점령전은 8×8 또는 12×12 보드만 지원합니다.".to_string())?;
+    }
     let (white_owner, black_owner) = if room.host_side == "white" {
         (host_owner, guest_owner)
     } else {
@@ -1998,6 +2011,14 @@ async fn create_game(
     headers: HeaderMap,
     Json(req): Json<CreateGameRequest>,
 ) -> Result<Json<GameResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if req.game_mode == game_record::GameMode::Challenge {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "지원하지 않는 게임 모드입니다.".into(),
+            }),
+        ));
+    }
     ensure_ruleset(req.ruleset, req.white_deck.ruleset)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     ensure_ruleset(req.ruleset, req.black_deck.ruleset)
@@ -2020,7 +2041,7 @@ async fn create_game(
         resolve_board_map(req.map_id.as_deref(), req.board_size, req.board_variant)
             .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     let id = Uuid::new_v4().to_string();
-    let state = build_game_state_with_variant(
+    let mut state = build_game_state_with_variant(
         id.clone(),
         req.board_size,
         board_variant,
@@ -2031,6 +2052,13 @@ async fn create_game(
         true,
     )
     .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
+    if req.game_mode == game_record::GameMode::Occupation {
+        state.occupation_zones = brainfuck_chess_engine::occupation::zones_for_board(req.board_size)
+            .ok_or_else(|| (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error: "점령전은 8×8 또는 12×12 보드만 지원합니다.".into() }),
+            ))?;
+    }
     let now = now_ms();
     let (record_players, record_ownership) = if let Some(local_side) = req.local_side.as_deref() {
         singleplayer_record_players(
@@ -2097,6 +2125,14 @@ async fn create_room(
     headers: HeaderMap,
     Json(req): Json<CreateRoomRequest>,
 ) -> Result<Json<MultiplayerRoom>, (StatusCode, Json<ErrorResponse>)> {
+    if req.game_mode == game_record::GameMode::Challenge {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "지원하지 않는 게임 모드입니다.".into(),
+            }),
+        ));
+    }
     ensure_ruleset(req.ruleset, req.deck.ruleset)
         .map_err(|error| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })))?;
     ensure_new_board_size(req.ruleset, req.board_size)
@@ -2128,6 +2164,7 @@ async fn create_room(
 
     let id = generate_room_id(&app.rooms);
     let room = MultiplayerRoom {
+        game_mode: req.game_mode,
         ruleset: req.ruleset,
         id: id.clone(),
         board_size: req.board_size,
@@ -6873,6 +6910,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn occupation_game_creation_persists_fixed_zones_and_record_mode() {
+        let app = AppState::in_memory();
+        for (size, map, expected) in [
+            (8, "standard-8x8", 7),
+            (12, "standard-12x12", 9),
+        ] {
+            let mut request = ruleset_game_request(size, DeckRuleset::Legacy, map);
+            request["game_mode"] = serde_json::json!("occupation");
+            let (status, response) = ruleset_http(&app, "/games", request).await;
+            assert_eq!(status, StatusCode::OK, "{response}");
+            let zones = response["state"]["occupation_zones"].as_array().unwrap();
+            assert_eq!(zones.len(), expected);
+            assert!(zones.iter().all(|zone| zone["stack"].is_null()
+                && zone["owner"].is_null()
+                && zone["effect_squares"].is_array()));
+            let id = response["id"].as_str().unwrap();
+            let game = app.games.get(id).unwrap();
+            assert_eq!(game.record.game_mode, game_record::GameMode::Occupation);
+            assert_eq!(game.record.initial_state.occupation_zones.len(), expected);
+            assert_eq!(game.record.state_at_ply(0).unwrap().occupation_zones.len(), expected);
+        }
+        let mut invalid = ruleset_game_request(10, DeckRuleset::Legacy, "standard-10x10");
+        invalid["game_mode"] = serde_json::json!("occupation");
+        assert_eq!(ruleset_http(&app, "/games", invalid).await.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn occupation_room_sends_same_zone_state_to_both_players() {
+        let app = AppState::in_memory();
+        let deck = valid_player_deck_with_ruleset(8, DeckRuleset::Legacy);
+        let (status, room) = ruleset_http(&app, "/rooms", serde_json::json!({
+            "game_mode":"occupation", "board_size":8, "map_id":"standard-8x8",
+            "ruleset":"legacy", "host_side":"white", "client_id":"host", "deck":deck,
+            "time_control":"unlimited"
+        })).await;
+        assert_eq!(status, StatusCode::OK, "{room}");
+        assert_eq!(room["game_mode"], "occupation");
+        let id = room["id"].as_str().unwrap();
+        let (status, joined) = ruleset_http(&app, &format!("/rooms/{id}/join"),
+            serde_json::json!({"client_id":"guest","deck":deck})).await;
+        assert_eq!(status, StatusCode::OK, "{joined}");
+        let game_id = joined["state"]["id"].as_str().unwrap();
+        assert_eq!(app.games.get(game_id).unwrap().record.game_mode, game_record::GameMode::Occupation);
+        {
+            let mut game = app.games.get_mut(game_id).unwrap();
+            game.state.occupation_zones[0].owner = Some("white".into());
+        }
+        for (client, side) in [("host", "white"), ("guest", "black")] {
+            let (status, sync) = ruleset_http(&app, &format!("/rooms/{id}/heartbeat"),
+                serde_json::json!({"client_id":client, "player_id":side,
+                    "latest_ply":0, "catalog_revision":null})).await;
+            assert_eq!(status, StatusCode::OK, "{sync}");
+            assert_eq!(sync["dynamic"]["occupation_zones"][0]["owner"], "white");
+            assert!(sync["dynamic"]["occupation_zones"][0]["stack"].is_null());
+            assert_eq!(sync["dynamic"]["occupation_zones"].as_array().unwrap().len(), 7);
+        }
+    }
+
+    #[tokio::test]
     async fn ruleset_game_creation_enforces_format_sizes_and_preserves_valid_views() {
         let app = AppState::in_memory();
         for (size, map) in [
@@ -6891,6 +6987,7 @@ mod tests {
                     continue;
                 }
                 assert_eq!(status, StatusCode::OK, "{response}");
+                assert!(response["state"]["occupation_zones"].is_null());
                 assert_eq!(
                     response["state"]["ruleset"],
                     serde_json::to_value(ruleset).unwrap()

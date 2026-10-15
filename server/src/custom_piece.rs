@@ -1611,6 +1611,7 @@ fn build_test_state(board_spec: TestBoard, package: &CustomPiecePackage) -> ApiR
         .collect::<HashMap<_, _>>();
     let mut state = GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: "custom-piece-test".into(),
         board: board.clone(),
         pieces: HashMap::new(),
@@ -1958,6 +1959,7 @@ mod tests {
         assert_eq!(state.players["white"].deck.total_score, 22);
 
         let mut room = crate::MultiplayerRoom {
+            game_mode: Default::default(),
             ruleset: Default::default(),
             id: "ROOM01".into(),
             board_size: 8,

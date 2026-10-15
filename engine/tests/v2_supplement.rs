@@ -16,6 +16,7 @@ fn make_state() -> GameState {
         .collect::<HashMap<_, _>>();
     GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: "v2-supplement".into(),
         board: create_board(8),
         pieces: HashMap::new(),

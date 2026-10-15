@@ -32,6 +32,14 @@ fn get_placement_candidates(game_state: &GameState, player_id: &PlayerId) -> Vec
         candidates.insert(*sq_id);
     }
 
+    for zone in &game_state.occupation_zones {
+        if zone.owner.as_ref() == Some(player_id) {
+            for square in &zone.effect_squares {
+                candidates.insert(square.to_id());
+            }
+        }
+    }
+
     // Filter only by bounds. Drop-specific occupancy rules are applied below.
     let squares = candidates
         .into_iter()
