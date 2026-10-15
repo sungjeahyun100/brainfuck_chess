@@ -8,6 +8,8 @@ use crate::types::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PositionKey {
     ruleset: crate::types::DeckRuleset,
+    occupation: Vec<Option<String>>,
+    occupation_turn: u32,
     board_size: i32,
     board: Vec<(i32, i32, Option<PieceId>)>,
     air_board: Vec<(i32, i32, Option<PieceId>)>,
@@ -158,6 +160,16 @@ impl PositionKey {
 
         Self {
             ruleset: state.ruleset,
+            occupation: state
+                .occupation_zones
+                .iter()
+                .map(|zone| zone.owner.clone())
+                .collect(),
+            occupation_turn: if state.occupation_zones.is_empty() {
+                0
+            } else {
+                state.turn_number
+            },
             board_size: state.board.size,
             board,
             air_board,
@@ -192,6 +204,7 @@ const fn result_tag(reason: &GameEndReason) -> u8 {
         GameEndReason::Timeout => 2,
         GameEndReason::Abandonment => 3,
         GameEndReason::Draw => 4,
+        GameEndReason::OccupationLimit => 5,
     }
 }
 
@@ -299,6 +312,7 @@ mod tests {
         }
         let mut state = GameState {
             ruleset: Default::default(),
+            occupation_zones: Vec::new(),
             id: "position-key-test".into(),
             board: create_board(8),
             pieces: HashMap::new(),

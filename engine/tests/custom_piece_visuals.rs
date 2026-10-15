@@ -17,6 +17,7 @@ fn empty_state() -> GameState {
     let chessembly_program_cache = ChessemblyProgramCache::from_definitions(&definitions);
     GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: "custom-visual-test".into(),
         board: create_board(8),
         pieces: HashMap::new(),

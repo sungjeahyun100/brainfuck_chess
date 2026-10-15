@@ -39,6 +39,7 @@ fn make_state() -> GameState {
 
     GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: "ai-test".into(),
         board: create_board(8),
         pieces: HashMap::new(),

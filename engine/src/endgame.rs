@@ -202,6 +202,7 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
 /// action that creates it, then decreases after each later action by its owner.
 pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> GameState {
     if let TurnAction::Draw(draw) = &action {
+        let player_id = draw.player_id.clone();
         game_state
             .global_state
             .insert(crate::actions::DRAW_REQUIRED.into(), 0);
@@ -210,6 +211,7 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
             player_id: draw.player_id.clone(),
             action,
         });
+        reconcile_occupation(&mut game_state, &player_id);
         return game_state;
     }
     let accelerated_move = match &action {
@@ -316,6 +318,8 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         action,
     });
 
+    reconcile_occupation(&mut game_state, &player_id);
+
     if keeps_turn && game_state.phase != GamePhase::Ended && game_state.result.is_none() {
         return game_state;
     }
@@ -354,9 +358,119 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
             "white".into()
         };
         game_state.turn_number += 1;
-        crate::actions::prepare_draw(&mut game_state);
+        // The limit counts completed White/Black turn cycles, not actions.
+        if player_id == "black" {
+            finish_occupation_limit(&mut game_state);
+        }
+        if game_state.phase != GamePhase::Ended {
+            crate::actions::prepare_draw(&mut game_state);
+        }
     }
     game_state
+}
+
+fn reconcile_occupation(state: &mut GameState, acting_player: &PlayerId) {
+    if state.occupation_zones.is_empty() {
+        return;
+    }
+    // Older saved occupation states have counters and no arrow coordinates.
+    if state.occupation_zones.iter().any(|zone| zone.effect_squares.is_empty()) {
+        if let Some(zones) = crate::occupation::zones_for_board(state.board.size) {
+            state.occupation_zones = zones;
+        } else {
+            return;
+        }
+    }
+    // Decide every zone from the same post-action board before any removals.
+    let owners: Vec<Option<PlayerId>> = state.occupation_zones.iter().map(|zone| {
+        let (white, black) = state
+            .pieces
+            .values()
+            .filter(|piece| {
+                piece.is_on_board()
+                    && piece
+                        .current_square
+                        .is_some_and(|sq| zone.squares.contains(&sq))
+            })
+            .fold((0, 0), |(white, black), piece| {
+                if piece.owner == "white" {
+                    (white + 1, black)
+                } else if piece.owner == "black" {
+                    (white, black + 1)
+                } else {
+                    (white, black)
+                }
+            });
+        if white > black {
+            Some("white".into())
+        } else if black > white {
+            Some("black".into())
+        } else {
+            None
+        }
+    }).collect();
+    let mut targets = std::collections::HashSet::new();
+    for (zone, owner) in state.occupation_zones.iter_mut().zip(owners) {
+        if zone.owner != owner {
+            if let Some(side) = &owner {
+                for piece in state.pieces.values() {
+                    if piece.is_on_board()
+                        && piece.owner != *side
+                        && piece.current_square.is_some_and(|sq| zone.effect_squares.contains(&sq))
+                    {
+                        targets.insert(piece.id.clone());
+                    }
+                }
+            }
+        }
+        zone.owner = owner;
+    }
+    let mut targets: Vec<_> = targets.into_iter().collect();
+    targets.sort();
+    let mut removal = RemovalOutcome::default();
+    for id in targets {
+        let captor: PlayerId = if state.pieces[&id].owner == "white" {
+            "black".into()
+        } else {
+            "white".into()
+        };
+        removal.merge(remove_captured_piece(state, &id, &captor));
+    }
+    if state.result.is_none() {
+        apply_removal_result(state, &removal, acting_player);
+    }
+}
+
+fn finish_occupation_limit(state: &mut GameState) {
+    if state.occupation_zones.is_empty() {
+        return;
+    }
+    // turn_number starts at 1 and advances once per consumed player turn.
+    if state.phase != GamePhase::Ended && (state.turn_number - 1) / 2 >= 40 {
+        let white: usize = state
+            .occupation_zones
+            .iter()
+            .filter(|zone| zone.owner.as_deref() == Some("white"))
+            .map(|zone| zone.squares.len())
+            .sum();
+        let black: usize = state
+            .occupation_zones
+            .iter()
+            .filter(|zone| zone.owner.as_deref() == Some("black"))
+            .map(|zone| zone.squares.len())
+            .sum();
+        state.phase = GamePhase::Ended;
+        state.result = Some(GameResult {
+            winner: if white > black {
+                Some("white".into())
+            } else if black > white {
+                Some("black".into())
+            } else {
+                None
+            },
+            reason: GameEndReason::OccupationLimit,
+        });
+    }
 }
 
 pub fn apply_ability_action(mut state: GameState, action: AbilityAction) -> GameState {
@@ -1196,5 +1310,315 @@ fn replenish_ammo_on_home_entry(
         if let Some(piece) = game_state.pieces.get_mut(piece_id) {
             piece.current_ammo = max_ammo;
         }
+    }
+}
+
+#[cfg(test)]
+mod occupation_tests {
+    use super::*;
+    use crate::occupation::zones_for_board;
+    use crate::pieces::default_pieces::all_default_definitions;
+    use crate::rules::create_board;
+    use std::collections::HashMap;
+
+    fn state(size: i32) -> GameState {
+        let definitions: HashMap<_, _> = all_default_definitions()
+            .into_iter()
+            .map(|definition| (definition.id.clone(), definition))
+            .collect();
+        let players = ["white", "black"]
+            .into_iter()
+            .map(|side| {
+                (
+                    side.into(),
+                    Player {
+                        id: side.into(),
+                        deck: Deck {
+                            player_id: side.into(),
+                            starting_pieces: vec![],
+                            pocket_pieces: vec![],
+                            hand_pieces: vec![],
+                            extra_deck_pieces: vec![],
+                            score_limit: 39,
+                            total_score: 0,
+                        },
+                        captured_pieces: vec![],
+                    },
+                )
+            })
+            .collect();
+        GameState {
+            ruleset: DeckRuleset::Legacy,
+            occupation_zones: zones_for_board(size).unwrap(),
+            id: "occupation-test".into(),
+            board: create_board(size),
+            pieces: HashMap::new(),
+            piece_definitions: definitions.clone(),
+            custom_piece_manifest: vec![],
+            players,
+            current_player: "white".into(),
+            turn_number: 1,
+            phase: GamePhase::Playing,
+            en_passant_target: None,
+            en_passant_available_to: None,
+            global_state: HashMap::new(),
+            history: vec![],
+            result: None,
+            chessembly_program_cache: ChessemblyProgramCache::from_definitions(&definitions),
+        }
+    }
+
+    fn place(state: &mut GameState, id: &str, side: &str, square: Square) {
+        let id: PieceId = id.into();
+        state
+            .board
+            .set_piece_at_layer(square, PieceLayer::Ground, Some(id.clone()));
+        state.pieces.insert(
+            id.clone(),
+            Piece {
+                id,
+                owner: side.into(),
+                type_id: "rook".into(),
+                current_square: Some(square),
+                in_pocket: false,
+                captured: false,
+                has_moved: false,
+                current_ammo: 0,
+                layer: PieceLayer::Ground,
+                remaining_flight_turns: 0,
+                state: HashMap::new(),
+                move_option_cooldowns: HashMap::new(),
+            },
+        );
+    }
+
+    fn move_action(side: &str, id: &str, from: Square, to: Square) -> TurnAction {
+        TurnAction::Move(MoveAction {
+            player_id: side.into(),
+            piece_id: id.into(),
+            from,
+            to,
+            captured_piece_id: None,
+            promotion: None,
+            move_option_id: "normal".into(),
+            source_layer_ids: vec![],
+            effects: ActionEffects::default(),
+        })
+    }
+
+    fn sq(label: &str) -> Square {
+        Square::new((label.as_bytes()[0] - b'a') as i32, label[1..].parse::<i32>().unwrap() - 1)
+    }
+
+    fn labels(squares: &[Square]) -> Vec<String> {
+        squares.iter().map(|s| format!("{}{}", (b'a' + s.file as u8) as char, s.rank + 1)).collect()
+    }
+
+    #[test]
+    fn fixed_judgment_and_effect_squares_match_images() {
+        let expected = [
+            (8, vec![
+                ("b8", "a8 a7 b7 c7 c8"), ("g8", "f8 f7 g7 h7 h8"),
+                ("a5 a4", "a6 b6 b5 b4 b3 a3"),
+                ("d5 e5 d4 e4", "d6 e6 f6 c6 c5 c4 c3 d3 e3 f3 f4 f5"),
+                ("h5 h4", "h6 g6 g5 g4 g3 h3"),
+                ("b1", "a1 a2 b2 c2 c1"), ("g1", "f1 f2 g2 h2 h1"),
+            ]),
+            (12, vec![
+                ("f12 g12", "e12 e11 f11 g11 h11 h12"),
+                ("c11", "b12 c12 d12 b11 d11 b10 c10 d10"),
+                ("j11", "i12 j12 k12 i11 k11 i10 j10 k10"),
+                ("b7 c7 b6 c6", "a8 b8 c8 d8 a7 d7 a6 d6 a5 b5 c5 d5"),
+                ("f7 g7 f6 g6", "e8 f8 g8 h8 e7 h7 e6 h6 e5 f5 g5 h5"),
+                ("j7 k7 j6 k6", "i8 j8 k8 l8 i7 l7 i6 l6 i5 j5 k5 l5"),
+                ("c2", "b3 c3 d3 b2 d2 b1 c1 d1"),
+                ("j2", "i3 j3 k3 i2 k2 i1 j1 k1"),
+                ("f1 g1", "e1 e2 f2 g2 h2 h1"),
+            ]),
+        ];
+        for (size, expected_zones) in expected {
+            let zones = zones_for_board(size).unwrap();
+            assert_eq!(zones.len(), expected_zones.len());
+            for (zone, (circles, arrows)) in zones.iter().zip(expected_zones) {
+                assert_eq!(labels(&zone.squares), circles.split_whitespace().collect::<Vec<_>>());
+                assert_eq!(labels(&zone.effect_squares), arrows.split_whitespace().collect::<Vec<_>>());
+                assert_eq!(zone.owner, None);
+            }
+        }
+        assert!(zones_for_board(10).is_none());
+    }
+
+    #[test]
+    fn each_zone_uses_only_its_own_current_piece_counts() {
+        let mut game = state(8);
+        reconcile_occupation(&mut game, &"white".into());
+        assert!(game.occupation_zones.iter().all(|zone| zone.owner.is_none()));
+        place(&mut game, "w", "white", sq("a5"));
+        place(&mut game, "b", "black", sq("a4"));
+        place(&mut game, "other", "black", sq("g8"));
+        reconcile_occupation(&mut game, &"white".into());
+        assert_eq!(game.occupation_zones[2].owner, None);
+        assert_eq!(game.occupation_zones[1].owner.as_deref(), Some("black"));
+        remove_captured_piece(&mut game, &"b".into(), &"white".into());
+        reconcile_occupation(&mut game, &"white".into());
+        assert_eq!(game.occupation_zones[2].owner.as_deref(), Some("white"));
+        assert_eq!(game.occupation_zones[1].owner.as_deref(), Some("black"));
+        remove_captured_piece(&mut game, &"w".into(), &"black".into());
+        reconcile_occupation(&mut game, &"black".into());
+        assert_eq!(game.occupation_zones[2].owner, None);
+    }
+
+    #[test]
+    fn new_claim_removes_enemy_once_and_flip_changes_captor() {
+        let mut game = state(8);
+        place(&mut game, "holder", "white", sq("b8"));
+        place(&mut game, "target", "black", sq("c7"));
+        reconcile_occupation(&mut game, &"white".into());
+        assert_eq!(game.occupation_zones[0].owner.as_deref(), Some("white"));
+        assert!(game.pieces["target"].captured);
+        assert!(game.players["white"].captured_pieces.contains(&"target".into()));
+        place(&mut game, "late", "black", sq("c7"));
+        reconcile_occupation(&mut game, &"white".into());
+        assert!(!game.pieces["late"].captured);
+        remove_captured_piece(&mut game, &"holder".into(), &"black".into());
+        place(&mut game, "invader", "black", sq("b8"));
+        place(&mut game, "white-target", "white", sq("a7"));
+        reconcile_occupation(&mut game, &"black".into());
+        assert_eq!(game.occupation_zones[0].owner.as_deref(), Some("black"));
+        assert!(game.pieces["white-target"].captured);
+        assert!(!game.pieces["late"].captured);
+        assert!(game.players["black"].captured_pieces.contains(&"white-target".into()));
+    }
+
+    #[test]
+    fn simultaneous_claims_use_one_snapshot() {
+        let mut game = state(8);
+        place(&mut game, "w", "white", sq("b8"));
+        place(&mut game, "b", "black", sq("g8"));
+        place(&mut game, "enemy-left", "black", sq("c7"));
+        place(&mut game, "enemy-right", "white", sq("f7"));
+        let mut reversed = game.clone();
+        reversed.occupation_zones.reverse();
+        reconcile_occupation(&mut game, &"white".into());
+        reconcile_occupation(&mut reversed, &"white".into());
+        assert_eq!(game.occupation_zones[0].owner.as_deref(), Some("white"));
+        assert_eq!(game.occupation_zones[1].owner.as_deref(), Some("black"));
+        assert!(game.pieces["enemy-left"].captured);
+        assert!(game.pieces["enemy-right"].captured);
+        assert_eq!(game.pieces["enemy-left"].captured, reversed.pieces["enemy-left"].captured);
+        assert_eq!(game.pieces["enemy-right"].captured, reversed.pieces["enemy-right"].captured);
+        assert_eq!(game.players["white"].captured_pieces, reversed.players["white"].captured_pieces);
+        assert_eq!(game.players["black"].captured_pieces, reversed.players["black"].captured_pieces);
+    }
+
+    #[test]
+    fn claimed_arrows_extend_drop_range_and_neutral_retracts_it() {
+        let mut game = state(8);
+        place(&mut game, "holder", "white", sq("b8"));
+        reconcile_occupation(&mut game, &"white".into());
+        assert!(crate::placement::get_placement_squares(&game, &"white".into()).contains(&sq("c7")));
+        remove_captured_piece(&mut game, &"holder".into(), &"black".into());
+        reconcile_occupation(&mut game, &"white".into());
+        assert_eq!(game.occupation_zones[0].owner, None);
+        assert!(!crate::placement::get_placement_squares(&game, &"white".into()).contains(&sq("c7")));
+
+        place(&mut game, "black-holder", "black", sq("b1"));
+        reconcile_occupation(&mut game, &"black".into());
+        assert!(crate::placement::get_placement_squares(&game, &"black".into()).contains(&sq("c2")));
+        assert!(!crate::placement::get_placement_squares(&game, &"white".into()).contains(&sq("c7")));
+    }
+
+    #[test]
+    fn turn_preserving_draw_reconciles_without_advancing_the_cycle() {
+        let mut game = state(8);
+        place(&mut game, "holder", "white", sq("b8"));
+        game = apply_and_advance_turn(game, TurnAction::Draw(DrawAction {
+            player_id: "white".into(),
+            turn_number: 1,
+        }));
+        assert_eq!(game.occupation_zones[0].owner.as_deref(), Some("white"));
+        assert_eq!(game.turn_number, 1);
+        assert_eq!(game.current_player, "white");
+    }
+
+    #[test]
+    fn old_counter_states_load_and_adopt_current_geometry_on_action() {
+        let mut game = state(8);
+        place(&mut game, "holder", "white", sq("b8"));
+        let mut saved = serde_json::to_value(&game).unwrap();
+        saved["occupation_zones"][0] = serde_json::json!({
+            "squares": [{"file": 3, "rank": 7}, {"file": 4, "rank": 7}],
+            "stack": 5,
+            "owner": "white"
+        });
+        let mut loaded: GameState = serde_json::from_value(saved).unwrap();
+        assert!(loaded.occupation_zones[0].effect_squares.is_empty());
+        reconcile_occupation(&mut loaded, &"white".into());
+        assert_eq!(loaded.occupation_zones[0].squares, vec![sq("b8")]);
+        assert_eq!(loaded.occupation_zones[0].owner.as_deref(), Some("white"));
+        assert!(!loaded.occupation_zones[0].effect_squares.is_empty());
+    }
+
+    #[test]
+    fn every_action_updates_ownership_but_limit_waits_for_fortieth_black_turn() {
+        let mut game = state(8);
+        place(&mut game, "holder", "white", sq("b8"));
+        place(&mut game, "white-mover", "white", sq("a3"));
+        place(&mut game, "black-mover", "black", sq("h3"));
+        for round in 1..=40 {
+            let (wf, wt, bf, bt) = if round % 2 == 1 {
+                ("a3", "a2", "h3", "h2")
+            } else {
+                ("a2", "a3", "h2", "h3")
+            };
+            game = apply_and_advance_turn(game, move_action("white", "white-mover", sq(wf), sq(wt)));
+            assert_eq!(game.occupation_zones[0].owner.as_deref(), Some("white"));
+            assert_eq!(game.phase, GamePhase::Playing);
+            game = apply_and_advance_turn(game, move_action("black", "black-mover", sq(bf), sq(bt)));
+            assert_eq!(game.turn_number, 2 * round + 1);
+            if round < 40 { assert_eq!(game.phase, GamePhase::Playing); }
+        }
+        assert_eq!(game.phase, GamePhase::Ended);
+        assert_eq!(game.result.as_ref().unwrap().winner.as_deref(), Some("white"));
+        assert_eq!(game.result.as_ref().unwrap().reason, GameEndReason::OccupationLimit);
+    }
+
+    #[test]
+    fn equal_claimed_circle_counts_draw_and_king_capture_takes_priority() {
+        let mut draw = state(8);
+        draw.turn_number = 80;
+        draw.current_player = "black".into();
+        place(&mut draw, "white-holder", "white", sq("b8"));
+        place(&mut draw, "black-holder", "black", sq("g8"));
+        place(&mut draw, "mover", "black", sq("h3"));
+        draw = apply_and_advance_turn(draw, move_action("black", "mover", sq("h3"), sq("h2")));
+        assert_eq!(draw.result.as_ref().unwrap().reason, GameEndReason::OccupationLimit);
+        assert_eq!(draw.result.as_ref().unwrap().winner, None);
+
+        let mut capture = state(8);
+        capture.turn_number = 80;
+        capture.current_player = "black".into();
+        place(&mut capture, "mover", "black", sq("a3"));
+        place(&mut capture, "king", "white", sq("a4"));
+        capture.pieces.get_mut("king").unwrap().type_id = "king".into();
+        let mut action = move_action("black", "mover", sq("a3"), sq("a4"));
+        if let TurnAction::Move(movement) = &mut action {
+            movement.captured_piece_id = Some("king".into());
+        }
+        capture = apply_and_advance_turn(capture, action);
+        assert_eq!(capture.result.as_ref().unwrap().reason, GameEndReason::KingCapture);
+        assert_eq!(capture.result.as_ref().unwrap().winner.as_deref(), Some("black"));
+    }
+
+    #[test]
+    fn ordinary_mode_does_not_get_occupation_limit() {
+        let mut game = state(8);
+        game.occupation_zones.clear();
+        game.turn_number = 80;
+        game.current_player = "black".into();
+        place(&mut game, "mover", "black", sq("h3"));
+        game = apply_and_advance_turn(game, move_action("black", "mover", sq("h3"), sq("h2")));
+        assert_eq!(game.phase, GamePhase::Playing);
+        assert_eq!(game.turn_number, 81);
     }
 }

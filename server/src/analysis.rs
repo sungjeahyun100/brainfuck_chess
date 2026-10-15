@@ -738,6 +738,7 @@ mod tests {
     fn state() -> GameState {
         GameState {
             ruleset: Default::default(),
+            occupation_zones: Vec::new(),
             id: "game".into(),
             board: Board {
                 size: 8,

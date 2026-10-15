@@ -64,6 +64,7 @@ fn make_game_state(board_size: i32) -> GameState {
 
     GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: "test".into(),
         board,
         pieces: HashMap::new(),

@@ -33,13 +33,13 @@ export interface GameRecord {
   players: Record<PlayerId, GameRecordPlayer>; time_control: TimeControlId
   initial_draws?: DrawResolution[]
   initial_state: ReplayInitialState; initial_clock: GameClock; decks: Record<PlayerId, DeckSnapshot>; actions: RecordedAction[]; final_clock?: GameClock | null
-  game_mode?: 'standard' | 'challenge'; challenge_id?: string | null
+  game_mode?: 'standard' | 'challenge' | 'occupation'; challenge_id?: string | null
   retention_mode?: 'auto' | 'permanent'; expires_at_ms?: number | null
 }
 export interface GameRecordSummary {
   game_id: string; display_name: string; started_at_ms: number; ended_at_ms?: number | null
   result?: GameResult | null; players: Record<PlayerId, GameRecordPlayer>; time_control: TimeControlId; owner_side: PlayerId
-  game_mode?: 'standard' | 'challenge'; challenge_id?: string | null
+  game_mode?: 'standard' | 'challenge' | 'occupation'; challenge_id?: string | null
   retention_mode: 'auto' | 'permanent'; expires_at_ms?: number | null; analysis_count: number
 }
 

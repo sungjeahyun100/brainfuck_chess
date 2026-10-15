@@ -37,6 +37,7 @@ fn state() -> GameState {
         .collect();
     GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: "wizard-test".into(),
         board: create_board(8),
         pieces: HashMap::new(),

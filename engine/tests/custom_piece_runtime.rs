@@ -113,6 +113,7 @@ fn state_with_piece(type_id: &str) -> GameState {
     );
     GameState {
         ruleset: Default::default(),
+        occupation_zones: Vec::new(),
         id: "custom-runtime".into(),
         board,
         pieces: HashMap::from([(piece_id, piece)]),

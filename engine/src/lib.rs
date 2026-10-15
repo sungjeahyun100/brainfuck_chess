@@ -9,6 +9,7 @@ pub mod hand;
 pub mod summon;
 pub mod interaction;
 pub mod legal_moves;
+pub mod occupation;
 pub mod pieces;
 pub mod placement;
 pub mod profiling;

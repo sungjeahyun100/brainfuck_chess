@@ -325,7 +325,7 @@ export interface BotTurnResponse {
 
 export type GamePhase = 'setup' | 'playing' | 'ended'
 
-export type GameEndReason = 'king_capture' | 'resignation' | 'timeout' | 'abandonment' | 'draw'
+export type GameEndReason = 'king_capture' | 'occupation_limit' | 'resignation' | 'timeout' | 'abandonment' | 'draw'
 
 export type TimeControlId = 'five_zero' | 'ten_zero' | 'five_three' | 'ten_five' | 'fifteen_ten' | 'unlimited'
 
@@ -370,6 +370,7 @@ export interface ChallengeGameMetadata {
 }
 
 export interface GameState {
+  occupation_zones?: Array<{ squares: Square[]; effect_squares: Square[]; owner: PlayerId | null }>
   /** Live Standard projection: counts for both sides; identities only in authorized decks. */
   deck_counts?: Record<PlayerId, number>
   hand_counts?: Record<PlayerId, number>

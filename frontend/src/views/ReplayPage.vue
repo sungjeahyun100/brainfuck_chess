@@ -11,7 +11,7 @@
       <section class="replay-board-area">
         <div class="replay-player"><div><strong>{{ record.players.black.nickname }}</strong><small v-if="record.players.black.public_id">@{{ record.players.black.public_id }}</small></div><b>{{ clockText('black') }}</b></div>
         <div class="replay-board-readonly" aria-label="읽기 전용 리플레이 보드">
-          <Board ref="boardRef" :board="state.board" :pieces="state.pieces" :definitions="state.piece_definitions" :selected-piece-id="selectedPieceId" :movable-squares="movableSquares" :attack-squares="attackSquares" :threat-squares="[]" :sacrifice-candidate-ids="summonActive ? summonSelection.candidates : []" :selected-sacrifice-ids="summonActive ? summonSelection.selected : []" :drop-squares="summonSquares.length ? summonSquares : dropSquares" :last-move="lastMove" :presentation-step="ply" orientation="white" :ability-mode="false" @square-click="onSquareClick" @piece-click="onBoardPieceClick" @piece-drag-start="selectPiece" @square-drop="onSquareDrop" />
+          <Board ref="boardRef" :board="state.board" :pieces="state.pieces" :occupation-zones="state.occupation_zones" :definitions="state.piece_definitions" :selected-piece-id="selectedPieceId" :movable-squares="movableSquares" :attack-squares="attackSquares" :threat-squares="[]" :sacrifice-candidate-ids="summonActive ? summonSelection.candidates : []" :selected-sacrifice-ids="summonActive ? summonSelection.selected : []" :drop-squares="summonSquares.length ? summonSquares : dropSquares" :last-move="lastMove" :presentation-step="ply" orientation="white" :ability-mode="false" @square-click="onSquareClick" @piece-click="onBoardPieceClick" @piece-drag-start="selectPiece" @square-drop="onSquareDrop" />
         </div>
         <div class="replay-player"><div><strong>{{ record.players.white.nickname }}</strong><small v-if="record.players.white.public_id">@{{ record.players.white.public_id }}</small></div><b>{{ clockText('white') }}</b></div>
         <section class="replay-controls" aria-label="리플레이 재생 조작">
@@ -151,7 +151,7 @@ const deckCodeSources = computed(() => ({
 }))
 const activeClock = computed(() => ply.value === 0 ? props.record.initial_clock : props.record.actions[ply.value - 1].clock)
 const notationRows = computed(() => groupNotation(props.record.actions))
-const compatibilityWarning = computed(() => props.record.format_version !== 2 || props.record.ruleset_version !== 'deck-chess-1' || props.record.chessembly_version !== 'chessembly-1')
+const compatibilityWarning = computed(() => props.record.format_version !== 2 || props.record.chessembly_version !== 'chessembly-1')
 const lastMove = computed(() => { const action = activeNode.value?.action ?? (ply.value ? props.record.actions[ply.value - 1].action : null); return action?.type === 'move' ? { from: action.from, to: action.to } : null })
 function duration(ms: number) { return `${(Math.max(0, ms) / 1000).toFixed(1)}s` }
 function deploymentText(side: PlayerId) { return props.record.decks[side].deployments.map(piece => `${piece.piece_name} ${squareName(piece.square)}`).join(', ') || '보드 배치 없음' }

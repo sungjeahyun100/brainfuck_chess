@@ -1089,6 +1089,7 @@ pub struct GameResult {
 #[serde(rename_all = "snake_case")]
 pub enum GameEndReason {
     KingCapture,
+    OccupationLimit,
     Resignation,
     Timeout,
     Abandonment,
@@ -1112,6 +1113,9 @@ pub struct GameState {
     // Omit Legacy so old serialized states and canonical analysis hashes remain identical.
     #[serde(default, skip_serializing_if = "DeckRuleset::is_legacy")]
     pub ruleset: DeckRuleset,
+    /// Empty for existing game modes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub occupation_zones: Vec<OccupationZone>,
     pub id: String,
     pub board: Board,
     /// All piece instances, keyed by PieceId
@@ -1137,6 +1141,14 @@ pub struct GameState {
     pub result: Option<GameResult>,
     #[serde(skip, default)]
     pub chessembly_program_cache: ChessemblyProgramCache,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OccupationZone {
+    pub squares: Vec<Square>,
+    #[serde(default)]
+    pub effect_squares: Vec<Square>,
+    pub owner: Option<PlayerId>,
 }
 
 impl GameState {

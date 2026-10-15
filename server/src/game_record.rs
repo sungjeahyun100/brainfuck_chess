@@ -62,6 +62,7 @@ pub(crate) enum GameMode {
     #[default]
     Standard,
     Challenge,
+    Occupation,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -326,6 +327,11 @@ impl GameRecord {
             .and_then(|p| p.public_id.as_deref())
             .or_else(|| players.get("black").map(|p| p.nickname.as_str()))
             .unwrap_or("black");
+        let game_mode = if initial_state.occupation_zones.is_empty() {
+            GameMode::Standard
+        } else {
+            GameMode::Occupation
+        };
         Self {
             ownership,
             format_version: GAME_RECORD_FORMAT_VERSION,
@@ -344,7 +350,7 @@ impl GameRecord {
             initial_draws: Vec::new(),
             actions: Vec::new(),
             final_clock: None,
-            game_mode: GameMode::Standard,
+            game_mode,
             challenge_id: None,
             retention_mode: RetentionMode::Permanent,
             expires_at_ms: None,
@@ -1457,6 +1463,7 @@ mod tests {
     ) -> GameRecord {
         let state = GameState {
             ruleset: Default::default(),
+            occupation_zones: Vec::new(),
             id: game_id,
             board: Board {
                 size: 8,

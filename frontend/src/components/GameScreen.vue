@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="header">
       <h2>
-        {{ state.challenge?.name ?? (debugBotMetrics ? '봇 디버거' : '덱체스') }}
+        {{ state.challenge?.name ?? (debugBotMetrics ? '봇 디버거' : viewState.occupation_zones?.length ? '덱체스 점령전' : '덱체스') }}
         <small class="title-en">{{ state.challenge ? 'Challenge · 상대: 봇' : debugBotMetrics ? 'Production Bot Test' : 'Deck Chess' }}</small>
       </h2>
       <div class="turn-info">
@@ -15,6 +15,7 @@
         </span>
         <span v-if="botPlayer" class="bot-badge">🤖 {{ botDifficultyLabel }}</span>
         <span class="turn-badge">Turn {{ viewState.turn_number }}</span>
+        <span v-if="viewState.occupation_zones?.length" class="turn-badge occupation-score">{{ Math.min(Math.floor((viewState.turn_number - 1) / 2), 40) }}/40라운드 · 백 {{ occupationScore('white') }}칸 / 흑 {{ occupationScore('black') }}칸</span>
       </div>
     </div>
 
@@ -208,6 +209,7 @@
           :class="{ 'board-waiting': !canUseSummonControls }"
           :board="viewState.board"
           :pieces="viewState.pieces"
+          :occupation-zones="viewState.occupation_zones"
           :definitions="viewState.piece_definitions"
           :selected-piece-id="visibleSelectedPieceId"
           :movable-squares="visibleMovableSquares"
@@ -617,6 +619,9 @@ watch(() => [viewState.value.id, viewState.value.phase, viewState.value.result?.
   if (resultEffect.value !== 'neutral') presentationSound.play(resultEffect.value)
 }, { flush: 'post' })
 const isStandard = computed(() => props.state.ruleset === 'standard')
+function occupationScore(side: PlayerId) {
+  return viewState.value.occupation_zones?.filter(zone => zone.owner === side).reduce((total, zone) => total + zone.squares.length, 0) ?? 0
+}
 const reserveActiveSide = computed<PlayerId>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? 'white')
 const deckViewer = computed<PlayerId | null>(() => props.playMode === 'single' ? viewState.value.current_player : props.localPlayer ?? null)
 function canRevealDeck(side: PlayerId) { return side === deckViewer.value }
@@ -2187,6 +2192,7 @@ async function onResign() {
 .player-badge.player-white { background: #eee; color: #333; }
 .player-badge.player-black { background: #333; color: #eee; }
 .turn-badge, .mode-badge { padding: 4px 8px; background: #ddd; color: #1f2933; border-radius: 6px; }
+.occupation-score { font-variant-numeric: tabular-nums; min-width: 17em; text-align:center; }
 .local-badge {
   padding: 4px 8px;
   background: #e8f5e9;
