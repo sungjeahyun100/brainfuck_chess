@@ -456,7 +456,7 @@ function occupationLabel(square: SquareInfo) {
   const zone = occupationZone(square)
   if (zone) return `점령 구역 · ${zone.owner === 'white' ? '백 소유' : zone.owner === 'black' ? '흑 소유' : '중립'}`
   const owner = occupationEffectOwner(square)
-  return owner ? `${owner === 'white' ? '백' : '흑'} 점령 효과 영역` : ''
+  return owner ? `${owner === 'white' ? '백' : '흑'} 착수 범위 확장 영역` : ''
 }
 
 function terrainLabel(typeId: string) {

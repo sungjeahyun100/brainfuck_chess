@@ -202,7 +202,6 @@ pub fn apply_move_action(mut game_state: GameState, action: MoveAction) -> GameS
 /// action that creates it, then decreases after each later action by its owner.
 pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> GameState {
     if let TurnAction::Draw(draw) = &action {
-        let player_id = draw.player_id.clone();
         game_state
             .global_state
             .insert(crate::actions::DRAW_REQUIRED.into(), 0);
@@ -211,7 +210,7 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
             player_id: draw.player_id.clone(),
             action,
         });
-        reconcile_occupation(&mut game_state, &player_id);
+        reconcile_occupation(&mut game_state);
         return game_state;
     }
     let accelerated_move = match &action {
@@ -318,7 +317,7 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
         action,
     });
 
-    reconcile_occupation(&mut game_state, &player_id);
+    reconcile_occupation(&mut game_state);
 
     if keeps_turn && game_state.phase != GamePhase::Ended && game_state.result.is_none() {
         return game_state;
@@ -369,7 +368,7 @@ pub fn apply_and_advance_turn(mut game_state: GameState, action: TurnAction) -> 
     game_state
 }
 
-fn reconcile_occupation(state: &mut GameState, acting_player: &PlayerId) {
+fn reconcile_occupation(state: &mut GameState) {
     if state.occupation_zones.is_empty() {
         return;
     }
@@ -381,7 +380,7 @@ fn reconcile_occupation(state: &mut GameState, acting_player: &PlayerId) {
             return;
         }
     }
-    // Decide every zone from the same post-action board before any removals.
+    // Decide every zone from the same post-action board.
     let owners: Vec<Option<PlayerId>> = state.occupation_zones.iter().map(|zone| {
         let (white, black) = state
             .pieces
@@ -409,35 +408,8 @@ fn reconcile_occupation(state: &mut GameState, acting_player: &PlayerId) {
             None
         }
     }).collect();
-    let mut targets = std::collections::HashSet::new();
     for (zone, owner) in state.occupation_zones.iter_mut().zip(owners) {
-        if zone.owner != owner {
-            if let Some(side) = &owner {
-                for piece in state.pieces.values() {
-                    if piece.is_on_board()
-                        && piece.owner != *side
-                        && piece.current_square.is_some_and(|sq| zone.effect_squares.contains(&sq))
-                    {
-                        targets.insert(piece.id.clone());
-                    }
-                }
-            }
-        }
         zone.owner = owner;
-    }
-    let mut targets: Vec<_> = targets.into_iter().collect();
-    targets.sort();
-    let mut removal = RemovalOutcome::default();
-    for id in targets {
-        let captor: PlayerId = if state.pieces[&id].owner == "white" {
-            "black".into()
-        } else {
-            "white".into()
-        };
-        removal.merge(remove_captured_piece(state, &id, &captor));
-    }
-    if state.result.is_none() {
-        apply_removal_result(state, &removal, acting_player);
     }
 }
 
@@ -1451,47 +1423,49 @@ mod occupation_tests {
     #[test]
     fn each_zone_uses_only_its_own_current_piece_counts() {
         let mut game = state(8);
-        reconcile_occupation(&mut game, &"white".into());
+        reconcile_occupation(&mut game);
         assert!(game.occupation_zones.iter().all(|zone| zone.owner.is_none()));
         place(&mut game, "w", "white", sq("a5"));
         place(&mut game, "b", "black", sq("a4"));
         place(&mut game, "other", "black", sq("g8"));
-        reconcile_occupation(&mut game, &"white".into());
+        reconcile_occupation(&mut game);
         assert_eq!(game.occupation_zones[2].owner, None);
         assert_eq!(game.occupation_zones[1].owner.as_deref(), Some("black"));
         remove_captured_piece(&mut game, &"b".into(), &"white".into());
-        reconcile_occupation(&mut game, &"white".into());
+        reconcile_occupation(&mut game);
         assert_eq!(game.occupation_zones[2].owner.as_deref(), Some("white"));
         assert_eq!(game.occupation_zones[1].owner.as_deref(), Some("black"));
         remove_captured_piece(&mut game, &"w".into(), &"black".into());
-        reconcile_occupation(&mut game, &"black".into());
+        reconcile_occupation(&mut game);
         assert_eq!(game.occupation_zones[2].owner, None);
     }
 
     #[test]
-    fn new_claim_removes_enemy_once_and_flip_changes_captor() {
+    fn new_claim_and_owner_flip_leave_pieces_and_capture_records_unchanged() {
         let mut game = state(8);
         place(&mut game, "holder", "white", sq("b8"));
         place(&mut game, "target", "black", sq("c7"));
-        reconcile_occupation(&mut game, &"white".into());
+        reconcile_occupation(&mut game);
         assert_eq!(game.occupation_zones[0].owner.as_deref(), Some("white"));
-        assert!(game.pieces["target"].captured);
-        assert!(game.players["white"].captured_pieces.contains(&"target".into()));
-        place(&mut game, "late", "black", sq("c7"));
-        reconcile_occupation(&mut game, &"white".into());
-        assert!(!game.pieces["late"].captured);
-        remove_captured_piece(&mut game, &"holder".into(), &"black".into());
-        place(&mut game, "invader", "black", sq("b8"));
-        place(&mut game, "white-target", "white", sq("a7"));
-        reconcile_occupation(&mut game, &"black".into());
-        assert_eq!(game.occupation_zones[0].owner.as_deref(), Some("black"));
-        assert!(game.pieces["white-target"].captured);
-        assert!(!game.pieces["late"].captured);
-        assert!(game.players["black"].captured_pieces.contains(&"white-target".into()));
+        assert!(!game.pieces["target"].captured);
+        assert_eq!(game.board.get_piece_at(&sq("c7")), Some(&"target".into()));
+        assert!(game.players["white"].captured_pieces.is_empty());
+        reconcile_occupation(&mut game);
+        assert!(!game.pieces["target"].captured);
+
+        let mut flipped = state(8);
+        flipped.occupation_zones[0].owner = Some("white".into());
+        place(&mut flipped, "invader", "black", sq("b8"));
+        place(&mut flipped, "white-target", "white", sq("a7"));
+        reconcile_occupation(&mut flipped);
+        assert_eq!(flipped.occupation_zones[0].owner.as_deref(), Some("black"));
+        assert!(!flipped.pieces["white-target"].captured);
+        assert_eq!(flipped.board.get_piece_at(&sq("a7")), Some(&"white-target".into()));
+        assert!(flipped.players["black"].captured_pieces.is_empty());
     }
 
     #[test]
-    fn simultaneous_claims_use_one_snapshot() {
+    fn simultaneous_claims_preserve_pieces_regardless_of_zone_order() {
         let mut game = state(8);
         place(&mut game, "w", "white", sq("b8"));
         place(&mut game, "b", "black", sq("g8"));
@@ -1499,31 +1473,66 @@ mod occupation_tests {
         place(&mut game, "enemy-right", "white", sq("f7"));
         let mut reversed = game.clone();
         reversed.occupation_zones.reverse();
-        reconcile_occupation(&mut game, &"white".into());
-        reconcile_occupation(&mut reversed, &"white".into());
+        reconcile_occupation(&mut game);
+        reconcile_occupation(&mut reversed);
         assert_eq!(game.occupation_zones[0].owner.as_deref(), Some("white"));
         assert_eq!(game.occupation_zones[1].owner.as_deref(), Some("black"));
-        assert!(game.pieces["enemy-left"].captured);
-        assert!(game.pieces["enemy-right"].captured);
+        assert!(!game.pieces["enemy-left"].captured);
+        assert!(!game.pieces["enemy-right"].captured);
         assert_eq!(game.pieces["enemy-left"].captured, reversed.pieces["enemy-left"].captured);
         assert_eq!(game.pieces["enemy-right"].captured, reversed.pieces["enemy-right"].captured);
         assert_eq!(game.players["white"].captured_pieces, reversed.players["white"].captured_pieces);
         assert_eq!(game.players["black"].captured_pieces, reversed.players["black"].captured_pieces);
+        assert!(game.players.values().all(|player| player.captured_pieces.is_empty()));
+    }
+
+    #[test]
+    fn normal_move_and_ability_captures_still_work_inside_claimed_arrows() {
+        let mut movement = state(8);
+        place(&mut movement, "holder", "white", sq("b8"));
+        place(&mut movement, "target", "black", sq("c7"));
+        place(&mut movement, "rook", "white", sq("c6"));
+        reconcile_occupation(&mut movement);
+        assert!(!movement.pieces["target"].captured);
+        let capture = crate::legal_moves::generate_piece_legal_move_actions_with_options(
+            &movement,
+            &"rook".into(),
+            &crate::legal_moves::MoveGenerationOptions::default(),
+        ).into_iter().find(|action| action.to == sq("c7")).unwrap();
+        let movement = crate::actions::submit_action(movement, TurnAction::Move(capture)).unwrap();
+        assert!(movement.pieces["target"].captured);
+        assert!(movement.players["black"].captured_pieces.contains(&"target".into()));
+
+        let mut ability = state(8);
+        place(&mut ability, "holder", "white", sq("b8"));
+        place(&mut ability, "target", "black", sq("c7"));
+        place(&mut ability, "gun", "white", sq("c5"));
+        ability.pieces.get_mut("gun").unwrap().type_id = "machine-gunner".into();
+        reconcile_occupation(&mut ability);
+        assert!(!ability.pieces["target"].captured);
+        let barrage = crate::legal_moves::generate_piece_legal_ability_actions(
+            &ability,
+            &"gun".into(),
+            MACHINE_GUN_BARRAGE_ABILITY_ID,
+        ).into_iter().next().unwrap();
+        let ability = crate::actions::submit_action(ability, TurnAction::Ability(barrage)).unwrap();
+        assert!(ability.pieces["target"].captured);
+        assert!(ability.players["white"].captured_pieces.contains(&"target".into()));
     }
 
     #[test]
     fn claimed_arrows_extend_drop_range_and_neutral_retracts_it() {
         let mut game = state(8);
         place(&mut game, "holder", "white", sq("b8"));
-        reconcile_occupation(&mut game, &"white".into());
+        reconcile_occupation(&mut game);
         assert!(crate::placement::get_placement_squares(&game, &"white".into()).contains(&sq("c7")));
         remove_captured_piece(&mut game, &"holder".into(), &"black".into());
-        reconcile_occupation(&mut game, &"white".into());
+        reconcile_occupation(&mut game);
         assert_eq!(game.occupation_zones[0].owner, None);
         assert!(!crate::placement::get_placement_squares(&game, &"white".into()).contains(&sq("c7")));
 
         place(&mut game, "black-holder", "black", sq("b1"));
-        reconcile_occupation(&mut game, &"black".into());
+        reconcile_occupation(&mut game);
         assert!(crate::placement::get_placement_squares(&game, &"black".into()).contains(&sq("c2")));
         assert!(!crate::placement::get_placement_squares(&game, &"white".into()).contains(&sq("c7")));
     }
@@ -1553,7 +1562,7 @@ mod occupation_tests {
         });
         let mut loaded: GameState = serde_json::from_value(saved).unwrap();
         assert!(loaded.occupation_zones[0].effect_squares.is_empty());
-        reconcile_occupation(&mut loaded, &"white".into());
+        reconcile_occupation(&mut loaded);
         assert_eq!(loaded.occupation_zones[0].squares, vec![sq("b8")]);
         assert_eq!(loaded.occupation_zones[0].owner.as_deref(), Some("white"));
         assert!(!loaded.occupation_zones[0].effect_squares.is_empty());

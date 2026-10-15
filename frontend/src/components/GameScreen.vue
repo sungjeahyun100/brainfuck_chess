@@ -15,7 +15,7 @@
         </span>
         <span v-if="botPlayer" class="bot-badge">🤖 {{ botDifficultyLabel }}</span>
         <span class="turn-badge">Turn {{ viewState.turn_number }}</span>
-        <span v-if="viewState.occupation_zones?.length" class="turn-badge occupation-score">{{ Math.min(Math.floor((viewState.turn_number - 1) / 2), 40) }}/40라운드 · 백 {{ occupationScore('white') }}칸 / 흑 {{ occupationScore('black') }}칸</span>
+        <span v-if="viewState.occupation_zones?.length" class="turn-badge occupation-score" title="점령은 화살표 칸의 착수 범위만 확장합니다. 점령 변화로 기물이 자동 제거되지는 않습니다.">{{ Math.min(Math.floor((viewState.turn_number - 1) / 2), 40) }}/40라운드 · 백 {{ occupationScore('white') }}칸 / 흑 {{ occupationScore('black') }}칸</span>
       </div>
     </div>
 

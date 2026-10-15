@@ -75,5 +75,7 @@ for (const [size, data] of zoneData) {
       assert.equal(section[0].includes('class="occupation-effect occupation-black"'), last.has(id), `black effect at ${id}`)
     }
     assert.doesNotMatch(html, /occupation-stack|스택/)
+    assert.match(html, /착수 범위 확장 영역/)
+    assert.doesNotMatch(html, /자동 제거/)
   })
 }
